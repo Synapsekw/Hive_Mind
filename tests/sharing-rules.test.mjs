@@ -1,55 +1,22 @@
 // Runs the real migrations in an in-process Postgres (PGlite) and checks the
 // sharing rules as three different people and two kinds of agent.
-// Supabase's auth schema and roles are stubbed below; everything else is the
-// SQL that ships. Run with: npm test
+// Supabase's auth schema and roles are stubbed in scripts/local-db.mjs;
+// everything else is the SQL that ships. Run with: npm test
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
-import { PGlite } from '@electric-sql/pglite';
+import { openDb } from '../scripts/local-db.mjs';
 
-const STUB = `
-  create role anon nologin;
-  create role authenticated nologin;
-  create role service_role nologin bypassrls;
-  create schema auth;
-  create table auth.users (id uuid primary key default gen_random_uuid(), email text);
-  create function auth.jwt() returns jsonb language sql stable as $$
-    select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
-  create function auth.uid() returns uuid language sql stable as $$
-    select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
-  grant usage on schema auth to anon, authenticated, service_role;
-  grant usage on schema public to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
-`;
-
-const db = new PGlite();
+const { db, as } = await openDb();
 const users = {};
 const members = {};
 const ws = {};
 let hive;
 
-// Run SQL as a signed-in person or agent.
-async function as(claims, sql, params = []) {
-  await db.exec('reset role');
-  await db.query(`select set_config('request.jwt.claims', $1, false)`, [JSON.stringify(claims ?? {})]);
-  await db.exec(`set role ${claims ? 'authenticated' : 'anon'}`);
-  try {
-    return (await db.query(sql, params)).rows;
-  } finally {
-    await db.exec('reset role');
-  }
-}
 const person = (name) => ({ sub: users[name], role: 'authenticated' });
 const titles = async (claims) =>
   (await as(claims, 'select title from public.notes order by title')).map((r) => r.title);
 
 before(async () => {
-  await db.exec(STUB);
-  const dir = new URL('../supabase/migrations/', import.meta.url);
-  for (const f of readdirSync(dir).sort()) await db.exec(readFileSync(new URL(f, dir), 'utf8'));
-
   for (const name of ['dani', 'ahmed', 'sara', 'outsider']) {
     const r = await db.query(`insert into auth.users (email) values ($1) returning id`, [`${name}@example.com`]);
     users[name] = r.rows[0].id;

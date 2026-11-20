@@ -11,6 +11,7 @@ Local only, first slice:
 
 - Database schema and sharing rules, as Supabase migrations.
 - Ten tests for the sharing rules. They pass.
+- A scripted walkthrough (`npm run demo`) of two people and their agents.
 - An MCP server with six tools. It typechecks, but has **not yet been run
   against a live Supabase stack**. That is the next step.
 - No web app yet. `docs/ui/` holds the design prototypes for the map and chat.
@@ -22,6 +23,7 @@ You need Node 22+, Docker, and the [Supabase CLI](https://supabase.com/docs/guid
 ```sh
 npm install
 npm test              # sharing rules, no Docker needed
+npm run demo          # two people and their agents, step by step, no Docker needed
 npm run db:start      # local Supabase in Docker; applies the migrations
 ```
 
