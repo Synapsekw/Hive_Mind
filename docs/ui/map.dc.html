@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hive brain dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#06090F}
+a{color:#8A96AD;text-decoration:none}a:hover{color:#E6EBF5}
+button,input{font-family:inherit}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #CFF4FF;outline-offset:2px;border-radius:999px}
+input::placeholder{color:#8A96AD}
+.hv-n{transition:left .9s cubic-bezier(.2,.7,.2,1),top .9s cubic-bezier(.2,.7,.2,1),opacity .25s ease}
+.hv-e{animation:hv-in 1.1s ease both}
+@keyframes hv-in{0%,55%{opacity:0}100%{opacity:1}}
+.hv-core{animation:hv-breathe 4s ease-in-out infinite}
+@keyframes hv-breathe{0%,100%{opacity:.75}50%{opacity:1}}
+.hv-spin{animation:hv-spin 80s linear infinite}
+.hv-bb{transform:rotateX(16deg) translate(-50%,-50%);animation:hv-unspin 80s linear infinite}
+@keyframes hv-spin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}
+@keyframes hv-unspin{from{transform:rotateY(0deg) rotateX(16deg) translate(-50%,-50%)}to{transform:rotateY(-360deg) rotateX(16deg) translate(-50%,-50%)}}
+.hv-orbit:hover .hv-spin,.hv-orbit:hover .hv-bb{animation-play-state:paused}
+@media (prefers-reduced-motion: reduce){.hv-n{transition:none}.hv-e,.hv-core,.hv-spin,.hv-bb{animation:none}}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #06090F; color: #E6EBF5; font-family: 'Geist', system-ui, sans-serif; font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums">
+
+<aside aria-label="Navigation" style="flex: 1 1 200px; max-width: 100%; box-sizing: border-box; padding: 28px 24px; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="width: 18px; height: 18px; background: #CFF4FF; clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%)"></span>
+<span style="font-size: 16px; font-weight: 600">Hive</span>
+</div>
+<nav aria-label="Main" style="display: flex; flex-direction: column; gap: 2px; font-size: 15px">
+<span aria-current="page" style="display: flex; align-items: center; height: 36px; font-weight: 500">Map</span>
+<span style="display: flex; align-items: center; justify-content: space-between; height: 36px; color: #8A96AD">Inbox<span style="font-size: 12px; font-weight: 500; color: #06090F; background: #CFF4FF; border-radius: 999px; padding: 0 7px">3</span></span>
+<span style="display: flex; align-items: center; height: 36px; color: #8A96AD">Vault</span>
+<span style="display: flex; align-items: center; height: 36px; color: #8A96AD">Gallery</span>
+<a href="Chat.dc.html" style="display: flex; align-items: center; height: 36px">Chat</a>
+</nav>
+<section style="margin-top: auto; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 13px; font-weight: 400; color: #8A96AD">Agents</h2>
+<div style="display: flex; align-items: center; gap: 12px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #F5B556"></span><span style="flex: 1">Danijel</span><span style="color: #8A96AD">writing</span></div>
+<div style="display: flex; align-items: center; gap: 12px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #F5B556"></span><span style="flex: 1">Ahmed</span><span style="color: #8A96AD">writing</span></div>
+<div style="display: flex; align-items: center; gap: 12px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #3A465C"></span><span style="flex: 1">Sara</span><span style="color: #8A96AD">idle</span></div>
+<p style="margin: 10px 0 0; font-size: 13px; color: #8A96AD">Synced a moment ago</p>
+</section>
+</aside>
+
+<main aria-label="Hive brain" style="flex: 999 1 620px; min-width: 0; box-sizing: border-box; margin: 12px 0; padding: 18px 22px; border-radius: 22px; background: #0B101A; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px">
+<p style="flex: 1 1 160px; margin: 0; font-size: 13px; color: #8A96AD">{{stats}}</p>
+<div role="group" aria-label="View" style="display: flex; padding: 3px; border-radius: 999px; background: #141B28">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+<button type="button" aria-pressed="{{t.on}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.name}}</button>
+</sc-for>
+</div>
+<div style="flex: 1 1 160px; display: flex; justify-content: flex-end; align-items: center; gap: 8px">
+<button type="button" aria-pressed="{{names}}" onClick="{{toggleNames}}" style="{{namesStyle}}">Labels</button>
+<label for="hv-bq" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%)">Search</label>
+<input id="hv-bq" type="search" placeholder="Search" value="{{q}}" onChange="{{onQ}}" style="flex: 0 1 180px; min-width: 0; height: 36px; box-sizing: border-box; padding: 0 16px; border: 0; border-radius: 999px; background: #141B28; color: #E6EBF5; font-size: 14px">
+</div>
+</div>
+
+<div style="position: relative; width: 100%; aspect-ratio: 1000 / 760; container-type: inline-size; background: radial-gradient(ellipse 36% 44% at 50% 50%, rgba(127,212,245,.07), rgba(11,16,26,0) 72%)">
+<svg aria-hidden="true" viewBox="0 0 1000 760" style="position: absolute; inset: 0; width: 100%; height: 100%">
+<path d="{{guides}}" fill="none" stroke="#1B2433" stroke-width="1"></path>
+<sc-if value="{{flipA}}" hint-placeholder-val="{{ true }}">
+<g class="hv-e"><path d="{{edgesBase}}" fill="none" stroke="#5A6C8E" stroke-width="0.6" stroke-opacity="{{baseOp}}"></path><path d="{{edgesHi}}" fill="none" stroke="#E6EBF5" stroke-width="1" stroke-opacity=".8"></path></g>
+</sc-if>
+<sc-if value="{{flipB}}" hint-placeholder-val="{{ false }}">
+<g class="hv-e"><path d="{{edgesBase}}" fill="none" stroke="#5A6C8E" stroke-width="0.6" stroke-opacity="{{baseOp}}"></path><path d="{{edgesHi}}" fill="none" stroke="#E6EBF5" stroke-width="1" stroke-opacity=".8"></path></g>
+</sc-if>
+<path d="{{ticks}}" fill="none" stroke="#5F6E8A" stroke-width="4" stroke-linecap="round"></path>
+<path class="hv-core" d="{{swarm}}" fill="none" stroke="#7FD4F5" stroke-width="2.2" stroke-linecap="round"></path>
+</svg>
+<sc-for list="{{ringLabels}}" as="l" hint-placeholder-count="4">
+<span style="{{l.style}}">{{l.name}}</span>
+</sc-for>
+<div style="{{flatStyle}}">
+<sc-for list="{{nodes}}" as="n" hint-placeholder-count="120">
+<button type="button" class="hv-n" aria-label="{{n.aria}}" aria-pressed="{{n.pressed}}" onClick="{{n.pick}}" style="{{n.wrap}}">
+<span aria-hidden="true" style="{{n.dot}}"></span>
+<span aria-hidden="true" style="{{n.label}}">{{n.text}}</span>
+</button>
+</sc-for>
+</div>
+<sc-if value="{{isOrbit}}" hint-placeholder-val="{{ false }}">
+<div class="hv-orbit" style="position: absolute; inset: 0; perspective: 150cqw">
+<div style="position: absolute; left: 50%; top: 50%; transform-style: preserve-3d; transform: rotateX(-16deg)">
+<div class="hv-spin" style="transform-style: preserve-3d">
+<div aria-hidden="true" style="position: absolute; left: -34cqw; top: -34cqw; width: 68cqw; height: 68cqw; box-sizing: border-box; border-radius: 50%; border: 1px solid #243043; transform: rotateX(90deg)"></div>
+<sc-for list="{{orbit}}" as="n" hint-placeholder-count="120">
+<div style="{{n.at}}"><button type="button" class="hv-bb" aria-label="{{n.aria}}" aria-pressed="{{n.pressed}}" onClick="{{n.pick}}" style="{{n.bb}}"><span aria-hidden="true" style="{{n.dot}}"></span><span aria-hidden="true" style="{{n.label}}">{{n.text}}</span></button></div>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+
+<div role="group" aria-label="Topics" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 4px">
+<sc-for list="{{areaChips}}" as="c" hint-placeholder-count="8">
+<button type="button" aria-pressed="{{c.on}}" onClick="{{c.pick}}" style="{{c.style}}"><span aria-hidden="true" style="{{c.dot}}"></span>{{c.name}}</button>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px 4px">
+<sc-for list="{{kindChips}}" as="c" hint-placeholder-count="4">
+<button type="button" aria-pressed="{{c.on}}" onClick="{{c.pick}}" style="{{c.style}}"><span aria-hidden="true" style="{{c.dot}}"></span>{{c.name}}</button>
+</sc-for>
+<span aria-hidden="true" style="width: 1px; height: 16px; margin: 0 10px; background: #1B2433"></span>
+<sc-for list="{{whoChips}}" as="c" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{c.on}}" onClick="{{c.pick}}" style="{{c.style}}">{{c.name}}</button>
+</sc-for>
+<span aria-hidden="true" style="width: 1px; height: 16px; margin: 0 10px; background: #1B2433"></span>
+<span style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; font-size: 13px; color: #8A96AD"><span aria-hidden="true" style="box-sizing: border-box; width: 8px; height: 8px; border-radius: 50%; border: 1.2px solid #8A96AD"></span>Not shared with you</span>
+</div>
+</main>
+
+<aside aria-label="Details" style="flex: 1 1 280px; max-width: 100%; box-sizing: border-box; padding: 28px 24px; display: flex; flex-direction: column; gap: 44px">
+
+<sc-if value="{{hasSel}}" hint-placeholder-val="{{ false }}">
+<section style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="{{selDot}}"></span>
+<h2 style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.25">{{selTitle}}</h2>
+</div>
+<p style="margin: 0; color: #B4BED0; line-height: 1.6">{{selMeta}}</p>
+<div style="display: flex; flex-direction: column; margin-top: 8px">
+<span style="font-size: 13px; color: #8A96AD; padding-bottom: 6px">{{nbTitle}}</span>
+<sc-for list="{{neighbours}}" as="b" hint-placeholder-count="4">
+<button type="button" onClick="{{b.pick}}" style="display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0; border: 0; background: none; color: #E6EBF5; font-size: 14px; text-align: left; cursor: pointer"><span aria-hidden="true" style="{{b.dot}}"></span><span style="flex: 1">{{b.name}}</span></button>
+</sc-for>
+<span style="font-size: 13px; color: #8A96AD">{{nbMore}}</span>
+</div>
+<button type="button" onClick="{{clear}}" style="align-self: flex-start; height: 36px; margin-top: 6px; padding: 0 16px; border: 0; border-radius: 999px; background: #141B28; color: #E6EBF5; font-size: 13px; cursor: pointer">Clear selection</button>
+</section>
+</sc-if>
+
+<sc-if value="{{noSel}}" hint-placeholder-val="{{ true }}">
+<section style="display: flex; flex-direction: column; gap: 18px">
+<div>
+<div style="font-size: 44px; font-weight: 600; line-height: 1; letter-spacing: -0.02em">126</div>
+<div style="margin-top: 8px; color: #8A96AD">notes written or changed today</div>
+</div>
+<div style="display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px 14px; align-items: center">
+<span>Danijel</span><span aria-hidden="true" style="height: 3px; border-radius: 2px; background: #141B28"><span style="display: block; width: 100%; height: 3px; border-radius: 2px; background: #CFF4FF"></span></span><span style="color: #8A96AD">58</span>
+<span>Ahmed</span><span aria-hidden="true" style="height: 3px; border-radius: 2px; background: #141B28"><span style="display: block; width: 71%; height: 3px; border-radius: 2px; background: #5F6E8A"></span></span><span style="color: #8A96AD">41</span>
+<span>Sara</span><span aria-hidden="true" style="height: 3px; border-radius: 2px; background: #141B28"><span style="display: block; width: 47%; height: 3px; border-radius: 2px; background: #5F6E8A"></span></span><span style="color: #8A96AD">27</span>
+</div>
+</section>
+</sc-if>
+
+<section style="display: flex; flex-direction: column; gap: 20px">
+<h2 style="margin: 0; font-size: 13px; font-weight: 400; color: #8A96AD">Needs you</h2>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span>Sara's agent is also working on Kestrel AI. Share your notes with each other?</span>
+<div style="display: flex; gap: 6px">
+<button type="button" style="height: 34px; padding: 0 16px; border: 0; border-radius: 999px; background: #E6EBF5; color: #06090F; font-size: 13px; font-weight: 500; cursor: pointer">Share</button>
+<button type="button" style="height: 34px; padding: 0 14px; border: 0; border-radius: 999px; background: none; color: #8A96AD; font-size: 13px; cursor: pointer">Decline</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span>Two notes disagree on the DMT mobilisation terms.</span>
+<button type="button" style="align-self: flex-start; height: 34px; padding: 0 16px; border: 0; border-radius: 999px; background: #141B28; color: #E6EBF5; font-size: 13px; cursor: pointer">Compare</button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span>3 notes from Sara's self-hosted agent are held for review.</span>
+<span style="font-size: 13px; color: #8A96AD">Only Sara can release them.</span>
+</div>
+</section>
+
+<p style="margin: auto 0 0; font-size: 13px; color: #8A96AD; line-height: 1.6">Housekeeper ran last night: 4 broken links repaired, 2 synthesis pages rebuilt, 1 duplicate topic for you to review.</p>
+</aside>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1600,"height":1000}}'>
+class Component extends DCLogic {
+  state = { view: 'rings', area: null, kind: null, who: null, sel: null, q: '', names: true, flip: false };
+
+  build() {
+    if (this._b) return this._b;
+    const AR = [['DMT', 64, [6, 3, 1]], ['ADNOC', 44, [6, 3, 1]], ['Emsteel', 26, [7, 1, 2]], ['ITC proposal', 34, [8, 0, 2]], ['Kestrel AI', 52, [5, 1, 4]], ['Quadruped fleet', 36, [2, 8, 0]], ['Airspace approvals', 38, [2, 1, 7]], ['Tower inspections', 40, [2, 7, 1]]];
+    const NT = ['Overview', 'Pricing basis', 'Rate card', 'Kickoff minutes', 'Site visit', 'Access log', 'Scope', 'Stakeholders', 'Risks', 'Timeline', 'Review comments', 'Method statement', 'Checklist', 'Budget notes', 'Contacts', 'Open questions', 'Lessons learned', 'Permit tracker', 'Handover notes', 'Meeting notes'];
+    const FT = ['Proposal, DOCX', 'Deck, PPTX', 'Rate card, XLSX', 'Survey, PDF', 'Photos, PDF', 'Report, PDF'];
+    const AG = [['d', 'Danijel, Claude desktop'], ['d', 'Danijel, ChatGPT'], ['a', 'Ahmed, Claude desktop'], ['a', 'Ahmed, Codex CLI'], ['s', 'Sara, ChatGPT'], ['s', 'Sara, self-hosted agent']];
+    let seed = 7;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+    const cx = 500, cy = 380, TAU = Math.PI * 2;
+    const polar = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+
+    const nodes = [{ id: 0, k: 'root', a: -1, o: null, title: 'Hive index', nb: [] }];
+    AR.forEach((r, i) => nodes.push({ id: i + 1, k: 'hub', a: i, o: null, title: r[0], nb: [] }));
+    const edges = [], mem = [];
+    AR.forEach((r, i) => {
+      const list = []; mem.push(list); edges.push([0, i + 1]);
+      for (let j = 0; j < r[1]; j++) {
+        const w = r[2], x = rnd() * 10;
+        const o = x < w[0] ? 'd' : x < w[0] + w[1] ? 'a' : 's';
+        const file = j % 4 === 3, id = nodes.length;
+        const tl = file ? FT : NT, c = file ? Math.floor(j / 4) : j - Math.floor(j / 4);
+        const title = tl[c % tl.length] + (c >= tl.length ? ' ' + (Math.floor(c / tl.length) + 1) : '');
+        nodes.push({ id, k: file ? 'file' : 'note', a: i, o, locked: o !== 'd' && rnd() < 0.35, title, nb: [] });
+        if (file) edges.push([list[list.length - 1 - Math.floor(rnd() * Math.min(3, list.length))], id]);
+        else if (list.length < 2 || rnd() < 0.55) edges.push([i + 1, id]);
+        else edges.push([list[Math.floor(rnd() * list.length)], id]);
+        if (!file && list.length > 4 && rnd() < 0.2) edges.push([list[Math.floor(rnd() * list.length)], id]);
+        list.push(id);
+      }
+    });
+    [[0, 5], [0, 7], [0, 6], [1, 7], [1, 6], [2, 6], [2, 4], [3, 6], [4, 5], [5, 7], [0, 1], [3, 0]].forEach((p) => {
+      for (let k = 0; k < 3; k++) edges.push([mem[p[0]][Math.floor(rnd() * mem[p[0]].length)], mem[p[1]][Math.floor(rnd() * mem[p[1]].length)]]);
+    });
+    const agents = [];
+    AG.forEach((g) => {
+      const id = nodes.length, wi = { d: 0, a: 1, s: 2 }[g[0]];
+      nodes.push({ id, k: 'agent', a: -1, o: g[0], title: g[1], nb: [] });
+      agents.push(id);
+      AR.forEach((r, i) => { if (r[2][wi] >= 3) edges.push([id, i + 1]); });
+    });
+    edges.forEach((e) => { nodes[e[0]].nb.push(e[1]); nodes[e[1]].nb.push(e[0]); });
+
+    const total = AR.reduce((s, r) => s + r[1], 0);
+    const usable = TAU - 0.28 - AR.length * 0.05;
+    let a = -TAU / 4 + 0.14;
+    const sec = AR.map((r) => { const w = usable * r[1] / total; const s = { a0: a, w, mid: a + w / 2 }; a += w + 0.05; return s; });
+    const N = nodes.length;
+
+    const rings = new Array(N), areas = new Array(N), circle = new Array(N);
+    rings[0] = areas[0] = circle[0] = [cx, cy];
+    agents.forEach((id, t) => {
+      rings[id] = polar(300, -TAU / 4 + (t + 0.5) * TAU / 6);
+      areas[id] = polar(64, t * TAU / 6);
+      circle[id] = polar(110, t * TAU / 6);
+    });
+    const place = (list, s, r0) => {
+      let k = 0, idx = 0;
+      while (idx < list.length) {
+        const r = r0 + 15 * k, cap = Math.max(1, Math.floor(s.w * r / 13.5)), m = Math.min(cap, list.length - idx);
+        for (let c = 0; c < m; c++) rings[list[idx + c]] = polar(r, s.a0 + (c + 0.5) * s.w / cap);
+        idx += m; k++;
+      }
+    };
+    AR.forEach((r, i) => {
+      const s = sec[i], list = mem[i];
+      rings[i + 1] = polar(120, s.mid);
+      place(list.filter((id) => nodes[id].k === 'note'), s, 165);
+      place(list.filter((id) => nodes[id].k === 'file'), s, 245);
+      const c = polar(240, s.mid);
+      areas[i + 1] = c;
+      list.forEach((id, j) => {
+        const rr = 5.6 * Math.sqrt(j + 2), an = j * 2.39996 + i;
+        areas[id] = [c[0] + rr * Math.cos(an), c[1] + rr * Math.sin(an)];
+        circle[id] = polar([318, 306, 330][j % 3], s.a0 + (j + 0.5) * s.w / list.length);
+      });
+      circle[i + 1] = polar(268, s.mid);
+    });
+
+    let swarm = '';
+    for (let i = 0; i < 130; i++) { const p = polar(4 + 46 * rnd() * rnd(), rnd() * TAU); swarm += 'M' + p[0].toFixed(1) + ' ' + p[1].toFixed(1) + 'h.01'; }
+
+    let s2 = 99;
+    const r2 = () => { s2 = (s2 * 1664525 + 1013904223) % 4294967296; return s2 / 4294967296; };
+    const timeline = new Array(N), orbit = new Array(N), colN = new Array(14).fill(0);
+    const X0 = 250, CW = 51;
+    timeline[0] = [30, 330]; orbit[0] = [0, 0, 0];
+    let ticks = '';
+    agents.forEach((id, t) => {
+      const y = 70 + 40 * t, an = t * TAU / 6;
+      timeline[id] = [30, y];
+      orbit[id] = [340 * Math.cos(an), 0, 340 * Math.sin(an)];
+      for (let c = 0; c < 14; c++) { const n = Math.floor(r2() * (t % 2 ? 3 : 5)); for (let k = 0; k < n; k++) ticks += 'M' + (X0 + c * CW + 8 + k * 10) + ' ' + y + 'h.01'; }
+    });
+    AR.forEach((r, i) => {
+      const s = sec[i], list = mem[i];
+      timeline[i + 1] = [X0 + (13 - (i % 5)) * CW + 10 + Math.floor(i / 5) * 18, 330];
+      orbit[i + 1] = [140 * Math.cos(s.mid), 0, 140 * Math.sin(s.mid)];
+      list.forEach((id, j) => {
+        const c = 13 - Math.floor(14 * Math.pow(r2(), 2.2)), k = colN[c]++;
+        timeline[id] = [X0 + c * CW + 6 + (k % 4) * 11, 430 + Math.floor(k / 4) * 11];
+        const lon = s.a0 + s.w * ((j * 0.618034) % 1), lat = Math.asin(2 * (j + 0.5) / list.length - 1) * 0.82, R = nodes[id].k === 'file' ? 285 : 250;
+        orbit[id] = [R * Math.cos(lat) * Math.cos(lon), R * Math.sin(lat), R * Math.cos(lat) * Math.sin(lon)];
+      });
+    });
+
+    this._b = { AR, nodes, edges, sec, P: { rings, areas, circle, timeline }, O: orbit, ticks, swarm, cx, cy, polar };
+    return this._b;
+  }
+
+  force() {
+    const B = this.build();
+    if (B.P.links) return B.P.links;
+    const { nodes, edges, cx, cy } = B, N = nodes.length;
+    const p = B.P.areas.map((q) => [q[0], q[1]]);
+    for (let it = 0; it < 170; it++) {
+      const cool = 1 - it / 170;
+      const fx = new Float64Array(N), fy = new Float64Array(N);
+      for (let i = 0; i < N; i++) {
+        for (let j = i + 1; j < N; j++) {
+          const dx = p[i][0] - p[j][0], dy = p[i][1] - p[j][1];
+          const d2 = Math.max(dx * dx + dy * dy, 16), d = Math.sqrt(d2), f = 260 / d2;
+          fx[i] += dx / d * f; fy[i] += dy / d * f; fx[j] -= dx / d * f; fy[j] -= dy / d * f;
+        }
+      }
+      edges.forEach((e) => {
+        const a = nodes[e[0]], b = nodes[e[1]];
+        const top = a.k === 'root' || a.k === 'agent' || b.k === 'root' || b.k === 'agent';
+        const same = !top && a.a === b.a;
+        const rest = top ? 170 : same ? 18 : 150, k = top ? 0.015 : same ? 0.08 : 0.008;
+        const dx = p[e[1]][0] - p[e[0]][0], dy = p[e[1]][1] - p[e[0]][1], d = Math.max(Math.sqrt(dx * dx + dy * dy), 1), f = (d - rest) * k;
+        fx[e[0]] += dx / d * f; fy[e[0]] += dy / d * f; fx[e[1]] -= dx / d * f; fy[e[1]] -= dy / d * f;
+      });
+      for (let i = 1; i < N; i++) {
+        fx[i] += (cx - p[i][0]) * 0.004; fy[i] += (cy - p[i][1]) * 0.004;
+        p[i][0] = Math.min(970, Math.max(30, p[i][0] + Math.max(-8, Math.min(8, fx[i])) * cool));
+        p[i][1] = Math.min(735, Math.max(25, p[i][1] + Math.max(-8, Math.min(8, fy[i])) * cool));
+      }
+    }
+    B.P.links = p;
+    return p;
+  }
+
+  renderVals() {
+    const st = this.state;
+    const B = this.build();
+    const { AR, nodes, edges, sec, cx, cy, polar } = B;
+    const C = ['#F5B556', '#62B8FF', '#FF8FB3', '#C4A2FF', '#5FE0B0', '#FF9D5C', '#5CD6E6', '#C3E36A'];
+    const BG = '#0B101A';
+    const who = { d: 'Danijel', a: 'Ahmed', s: 'Sara' };
+    const isOrbit = st.view === 'orbit', isTime = st.view === 'timeline';
+    const pos = st.view === 'links' ? this.force() : isOrbit ? B.P.areas : B.P[st.view];
+    const f = (v) => v.toFixed(1);
+    const q = st.q.trim().toLowerCase();
+    const sel = st.sel === null ? null : nodes[st.sel];
+    const nbSet = {};
+    if (sel) sel.nb.forEach((i) => { nbSet[i] = 1; });
+    const filtered = st.area !== null || !!st.kind || !!st.who || !!q;
+    const kindWord = { note: 'note', file: 'file', hub: 'synthesis page', agent: 'agent', root: 'index' };
+    const shown = (n) => n.locked ? (n.k === 'file' ? 'Private file' : 'Private note') : n.title;
+    const colour = (n) => n.a >= 0 ? C[n.a] : '#B4BED0';
+
+    const lit = nodes.map((n) => {
+      const text = shown(n);
+      let ok = true;
+      if (st.area !== null) ok = n.a === st.area;
+      if (st.kind) ok = ok && n.k === st.kind;
+      if (st.who) ok = ok && n.o === st.who;
+      if (q) ok = ok && (text.toLowerCase().includes(q) || (n.a >= 0 && AR[n.a][0].toLowerCase().includes(q)));
+      if (sel) ok = ok && (n.id === sel.id || !!nbSet[n.id]);
+      if (n.k === 'root' && !sel && !q) ok = true;
+      return ok;
+    });
+    const hits = q ? lit.filter(Boolean).length : 0;
+    const ringSel = ',0 0 0 3px ' + BG + ',0 0 0 4.5px #FFFFFF';
+
+    const view = nodes.map((n) => {
+      const p = pos[n.id], c = colour(n), on = lit[n.id], isSel = !!sel && sel.id === n.id;
+      const text = shown(n);
+      let d, shape;
+      if (n.k === 'root') { d = 28; shape = 'background:#CFF4FF;clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%);'; }
+      else if (n.k === 'hub') { d = 16; shape = 'border-radius:50%;background:' + c + ';border:2px solid ' + BG + ';box-shadow:0 0 0 1.5px ' + c + (isSel ? ringSel : ',0 0 14px 2px ' + c + '55') + ';'; }
+      else if (n.k === 'agent') { d = 14; shape = 'border-radius:50%;border:1.5px solid #B4BED0;background:radial-gradient(circle,#B4BED0 0 2px,' + BG + ' 2.5px);' + (isSel ? 'box-shadow:0 0 0 0 #fff' + ringSel + ';' : ''); }
+      else {
+        d = Math.min(10, 5 + n.nb.length);
+        shape = (n.k === 'file' ? 'transform:rotate(45deg);' : 'border-radius:50%;') + (n.locked ? 'border:1.2px solid ' + c + ';background:' + BG + ';' : 'background:' + c + ';opacity:' + (n.o === 'd' ? 1 : 0.72) + ';') + (isSel ? 'box-shadow:0 0 0 0 #fff' + ringSel + ';' : '');
+      }
+      const major = n.k === 'hub';
+      const showLabel = on && n.k !== 'root' && (isSel || (st.names && major && !isTime) || (sel && nbSet[n.id] && sel.nb.length <= 14) || (q && hits <= 14) || ((isTime || st.kind === 'agent') && n.k === 'agent'));
+      const o = B.O[n.id];
+      return {
+        aria: text + ', ' + kindWord[n.k] + (n.a >= 0 && n.k !== 'hub' ? ', ' + AR[n.a][0] : ''),
+        pressed: isSel,
+        pick: () => this.setState({ sel: isSel ? null : n.id }),
+        text,
+        at: 'position:absolute;left:0;top:0;transform-style:preserve-3d;transform:translate3d(' + f(o[0] / 10) + 'cqw,' + f(o[1] / 10) + 'cqw,' + f(o[2] / 10) + 'cqw)',
+        bb: 'position:absolute;padding:3px;border:0;background:none;cursor:pointer;display:flex;opacity:' + (on ? 1 : 0.1),
+        wrap: 'position:absolute;left:' + f(p[0] / 10) + '%;top:' + f(p[1] / 7.6) + '%;transform:translate(-50%,-50%);padding:3px;border:0;background:none;cursor:pointer;display:flex;opacity:' + (on ? 1 : 0.1) + ';z-index:' + (isSel ? 5 : major || n.k === 'root' ? 4 : on ? 3 : 2),
+        dot: 'box-sizing:border-box;display:block;width:' + d + 'px;height:' + d + 'px;' + shape,
+        label: 'display:' + (showLabel ? 'block' : 'none') + ';position:absolute;left:calc(50% + ' + (d / 2 + 6) + 'px);top:50%;transform:translateY(-50%);white-space:nowrap;pointer-events:none;padding:1px 6px;border-radius:6px;background:rgba(11,16,26,.78);color:#E6EBF5;font-size:12px;font-weight:' + (major || isSel ? 500 : 400)
+      };
+    });
+
+    let edgesBase = '', edgesHi = '';
+    if (!isOrbit) edges.forEach((e) => {
+      const a = pos[e[0]], b = pos[e[1]];
+      const seg = 'M' + f(a[0]) + ' ' + f(a[1]) + 'L' + f(b[0]) + ' ' + f(b[1]);
+      const hi = sel ? (e[0] === sel.id || e[1] === sel.id) : !isTime && filtered && lit[e[0]] && lit[e[1]];
+      if (hi) edgesHi += seg; else if (!isTime) edgesBase += seg;
+    });
+
+    const ring = (r) => 'M' + (cx - r) + ' ' + cy + 'a' + r + ' ' + r + ' 0 1 0 ' + (2 * r) + ' 0a' + r + ' ' + r + ' 0 1 0 ' + (-2 * r) + ' 0';
+    let guides = '', ringLabels = [];
+    const lab = (name, x, y, left) => ({ name, style: 'position:absolute;left:' + f(x / 10) + '%;top:' + f(y / 7.6) + '%;transform:translate(' + (left ? '0' : '-50%') + ',-50%);padding:0 8px;white-space:nowrap;background:' + BG + ';font-size:12px;color:#8A96AD;pointer-events:none;z-index:1' });
+    if (st.view === 'rings') {
+      guides = ring(143) + ring(228) + ring(272);
+      ringLabels = [['Synthesis', 120], ['Notes', 187], ['Files', 250], ['Agents', 322]].map((l) => lab(l[0], cx, cy - l[1], false));
+    } else if (isTime) {
+      guides = 'M250 392H964';
+      ringLabels = [lab('Agent writes by day', 22, 30, true), lab('Synthesis pages rebuilt', 46, 330, true), lab('Notes and files by last change', 22, 436, true)];
+      for (let c = 0; c < 14; c++) ringLabels.push(lab(c === 13 ? 'Today' : (7 + c) + (c === 0 ? ' Nov' : ''), 250 + c * 51 + 22, 410, false));
+    }
+
+    const tabs = [['rings', 'Rings'], ['circle', 'Circle'], ['areas', 'Topics'], ['links', 'Links'], ['timeline', 'Timeline'], ['orbit', 'Orbit']].map((t) => {
+      const on = st.view === t[0];
+      return {
+        name: t[1], on,
+        style: 'height:32px;padding:0 16px;border:0;border-radius:999px;cursor:pointer;font-size:13px;font-weight:' + (on ? 500 : 400) + ';background:' + (on ? '#263142' : 'none') + ';color:' + (on ? '#E6EBF5' : '#8A96AD'),
+        pick: () => this.setState({ view: t[0], flip: !st.flip })
+      };
+    });
+    const chip = (on, quiet) => 'display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:0;border-radius:999px;cursor:pointer;font-size:13px;background:' + (on ? '#1A2231' : 'none') + ';color:' + (on ? '#E6EBF5' : quiet ? '#5F6B84' : '#B4BED0');
+    const areaChips = AR.map((r, i) => ({
+      name: r[0], on: st.area === i,
+      style: chip(st.area === i, st.area !== null && st.area !== i),
+      dot: 'flex:none;width:8px;height:8px;border-radius:50%;background:' + C[i] + ';opacity:' + (st.area !== null && st.area !== i ? 0.35 : 1),
+      pick: () => this.setState({ area: st.area === i ? null : i, sel: null })
+    }));
+    const kindChips = [['note', 'Notes', 'border-radius:50%;background:#B4BED0'], ['file', 'Files', 'background:#B4BED0;transform:rotate(45deg)'], ['hub', 'Synthesis', 'border-radius:50%;border:1.5px solid #B4BED0'], ['agent', 'Agents', 'border-radius:50%;border:1.5px solid #B4BED0;background:radial-gradient(circle,#B4BED0 0 1.5px,' + BG + ' 2px)']]
+      .map((k) => ({ name: k[1], on: st.kind === k[0], style: chip(st.kind === k[0], !!st.kind && st.kind !== k[0]), dot: 'flex:none;box-sizing:border-box;width:8px;height:8px;' + k[2], pick: () => this.setState({ kind: st.kind === k[0] ? null : k[0], sel: null }) }));
+    const whoChips = ['d', 'a', 's'].map((o) => ({ name: who[o], on: st.who === o, style: chip(st.who === o, !!st.who && st.who !== o), pick: () => this.setState({ who: st.who === o ? null : o, sel: null }) }));
+
+    const nbDot = (n) => 'flex:none;box-sizing:border-box;width:9px;height:9px;' + (n.k === 'file' ? 'transform:rotate(45deg);' : 'border-radius:50%;') + (n.locked ? 'border:1.2px solid ' + colour(n) : 'background:' + colour(n));
+    let selMeta = '';
+    if (sel) {
+      if (sel.k === 'root') selMeta = 'The top of the map. It points to one synthesis page per topic, and each page points to its notes, so any note is two hops away.';
+      else if (sel.k === 'hub') selMeta = 'Synthesis page, built from ' + AR[sel.a][1] + ' notes and files. Every fact on it cites the note it came from.';
+      else if (sel.k === 'agent') selMeta = sel.title.includes('self-hosted') ? 'Self-hosted agent. Its writes are held until Sara releases them.' : 'Agent on ' + who[sel.o] + "'s own subscription. It writes only to " + who[sel.o] + "'s space.";
+      else selMeta = AR[sel.a][0] + '. ' + (sel.locked ? who[sel.o] + ' has not shared this, so you see where it sits but not what it says.' : sel.o === 'd' ? 'Written by your agent.' : 'Written by ' + who[sel.o] + "'s agent, shared with you.");
+    }
+    const nbs = sel ? sel.nb.map((i) => nodes[i]) : [];
+    const name = (n) => n.k === 'hub' ? n.title + ' synthesis' : shown(n);
+
+    return {
+      nodes: view, tabs, areaChips, kindChips, whoChips, guides, ringLabels, edgesBase, edgesHi,
+      swarm: isTime ? '' : B.swarm,
+      ticks: isTime ? B.ticks : '',
+      isOrbit,
+      orbit: isOrbit ? view : [],
+      flatStyle: 'position:absolute;inset:0;display:' + (isOrbit ? 'none' : 'block'),
+      baseOp: sel || filtered ? 0.1 : st.view === 'links' ? 0.55 : 0.3,
+      flipA: !st.flip, flipB: st.flip,
+      names: st.names,
+      toggleNames: () => this.setState({ names: !st.names }),
+      namesStyle: 'height:36px;padding:0 14px;border:0;border-radius:999px;cursor:pointer;font-size:13px;background:' + (st.names ? '#141B28' : 'none') + ';color:' + (st.names ? '#E6EBF5' : '#8A96AD'),
+      q: st.q,
+      onQ: (e) => this.setState({ q: e.target.value, sel: null }),
+      stats: q ? hits + (hits === 1 ? ' match' : ' matches') : (nodes.length - 1) + ' items, ' + edges.length + ' links',
+      hasSel: !!sel, noSel: !sel,
+      clear: () => this.setState({ sel: null }),
+      selTitle: sel ? name(sel) : '',
+      selDot: sel ? nbDot(sel) : 'display:none',
+      selMeta,
+      nbTitle: nbs.length === 1 ? '1 connection' : nbs.length + ' connections',
+      neighbours: nbs.slice(0, 6).map((n) => ({ name: name(n) + (n.a >= 0 && sel && n.a !== sel.a && n.k !== 'hub' ? ', ' + AR[n.a][0] : ''), dot: nbDot(n), pick: () => this.setState({ sel: n.id }) })),
+      nbMore: nbs.length > 6 ? 'and ' + (nbs.length - 6) + ' more' : ''
+    };
+  }
+}
+</script>
+</body>
+</html>
