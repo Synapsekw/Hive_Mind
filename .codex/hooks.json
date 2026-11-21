@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'C:\\Users\\D\\Hive_Mind\\.codex\\hooks\\session-context.sh'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node 'C:\\Users\\D\\Hive_Mind\\.codex\\hooks\\maybe-write-session.mjs'"
+          }
+        ]
+      }
+    ]
+  }
+}
