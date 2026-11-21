@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash 'C:\\Users\\D\\Hive_Mind\\.codex\\hooks\\session-context.sh'"
+            "command": "bash 'E:\\Dev\\Hive_Mind\\.codex\\hooks\\session-context.sh'"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node 'C:\\Users\\D\\Hive_Mind\\.codex\\hooks\\maybe-write-session.mjs'"
+            "command": "node 'E:\\Dev\\Hive_Mind\\.codex\\hooks\\maybe-write-session.mjs'"
           }
         ]
       }
