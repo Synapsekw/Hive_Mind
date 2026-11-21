@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Tests (sharing rules + hooks)
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  author-email:
+    name: author email (commit identity)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify pushed commit author emails
+        env:
+          ALLOWED: info@synapse-solutions.ai
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            COMMITS=$(git log -1 --format='%H %ae' "$AFTER")
+          else
+            COMMITS=$(git log --no-merges --format='%H %ae' "$BEFORE..$AFTER")
+          fi
+          BAD=$(echo "$COMMITS" | awk -v ok="$ALLOWED" 'NF && tolower($2) != tolower(ok)') || true
+          if [ -n "$BAD" ]; then
+            echo "::error title=Wrong commit author email on develop::Commits below are not authored as $ALLOWED."
+            echo "$BAD"
+            exit 1
+          fi
+          echo "OK: all pushed commits authored as $ALLOWED"
+
+  commitlint:
+    name: commitlint (PR)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref != 'main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint commit messages
+        run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose

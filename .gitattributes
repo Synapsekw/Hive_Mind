@@ -1,0 +1,19 @@
+# Line endings: the repo stores LF and every checkout (Windows included) uses LF
+# on disk, so local tooling sees exactly what CI sees.
+* text=auto eol=lf
+
+# Binary assets: never munge line endings or attempt a text diff.
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+
+# Generated: keep out of review noise, but still LF text.
+pnpm-lock.yaml linguist-generated=true

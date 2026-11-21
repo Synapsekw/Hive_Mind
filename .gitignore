@@ -1,8 +1,55 @@
+# dependencies
 node_modules/
+
+# build output
 dist/
-.env
-.env.*
-!.env.example
-supabase/.branches/
-supabase/.temp/
+*.tsbuildinfo
+
+# testing
+/coverage
+/test-results
+
+# misc
 .DS_Store
+*.pem
+npm-debug.log*
+.pnpm-debug.log*
+
+# env files (never commit real values)
+.env*
+!.env.example
+
+# mcp: commit .mcp.json (OAuth, no secret) but never a local/token variant
+.mcp.local.json
+.mcp.*.local.json
+
+# supabase local
+supabase/.branches
+supabase/.temp
+supabase/.env
+
+# Obsidian dev-memory vault: TRACKED (vault/ notes + stable .obsidian config,
+# incl. community-plugins.json so the plugin set is reproducible). Volatile
+# per-machine state and installed plugin binaries are ignored.
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.obsidian/graph.json
+.obsidian/appearance.json
+.obsidian/core-plugins.json
+# Ignore plugin binaries, but TRACK the homepage choice so it survives a clone.
+.obsidian/plugins/*
+!.obsidian/plugins/homepage/
+.obsidian/plugins/homepage/*
+!.obsidian/plugins/homepage/data.json
+# Obsidian's default new-vault placeholder note.
+Welcome.md
+
+# Claude Code: share project settings + commands/hooks, never machine-local settings.
+.claude/settings.local.json
+
+# Per-session task worktrees (scripts/start-task.sh) live here; never part of the main tree.
+.claude/worktrees/
+
+# Brainstorming visual companion (local mockups)
+.superpowers/
