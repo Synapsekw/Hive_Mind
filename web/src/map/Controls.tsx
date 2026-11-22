@@ -138,7 +138,7 @@ export function Chips({
       <div role="group" aria-label="Topics" className={s.chips}>
         {model.topics.map((t, i) => (
           <Chip
-            key={t.name}
+            key={i}
             name={t.name}
             on={topic === i}
             quiet={topic !== null && topic !== i}

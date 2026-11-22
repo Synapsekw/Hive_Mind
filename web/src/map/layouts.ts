@@ -13,6 +13,11 @@ const TAU = Math.PI * 2;
 const GAP = 0.05;
 /** The narrowest sector a topic gets, so one item next to two hundred is still visible. */
 const MIN_SECTOR = 0.12;
+/**
+ * The narrowest sector once widths are shared out: 0.35 rad keeps neighbouring hubs more than
+ * 40 apart at the hub radius (120). Eight topics at 0.35 rad fit the circle.
+ */
+const MIN_HUB_SECTOR = 0.35;
 
 const polar = (r: number, a: number): P2 => [
   CX + r * Math.cos(a),
@@ -37,17 +42,46 @@ function parts(model: MapModel): Parts {
     else if (n.kind !== "root") items[n.topic]!.push(n.i);
   }
   const total = items.reduce((s, l) => s + l.length, 0);
+  // The 0.28 rad left at twelve o'clock keeps hubs clear of the ring labels there.
   const usable = TAU - 0.28 - T * GAP;
   const min = T > 0 ? Math.min(MIN_SECTOR, usable / T) : 0;
   const spare = usable - T * min;
+  const widths = spread(
+    items.map(
+      (l) => min + (total > 0 ? (spare * l.length) / total : spare / T),
+    ),
+    T > 0 ? Math.min(MIN_HUB_SECTOR, usable / T) : 0,
+  );
   let a = -TAU / 4 + 0.14;
-  const sec = items.map((l) => {
-    const w = min + (total > 0 ? (spare * l.length) / total : spare / T);
+  const sec = widths.map((w) => {
     const s = { a0: a, w, mid: a + w / 2 };
     a += w + GAP;
     return s;
   });
   return { hubs, items, agents, sec };
+}
+
+/**
+ * Lifts every width below `floor` to `floor` and takes the difference from the wider ones in
+ * proportion, so the total stays the same. Widths already at or above `floor` come back as given.
+ */
+function spread(w: number[], floor: number): number[] {
+  const sum = w.reduce((s, x) => s + x, 0);
+  const fixed = new Array<boolean>(w.length).fill(false);
+  let out = w;
+  for (;;) {
+    const low = out.some((x, i) => !fixed[i] && x < floor);
+    if (!low) return out;
+    out.forEach((x, i) => {
+      if (x < floor) fixed[i] = true;
+    });
+    const nFixed = fixed.filter(Boolean).length;
+    const freeSum = w.reduce((s, x, i) => (fixed[i] ? s : s + x), 0);
+    const budget = sum - nFixed * floor;
+    out = w.map((x, i) =>
+      fixed[i] ? floor : freeSum > 0 ? (x * budget) / freeSum : floor,
+    );
+  }
 }
 
 function rings(model: MapModel, p: Parts): P2[] {
@@ -180,9 +214,20 @@ function timeline(model: MapModel, p: Parts, now: number): P2[] {
 }
 
 const ITERATIONS = 170;
+const FULL_NODES = 1500;
+
+/**
+ * Passes of the force layout for `n` nodes: 170 up to 1,500 nodes, then fewer, so the pair
+ * work (n^2 per pass) never exceeds the 1,500-node cost. Never fewer than 12.
+ */
+export function forceIterations(n: number): number {
+  if (n <= FULL_NODES) return ITERATIONS;
+  return Math.max(12, Math.floor(ITERATIONS * (FULL_NODES / n) ** 2));
+}
 
 function force(model: MapModel, start: P2[]): P2[] {
   const N = model.nodes.length;
+  const ITER = forceIterations(N);
   const px = new Float64Array(N);
   const py = new Float64Array(N);
   start.forEach((q, i) => {
@@ -206,8 +251,8 @@ function force(model: MapModel, start: P2[]): P2[] {
   });
   const fx = new Float64Array(N);
   const fy = new Float64Array(N);
-  for (let it = 0; it < ITERATIONS; it++) {
-    const cool = 1 - it / ITERATIONS;
+  for (let it = 0; it < ITER; it++) {
+    const cool = 1 - it / ITER;
     fx.fill(0);
     fy.fill(0);
     for (let i = 0; i < N; i++) {
@@ -261,7 +306,10 @@ function inBox(pos: P2[]): P2[] {
   );
 }
 
-/** Flat positions in the 1000 x 760 box, one per model node. `links` is O(n^2 * 170): cache it. */
+/**
+ * Flat positions in the 1000 x 760 box, one per model node. `links` is O(n^2) per pass with
+ * `forceIterations(n)` passes (bounded at the 1,500-node cost): cache it.
+ */
 export function layout(
   view: Exclude<View, "orbit">,
   model: MapModel,

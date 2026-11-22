@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-const OPEN = [/^\/login(\/|$)/, /^\/auth(\/|$)/, /^\/dev(\/|$)/];
+const OPEN = [/^\/login(\/|$)/, /^\/auth(\/|$)/];
+// The fixture map under /dev is open in development only; in production it needs a sign-in.
+if (process.env.NODE_ENV !== "production") OPEN.push(/^\/dev(\/|$)/);
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -18,18 +20,25 @@ export async function proxy(request: NextRequest) {
   }
 
   let response = NextResponse.next({ request });
+  // Cache headers @supabase/ssr asks for when it writes auth cookies, so no shared cache
+  // stores one person's session for another.
+  const headers: Record<string, string> = {};
   const supabase = createServerClient(url, key, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet, cacheHeaders) {
         for (const { name, value } of cookiesToSet) {
           request.cookies.set(name, value);
         }
+        Object.assign(headers, cacheHeaders);
         response = NextResponse.next({ request });
         for (const { name, value, options } of cookiesToSet) {
           response.cookies.set(name, value, options);
+        }
+        for (const [k, v] of Object.entries(headers)) {
+          response.headers.set(k, v);
         }
       },
     },
@@ -42,9 +51,12 @@ export async function proxy(request: NextRequest) {
 
   const redirect = (to: string) => {
     const res = NextResponse.redirect(new URL(to, request.url));
-    // Carry refreshed session cookies onto the redirect.
+    // Carry refreshed session cookies and their cache headers onto the redirect.
     for (const cookie of response.cookies.getAll()) {
       res.cookies.set(cookie);
+    }
+    for (const [k, v] of Object.entries(headers)) {
+      res.headers.set(k, v);
     }
     return res;
   };

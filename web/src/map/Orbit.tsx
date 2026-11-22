@@ -5,6 +5,7 @@ import { Dot, type DotState } from "./Dots";
 import s from "./map.module.css";
 
 const f = (v: number) => String(Math.round(v * 10) / 100);
+const BILLBOARD = `${s.dot} ${s.billboard}`;
 
 export function Orbit({
   model,
@@ -24,6 +25,7 @@ export function Orbit({
           <div aria-hidden="true" className={s.equator} />
           {model.nodes.map((n) => {
             const [x, y, z] = pos[n.i] ?? [0, 0, 0];
+            const st = states[n.i]!;
             return (
               <div
                 key={n.i}
@@ -35,10 +37,11 @@ export function Orbit({
                 <Dot
                   model={model}
                   n={n}
-                  st={states[n.i]!}
+                  on={st.on}
+                  sel={st.sel}
+                  label={st.label}
                   onPick={onPick}
-                  className={`${s.dot} ${s.billboard}`}
-                  style={{}}
+                  className={BILLBOARD}
                 />
               </div>
             );

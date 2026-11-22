@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildModel } from "./graph";
-import { lit } from "./select";
+import { lit, nodeIndex, nodeKey, topicIndexOf } from "./select";
 import { fixturePayload } from "./fixture";
 import type { Filter, MapPayload } from "./types";
 
@@ -48,9 +48,16 @@ describe("lit", () => {
   it("matches search on the topic name, case-insensitively", () => {
     const name = model.topics[0]!.name;
     const on = lit(model, { ...NONE, q: `  ${name.toUpperCase()} ` });
+    const lower = name.toLowerCase();
     model.nodes.forEach((n, i) => {
       if (n.topic === 0) expect(on[i]).toBe(true);
+      else if (
+        !n.title.toLowerCase().includes(lower) &&
+        !(model.topics[n.topic]?.name.toLowerCase().includes(lower) ?? false)
+      )
+        expect(on[i]).toBe(false);
     });
+    expect(on.filter((x) => !x).length).toBeGreaterThan(0);
   });
 
   it("never matches a locked node on its real title", () => {
@@ -75,5 +82,73 @@ describe("lit", () => {
     expect(lit(open, { ...NONE, q }).filter(Boolean).length).toBeGreaterThan(0);
     const on = lit(closed, { ...NONE, q });
     expect(on.filter(Boolean).length).toBe(0);
+  });
+});
+
+describe("selection and topic keys across a refresh", () => {
+  const before = fixturePayload(NOW);
+  const m0 = buildModel(before);
+
+  function prepend(p: MapPayload): MapPayload {
+    const first = p.nodes[0]!;
+    return {
+      ...p,
+      nodes: [
+        {
+          ...first,
+          id: "fresh-node",
+          title: "Just written",
+          locked: false,
+        },
+        ...p.nodes,
+      ],
+    };
+  }
+
+  it("keeps the same item selected when a newer node is prepended", () => {
+    const i0 = m0.nodes.findIndex((n) => n.kind === "note" && !n.locked);
+    const key = nodeKey(m0, i0)!;
+    const m1 = buildModel(prepend(before));
+    const i1 = nodeIndex(m1, key);
+    expect(i1).not.toBeNull();
+    expect(i1).not.toBe(i0);
+    expect(m1.nodes[i1!]!.id).toBe(m0.nodes[i0]!.id);
+  });
+
+  it("keeps an agent, a hub and the root selected by what they are", () => {
+    const m1 = buildModel(prepend(before));
+    for (const kind of ["agent", "hub", "root"] as const) {
+      const i0 = m0.nodes.findIndex((n) => n.kind === kind);
+      const i1 = nodeIndex(m1, nodeKey(m0, i0)!);
+      expect(i1).not.toBeNull();
+      expect(m1.nodes[i1!]!.kind).toBe(kind);
+      expect(m1.nodes[i1!]!.title).toBe(m0.nodes[i0]!.title);
+    }
+  });
+
+  it("clears the selection when the item has vanished", () => {
+    const gone = before.nodes[5]!;
+    const i0 = m0.nodes.findIndex((n) => n.id === gone.id);
+    const key = nodeKey(m0, i0)!;
+    const m1 = buildModel({
+      ...before,
+      nodes: before.nodes.filter((n) => n.id !== gone.id),
+    });
+    expect(nodeIndex(m1, key)).toBeNull();
+    expect(nodeIndex(m1, null)).toBeNull();
+  });
+
+  it("follows the topic filter by name", () => {
+    const name = m0.topics[1]!.name;
+    // Enough new items in that topic to make it the largest.
+    const extra = Array.from({ length: 200 }, (_, k) => ({
+      ...before.nodes.find((n) => n.topic === name)!,
+      id: `more-${k}`,
+    }));
+    const m1 = buildModel({ ...before, nodes: [...extra, ...before.nodes] });
+    expect(topicIndexOf(m1, name)).toBe(0);
+    expect(m1.topics[topicIndexOf(m1, name)!]!.name).toBe(name);
+    expect(topicIndexOf(m1, "No such topic")).toBeNull();
+    expect(topicIndexOf(m1, null)).toBeNull();
   });
 });

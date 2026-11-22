@@ -344,6 +344,17 @@
   z-index: 3;
 }
 
+/* Dimmed: everything outside the filter, search or selection. */
+.dot:not([data-lit]) {
+  opacity: 0.1;
+}
+
+/* A dimmed dot reached by keyboard shows itself and its focus ring at full strength. */
+.dot:focus-visible {
+  z-index: 6;
+  opacity: 1;
+}
+
 .dot[data-kind="hub"],
 .dot[data-kind="root"] {
   z-index: 4;

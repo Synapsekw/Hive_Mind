@@ -60,10 +60,14 @@ export function buildModel(payload: MapPayload): MapModel {
   const topics: MapModel["topics"] = [];
   const topicIndex = new Map<string, number>();
   const fold = ranked.length > HUES;
+  // A real topic among the kept seven may itself be called "Other".
+  const otherName = ranked.slice(0, HUES - 1).some(([name]) => name === "Other")
+    ? "Other topics"
+    : "Other";
   ranked.forEach(([name, count], r) => {
     if (fold && r >= HUES - 1) {
       if (topics.length < HUES)
-        topics.push({ name: "Other", hue: HUES - 1, count: 0 });
+        topics.push({ name: otherName, hue: HUES - 1, count: 0 });
       topics[HUES - 1]!.count += count;
       topicIndex.set(name, HUES - 1);
     } else {
@@ -162,9 +166,10 @@ export function buildModel(payload: MapPayload): MapModel {
   for (const l of payload.links) {
     const a = byId.get(l.from);
     const b = byId.get(l.to);
-    if (a === undefined || b === undefined || a === b) continue;
-    linkCount++;
-    link(a, b);
+    if (a === undefined || b === undefined) continue;
+    // Count only links that drew a new edge: a reverse duplicate or a link that repeats a
+    // structural edge adds nothing to the map.
+    if (link(a, b)) linkCount++;
   }
 
   // Agents: own agents connect to the hubs where they wrote (agent_id); a colleague's agent to

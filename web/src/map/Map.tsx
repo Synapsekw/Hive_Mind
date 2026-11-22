@@ -2,10 +2,10 @@
 
 // The map screen. The only state holder: view, topic, kind, person, selection, search text and
 // labels. Everything is computed from the payload in memory; nothing here touches the network.
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { activity, agentStatus, buildModel } from "./graph";
 import { layout, orbit } from "./layouts";
-import { lit } from "./select";
+import { lit, nodeIndex, nodeKey, topicIndexOf } from "./select";
 import type { MapPayload, NodeKind, View } from "./types";
 import { Chips, TopBar } from "./Controls";
 import { DetailRail } from "./DetailRail";
@@ -25,25 +25,46 @@ export function HiveMap({
   now: number;
 }) {
   const [view, setView] = useState<View>("rings");
-  const [topic, setTopic] = useState<number | null>(null);
+  // The topic filter and the selection are kept by name and by key, not by index, so they
+  // follow the same topic and node when a refresh shifts the indices (see `nodeKey`).
+  const [topicName, setTopicName] = useState<string | null>(null);
   const [kind, setKind] = useState<NodeKind | null>(null);
-  const [member, setMember] = useState<string | null>(null);
-  const [sel, setSel] = useState<number | null>(null);
+  const [memberId, setMemberId] = useState<string | null>(null);
+  const [selKey, setSelKey] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [names, setNames] = useState(true);
 
-  const model = useMemo(() => buildModel(payload), [payload]);
+  // A refresh that delivers the same payload keeps the model, so no layout runs again.
+  const sig = useMemo(() => JSON.stringify(payload), [payload]);
+  const model = useMemo(() => buildModel(JSON.parse(sig) as MapPayload), [sig]);
   const act = useMemo(() => activity(model, now), [model, now]);
 
-  // Layouts are computed the first time a view is opened, then kept for this model.
+  const sel = useMemo(() => nodeIndex(model, selKey), [model, selKey]);
+  const topic = topicIndexOf(model, topicName);
+  const member =
+    memberId !== null && model.members.some((m) => m.id === memberId)
+      ? memberId
+      : null;
+  // Drop what the new payload no longer has.
+  if (selKey !== null && sel === null) setSelKey(null);
+  if (topicName !== null && topic === null) setTopicName(null);
+  if (memberId !== null && member === null) setMemberId(null);
+
+  // Layouts are computed the first time a view is opened, then kept for this model. Only the
+  // timeline depends on `now`, so only it is redone when `now` moves.
   const cache = useMemo(
     () => ({
       flat: new Map<Flat, [number, number][]>(),
+      timelineAt: 0,
       orbit: null as [number, number, number][] | null,
     }),
     [model],
   );
   const flatView: Flat = view === "orbit" ? "topics" : view;
+  if (flatView === "timeline" && cache.timelineAt !== now) {
+    cache.flat.delete("timeline");
+    cache.timelineAt = now;
+  }
   let pos = cache.flat.get(flatView);
   if (!pos) {
     pos = layout(flatView, model, now);
@@ -53,21 +74,27 @@ export function HiveMap({
   if (isOrbit && !cache.orbit) cache.orbit = orbit(model);
 
   const agentInfo = useMemo(() => {
-    const m = new Map<string, { status: string; selfHosted: boolean }>();
+    const m = new Map<
+      string,
+      { status: string; selfHosted: boolean; name: string | null }
+    >();
     for (const a of payload.agents)
       m.set(a.id, {
         status: agentStatus(a.last_used_at, now),
         selfHosted: a.trust_tier === "self_hosted",
+        name: a.name,
       });
     return m;
   }, [payload, now]);
   const agents: AgentRow[] = model.nodes
     .filter((n) => n.kind === "agent" && n.id !== null)
     .map((n) => {
-      const status = agentInfo.get(n.id!)?.status ?? "never used";
+      const info = agentInfo.get(n.id!);
+      const status = info?.status ?? "never used";
       return {
         id: n.id!,
-        name: n.title,
+        // The caller's own agents carry their name; a colleague's is "<member>, <provider>".
+        name: info?.name || n.title,
         status,
         connected: status === "connected",
       };
@@ -112,12 +139,19 @@ export function HiveMap({
     : `${items} ${items === 1 ? "item" : "items"}, ${model.linkCount} ${model.linkCount === 1 ? "link" : "links"}` +
       (model.truncated ? ". Showing the 5,000 most recent items" : "");
 
-  const pick = (i: number) => setSel((cur) => (cur === i ? null : i));
+  // Stable for a model, so the memoised dots do not redraw on every keystroke or click.
+  const pick = useCallback(
+    (i: number) => {
+      const key = nodeKey(model, i);
+      setSelKey((cur) => (cur === key ? null : key));
+    },
+    [model],
+  );
   const filter =
     <T,>(set: (v: T) => void) =>
     (v: T) => {
       set(v);
-      setSel(null);
+      setSelKey(null);
     };
 
   return (
@@ -142,13 +176,9 @@ export function HiveMap({
             edges={{ ...edges, baseOpacity }}
           />
           <GuideLabels view={view} now={now} />
-          <FlatDots
-            model={model}
-            pos={pos}
-            states={states}
-            onPick={pick}
-            hidden={isOrbit}
-          />
+          {!isOrbit && (
+            <FlatDots model={model} pos={pos} states={states} onPick={pick} />
+          )}
           {isOrbit && cache.orbit && (
             <Orbit
               model={model}
@@ -161,11 +191,13 @@ export function HiveMap({
         <Chips
           model={model}
           topic={topic}
-          onTopic={filter(setTopic)}
+          onTopic={filter((t: number | null) =>
+            setTopicName(t === null ? null : (model.topics[t]?.name ?? null)),
+          )}
           kind={kind}
           onKind={filter(setKind)}
           member={member}
-          onMember={filter(setMember)}
+          onMember={filter(setMemberId)}
         />
       </main>
       <DetailRail
@@ -174,8 +206,8 @@ export function HiveMap({
         sel={sel}
         agentInfo={agentInfo}
         now={now}
-        onPick={(i) => setSel(i)}
-        onClear={() => setSel(null)}
+        onPick={(i) => setSelKey(nodeKey(model, i))}
+        onClear={() => setSelKey(null)}
       />
     </div>
   );

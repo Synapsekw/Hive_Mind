@@ -230,6 +230,34 @@ describe("buildModel", () => {
     expect(m.nodes[a]!.nb).toContain(b);
   });
 
+  it("counts a link only when it adds an edge", () => {
+    const f: MapNode = { ...note("f1", "A"), kind: "file", note_id: "n1" };
+    const m = buildModel(
+      payload([note("n1", "A"), note("n2", "B"), f], {
+        links: [
+          { from: "n1", to: "n2", tier: 1, score: 0.9 },
+          { from: "n2", to: "n1", tier: 1, score: 0.9 },
+          { from: "n1", to: "n2", tier: 2, score: 0.5 },
+          // The same as the structural note-to-file edge.
+          { from: "f1", to: "n1", tier: 1, score: 0.9 },
+        ],
+      }),
+    );
+    expect(m.linkCount).toBe(1);
+  });
+
+  it("names the folded topic Other topics when a real topic is called Other", () => {
+    const counts = [30, 25, 20, 18, 15, 12, 10, 8, 5, 3];
+    const p = topicsPayload(counts);
+    for (const n of p.nodes) if (n.topic === "T2") n.topic = "Other";
+    const m = buildModel(p);
+    const names = m.topics.map((t) => t.name);
+    expect(names).toHaveLength(8);
+    expect(new Set(names).size).toBe(8);
+    expect(names).toContain("Other");
+    expect(names[7]).toBe("Other topics");
+  });
+
   it("connects own agents to hubs by agent_id and a colleague's agent by by_agent notes", () => {
     const mine = note("n1", "A", { by_agent: true, agent_id: "ag-me" });
     const plain = note("n2", "B");

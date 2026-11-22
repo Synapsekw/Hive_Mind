@@ -3,6 +3,7 @@ import s from "./map.module.css";
 
 export type AgentRow = {
   id: string;
+  /** The agent's own name for the caller's agents; "<member>, <provider>" for colleagues'. */
   name: string;
   status: string;
   connected: boolean;

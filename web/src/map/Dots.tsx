@@ -1,6 +1,6 @@
 // The dots: one real button per node. Shape doubles colour: circle = note, diamond = file,
 // ringed = topic hub, hollow = not shared with you, hexagon = the hive index.
-import type { CSSProperties } from "react";
+import { memo, type CSSProperties } from "react";
 import type { MapModel, ModelNode } from "./types";
 import s from "./map.module.css";
 
@@ -33,6 +33,8 @@ export function size(n: ModelNode): number {
 export function ariaLabel(model: MapModel, n: ModelNode): string {
   const topic =
     n.topic >= 0 && n.kind !== "hub" ? `, ${model.topics[n.topic]!.name}` : "";
+  // "Private note" / "Private file" already says the kind.
+  if (n.locked) return `${n.title}${topic}`;
   return `${n.title}, ${KIND_WORD[n.kind]}${topic}`;
 }
 
@@ -73,22 +75,32 @@ export type DotState = {
   label: boolean;
 };
 
-/** One dot. `className`/`style` place it; the flat and orbit views place it differently. */
-export function Dot({
+/**
+ * One dot. `className` and `left`/`top` place it; the flat and orbit views place it differently.
+ * Props are primitives or objects that stay the same for a model, so a dot whose state did not
+ * change is not drawn again. A dimmed dot gets its 0.1 opacity from the stylesheet (see `.dot`).
+ */
+export const Dot = memo(function Dot({
   model,
   n,
-  st,
+  on,
+  sel,
+  label,
   onPick,
   className,
-  style,
+  left,
+  top,
   flip = false,
 }: {
   model: MapModel;
   n: ModelNode;
-  st: DotState;
+  on: boolean;
+  sel: boolean;
+  label: boolean;
   onPick: (i: number) => void;
   className: string;
-  style: CSSProperties;
+  left?: string;
+  top?: string;
   flip?: boolean;
 }) {
   const d = size(n);
@@ -96,31 +108,31 @@ export function Dot({
     <button
       type="button"
       className={className}
-      style={{ ...style, opacity: st.on ? 1 : 0.1 }}
+      style={left !== undefined ? { left, top } : undefined}
       aria-label={ariaLabel(model, n)}
-      aria-pressed={st.sel}
+      aria-pressed={sel}
       onClick={() => onPick(n.i)}
       data-map-dot=""
       data-kind={n.kind}
       data-topic={n.topic}
       data-locked={n.locked || undefined}
-      data-lit={st.on || undefined}
+      data-lit={on || undefined}
     >
-      <Shape model={model} n={n} sel={st.sel} />
-      {st.label && (
+      <Shape model={model} n={n} sel={sel} />
+      {label && (
         <span
           aria-hidden="true"
           className={s.label}
           style={{ "--d": `${d}px` } as CSSProperties}
           data-flip={flip || undefined}
-          data-strong={st.sel || n.kind === "hub" || undefined}
+          data-strong={sel || n.kind === "hub" || undefined}
         >
           {n.title}
         </span>
       )}
     </button>
   );
-}
+});
 
 /** The five flat views: dots positioned by percentage inside the 1000 x 760 box. */
 export function FlatDots({
@@ -128,30 +140,31 @@ export function FlatDots({
   pos,
   states,
   onPick,
-  hidden,
+  hidden = false,
 }: {
   model: MapModel;
   pos: [number, number][];
   states: DotState[];
   onPick: (i: number) => void;
-  hidden: boolean;
+  hidden?: boolean;
 }) {
   return (
     <div className={s.flat} hidden={hidden}>
       {model.nodes.map((n) => {
         const [x, y] = pos[n.i] ?? [500, 380];
+        const st = states[n.i]!;
         return (
           <Dot
             key={n.i}
             model={model}
             n={n}
-            st={states[n.i]!}
+            on={st.on}
+            sel={st.sel}
+            label={st.label}
             onPick={onPick}
             className={s.dot}
-            style={{
-              left: `${pct(x / 10)}%`,
-              top: `${pct(y / 7.6)}%`,
-            }}
+            left={`${pct(x / 10)}%`}
+            top={`${pct(y / 7.6)}%`}
             flip={x > 760}
           />
         );

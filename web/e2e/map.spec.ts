@@ -98,11 +98,13 @@ test("a hostile title is shown as text", async ({ page }) => {
 
 test("every dot is a labelled button", async ({ page }) => {
   await open(page);
+  const counts: number[] = [];
   for (const name of ["Rings", "Orbit"]) {
     await viewButton(page, name).click();
     const dots = page.locator("[data-map-dot]");
     const n = await dots.count();
     expect(n).toBeGreaterThan(250);
+    counts.push(n);
     const bad = await dots.evaluateAll((els) =>
       els
         .filter(
@@ -114,4 +116,6 @@ test("every dot is a labelled button", async ({ page }) => {
     );
     expect(bad).toEqual([]);
   }
+  // One layer of dots at a time: the orbit view does not keep the flat dots mounted.
+  expect(counts[1]).toBe(counts[0]);
 });

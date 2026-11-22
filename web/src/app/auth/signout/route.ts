@@ -4,7 +4,8 @@ import { createServerSupabase } from "../../../lib/supabase/server";
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabase();
-    await supabase.auth.signOut();
+    // This browser only; the person's other sessions stay signed in.
+    await supabase.auth.signOut({ scope: "local" });
   } catch {
     // Not configured or already signed out: nothing to clear.
   }

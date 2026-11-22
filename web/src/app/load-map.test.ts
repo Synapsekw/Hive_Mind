@@ -51,9 +51,19 @@ describe("loadMap", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const t = stub({
       hives: { data: [{ id: "h1" }], error: null },
-      rpc: { data: null, error: { message: "boom", code: "XX000" } },
+      rpc: {
+        data: { nodes: [{ title: "Secret payload title" }] },
+        error: {
+          message: "boom",
+          code: "XX000",
+          details: "Secret payload title",
+        } as Err,
+      },
     });
     expect(await loadMap(t.db)).toEqual({ state: "error" });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith("map_graph failed", "XX000", "boom");
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
     spy.mockRestore();
   });
 
@@ -64,6 +74,8 @@ describe("loadMap", () => {
     });
     expect(await loadMap(t.db)).toEqual({ state: "error" });
     expect(t.rpc).not.toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith("hives query failed", "42501", "nope");
     spy.mockRestore();
   });
 

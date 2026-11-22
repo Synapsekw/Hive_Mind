@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildModel } from "./graph";
-import { layout, orbit } from "./layouts";
+import { forceIterations, layout, orbit } from "./layouts";
 import { fixturePayload } from "./fixture";
 import type { MapNode, MapPayload, View } from "./types";
 
@@ -95,6 +95,61 @@ describe.each(CASES)("layouts on %s", (_name, payload) => {
 
   it("puts the root at the centre in rings", () => {
     expect(layout("rings", model, NOW)[0]).toEqual([500, 380]);
+  });
+});
+
+describe("forceIterations", () => {
+  it("is 170 up to 1,500 nodes, then shrinks so pair work stays bounded", () => {
+    expect(forceIterations(10)).toBe(170);
+    expect(forceIterations(1500)).toBe(170);
+    expect(forceIterations(5000)).toBe(15);
+    expect(forceIterations(100_000)).toBe(12);
+  });
+});
+
+describe("rings on a small hive", () => {
+  it("keeps every pair of hubs at least 40 apart for topic sizes 17, 7, 1, 1, 1", () => {
+    const nodes: MapNode[] = [];
+    [17, 7, 1, 1, 1].forEach((c, t) => {
+      for (let j = 0; j < c; j++) nodes.push(note(`s${t}-${j}`, `Small ${t}`));
+    });
+    const model = buildModel(base(nodes));
+    const pos = layout("rings", model, NOW);
+    const hubs = model.nodes
+      .filter((n) => n.kind === "hub")
+      .map((n) => pos[n.i]!);
+    expect(hubs).toHaveLength(5);
+    for (let a = 0; a < hubs.length; a++)
+      for (let b = a + 1; b < hubs.length; b++) {
+        const d = Math.hypot(
+          hubs[a]![0] - hubs[b]![0],
+          hubs[a]![1] - hubs[b]![1],
+        );
+        expect(d).toBeGreaterThanOrEqual(40);
+      }
+    // Each sector is at least 0.35 rad wide, so neighbouring hubs' angles differ by 0.35 + gap.
+    const angles = hubs
+      .map(([x, y]) => Math.atan2(y - 380, x - 500))
+      .sort((a, b) => a - b);
+    for (let k = 1; k < angles.length; k++)
+      expect(angles[k]! - angles[k - 1]!).toBeGreaterThanOrEqual(0.4 - 1e-9);
+    expect(
+      angles[0]! + 2 * Math.PI - angles[angles.length - 1]!,
+    ).toBeGreaterThanOrEqual(0.4 - 1e-9);
+  });
+
+  it("keeps hubs clear of the ring labels at twelve o'clock", () => {
+    const nodes: MapNode[] = [];
+    [17, 7, 1, 1, 1].forEach((c, t) => {
+      for (let j = 0; j < c; j++) nodes.push(note(`s${t}-${j}`, `Small ${t}`));
+    });
+    const model = buildModel(base(nodes));
+    const pos = layout("rings", model, NOW);
+    for (const n of model.nodes.filter((x) => x.kind === "hub")) {
+      const [x, y] = pos[n.i]!;
+      // The labels sit straight above the centre; no hub sits in a 60-wide band there.
+      if (y < 380) expect(Math.abs(x - 500)).toBeGreaterThanOrEqual(30);
+    }
   });
 });
 

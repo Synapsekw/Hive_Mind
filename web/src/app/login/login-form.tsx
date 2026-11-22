@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { createBrowserSupabase } from "../../lib/supabase/browser";
 import styles from "./login.module.css";
 
@@ -8,6 +9,7 @@ const COPY = {
   notConfigured:
     "Sign-in isn't configured. Add the project URL and key to web/.env.local.",
   wrongCredentials: "That email and password don't match.",
+  unreachable: "Couldn't reach the server. Try again.",
   linkSent: "Check your email for a sign-in link.",
   linkFailed:
     "Couldn't send the link. Try again in a few minutes, or use your password.",
@@ -39,13 +41,18 @@ export function LoginForm({
         password,
       });
       if (error) {
-        setMessage(COPY.wrongCredentials);
+        // supabase-js returns a network failure as an error rather than throwing it.
+        setMessage(
+          isAuthRetryableFetchError(error)
+            ? COPY.unreachable
+            : COPY.wrongCredentials,
+        );
         setBusy(false);
         return;
       }
       window.location.assign("/");
     } catch {
-      setMessage(COPY.wrongCredentials);
+      setMessage(COPY.unreachable);
       setBusy(false);
     }
   }
