@@ -12,7 +12,7 @@ import { DetailRail } from "./DetailRail";
 import { FlatDots, type DotState } from "./Dots";
 import { Backdrop, edgePaths, GuideLabels } from "./Edges";
 import { Orbit } from "./Orbit";
-import { Shell, type AgentRow } from "./Shell";
+import { Shell, type AgentRow } from "../shell/Shell";
 import s from "./map.module.css";
 
 type Flat = Exclude<View, "orbit">;

@@ -5,7 +5,7 @@
 // writes go through `actions`, and the database decides whether they are allowed.
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Shell } from "../map/Shell";
+import { Shell } from "../shell/Shell";
 import { Folders } from "./Folders";
 import { folderMark } from "./marks";
 import { NoteList } from "./NoteList";

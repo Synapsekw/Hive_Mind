@@ -1,0 +1,116 @@
+// The left rail, shared by the map and the vault: the mark, the destinations (Map, Vault), the
+// agents when given, the Appearance panel and sign out. It sits straight on the wash, so it is
+// the "chrome" scope (white text in light mode).
+import Link from "next/link";
+import { Appearance } from "./Appearance";
+import s from "./shell.module.css";
+
+export type AgentRow = {
+  id: string;
+  /** The agent's own name for the caller's agents; "<member>, <provider>" for colleagues'. */
+  name: string;
+  status: string;
+  connected: boolean;
+};
+
+const ICON = {
+  width: 16,
+  height: 16,
+  viewBox: "0 0 16 16",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.3,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+} as const;
+
+const DESTINATIONS = [
+  {
+    key: "map",
+    href: "/",
+    name: "Map",
+    icon: (
+      <svg aria-hidden="true" {...ICON}>
+        <circle cx="8" cy="8" r="2" />
+        <circle cx="3" cy="3.5" r="1.2" />
+        <circle cx="13" cy="4" r="1.2" />
+        <circle cx="12" cy="13" r="1.2" />
+        <path d="M6.6 6.6 3.9 4.3M9.6 6.9l2.5-2.1M9.2 9.6l2 2.5" />
+      </svg>
+    ),
+  },
+  {
+    key: "vault",
+    href: "/vault",
+    name: "Vault",
+    icon: (
+      <svg aria-hidden="true" {...ICON}>
+        <path d="M2 4.5h4l1.2 1.5H14v6.5H2z" />
+      </svg>
+    ),
+  },
+] as const;
+
+export function Shell({
+  current,
+  agents = [],
+}: {
+  current: "map" | "vault";
+  agents?: AgentRow[];
+}) {
+  return (
+    <aside aria-label="Navigation" data-scope="chrome" className={s.rail}>
+      <div className={s.brand}>
+        <span aria-hidden="true" className={s.mark} />
+        <span className={s.brandName}>Hive</span>
+      </div>
+      <nav aria-label="Main" className={s.links}>
+        {DESTINATIONS.map((d) => (
+          <Link
+            key={d.key}
+            href={d.href}
+            aria-current={d.key === current ? "page" : undefined}
+            className={`${s.row} ${s.control}`}
+          >
+            <span className={s.slot}>{d.icon}</span>
+            <span className={s.rowLabel}>{d.name}</span>
+          </Link>
+        ))}
+      </nav>
+      <section className={s.foot}>
+        {agents.length > 0 && (
+          <>
+            <h2 className={s.heading}>Agents</h2>
+            <ul className={s.agentList}>
+              {agents.map((a) => (
+                <li key={a.id} className={s.agent}>
+                  <span aria-hidden="true" className={s.slot}>
+                    <span
+                      className={s.agentDot}
+                      data-on={a.connected || undefined}
+                    />
+                  </span>
+                  <span className={s.agentName} title={a.name}>
+                    {a.name}
+                  </span>
+                  <span className={s.agentStatus}>{a.status}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <Appearance />
+        <form method="post" action="/auth/signout" className={s.signOutForm}>
+          <button type="submit" className={`${s.row} ${s.control}`}>
+            <span aria-hidden="true" className={s.slot}>
+              <svg {...ICON}>
+                <path d="M6.5 2.5h-3v11h3M10 5l3 3-3 3M13 8H6.5" />
+              </svg>
+            </span>
+            <span className={s.rowLabel}>Sign out</span>
+          </button>
+        </form>
+      </section>
+    </aside>
+  );
+}

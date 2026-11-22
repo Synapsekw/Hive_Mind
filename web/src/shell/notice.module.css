@@ -1,0 +1,77 @@
+/* A notice: the rail and one glass card with a sentence. Tokens only; refined in a later task. */
+
+.root {
+  min-height: 100vh;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.card {
+  flex: 999 1 620px;
+  min-width: 0;
+  margin: 8px 4px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--edge-card);
+  border-radius: 20px;
+  background: var(--glow), var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--lift);
+}
+
+.notice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.text {
+  margin: 0;
+  max-width: 36ch;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--grad);
+  color: var(--on-brand);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+@media (min-width: 1100px) and (min-height: 560px) {
+  .root {
+    height: 100dvh;
+    min-height: 0;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .card {
+    min-height: 0;
+  }
+}
+
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .card {
+    background: var(--bg);
+  }
+}
