@@ -1,0 +1,309 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  previewIn,
+  releaseIn,
+  saveFolderIn,
+  saveNoteIn,
+  toPreview,
+} from "./write";
+
+const HIVE = "00000000-0000-4000-8000-000000000a01";
+const ME = "00000000-0000-4000-8000-000000000001";
+const AHMED = "00000000-0000-4000-8000-000000000002";
+const OUTSIDE = "00000000-0000-4000-8000-0000000000ff";
+const W1 = "00000000-0000-4000-8000-000000000b01";
+const NOTE = "00000000-0000-4000-8000-000000010001";
+
+type Err = { message: string; code?: string; details?: string };
+type Res = { data: unknown; error: Err | null };
+type Call = { table: string; ops: [string, unknown[]][] };
+
+const ok = (data: unknown): Res => ({ data, error: null });
+
+function stub(
+  opts: {
+    write?: Res;
+    workspace?: Res;
+    rpc?: Res;
+    user?: { id: string } | null;
+  } = {},
+) {
+  const calls: Call[] = [];
+  const answer = (c: Call): Res => {
+    if (c.table === "hives") return ok([{ id: HIVE }]);
+    if (c.table === "members")
+      return ok([
+        { id: ME, user_id: "u-me" },
+        { id: AHMED, user_id: "u-ahmed" },
+      ]);
+    if (c.table === "workspaces")
+      return opts.workspace ?? ok([{ id: W1, member_id: ME }]);
+    return opts.write ?? ok([{ id: NOTE }]);
+  };
+  const from = vi.fn((table: string) => {
+    const call: Call = { table, ops: [] };
+    calls.push(call);
+    const chain: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "order", "limit", "update", "upsert"])
+      chain[m] = (...args: unknown[]) => {
+        call.ops.push([m, args]);
+        return chain;
+      };
+    chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) =>
+      Promise.resolve(answer(call)).then(res, rej);
+    return chain;
+  });
+  const rpc = vi.fn(async () => opts.rpc ?? ok(null));
+  const user = opts.user === undefined ? { id: "u-me" } : opts.user;
+  const auth = {
+    getUser: vi.fn(async () => ({ data: { user }, error: null })),
+  };
+  return { db: { from, rpc, auth } as never, calls, from, rpc, auth };
+}
+
+const writes = (t: { calls: Call[] }, table: string) =>
+  t.calls.filter(
+    (c) =>
+      c.table === table &&
+      c.ops.some(([m]) => m === "update" || m === "upsert"),
+  );
+const args = (c: Call, name: string) => c.ops.find(([m]) => m === name)?.[1];
+
+describe("saveNoteIn", () => {
+  it("writes only the decision, by id, and asks for the id back", async () => {
+    const t = stub();
+    expect(
+      await saveNoteIn(t.db, NOTE, {
+        visibility: "members",
+        shared_with: [AHMED],
+        body: "overwrite",
+      } as never),
+    ).toEqual({ ok: true });
+    const [w] = writes(t, "notes");
+    expect(args(w!, "update")).toEqual([
+      { visibility: "members", shared_with: [AHMED] },
+    ]);
+    expect(args(w!, "eq")).toEqual(["id", NOTE]);
+    expect(args(w!, "select")).toEqual(["id"]);
+  });
+
+  it("sends no own setting as null with an empty list", async () => {
+    const t = stub();
+    await saveNoteIn(t.db, NOTE, { visibility: null, shared_with: [AHMED] });
+    expect(args(writes(t, "notes")[0]!, "update")).toEqual([
+      { visibility: null, shared_with: [] },
+    ]);
+  });
+
+  it("refuses a bad id or choice without writing", async () => {
+    const t = stub();
+    expect(
+      await saveNoteIn(t.db, "1 or 1=1", {
+        visibility: "group",
+        shared_with: [],
+      }),
+    ).toEqual({ ok: false });
+    expect(
+      await saveNoteIn(t.db, NOTE, {
+        visibility: "public",
+        shared_with: [],
+      } as never),
+    ).toEqual({ ok: false });
+    expect(writes(t, "notes")).toHaveLength(0);
+  });
+
+  it("refuses members outside the hive, and the caller themselves", async () => {
+    const t = stub();
+    expect(
+      await saveNoteIn(t.db, NOTE, {
+        visibility: "members",
+        shared_with: [OUTSIDE],
+      }),
+    ).toEqual({ ok: false });
+    expect(
+      await saveNoteIn(t.db, NOTE, {
+        visibility: "members",
+        shared_with: [ME],
+      }),
+    ).toEqual({ ok: false });
+    expect(writes(t, "notes")).toHaveLength(0);
+  });
+
+  it("is not ok without a session", async () => {
+    const t = stub({ user: null });
+    expect(
+      await saveNoteIn(t.db, NOTE, { visibility: "group", shared_with: [] }),
+    ).toEqual({ ok: false });
+    expect(writes(t, "notes")).toHaveLength(0);
+  });
+
+  it("is not ok when no row changed", async () => {
+    const t = stub({ write: ok([]) });
+    expect(
+      await saveNoteIn(t.db, NOTE, { visibility: "group", shared_with: [] }),
+    ).toEqual({ ok: false });
+  });
+
+  it("is not ok when the database refuses, logging only code and message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      write: {
+        data: null,
+        error: {
+          message: "agents cannot change sharing",
+          code: "P0001",
+          details: "Secret",
+        },
+      },
+    });
+    expect(
+      await saveNoteIn(t.db, NOTE, { visibility: "group", shared_with: [] }),
+    ).toEqual({ ok: false });
+    expect(spy).toHaveBeenCalledWith(
+      "saveNote failed",
+      "P0001",
+      "agents cannot change sharing",
+    );
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    spy.mockRestore();
+  });
+});
+
+describe("saveFolderIn", () => {
+  it("upserts the folder on (workspace_id, path) with the workspace owner's member", async () => {
+    const t = stub({ write: ok([{ path: "Decisions" }]) });
+    expect(
+      await saveFolderIn(t.db, W1, "Decisions", {
+        visibility: "group",
+        shared_with: [],
+      }),
+    ).toEqual({ ok: true });
+    const ws = t.calls.find((c) => c.table === "workspaces")!;
+    expect(args(ws, "eq")).toEqual(["id", W1]);
+    const [w] = writes(t, "folders");
+    expect(args(w!, "upsert")).toEqual([
+      {
+        workspace_id: W1,
+        member_id: ME,
+        path: "Decisions",
+        visibility: "group",
+        shared_with: [],
+      },
+      { onConflict: "workspace_id,path" },
+    ]);
+    expect(args(w!, "select")).toEqual(["path"]);
+  });
+
+  it("refuses a bad workspace, path or choice without reading or writing", async () => {
+    const t = stub();
+    const c = { visibility: "group" as const, shared_with: [] };
+    expect(await saveFolderIn(t.db, "x", "Decisions", c)).toEqual({
+      ok: false,
+    });
+    expect(await saveFolderIn(t.db, W1, "../x", c)).toEqual({ ok: false });
+    expect(await saveFolderIn(t.db, W1, "/x", c)).toEqual({ ok: false });
+    expect(t.calls.some((x) => x.table === "workspaces")).toBe(false);
+    expect(writes(t, "folders")).toHaveLength(0);
+  });
+
+  it("is not ok when the workspace is not the caller's", async () => {
+    const t = stub({ workspace: ok([]) });
+    expect(
+      await saveFolderIn(t.db, W1, "Decisions", {
+        visibility: "group",
+        shared_with: [],
+      }),
+    ).toEqual({ ok: false });
+    expect(writes(t, "folders")).toHaveLength(0);
+  });
+
+  it("is not ok when no row comes back", async () => {
+    const t = stub({ write: ok([]) });
+    expect(
+      await saveFolderIn(t.db, W1, "Decisions", {
+        visibility: null,
+        shared_with: [],
+      }),
+    ).toEqual({ ok: false });
+  });
+});
+
+describe("releaseIn", () => {
+  it("sends only quarantined: false, by id", async () => {
+    const t = stub();
+    expect(await releaseIn(t.db, NOTE)).toEqual({ ok: true });
+    const [w] = writes(t, "notes");
+    expect(args(w!, "update")).toEqual([{ quarantined: false }]);
+    expect(args(w!, "eq")).toEqual(["id", NOTE]);
+  });
+
+  it("refuses a bad id, no session, and zero rows", async () => {
+    expect(await releaseIn(stub().db, "nope")).toEqual({ ok: false });
+    expect(await releaseIn(stub({ user: null }).db, NOTE)).toEqual({
+      ok: false,
+    });
+    expect(await releaseIn(stub({ write: ok([]) }).db, NOTE)).toEqual({
+      ok: false,
+    });
+  });
+});
+
+describe("previewIn", () => {
+  const counts = { follows: 17, own_setting: 2, under_nested_rule: 3, held: 1 };
+
+  it("asks the database for the counts", async () => {
+    const t = stub({ rpc: ok(counts) });
+    expect(await previewIn(t.db, W1, "Decisions")).toEqual(counts);
+    expect(t.rpc).toHaveBeenCalledWith("folder_share_preview", {
+      p_workspace: W1,
+      p_path: "Decisions",
+    });
+  });
+
+  it("is null for bad input, no session, an error or a malformed answer", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await previewIn(stub().db, "x", "Decisions")).toBeNull();
+    expect(await previewIn(stub().db, W1, "a//b")).toBeNull();
+    expect(
+      await previewIn(stub({ user: null, rpc: ok(counts) }).db, W1, "D"),
+    ).toBeNull();
+    expect(
+      await previewIn(
+        stub({ rpc: { data: null, error: { message: "not your workspace" } } })
+          .db,
+        W1,
+        "D",
+      ),
+    ).toBeNull();
+    expect(
+      await previewIn(stub({ rpc: ok({ follows: 1 }) }).db, W1, "D"),
+    ).toBeNull();
+    spy.mockRestore();
+  });
+});
+
+describe("toPreview", () => {
+  it("keeps four non-negative whole numbers and drops anything else", () => {
+    expect(
+      toPreview({
+        follows: 1,
+        own_setting: 0,
+        under_nested_rule: 0,
+        held: 0,
+        x: 9,
+      }),
+    ).toEqual({ follows: 1, own_setting: 0, under_nested_rule: 0, held: 0 });
+    expect(
+      toPreview({ follows: -1, own_setting: 0, under_nested_rule: 0, held: 0 }),
+    ).toBeNull();
+    expect(
+      toPreview({
+        follows: "1",
+        own_setting: 0,
+        under_nested_rule: 0,
+        held: 0,
+      }),
+    ).toBeNull();
+    expect(toPreview(null)).toBeNull();
+  });
+});

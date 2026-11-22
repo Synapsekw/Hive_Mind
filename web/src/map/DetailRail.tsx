@@ -1,5 +1,6 @@
 // The right rail: today's activity until something is selected, then what it is, who wrote
 // it and what it connects to. Every title is rendered as a text node.
+import Link from "next/link";
 import type { Activity, MapModel, ModelNode } from "./types";
 import { Shape } from "./Dots";
 import s from "./map.module.css";
@@ -161,6 +162,14 @@ function Selected({
         </h2>
       </div>
       {body}
+      {n.kind === "note" && !n.locked && n.id && (
+        <Link
+          href={`/vault?note=${encodeURIComponent(n.id)}`}
+          className={`${s.pillLink} ${s.openLink}`}
+        >
+          Open in vault
+        </Link>
+      )}
       {nbs.length > 0 && (
         <div className={s.neighbours}>
           <span className={s.nbTitle}>

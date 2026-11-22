@@ -84,9 +84,10 @@ publishable key. Put them in `web/.env.local` (copy `web/.env.example`) and run 
 
 ## What is proven, and what is not
 
-- `pnpm test:live` runs 18 checks against the hosted project: the MCP server signs in with an
+- `pnpm test:live` runs 19 checks against the hosted project: the MCP server signs in with an
   agent token and calls every tool as the member, and two members' agents keep private notes
   private until a person shares them or both accept a link. It also calls `map_graph` as a
-  member and as an agent, which is refused.
+  member and as an agent, which is refused, and checks that a note an agent writes into a folder
+  its member has shared is readable by the second member at once.
 - Signing in to the web app through the browser, and the map it then draws, are checked by hand.
   No automated test signs in to the hosted project through the browser.

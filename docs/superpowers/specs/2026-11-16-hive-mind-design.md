@@ -38,20 +38,26 @@ decide what is shared.
 
 ## 4. Architecture
 
-| Component       | Technology                            | Responsibility                                                                                 |
-| --------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Database        | Supabase Postgres                     | Hives, members, agents, notes, files, entities, links, synthesis, audit                        |
-| Access control  | Supabase Auth + row-level security    | Member identity, agent claims, visibility enforced in every query                              |
-| Agent interface | MCP server (TypeScript)               | overview, search, read, write, append, propose link                                            |
-| Object storage  | Supabase Storage (private buckets)    | Deliverables; signed URLs only (not built)                                                     |
-| Vector search   | pgvector                              | Embedding per note for semantic search and tier-4 links (not built)                            |
-| Background jobs | Edge Functions + triggers + `pg_cron` | Entity extraction, link proposal, synthesis, housekeeper (not built)                           |
-| Realtime        | Supabase Realtime                     | Pushes link suggestions and notifications to the web app (not built)                           |
-| Web app         | Next.js                               | Map, inbox, vault, gallery, entity pages, settings. Built so far: sign-in and the map (`web/`) |
-| Hosted chat     | Vendor sign-in programmes             | Optional browser chat on the member's own plan, subject to vendor approval                     |
+| Component       | Technology                            | Responsibility                                                                                            |
+| --------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Database        | Supabase Postgres                     | Hives, members, agents, notes, files, entities, links, synthesis, audit                                   |
+| Access control  | Supabase Auth + row-level security    | Member identity, agent claims, visibility enforced in every query                                         |
+| Agent interface | MCP server (TypeScript)               | overview, search, read, write, append, propose link                                                       |
+| Object storage  | Supabase Storage (private buckets)    | Deliverables; signed URLs only (not built)                                                                |
+| Vector search   | pgvector                              | Embedding per note for semantic search and tier-4 links (not built)                                       |
+| Background jobs | Edge Functions + triggers + `pg_cron` | Entity extraction, link proposal, synthesis, housekeeper (not built)                                      |
+| Realtime        | Supabase Realtime                     | Pushes link suggestions and notifications to the web app (not built)                                      |
+| Web app         | Next.js                               | Map, inbox, vault, gallery, entity pages, settings. Built so far: sign-in, the map and the vault (`web/`) |
+| Hosted chat     | Vendor sign-in programmes             | Optional browser chat on the member's own plan, subject to vendor approval                                |
 
 The desktop apps talk to the database only through the MCP server. The web app goes direct with
 the signed-in person's identity. Nothing uses the service-role key except background jobs.
+
+The vault (`/vault`) is where a person reads their notes and makes sharing decisions: for one
+note, or for a whole folder. Its page is rendered on the server with the person's session, and
+each decision is one server action that writes only that decision. The app does not work out who
+may read what; it shows what the database answers and the database accepts or refuses the write.
+Opening a note from the map ("Open in vault") goes to `/vault?note=<id>`.
 
 ## 5. Data model — built
 
@@ -79,11 +85,18 @@ buckets ([[2026-11-20-decision-09-embeddings-and-storage-deferred]]).
 
 ## 6. Sharing rules — built
 
-Defined in `supabase/migrations/20261120000002_sharing_rules.sql`, tested in
-`tests/sharing-rules.test.mjs`.
+Defined in `supabase/migrations/20261120000002_sharing_rules.sql` and changed by
+`20261122115431_folder_rules_by_path.sql`, tested in `tests/sharing-rules.test.mjs`.
 
-**Effective visibility** of a note = its own setting, else its folder's, else the member's default
-(private).
+**Effective visibility** of a note = its own setting, else the rule of the nearest folder above it
+(by path, in the same workspace) that has a rule, else the member's default (private). A folder
+record with no rule is skipped, so a note under it follows the folder above. Folder rules follow
+the path: every note under a shared folder is shared, including a note an agent writes there
+later. Such a note is shared at once, without anyone reviewing it; a self-hosted agent's note is
+the exception, because it is held until the member releases it. `notes.folder_id` is no longer
+read for sharing. The database also reports, for each note, where its sharing comes from
+(`note_rule_folder`) and why the caller can read it (`note_access`), and gives exact counts before
+a folder rule is saved (`folder_share_preview`).
 
 **Who can read a note:**
 
@@ -98,9 +111,20 @@ claims — `agent_id`, `workspace_id`, `trust_tier` — and the database uses th
 
 - writes outside the token's workspace are refused;
 - setting or changing visibility, `shared_with`, quarantine or folder is refused;
+- moving a note (changing its path) is refused, because with folder rules a move can change who
+  may read it;
+- changing, renaming or deleting a folder record is refused, and so is a folder record with a
+  rule;
 - deletes are refused;
 - accepting or declining a link is refused;
 - a self-hosted agent's writes are forced into quarantine.
+
+**Audit log:** every sharing change a person makes writes one row to `audit_log`: setting or
+changing a note's or a folder's sharing, releasing a held note, deleting or renaming a folder that
+has a rule, and moving a note so that a different folder rule applies. A row records the hive,
+the person, the note id or the folder's path, and the settings before and after. It never holds a
+note's text, title or path. Only the hive owner can read the audit log; there is no screen for it
+yet.
 
 **Functions:** `create_hive`, `add_member`, `create_agent` (returns the token once; only a hash is
 stored), `revoke_agent`, `agent_login` (token → identity), `respond_to_link`, `search_notes`

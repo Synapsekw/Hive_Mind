@@ -887,3 +887,14 @@
 .pillLink:hover {
   background: #2f3b50;
 }
+
+/* "Open in vault" in the detail rail. */
+.openLink {
+  align-self: flex-start;
+  font-size: 13px;
+}
+
+.openLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

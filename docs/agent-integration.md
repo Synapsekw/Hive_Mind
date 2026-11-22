@@ -49,6 +49,12 @@ records. Those exist only in the web app for signed-in people.
   fails at the database, not in application code.
 - Every write is versioned; a bad write is reverted from the Vault.
 - Self-hosted agents' writes are quarantined; the member releases them.
+- Agents cannot move a note (change its path), and cannot change, rename or delete a folder
+  record. Folder sharing rules follow the path, so a move could otherwise share a note.
+- A note an agent writes into a folder its member has shared is shared at once, with nobody
+  reviewing it first: the folder's rule covers every note under it, including new ones. The only
+  exception is a self-hosted agent, whose notes stay held until the member releases them. The
+  vault says this every time a person shares a folder.
 
 ### 3.2 Inbound content hygiene (designed)
 
@@ -111,7 +117,9 @@ it first and write back the full text.
 When two notes concern the same client or project, propose a link once with hive_propose_link.
 
 Never attempt to change sharing or visibility, and never try to delete a note; the user controls
-those in the web app. If a note seems to belong with the group, say so once.
+those in the web app. If a note seems to belong with the group, say so once. You cannot move or
+rename a note. A note you write inside a folder the user has shared is readable by their
+colleagues straight away.
 
 When you produce a file the user will want to keep (a proposal, a spreadsheet, a deck), save it
 with hive_save_file, giving its type and customer, and attach it to the note it belongs to. The

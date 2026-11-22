@@ -1,4 +1,4 @@
-// The rail and an otherwise empty panel, for the two states where there is no map to draw.
+// The rail and an otherwise empty panel, for the states where there is no screen to draw.
 import type { ReactNode } from "react";
 import { Shell } from "./Shell";
 import s from "./map.module.css";
@@ -6,18 +6,26 @@ import s from "./map.module.css";
 export function Notice({
   children,
   tryAgain,
+  current = "map",
 }: {
   children: ReactNode;
   tryAgain?: boolean;
+  current?: "map" | "vault";
 }) {
   return (
     <div className={s.root}>
-      <Shell current="map" />
-      <main aria-label="Hive map" className={s.panel}>
+      <Shell current={current} />
+      <main
+        aria-label={current === "vault" ? "Vault" : "Hive map"}
+        className={s.panel}
+      >
         <div className={s.notice}>
           <p className={s.noticeText}>{children}</p>
           {tryAgain && (
-            <a href="/" className={s.pillLink}>
+            <a
+              href={current === "vault" ? "/vault" : "/"}
+              className={s.pillLink}
+            >
               Try again
             </a>
           )}

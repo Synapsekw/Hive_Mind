@@ -21,17 +21,19 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 
 ## 2. Threat model
 
-| Threat                              | Example                                                           | Control                                                                                           | Status   |
-| ----------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------- |
-| Private note leaks across members   | A bug or prompt-injected agent reads a colleague's private folder | Row-level security; agents inherit member permissions; no service-role key in the agent path      | built    |
-| Stolen or leaked agent token        | Lost laptop, token pasted in a public repo                        | Tokens hashed at rest, bound to one workspace, revocable per agent, last use recorded             | built    |
-| Over-sharing by an agent            | Agent writes client material into a shared folder by mistake      | Private by default; agents can never set sharing; writes are versioned                            | built    |
-| Untrusted self-hosted agent         | Open-source agent with no vendor safety layer                     | Lower trust tier: reads shared notes only, writes are quarantined until the member releases them  | built    |
-| Prompt injection via note content   | A shared note tells agents to exfiltrate data                     | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine | partly   |
-| Departing member                    | Colleague leaves with access                                      | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision             | designed |
-| Platform compromise                 | Project credentials exposed                                       | Service-role key only in background jobs; secrets in a vault; MFA on the owner account            | designed |
-| Overlap detection as a side channel | Notifications reveal what a colleague works on                    | Notification names only the entity; content never moves before double accept; mute per folder     | designed |
-| The map as a side channel           | Locked dots show that a colleague has notes in a folder           | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents | built    |
+| Threat                              | Example                                                           | Control                                                                                                                                                                                                               | Status   |
+| ----------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Private note leaks across members   | A bug or prompt-injected agent reads a colleague's private folder | Row-level security; agents inherit member permissions; no service-role key in the agent path                                                                                                                          | built    |
+| Stolen or leaked agent token        | Lost laptop, token pasted in a public repo                        | Tokens hashed at rest, bound to one workspace, revocable per agent, last use recorded                                                                                                                                 | built    |
+| Over-sharing by an agent            | Agent writes client material into a shared folder by mistake      | Private by default; agents can never set sharing; writes are versioned. A note an agent writes into a folder its owner shared is shared at once, unreviewed (accepted; the vault says so whenever a folder is shared) | built    |
+| Sharing by moving a note            | Agent moves a private note into a shared folder                   | Agents cannot change a note's path, and cannot change, rename or delete a folder record                                                                                                                               | built    |
+| A sharing change with no trace      | Someone shares a folder and nobody can tell when or who           | Every sharing change by a person writes one audit row, readable by the hive owner only                                                                                                                                | built    |
+| Untrusted self-hosted agent         | Open-source agent with no vendor safety layer                     | Lower trust tier: reads shared notes only, writes are quarantined until the member releases them                                                                                                                      | built    |
+| Prompt injection via note content   | A shared note tells agents to exfiltrate data                     | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine                                                                                                                     | partly   |
+| Departing member                    | Colleague leaves with access                                      | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision                                                                                                                                 | designed |
+| Platform compromise                 | Project credentials exposed                                       | Service-role key only in background jobs; secrets in a vault; MFA on the owner account                                                                                                                                | designed |
+| Overlap detection as a side channel | Notifications reveal what a colleague works on                    | Notification names only the entity; content never moves before double accept; mute per folder                                                                                                                         | designed |
+| The map as a side channel           | Locked dots show that a colleague has notes in a folder           | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents                                                                                                                     | built    |
 
 ## 3. Identity and tokens
 
@@ -45,11 +47,17 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 
 ## 4. Authorisation
 
-- Effective visibility = note override, else folder rule, else member default.
+- Effective visibility = note override, else the rule of the nearest folder above the note (by
+  path, in the same workspace) that has one, else member default. A folder record without a rule
+  is skipped. Folder paths are matched literally and case-sensitively.
 - RLS policies implement this on every content table. The MCP server acts with the member's own
   identity plus agent claims, never a service key.
 - Visibility, membership and tokens are not exposed as MCP tools. They change only in the web app
   by a signed-in person.
+- The vault page saves a sharing decision through a server action that signs in with the
+  person's session cookie. It checks the shape of every argument before any query and sends only
+  the decision (a note's or folder's visibility and named members, or releasing a held note);
+  the database decides whether it is allowed. It never writes a note's text, path or owner.
 - Agents may create inbox proposals (share this note, link these notes); people act on them.
 - `map_graph`, the one call the web app's map reads, is a security-definer function: a
   deliberate, tested exception to "RLS decides". Row-level security does not apply inside it, so
@@ -83,6 +91,12 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 
 ## 7. Audit and monitoring
 
+- Built: every sharing change by a person writes one row to `audit_log`. That covers a note's or
+  a folder's setting, releasing a held note, deleting or renaming a folder that has a rule, and
+  moving a note so that a different folder rule applies. A row holds the hive, the person, the
+  note id or the folder's path, and the settings before and after; never a note's text, title or
+  path. Only the hive owner can read it, and there is no screen for it yet. Writes with no person
+  behind them are not recorded.
 - Every MCP call logged: agent, member, tool, note, time, result.
 - Owner view: reads and writes per agent per day, failed authorisations, token last use.
 - Alerts: a burst of reads across many entities by one agent; repeated authorisation failures. A
