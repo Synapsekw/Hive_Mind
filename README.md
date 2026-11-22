@@ -57,7 +57,7 @@ pnpm dev:web          # open http://localhost:3000 and sign in
 
 `/dev/map` shows the map on sample data, without an account. `pnpm --filter @hive-mind/web
 test:e2e` runs the browser test; run `pnpm --filter @hive-mind/web exec playwright install
-chromium` once first.
+chromium` once first. The browser test is run by hand; it is not part of CI.
 
 ### Create your hive and connect an agent
 

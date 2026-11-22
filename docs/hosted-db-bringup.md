@@ -82,8 +82,11 @@ publishable key. Put them in `web/.env.local` (copy `web/.env.example`) and run 
 - **Emailed links.** Add `http://localhost:3000/**` to the allowed redirect URLs (Authentication
   → URL Configuration), or the link is refused.
 
-## What this does not prove
+## What is proven, and what is not
 
-`agent_login` works with the anon key, but the MCP server's next step — signing its own JWT with the
-project secret and reading as the member — has still not run against this database. That is T2 of
-the [Phase 1 plan](superpowers/plans/2026-11-21-local-end-to-end.md).
+- `pnpm test:live` runs 18 checks against the hosted project: the MCP server signs in with an
+  agent token and calls every tool as the member, and two members' agents keep private notes
+  private until a person shares them or both accept a link. It also calls `map_graph` as a
+  member and as an agent, which is refused.
+- Signing in to the web app through the browser, and the map it then draws, are checked by hand.
+  No automated test signs in to the hosted project through the browser.

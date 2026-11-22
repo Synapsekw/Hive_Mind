@@ -31,6 +31,7 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 | Departing member                    | Colleague leaves with access                                      | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision             | designed |
 | Platform compromise                 | Project credentials exposed                                       | Service-role key only in background jobs; secrets in a vault; MFA on the owner account            | designed |
 | Overlap detection as a side channel | Notifications reveal what a colleague works on                    | Notification names only the entity; content never moves before double accept; mute per folder     | designed |
+| The map as a side channel           | Locked dots show that a colleague has notes in a folder           | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents | built    |
 
 ## 3. Identity and tokens
 
@@ -50,6 +51,17 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - Visibility, membership and tokens are not exposed as MCP tools. They change only in the web app
   by a signed-in person.
 - Agents may create inbox proposals (share this note, link these notes); people act on them.
+- `map_graph`, the one call the web app's map reads, is a security-definer function: a
+  deliberate, tested exception to "RLS decides". Row-level security does not apply inside it, so
+  every read is filtered by hive and decided with `can_read_note`, the test the notes policy uses.
+  Tests in `tests/sharing-rules.test.mjs` hold it to that.
+- What a member cannot read comes back as a stub. A stub reveals that the item exists, its owner,
+  its topic (the first two folder levels of its path) and when it last changed; never its title,
+  path, body or links. Someone else's quarantined note is left out entirely.
+- `map_graph` is refused for any identity carrying an agent claim, and for a self-hosted claim.
+  Only people draw the map.
+- Through it, members see colleagues' agents by provider, trust tier and last sign-in, never by
+  name. An agent's name is returned only to its own member.
 
 ## 5. Data handling
 
