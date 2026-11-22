@@ -1,7 +1,7 @@
 ---
 type: north-star
 status: active
-last-updated: 2026-11-22-1130
+last-updated: 2026-11-22-1230
 tags: [project/hive-mind, north-star]
 related:
   - "[[README]]"
@@ -42,14 +42,15 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 
 ## 3. Now
 
-- **Phase:** **Phase 1, T1 (hosted half), T2 and T3 done.** The schema, the sharing rules and the MCP server run on the hosted dev project, and the owner's Claude Code is connected to it.
+- **Phase:** **Phase 1, T1 (hosted half), T2, T3 and T4 done.** The schema, the sharing rules and the MCP server run on the hosted dev project, and the owner's Claude Code is connected to it.
 - **Branch:** `develop` is ahead of `main` (docs and vault only; no promotion PR yet). No `task/*` branches, no worktrees.
 - **The MCP server works on the live database** (T2, 2026-11-22): all six tools pass `pnpm test:live` (`tests/mcp.integration.test.mjs`), which also proves on real Supabase that an agent identity cannot delete a note or set sharing. Nothing in `mcp/` needed changing. The sign-in depends on the project's legacy JWT secret: do not revoke it ([[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]]).
 - **`pnpm test` proves the SQL, not Supabase** ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]); the auth schema and roles are stubbed in `scripts/local-db.mjs`. `pnpm test:live` is the check against real Supabase, and it does not run in CI.
 - **The hosted dev project is up** (T1, hosted half, 2026-11-22): `tokyttkztrkjvkaksdnh`, wired in `.mcp.json` as `supabase-dev`. Both migrations applied under the repo's version stamps; one hive (`Synapse`), one owner, one workspace, one agent (`Claude`); the token is in the local `.env`. `agent_login` works through the public API and a signed-out caller reads nothing. Runbook: `docs/hosted-db-bringup.md`; session [[2026-11-22-0923-hosted-db-bringup]]. Migrations applied through the MCP must be re-stamped ([[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]]). The local Docker stack is still not set up.
 - **The owner's Claude is connected** (T3 wiring, 2026-11-22): `hive` is registered for the user account in Claude Code, launched with `node --env-file` so secrets stay in the repo's `.env`; it runs the main checkout's `mcp/dist`, so rebuild after changes under `mcp/`. Only `E:\Dev\hive-work` (untracked, outside the repo) carries the instructions to use it. The template in `docs/agent-integration.md` §5 was cut down to the six built tools. The real session ran on 2026-11-22: the agent created a client note, appended facts, wrote a session note, and a fresh session answered from the hive. One template fix came out of it (facts stated together go in one append). The hive now holds two test notes about a made-up client, Acme.
+- **Notes can be imported** (T4, 2026-11-22): `pnpm import:vault <folder> <workspace>` creates one private note per markdown file, as the person, and is safe to re-run. The first 25 notes of Danijel's DRA vault (`Decisions`, `MOCs`, `Home.md`) are in a separate `DRA` workspace, which the agent can read and search but not change; about 930 notes remain to import. Other file types wait for T5.
 - **In flight:** none.
-- **Next:** **T4** (vault importer), then **T5** (file storage) and **T6** (second member proof) of [[2026-11-21-local-end-to-end]]; all three are unblocked.
+- **Next:** **T5** (file storage) and **T6** (second member proof) of [[2026-11-21-local-end-to-end]]; both are unblocked. Then Phase 2, the web app and map.
 - **Workflow trap:** on Windows `finish-task.sh` merges and pushes, then fails to remove the worktree the session sits in ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
 - **Owed — Danijel:** install Docker + the Supabase CLI on the build machine for the local stack.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
