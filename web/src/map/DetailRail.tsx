@@ -165,7 +165,7 @@ function Selected({
       {n.kind === "note" && !n.locked && n.id && (
         <Link
           href={`/vault?note=${encodeURIComponent(n.id)}`}
-          className={`${s.pillLink} ${s.openLink}`}
+          className={`${s.primaryLink} ${s.openLink}`}
         >
           Open in vault
         </Link>
@@ -218,7 +218,7 @@ export function DetailRail({
   const n = sel !== null ? model.nodes[sel] : undefined;
   const info = n?.kind === "agent" && n.id ? agentInfo.get(n.id) : undefined;
   return (
-    <aside aria-label="Details" className={s.details}>
+    <aside aria-label="Details" data-scope="chrome" className={s.details}>
       {n ? (
         <Selected
           model={model}
