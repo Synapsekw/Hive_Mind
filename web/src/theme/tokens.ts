@@ -510,6 +510,18 @@ function worst(fg: RGBA, on: Labelled[]): { ratio: number; against: string } {
   return w;
 }
 
+/**
+ * What the adjustment aims for, above the minimums that the tests assert (4.5 text, 3 the rest).
+ * The model samples a finite set of viewports, and the Vivid card glows are a fixed 224 px tall,
+ * so on windows the model does not sample (ultrawide 3440 × 1440, 2560 × 1080) they land on the
+ * page glows a little differently and a colour tuned to exactly the minimum can dip just below
+ * it (2.988 seen). Aiming 0.1 higher closes that gap without more viewports.
+ */
+export const TEXT_TARGET = 4.6;
+export const NON_TEXT_TARGET = 3.1;
+const aim = (min: number) =>
+  min === 4.5 ? TEXT_TARGET : min === 3 ? NON_TEXT_TARGET : min;
+
 type Outcome = {
   value: RGBA;
   ok: boolean;
@@ -592,7 +604,7 @@ function themeDots(s: Seeds, mode: Mode): RGB[] {
 
 /**
  * Fix round 2: for a low-chroma brand (Graphite), the eight greys are spaced evenly across the
- * part of the prototype's lightness run that passes 3:1 on every card background (all reaches),
+ * part of the prototype's lightness run that reaches NON_TEXT_TARGET (3.1) on every card background (all reaches),
  * keeping the prototype's topic order, instead of clamping each grey on its own. The run is
  * dark 0.55 → 0.55 + 7 × 0.055, light 0.30 → 0.30 + 7 × 0.06; it is walked from its start in
  * 0.001 steps, and the spaced range runs from the first passing lightness to the last one
@@ -610,7 +622,8 @@ function spacedGreys(s: Seeds, mode: Mode, on: Labelled[]): RGB[] | null {
   const start = light ? 0.3 : 0.55;
   const step = light ? 0.06 : 0.055;
   const grey = (l: number) => quantize(fromOklch(l, 0.012, hue));
-  const passes = (l: number) => worst(opaque(grey(l)), on).ratio >= 3;
+  const passes = (l: number) =>
+    worst(opaque(grey(l)), on).ratio >= NON_TEXT_TARGET;
   const ks = [0, 4, 1, 5, 2, 6, 3, 7];
   if (ks.every((k) => passes(Number((start + k * step).toFixed(3)))))
     return null;
@@ -684,7 +697,10 @@ function resolve(theme: string, mode: Mode): Resolved {
     min: number,
     avoid = new Set<string>(),
   ) => {
-    let out = adjust(value, bgs, min, avoid);
+    // Aim at the minimum plus a margin; fall back to the bare minimum if the margin is out of
+    // reach, and only then treat the pair as unreachable.
+    let out = adjust(value, bgs, aim(min), avoid);
+    if (!out.ok) out = adjust(value, bgs, min, avoid);
     if (!out.ok) {
       // Lightness alone cannot pass every background. Record the pair, then adjust for the
       // backgrounds that can pass, so the contrast test fails on exactly the unreachable ones.
