@@ -1,12 +1,12 @@
-/* The map screen, ported from docs/ui/map.dc.html. Tokens come from globals.css; the rail is
-   web/src/shell/. */
+/* The map screen in Keystone glass, after docs/ui/map.dc.html: the map on one frosted card, the
+   details on a second glass slab (data-scope="chrome"), the rail (web/src/shell/) on the wash.
+   Colours are tokens only (themes.generated.css), read with var(). */
 
 .root {
-  --soft: #b4bed0;
   min-height: 100vh;
   display: flex;
   flex-wrap: wrap;
-  color: var(--text);
+  color: var(--fg);
   font-size: 14px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
@@ -18,10 +18,11 @@
 }
 
 .root button:focus-visible,
-.root input:focus-visible {
-  outline: 2px solid var(--accent);
+.root input:focus-visible,
+.root a:focus-visible {
+  outline: 2px solid var(--acc);
   outline-offset: 2px;
-  border-radius: 999px;
+  border-radius: 8px;
 }
 
 .srOnly {
@@ -33,15 +34,19 @@
   white-space: nowrap;
 }
 
-/* ---- The panel ---- */
+/* ---- The card ---- */
 
 .panel {
   flex: 999 1 620px;
   min-width: 0;
-  margin: 12px 0;
-  padding: 18px 22px;
-  border-radius: 22px;
-  background: var(--panel);
+  margin: 8px 4px;
+  padding: 16px 20px;
+  border: 1px solid var(--edge-card);
+  border-radius: 20px;
+  background: var(--glow), var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -57,40 +62,48 @@
 .stats {
   flex: 1 1 160px;
   margin: 0;
-  font-size: 13px;
-  color: var(--text-2);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--muted);
 }
 
+/* The view switch: one segmented control, a 10 px hairline track with 7 px segments. */
 .switch {
   display: flex;
   padding: 3px;
-  border-radius: 999px;
-  background: var(--fill-1);
+  border: 1px solid var(--line);
+  border-radius: 10px;
 }
 
 .tab {
-  height: 32px;
-  padding: 0 16px;
+  height: 30px;
+  padding: 0 14px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 7px;
   background: none;
-  color: var(--text-2);
+  color: var(--muted);
   font-size: 13px;
   cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
 }
 
 .tab:hover {
-  color: var(--text);
+  color: var(--fg);
 }
 
 .tab[aria-pressed="true"] {
-  background: #263142;
-  color: var(--text);
+  background: var(--fill-on);
+  color: var(--fg);
   font-weight: 500;
 }
 
+/* min-width 0: the search box may narrow, so at 1366 px the bar stays one line and the stage
+   keeps the height. */
 .tools {
   flex: 1 1 160px;
+  min-width: 0;
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -101,32 +114,44 @@
   height: 36px;
   padding: 0 14px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: none;
-  color: var(--text-2);
+  color: var(--muted);
   font-size: 13px;
   cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.toggle:hover {
+  color: var(--fg);
 }
 
 .toggle[aria-pressed="true"] {
-  background: var(--fill-1);
-  color: var(--text);
+  background: var(--fill);
+  color: var(--fg);
 }
 
 .search {
-  flex: 0 1 180px;
+  flex: 0 1 200px;
   min-width: 0;
-  height: 36px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--fill-1);
-  color: var(--text);
-  font-size: 14px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
+  font-size: 13px;
+  transition: border-color 0.24s var(--ease);
+}
+
+.search:hover {
+  border-color: var(--line-hi);
 }
 
 .search::placeholder {
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 /* ---- The stage: a 1000 x 760 box ---- */
@@ -138,8 +163,8 @@
   container-type: inline-size;
   background: radial-gradient(
     ellipse 36% 44% at 50% 50%,
-    rgba(127, 212, 245, 0.07),
-    rgba(11, 16, 26, 0) 72%
+    color-mix(in srgb, var(--brand) 8%, transparent),
+    transparent 72%
   );
 }
 
@@ -148,6 +173,22 @@
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+.guides {
+  stroke: var(--line);
+}
+
+.edgeBase {
+  stroke: var(--edge);
+}
+
+.edgeHi {
+  stroke: var(--fg);
+}
+
+.ticks {
+  stroke: var(--quiet);
 }
 
 .edges {
@@ -165,6 +206,7 @@
 }
 
 .core {
+  stroke: var(--brand);
   animation: breathe 4s ease-in-out infinite;
 }
 
@@ -178,14 +220,18 @@
   }
 }
 
+/* Ring and axis names: a few small frosted tags, the only blur inside the card. */
 .guideLabel {
   position: absolute;
   z-index: 1;
   padding: 0 8px;
+  border-radius: 6px;
   white-space: nowrap;
-  background: var(--panel);
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   font-size: 12px;
-  color: var(--text-2);
+  color: var(--muted);
   pointer-events: none;
   transform: translate(-50%, -50%);
 }
@@ -215,8 +261,8 @@
   cursor: pointer;
   transform: translate(-50%, -50%);
   transition:
-    left 0.9s cubic-bezier(0.2, 0.7, 0.2, 1),
-    top 0.9s cubic-bezier(0.2, 0.7, 0.2, 1),
+    left 0.9s var(--ease),
+    top 0.9s var(--ease),
     opacity 0.25s ease;
 }
 
@@ -244,10 +290,12 @@
   z-index: 5;
 }
 
+/* The selected ring: a gap in the card's colour, then a fine ring in the text colour. */
 .shape {
-  --ring: 0 0 0 3px var(--panel), 0 0 0 4.5px #ffffff;
+  --ring: 0 0 0 3px var(--bg), 0 0 0 4.5px var(--fg);
   display: block;
   flex: none;
+  box-sizing: border-box;
   width: var(--d);
   height: var(--d);
   border-radius: 50%;
@@ -266,24 +314,24 @@
 .shape[data-locked] {
   opacity: 1;
   border: 1.2px solid var(--c);
-  background: var(--panel);
+  background: var(--bg);
 }
 
 .shape[data-kind="hub"] {
-  border: 2px solid var(--panel);
+  border: 2px solid var(--bg);
   box-shadow:
     0 0 0 1.5px var(--c),
-    0 0 14px 2px color-mix(in srgb, var(--c) 33%, transparent);
+    0 0 14px 2px color-mix(in srgb, var(--c) 35%, transparent);
 }
 
 .shape[data-kind="agent"] {
-  border: 1.5px solid var(--soft);
-  background: radial-gradient(circle, var(--soft) 0 2px, var(--panel) 2.5px);
+  border: 1.5px solid var(--fg2);
+  background: radial-gradient(circle, var(--fg2) 0 2px, var(--bg) 2.5px);
 }
 
 .shape[data-kind="root"] {
   border-radius: 0;
-  background: var(--accent);
+  background: var(--fg);
   clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%);
 }
 
@@ -307,8 +355,8 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  background: rgba(11, 16, 26, 0.78);
-  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  color: var(--fg);
   font-size: 12px;
   font-weight: 400;
   pointer-events: none;
@@ -352,7 +400,7 @@
   width: 68cqw;
   height: 68cqw;
   border-radius: 50%;
-  border: 1px solid #243043;
+  border: 1px solid var(--line);
   transform: rotateX(90deg);
 }
 
@@ -413,32 +461,36 @@
   height: 32px;
   padding: 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: none;
-  color: var(--soft);
+  color: var(--fg2);
   font-size: 13px;
   cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
 }
 
 .chip:hover {
-  color: var(--text);
+  color: var(--fg);
 }
 
 .chip[data-quiet] {
-  color: var(--text-quiet);
+  color: var(--quiet);
 }
 
 .chip[aria-pressed="true"] {
-  background: var(--fill-2);
-  color: var(--text);
+  background: var(--fill);
+  color: var(--fg);
 }
 
 .chipDot {
   flex: none;
+  box-sizing: border-box;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--c, var(--soft));
+  background: var(--c, var(--fg2));
 }
 
 .chip[data-quiet] .chipDot {
@@ -451,13 +503,13 @@
 }
 
 .chipDot[data-kind="hub"] {
-  border: 1.5px solid var(--soft);
+  border: 1.5px solid var(--fg2);
   background: none;
 }
 
 .chipDot[data-kind="agent"] {
-  border: 1.5px solid var(--soft);
-  background: radial-gradient(circle, var(--soft) 0 1.5px, var(--panel) 2px);
+  border: 1.5px solid var(--fg2);
+  background: radial-gradient(circle, var(--fg2) 0 1.5px, var(--bg) 2px);
 }
 
 .sep {
@@ -474,26 +526,34 @@
   height: 32px;
   padding: 0 10px;
   font-size: 13px;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .legendDot {
+  box-sizing: border-box;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  border: 1.2px solid var(--text-2);
+  border: 1.2px solid var(--muted);
 }
 
-/* ---- Right rail ---- */
+/* ---- The side panel: a second, lighter glass slab ---- */
 
 .details {
   flex: 1 1 280px;
   max-width: 100%;
   min-width: 0;
-  padding: 28px 24px;
+  margin: 8px 8px 8px 4px;
+  padding: 22px 20px 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--glass2);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  color: var(--fg);
   display: flex;
   flex-direction: column;
-  gap: 44px;
+  gap: 36px;
 }
 
 .today {
@@ -511,12 +571,12 @@
 
 .bigNote {
   margin: 8px 0 0;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .quiet {
   margin: 0;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .bars {
@@ -529,22 +589,22 @@
 .track {
   height: 3px;
   border-radius: 2px;
-  background: var(--fill-1);
+  background: var(--fill);
 }
 
 .fill {
   display: block;
   height: 3px;
   border-radius: 2px;
-  background: #5f6e8a;
+  background: var(--edge);
 }
 
 .fill[data-me] {
-  background: var(--accent);
+  background: var(--grad);
 }
 
 .count {
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .sel {
@@ -574,7 +634,7 @@
 
 .meta {
   margin: 0;
-  color: var(--soft);
+  color: var(--fg2);
   line-height: 1.6;
 }
 
@@ -586,7 +646,7 @@
 }
 
 .facts dt {
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .facts dd {
@@ -607,7 +667,7 @@
 .nbTitle {
   padding-bottom: 6px;
   font-size: 13px;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .nb {
@@ -619,14 +679,16 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--text);
+  color: var(--fg);
   font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
 
-.nb:hover {
-  color: var(--accent);
+.nb:hover .nbName {
+  text-decoration: underline;
+  text-decoration-color: var(--line-hi);
+  text-underline-offset: 3px;
 }
 
 .nbName {
@@ -643,7 +705,7 @@
 
 .more {
   font-size: 13px;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .clear {
@@ -652,21 +714,64 @@
   margin-top: 6px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
-  background: var(--fill-1);
-  color: var(--text);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
   font-size: 13px;
   cursor: pointer;
+  transition: background 0.18s var(--ease);
 }
 
 .clear:hover {
-  background: var(--fill-2);
+  background: var(--fill-on);
+}
+
+/* The primary action: the theme gradient (white with brand text on the light-mode chrome). */
+.primaryLink {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--grad);
+  color: var(--on-brand);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: filter 0.18s var(--ease);
+}
+
+.primaryLink:hover {
+  filter: brightness(1.08);
+}
+
+/* "Open in vault" in the side panel. */
+.openLink {
+  align-self: flex-start;
+}
+
+/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
+
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .panel {
+    background: var(--glow), var(--bg);
+  }
+
+  .details {
+    background: var(--panel-solid);
+  }
+
+  .guideLabel {
+    background: color-mix(in srgb, var(--bg) 84%, transparent);
+  }
 }
 
 /* ---- Fit the screen ----
    When the three columns sit side by side, the page is exactly one screen
-   tall: the map scales to the room the panel has, and a rail scrolls on its
-   own if it ever runs long. Narrower or very short windows keep the stacked,
+   tall: the map scales to the room the card has, and the side panel scrolls on
+   its own if it ever runs long. Narrower or very short windows keep the stacked,
    scrolling layout above. */
 
 @media (min-width: 1100px) and (min-height: 560px) {
@@ -680,6 +785,8 @@
   .details {
     min-height: 0;
     overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fill-on) transparent;
   }
 
   .panel {
@@ -703,7 +810,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .dot,
-  .billboard {
+  .billboard,
+  .tab,
+  .toggle,
+  .search,
+  .chip,
+  .clear,
+  .primaryLink {
     transition: none;
   }
   .edges,
@@ -712,31 +825,4 @@
   .billboard {
     animation: none;
   }
-}
-
-.pillLink {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 999px;
-  background: #263142;
-  color: var(--text);
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.pillLink:hover {
-  background: #2f3b50;
-}
-
-/* "Open in vault" in the detail rail. */
-.openLink {
-  align-self: flex-start;
-  font-size: 13px;
-}
-
-.openLink:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
