@@ -1,7 +1,7 @@
 ---
 type: design
 status: active
-last-updated: 2026-11-21
+last-updated: 2026-11-22
 tags: [project/hive-mind, ui, design]
 ---
 
@@ -18,7 +18,9 @@ The live canvas is the "Hive Mind UI Samples" artifact.
 
 - **One idea per screen.** The map is a map; the chat is a chat. No dashboards of widgets.
 - **Light is information.** Brightness means yours and recent; a hollow dot means not shared with
-  you. Nothing glows for decoration.
+  you. The only decorative light is the theme's colour behind the glass.
+- **The frame carries the colour, the data stays readable.** Navigation and panels are neutral or
+  white-on-colour; hue is spent on the theme wash and on the dots.
 - **Humans decide, the system suggests.** Every suggestion arrives as a quiet item in "Needs you",
   never a modal that blocks work.
 - **Familiar where it must be.** Chat keeps the three-column shape of Claude and ChatGPT.
@@ -27,16 +29,56 @@ The live canvas is the "Hive Mind UI Samples" artifact.
 
 ## 2. Visual language
 
-| Token        | Choice                                                                          |
-| ------------ | ------------------------------------------------------------------------------- |
-| Base surface | `#06090F`; the working panel sits on it as a rounded `#0B101A` card (22 px)     |
-| Text         | `#E6EBF5` primary, `#8A96AD` secondary, `#5F6B84` quiet                         |
-| Accent       | `#CFF4FF` for the hive mark, primary actions and the selected state             |
-| Topic hues   | `#F5B556` `#62B8FF` `#FF8FB3` `#C4A2FF` `#5FE0B0` `#FF9D5C` `#5CD6E6` `#C3E36A` |
-| Type         | Geist, 400 / 500 / 600, sentence case, tabular numbers                          |
-| Controls     | Pills (999 px radius), no borders; fills `#141B28` and `#1A2231`                |
-| Depth        | No shadows, no rules between rails; separation by tone and space                |
-| Motion       | Dots glide between views; the core breathes; the orbit turns. Nothing else.     |
+The look is "Keystone glass": the layout grammar of our Monolith app (a rail and a side panel
+sitting directly on a coloured wash, content on one inset card) with frosted glass panels and
+theme-driven dot colours, which are Hive's own
+([[2026-11-22-decision-13-keystone-glass-look-with-themes]]). It replaces the navy look the first
+map was built with.
+
+| Token      | Choice                                                                                                                                                      |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Background | The theme's wash: a 168° three-stop gradient, with soft radial glows of the theme's two accents on top (three at the edges, two pooled behind the map card) |
+| Map card   | Frosted glass: the card colour at 56% (dark) or 78% (light) opacity, `backdrop-filter: blur(30px) saturate(1.5)`, 20 px radius, a 1 px light edge           |
+| Side panel | A second, lighter glass slab: white at 4.5% (dark) or 13% (light), same blur, 1 px hairline                                                                 |
+| Left rail  | No panel; it sits on the wash                                                                                                                               |
+| Text       | From the theme: `text`, `textMuted`. On the light-mode wash all text is white (muted is white at 90%)                                                       |
+| Accent     | The theme's `brand`. Fills that mark "active" or "primary" use the gradient `brand → brandMid → brand2`                                                     |
+| Type       | Inter 400 / 500 / 600; JetBrains Mono for counts and section labels (11 px, uppercase, 0.12em tracking); tabular numbers                                    |
+| Controls   | 8 px radius (7 px inside the 10 px view-switch track). Hairlines at 10% that brighten to 26% on hover, never thicken                                        |
+| Nav rows   | 24 px icon slot, then the label. Active row: a faint brand tint plus a 3 px gradient bar on the rail's outer edge                                           |
+| Depth      | No drop shadows on controls; the glass edge and blur do the separating                                                                                      |
+| Motion     | Dots glide between views; the core breathes; the orbit turns; a writing agent's dot pulses. Easing `cubic-bezier(0.16, 1, 0.3, 1)`                          |
+
+### Themes, mode and reach
+
+Appearance is three independent choices, per person, changed in an Appearance panel (bottom of the
+left rail in the prototype; it can move to Settings).
+
+- **Theme (17):** Keystone (default), Graphite, Aurora, Sunset, Nebula, Lagoon, Tropic, Orchid,
+  Peach, Glacier, Dusk, Berry, Candy, Citrus, Prism, Mocha, Neon. Keystone and Graphite have one
+  accent; the rest have two. The seed values for every theme in both modes are in
+  [`ui/themes.json`](ui/themes.json), copied from Monolith's `develop` on 2026-11-18.
+- **Mode:** dark (default) or light. Light is a "bold frame": the wash is a saturated gradient,
+  everything painted on it is white, and the map sits on white glass. A primary button on the
+  light wash is white with brand-coloured text.
+- **Reach:** how much of `brand` is mixed into the card. Subtle 0%, Tinted 5% (default), Vivid 8%
+  in dark; 0%, 2.5%, 2.5% in light. Vivid also adds two faint glows along the card's top edge.
+
+A theme only supplies seeds. Everything else (gradient, glows, glass, selected tint, hairlines) is
+derived from them, so a component never names a theme.
+
+**Dot colours follow the theme.** The eight topic colours are generated: take the hue midway
+between `brand` and `brand2` (in OKLCH), fan eight hues across 160° around it, and alternate two
+lightness levels (0.82 / 0.72 in dark, 0.60 / 0.50 in light) at chroma 0.14 (0.15 in light), with
+neighbouring topics placed far apart in the fan. Graphite has no hue, so its topics are eight
+greys. A "Classic" switch keeps the original fixed eight:
+`#F5B556` `#62B8FF` `#FF8FB3` `#C4A2FF` `#5FE0B0` `#FF9D5C` `#5CD6E6` `#C3E36A`
+(light mode: `#C98A1B` `#2F7FD1` `#D9567F` `#8B62D9` `#1FA57A` `#DB6A22` `#1C9BAA` `#7F9E1F`).
+The trade-off is known and accepted: in "Follow theme" a topic has no fixed colour across themes,
+and topics sit closer in hue than in Classic.
+
+Not yet checked: text contrast for every theme, mode and reach combination. Monolith guards its
+own with a test; Hive needs the same before this ships (section 6).
 
 ## 3. The map (home)
 
@@ -59,9 +101,10 @@ One dot per note or file, coloured by topic. The same dots are shown in six view
   it and what it connects to. An unshared note shows only "Private note" and its topic.
 - **Search:** matching dots stay lit and get labels when there are few enough.
 
-Layout: a slim left rail (mark, five destinations, agents summary), the map on a rounded panel
-with the view switch as one pill control, and a right rail that shows today's activity until
-something is selected. "Needs you" and the housekeeper's last run sit below.
+Layout: a left rail on the wash (mark, hive switcher, five destinations with icons, agents
+summary, Appearance), the map on the glass card with the view switch as one segmented control,
+and a glass side panel that shows today's activity until something is selected. "Needs you" and
+the housekeeper's last run sit below.
 
 Rejected and not to be reopened: the entity-level "neural map", the per-topic cluster options and
 the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
@@ -102,7 +145,8 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 - Colour meaning is doubled by shape or text.
 - Real buttons and labels everywhere; visible keyboard focus.
 - Reduced-motion setting stops the glide, the breathing core and the orbit.
-- Text contrast at least 4.5:1.
+- Text contrast at least 4.5:1, in every theme, mode and reach. This needs a test.
+- Glass needs a fallback: where `backdrop-filter` is unsupported, use the solid card colour.
 
 ## 7. Performance budget for the map
 
@@ -110,3 +154,7 @@ Six views of one graph must be **one load and zero further round-trips**: fetch 
 links once, compute every layout in the browser, and switch views in client state only. The
 fetch must be bounded: select only the columns the map draws, over indexed columns, never note
 bodies.
+
+Changing theme, mode, reach or dot colours is also **zero round-trips**: it changes CSS variables
+on the root and nothing else. The choice is remembered per person; where it is stored is not
+decided yet.
