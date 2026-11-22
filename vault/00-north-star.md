@@ -1,7 +1,7 @@
 ---
 type: north-star
 status: active
-last-updated: 2026-11-21-1400
+last-updated: 2026-11-22-0815
 tags: [project/hive-mind, north-star]
 related:
   - "[[README]]"
@@ -42,14 +42,14 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 
 ## 3. Now
 
-- **Phase:** **Phase 0 is closed; Phase 1 has not started.** The engine exists and is proven in an in-process database only: schema, sharing rules, six MCP tools, a scripted demo. Nothing has run against a real Supabase stack yet.
+- **Phase:** **Phase 1 has started.** The schema and sharing rules now run on the hosted dev project; the MCP server has still not run against it.
 - **Branch:** `develop` == `main`. No `task/*` branches, no worktrees.
 - **The MCP server is untested end to end** ([[2026-11-20-gotcha-02-mcp-server-untested-end-to-end]]). It typechecks. Its sign-in signs a JWT with the project secret and has never met a live database; expect that to need work on the hosted project.
 - **Green tests prove the SQL, not Supabase** ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]). The auth schema and roles are stubbed in `scripts/local-db.mjs`.
-- **A hosted dev project exists:** `tokyttkztrkjvkaksdnh`, wired in `.mcp.json` as `supabase-dev`. **No migrations have been applied to it.**
+- **The hosted dev project is up** (T1, hosted half, 2026-11-22): `tokyttkztrkjvkaksdnh`, wired in `.mcp.json` as `supabase-dev`. Both migrations applied under the repo's version stamps; one hive (`Synapse`), one owner, one workspace, one agent (`Claude`); the token is in the local `.env`. `agent_login` works through the public API and a signed-out caller reads nothing. Runbook: `docs/hosted-db-bringup.md`. The local Docker stack is still not set up.
 - **In flight:** none.
-- **Next:** Phase 1, Batch A of [[2026-11-21-local-end-to-end]] — **T1** (bring the database up, apply the two migrations, create the hive and an agent token) in parallel with **T4** (vault importer). Then **T2**, the critical path: run the MCP server against the live database.
-- **Owed — Danijel:** fill `.env` (anon key and JWT secret from the Supabase dashboard); run `claude /mcp` once to authorise `supabase-dev`; install Docker + the Supabase CLI on the build machine for the local stack.
+- **Next:** **T2**, the critical path of [[2026-11-21-local-end-to-end]]: run the MCP server against the live database (unblocked now). **T4** (vault importer) is independent and can run alongside.
+- **Owed — Danijel:** install Docker + the Supabase CLI on the build machine for the local stack.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
 
 ### Last session

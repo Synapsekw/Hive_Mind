@@ -42,7 +42,8 @@ pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 
 `supabase status` then prints the local URL and keys. Copy `.env.example` to `.env` and fill it
-in. The hosted dev project is `tokyttkztrkjvkaksdnh`; no migrations are applied to it yet.
+in. The hosted dev project is `tokyttkztrkjvkaksdnh`; both migrations are applied to it and it holds
+one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
 
 ### Create your hive and connect an agent
 

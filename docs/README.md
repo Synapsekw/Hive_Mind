@@ -59,5 +59,6 @@ not duplicate content — it points to the canonical home of each topic.
 ## Operations & decisions
 
 - [`vault/moc/operations.md`](../vault/moc/operations.md) — Supabase, MCP, migrations.
+- [Bringing up a hosted database](hosted-db-bringup.md) — migrations, first hive, first agent token.
 - [`vault/decisions/`](../vault/decisions/) — decisions and gotchas.
 - [`vault/sessions/`](../vault/sessions/) — working-session notes.
