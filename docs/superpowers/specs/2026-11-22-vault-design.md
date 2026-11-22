@@ -1,6 +1,6 @@
 ---
 type: spec
-status: draft
+status: active
 last-updated: 2026-11-22
 tags: [project/hive-mind, spec, ui]
 ---
@@ -164,18 +164,19 @@ project has no folder with a rule and no note with its own setting, so nothing c
 - **Sharing control** (note or folder): a pill showing the current state; opening it offers
   _Private_, _Everyone in <hive>_, _Specific people_ (a checklist of the other members), and for
   a note inside a folder with a rule, _Same as folder_; for a folder, _No rule_ (it follows the
-  folder above, or stays private). Choosing shows the sentence and "Save" / "Cancel"; nothing is
+  folder above, or your default setting). Choosing shows the sentence and "Save" / "Cancel"; nothing is
   written before "Save". "Save" is disabled for _Specific people_ with nobody ticked.
 - **The sentence** is built from counts the database supplies (`folder_share_preview` for a
   folder), in these forms:
-  - "Only you will be able to read this note."
+  - "Only you will be able to read this note, and anyone whose link to it you accepted."
   - "Everyone in Synapse (2 people) will be able to read this note."
   - "Ahmed and Sara will be able to read this note."
   - Folder: "Everyone in Synapse (2 people) will be able to read the 17 notes in Decisions, and
     any note added there later, including by your agent. 2 notes with their own setting are not
     affected." (and "3 notes in folders with their own rule are not affected." when there are any)
-  - Folder to private: "The 17 notes in Decisions go back to private, except 2 with their own
-    setting."
+  - Folder to private: "The 17 notes in Decisions will be readable only by you, and so will any
+    note added there later. A note linked with a colleague's note stays readable to that colleague.
+    2 notes with their own setting are not affected."
 - **Held notes:** listed under "Held" with "Release"; the sentence is "This note was written by a
   self-hosted agent. Releasing it makes it follow its sharing setting: <state>."
 - **Shared with me:** colleagues' notes the person can read, grouped by owner, newest first,

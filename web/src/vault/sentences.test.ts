@@ -25,7 +25,9 @@ describe("noteSentence", () => {
         ...base,
         choice: { visibility: "private", shared_with: [] },
       }),
-    ).toBe("Only you will be able to read this note.");
+    ).toBe(
+      "Only you will be able to read this note, and anyone whose link to it you accepted.",
+    );
   });
   it("group", () => {
     expect(
@@ -161,7 +163,7 @@ describe("folderSentence", () => {
         preview: { ...none, follows: 1 },
       }),
     ).toBe(
-      "clients will have no rule of its own. Its 1 note follows the folder above, or stays private.",
+      "clients will have no rule of its own. Its 1 note follows the folder above, or your default setting.",
     );
   });
   it("group in a hive of one", () => {
@@ -197,7 +199,7 @@ describe("folderSentence", () => {
         preview: { ...none, follows: 4, own_setting: 3 },
       }),
     ).toBe(
-      "The 4 notes in clients will be readable only by you, and so will any note added there later. 3 notes with their own setting are not affected.",
+      "The 4 notes in clients will be readable only by you, and so will any note added there later. A note linked with a colleague's note stays readable to that colleague. 3 notes with their own setting are not affected.",
     );
     expect(
       folderSentence({
@@ -215,7 +217,7 @@ describe("folderSentence", () => {
         preview: { ...none, follows: 6 },
       }),
     ).toBe(
-      "clients will have no rule of its own. Its 6 notes follow the folder above, or stay private.",
+      "clients will have no rule of its own. Its 6 notes follow the folder above, or your default setting.",
     );
   });
 });

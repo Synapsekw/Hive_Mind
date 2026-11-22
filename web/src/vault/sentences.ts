@@ -30,7 +30,7 @@ export function noteSentence(a: {
   if (choice.visibility === "members" && a.names.length > 0) {
     return `${people(a.names)} will be able to read this note.`;
   }
-  return "Only you will be able to read this note.";
+  return "Only you will be able to read this note, and anyone whose link to it you accepted.";
 }
 
 function tails(p: SharePreview): string {
@@ -68,10 +68,10 @@ export function folderSentence(a: {
   switch (a.choice.visibility) {
     case null:
       return p.follows === 1
-        ? `${folder} will have no rule of its own. Its 1 note follows the folder above, or stays private.`
-        : `${folder} will have no rule of its own. Its ${p.follows} notes follow the folder above, or stay private.`;
+        ? `${folder} will have no rule of its own. Its 1 note follows the folder above, or your default setting.`
+        : `${folder} will have no rule of its own. Its ${p.follows} notes follow the folder above, or your default setting.`;
     case "private":
-      return `The ${p.follows} ${noun} in ${folder} will be readable only by you, and so will any note added there later.${tails(p)}`;
+      return `The ${p.follows} ${noun} in ${folder} will be readable only by you, and so will any note added there later. A note linked with a colleague's note stays readable to that colleague.${tails(p)}`;
     case "members":
       return `${readers(people(a.names))}${tails(p)}`;
     case "group":

@@ -47,7 +47,7 @@ records. Those exist only in the web app for signed-in people.
 
 - Writes are confined to the agent's own workspace by row-level security; a cross-member write
   fails at the database, not in application code.
-- Every write is versioned; a bad write is reverted from the Vault.
+- Every write is versioned. Reverting a bad write from the Vault is not built yet; for now the earlier version stays in the history.
 - Self-hosted agents' writes are quarantined; the member releases them.
 - Agents cannot move a note (change its path), and cannot change, rename or delete a folder
   record. Folder sharing rules follow the path, so a move could otherwise share a note.
