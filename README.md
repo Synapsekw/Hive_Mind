@@ -43,8 +43,21 @@ pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 
 `supabase status` then prints the local URL and keys. Copy `.env.example` to `.env` and fill it
-in. The hosted dev project is `tokyttkztrkjvkaksdnh`; both migrations are applied to it and it holds
+in. The hosted dev project is `tokyttkztrkjvkaksdnh`; all four migrations are applied to it and it holds
 one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
+
+### Run the web app
+
+Copy `web/.env.example` to `web/.env.local` and fill in the project URL and the publishable key
+(dashboard → Project Settings → API). Then:
+
+```sh
+pnpm dev:web          # open http://localhost:3000 and sign in
+```
+
+`/dev/map` shows the map on sample data, without an account. `pnpm --filter @hive-mind/web
+test:e2e` runs the browser test; run `pnpm --filter @hive-mind/web exec playwright install
+chromium` once first.
 
 ### Create your hive and connect an agent
 

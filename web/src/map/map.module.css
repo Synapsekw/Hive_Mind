@@ -784,3 +784,38 @@
     animation: none;
   }
 }
+
+/* ---- States with no map ---- */
+
+.notice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.noticeText {
+  margin: 0;
+  max-width: 36ch;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.pillLink {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: #263142;
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.pillLink:hover {
+  background: #2f3b50;
+}

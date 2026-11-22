@@ -1,7 +1,7 @@
 ---
 type: spec
 status: active
-last-updated: 2026-11-21
+last-updated: 2026-11-22
 tags: [project/hive-mind, security]
 ---
 
@@ -35,6 +35,8 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 ## 3. Identity and tokens
 
 - Members sign in to the web app with email magic link or SSO; MFA required for the owner.
+- The web app currently signs in with email and password or an emailed link; MFA and SSO are not
+  yet built.
 - Each agent gets its own token, created by the member, bound to one workspace and one trust tier.
 - Tokens are shown once, stored as SHA-256 hashes, and carry an optional expiry.
 - Revocation takes effect on the next sign-in; the MCP server re-signs in at least hourly.

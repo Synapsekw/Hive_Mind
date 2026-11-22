@@ -7,8 +7,10 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
 ## Current state of the dev project
 
 - Migrations `20261120000001_schema`, `20261120000002_sharing_rules` and
-  `20261122063919_file_storage` are applied and recorded under those versions. The last one adds a
+  `20261122063919_file_storage` are applied and recorded under those versions. The third adds a
   private `files` storage bucket.
+- Migration `20261122083415_map_graph` is applied too, through the Supabase MCP and re-stamped
+  like the earlier ones. It adds `map_graph` and `note_topic` for the web app's map.
 - One hive (`Synapse`), one owner member (`Danijel`), one workspace (`Main`), one agent (`Claude`,
   provider `claude`, trust tier `vendor`).
 - The agent token is in the owner's local `.env` as `HIVE_AGENT_TOKEN`. Only its hash is stored in
@@ -68,6 +70,17 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
    | `GET /rest/v1/hives`, `members`, `notes`           | 200, `[]`                          |
    | `GET /rest/v1/agents`                              | 401, permission denied             |
    | `POST /rest/v1/rpc/create_hive`                    | 401, permission denied             |
+
+## Run the web app
+
+The web app needs two public values from Project Settings → API: the project URL and the
+publishable key. Put them in `web/.env.local` (copy `web/.env.example`) and run `pnpm dev:web`.
+`NEXT_PUBLIC_*` values are baked in when the app is built, so rebuild after changing them.
+
+- **Password.** Set one on the member's account in the dashboard (Authentication → Users). A
+  password never goes through an agent.
+- **Emailed links.** Add `http://localhost:3000/**` to the allowed redirect URLs (Authentication
+  → URL Configuration), or the link is refused.
 
 ## What this does not prove
 
