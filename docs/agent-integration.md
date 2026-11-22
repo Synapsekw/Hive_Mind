@@ -101,7 +101,8 @@ relevant to the topic, before answering.
 
 When the user states a durable fact, decision, constraint, contact or status, record it straight
 away as a short line with hive_append on the matching note. If no note exists for that subject,
-create it with hive_write first. One note per subject, at a path such as
+create it with hive_write first. Record facts stated together as one append, not one append
+each. One note per subject, at a path such as
 clients/<name>/<subject>.md, projects/<name>/<subject>.md or people/<name>.md.
 
 hive_write replaces the whole note. To add to a note use hive_append; to rewrite one, hive_read
