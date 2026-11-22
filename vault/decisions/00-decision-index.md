@@ -40,5 +40,5 @@ an existing file.
 - **G02** [[2026-11-20-gotcha-02-mcp-server-untested-end-to-end]] — resolved: the MCP server runs on the hosted project (`pnpm test:live`)
 - **G03** [[2026-11-16-gotcha-03-brand-name-is-unresolved]] — "Hive Mind" and "Cortex" are both crowded
 - **G04** [[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]] — re-stamp MCP-applied migrations to the repo version
-- **G05** [[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]] — on Windows the finish merges, then cleanup fails
+- **G05** [[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]] — resolved: the finish no longer fails at cleanup; an empty folder may remain
 - **G06** [[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]] — do not revoke the legacy JWT secret; replace the sign-in before phase 3

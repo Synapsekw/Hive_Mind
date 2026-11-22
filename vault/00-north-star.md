@@ -51,7 +51,7 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 - **Notes can be imported** (T4, 2026-11-22): `pnpm import:vault <folder> <workspace>` creates one private note per markdown file, as the person, and is safe to re-run. The first 25 notes of Danijel's DRA vault (`Decisions`, `MOCs`, `Home.md`) are in a separate `DRA` workspace, which the agent can read and search but not change; about 930 notes remain to import. Other file types wait for T5.
 - **In flight:** none.
 - **Next:** **T5** (file storage) and **T6** (second member proof) of [[2026-11-21-local-end-to-end]]; both are unblocked. Then Phase 2, the web app and map.
-- **Workflow trap:** on Windows `finish-task.sh` merges and pushes, then fails to remove the worktree the session sits in ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
+- **Workflow note:** `finish-task.sh` now refreshes the main checkout (install + build) after a merge and no longer fails at cleanup; from an agent session one empty worktree folder remains to delete after `ExitWorktree` ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
 - **Owed — Danijel:** install Docker + the Supabase CLI on the build machine for the local stack.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
 

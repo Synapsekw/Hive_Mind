@@ -1,7 +1,7 @@
 ---
 type: adr
 date: 2026-11-22
-status: open
+status: resolved
 tags: [gotcha]
 related:
   - "[[2026-11-21-decision-10-task-worktrees-nested-in-the-project]]"
@@ -27,6 +27,10 @@ The failure is after the push, so nothing is lost, but the exit code reads like 
 - Positive: a known three-command recovery.
 - Negative: every `/develop` run on Windows ends with a manual cleanup.
 - Open follow-ups: make `finish-task.sh` step out of the worktree before removing it, or have `/develop` exit the worktree and run the cleanup half from the main checkout.
+
+## Resolution (2026-11-22)
+
+`finish-task.sh` now steps out of the worktree before removing it and, if the folder is still in use, unregisters it, deletes the branch, reports the leftover and exits 0. Run from an agent session that sits in the worktree, what remains is one empty folder: `ExitWorktree` with `keep`, then delete it. The script also runs `pnpm install` and `pnpm build` in the main checkout after the merge, because a merged dependency once left the main checkout unable to run a script that had just been merged.
 
 ## Related
 
