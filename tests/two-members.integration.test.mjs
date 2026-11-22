@@ -367,4 +367,51 @@ describe("two members and their agents on a live database", { skip }, () => {
       `${DIR}a-shared.md`,
     ]);
   });
+
+  test("a folder shared by its owner shares the note an agent writes there", async () => {
+    const folder = `${DIR}shared-folder`;
+    const notePath = `${folder}/by-agent.md`;
+    let folderId;
+    try {
+      const rule = await rest("folders?on_conflict=workspace_id,path", {
+        jwt: a.person,
+        method: "POST",
+        prefer: "resolution=merge-duplicates,return=representation",
+        body: {
+          workspace_id: a.me.workspace_id,
+          member_id: a.me.member_id,
+          path: folder,
+          visibility: "group",
+        },
+      });
+      assert.equal(rule.status, 201, rule.text);
+      folderId = rule.json[0].id;
+
+      const w = await a.call("hive_write", {
+        path: notePath,
+        title: "in a shared folder",
+        body: `written after the folder was shared ${WORD}`,
+      });
+      assert.ok(!w.isError, text(w));
+      const id = data(await a.call("hive_read", { path: notePath })).id;
+
+      const r = await rest(
+        `notes?select=id,effective:note_visibility,rule_folder:note_rule_folder,access:note_access&id=eq.${id}`,
+        { jwt: b.person },
+      );
+      assert.equal(r.status, 200, r.text);
+      assert.deepEqual(r.json, [
+        { id, effective: "group", rule_folder: folder, access: "shared" },
+      ]);
+    } finally {
+      if (folderId) {
+        const gone = await rest(`folders?id=eq.${folderId}`, {
+          jwt: a.person,
+          method: "DELETE",
+        });
+        assert.ok(gone.status < 300, `folder cleanup failed: ${gone.text}`);
+      }
+      await cleanUp(a);
+    }
+  });
 });
