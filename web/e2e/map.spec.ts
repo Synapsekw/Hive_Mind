@@ -119,3 +119,55 @@ test("every dot is a labelled button", async ({ page }) => {
   // One layer of dots at a time: the orbit view does not keep the flat dots mounted.
   expect(counts[1]).toBe(counts[0]);
 });
+
+for (const size of [
+  { width: 1920, height: 1080 },
+  { width: 1600, height: 1000 },
+  { width: 1366, height: 768 },
+  { width: 1280, height: 620 },
+]) {
+  test(`the whole screen fits a ${size.width} x ${size.height} window without scrolling`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await open(page);
+    for (const name of ["Rings", "Timeline"]) {
+      await viewButton(page, name).click();
+      const fit = await page.evaluate(() => {
+        const main = document.querySelector("main")!.getBoundingClientRect();
+        const root = document.documentElement;
+        return {
+          pageScrolls:
+            root.scrollHeight > window.innerHeight ||
+            root.scrollWidth > window.innerWidth,
+          panelBottom: main.bottom,
+          panelRight: main.right,
+        };
+      });
+      expect(fit.pageScrolls).toBe(false);
+      expect(fit.panelBottom).toBeLessThanOrEqual(size.height);
+      expect(fit.panelRight).toBeLessThanOrEqual(size.width);
+    }
+    // Every dot of the map stays inside the panel.
+    await viewButton(page, "Rings").click();
+    await page.waitForTimeout(1100);
+    const dots = await page.evaluate(() => {
+      const main = document.querySelector("main")!.getBoundingClientRect();
+      const rects = [...document.querySelectorAll("[data-map-dot]")].map((d) =>
+        d.getBoundingClientRect(),
+      );
+      return {
+        count: rects.length,
+        outside: rects.filter(
+          (r) =>
+            r.top < main.top ||
+            r.bottom > main.bottom ||
+            r.left < main.left ||
+            r.right > main.right,
+        ).length,
+      };
+    });
+    expect(dots.count).toBeGreaterThan(250);
+    expect(dots.outside).toBe(0);
+  });
+}

@@ -167,26 +167,28 @@ export function HiveMap({
           q={q}
           onQ={filter(setQ)}
         />
-        <div className={s.stage}>
-          <Backdrop
-            model={model}
-            pos={pos}
-            view={view}
-            act={act}
-            edges={{ ...edges, baseOpacity }}
-          />
-          <GuideLabels view={view} now={now} />
-          {!isOrbit && (
-            <FlatDots model={model} pos={pos} states={states} onPick={pick} />
-          )}
-          {isOrbit && cache.orbit && (
-            <Orbit
+        <div className={s.stageFit}>
+          <div className={s.stage}>
+            <Backdrop
               model={model}
-              pos={cache.orbit}
-              states={states}
-              onPick={pick}
+              pos={pos}
+              view={view}
+              act={act}
+              edges={{ ...edges, baseOpacity }}
             />
-          )}
+            <GuideLabels view={view} now={now} />
+            {!isOrbit && (
+              <FlatDots model={model} pos={pos} states={states} onPick={pick} />
+            )}
+            {isOrbit && cache.orbit && (
+              <Orbit
+                model={model}
+                pos={cache.orbit}
+                states={states}
+                onPick={pick}
+              />
+            )}
+          </div>
         </div>
         <Chips
           model={model}
