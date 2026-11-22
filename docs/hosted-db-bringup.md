@@ -6,8 +6,9 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
 
 ## Current state of the dev project
 
-- Migrations `20261120000001_schema` and `20261120000002_sharing_rules` are applied and recorded
-  under those versions.
+- Migrations `20261120000001_schema`, `20261120000002_sharing_rules` and
+  `20261122063919_file_storage` are applied and recorded under those versions. The last one adds a
+  private `files` storage bucket.
 - One hive (`Synapse`), one owner member (`Danijel`), one workspace (`Main`), one agent (`Claude`,
   provider `claude`, trust tier `vendor`).
 - The agent token is in the owner's local `.env` as `HIVE_AGENT_TOKEN`. Only its hash is stored in

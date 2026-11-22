@@ -8,7 +8,7 @@ tags: [project/hive-mind, adr, index]
 # Decision and gotcha index
 
 One line each. Two separate sequences: `decision-NN` and `gotcha-NN`. Before minting a new one,
-take the **next free number** (decision **12**, gotcha **07**) and add a row here. Never rename
+take the **next free number** (decision **13**, gotcha **07**) and add a row here. Never rename
 an existing file.
 
 ## Product and sharing model
@@ -23,7 +23,8 @@ an existing file.
 - **D03** [[2026-11-16-decision-03-desktop-apps-first-over-mcp]] — MCP connector first; hosted chat only via vendor programmes
 - **D06** [[2026-11-20-decision-06-local-first-on-the-supabase-stack]] — local Supabase, migrations as files
 - **D08** [[2026-11-20-decision-08-every-row-belongs-to-a-hive]] — tenancy from day one
-- **D09** [[2026-11-20-decision-09-embeddings-and-storage-deferred]] — no embeddings or storage in the first slice
+- **D09** [[2026-11-20-decision-09-embeddings-and-storage-deferred]] — no embeddings or storage in the first slice (storage arrived 2026-11-22)
+- **D12** [[2026-11-22-decision-12-agents-save-files-only-from-the-working-folder]] — the save tool reads only the working folder, never hidden files
 
 ## UI
 

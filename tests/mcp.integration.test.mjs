@@ -7,7 +7,9 @@
 // Agents cannot delete notes, so the cleanup signs in as the workspace's owner.
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -30,7 +32,25 @@ const RUN = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}
 const DIR = `${PREFIX}${RUN}/`;
 const WORD = `hivetest${RUN}`;
 
+// Files are saved under outputs/<type>/<customer>/; the test uses its own type.
+const FILE_TYPE = "_integration-test";
+
 const { SUPABASE_URL: URL_, SUPABASE_ANON_KEY: ANON } = process.env;
+
+// Supabase Storage, as one identity (or signed out).
+async function storage(path, { jwt, method = "GET", body, raw } = {}) {
+  const res = await fetch(`${URL_}/storage/v1/${path}`, {
+    method,
+    headers: {
+      apikey: ANON,
+      Authorization: `Bearer ${jwt ?? ANON}`,
+      ...(raw ? { "Content-Type": "text/plain" } : {}),
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: raw ?? (body ? JSON.stringify(body) : undefined),
+  });
+  return { status: res.status, text: await res.text() };
+}
 
 // The server's own dependencies; the repo root does not install them.
 const fromMcp = createRequire(new URL("../mcp/package.json", import.meta.url));
@@ -73,12 +93,14 @@ function data(result) {
 
 describe("MCP server against a live database", { skip }, () => {
   let Client, StdioClientTransport, client, me, ownerJwt, agentJwt;
+  // The folder the server may read files from, and one it may not.
+  let work, outside;
 
   const start = async (env = {}) => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [SERVER],
-      env: { ...process.env, ...env },
+      env: { ...process.env, HIVE_FILES_ROOT: work, ...env },
       stderr: "pipe",
     });
     const c = new Client({ name: "hive-integration-test", version: "0.0.0" });
@@ -95,8 +117,51 @@ describe("MCP server against a live database", { skip }, () => {
     assert.equal(r.status, 200, r.text);
     return r.json.filter((n) => n.path.startsWith(PREFIX));
   };
-  // Deletes this run's notes and any left behind by a run that crashed.
+  const filesBase = () =>
+    `${me.member_id}/${me.workspace_id}/outputs/${FILE_TYPE}`;
+  // Every stored test file, including ones whose row was never written.
+  const myTestFiles = async () => {
+    const list = async (prefix) => {
+      const r = await storage("object/list/files", {
+        jwt: ownerJwt,
+        method: "POST",
+        body: { prefix, limit: 1000 },
+      });
+      assert.equal(r.status, 200, r.text);
+      return JSON.parse(r.text);
+    };
+    const paths = [];
+    for (const run of await list(filesBase()))
+      for (const f of await list(`${filesBase()}/${run.name}`))
+        paths.push(`${filesBase()}/${run.name}/${f.name}`);
+    return paths;
+  };
+  // Deletes this run's notes and files and any left behind by a run that crashed.
   const cleanUp = async () => {
+    const paths = await myTestFiles();
+    if (paths.length) {
+      const gone = await storage("object/files", {
+        jwt: ownerJwt,
+        method: "DELETE",
+        body: { prefixes: paths },
+      });
+      assert.equal(gone.status, 200, `file cleanup failed: ${gone.text}`);
+    }
+    const rows = await rest(
+      `files?select=id,storage_path&workspace_id=eq.${me.workspace_id}`,
+      { jwt: ownerJwt },
+    );
+    assert.equal(rows.status, 200, rows.text);
+    const mine = rows.json.filter((f) =>
+      f.storage_path.startsWith(`${filesBase()}/`),
+    );
+    if (mine.length) {
+      const r = await rest(`files?id=in.(${mine.map((f) => f.id).join(",")})`, {
+        jwt: ownerJwt,
+        method: "DELETE",
+      });
+      assert.ok(r.status < 300, `file row cleanup failed: ${r.text}`);
+    }
     const notes = await myTestNotes();
     if (!notes.length) return;
     const ids = notes.map((n) => n.id).join(",");
@@ -139,6 +204,8 @@ describe("MCP server against a live database", { skip }, () => {
     });
 
     await cleanUp();
+    work = mkdtempSync(join(tmpdir(), "hive-live-work-"));
+    outside = mkdtempSync(join(tmpdir(), "hive-live-outside-"));
     client = await start();
   });
 
@@ -147,15 +214,19 @@ describe("MCP server against a live database", { skip }, () => {
     if (!ownerJwt) return;
     await cleanUp();
     assert.deepEqual(await myTestNotes(), [], "test notes were left behind");
+    assert.deepEqual(await myTestFiles(), [], "test files were left behind");
+    for (const dir of [work, outside])
+      if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  test("offers exactly the six tools, none that share, accept or delete", async () => {
+  test("offers exactly the seven tools, none that share, accept or delete", async () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
       "hive_append",
       "hive_overview",
       "hive_propose_link",
       "hive_read",
+      "hive_save_file",
       "hive_search",
       "hive_write",
     ]);
@@ -278,6 +349,76 @@ describe("MCP server against a live database", { skip }, () => {
     const r = await rest(`notes?select=id&path=like.*integration-test*`);
     assert.equal(r.status, 200, r.text);
     assert.deepEqual(r.json, []);
+  });
+
+  test("hive_save_file stores a file from the working folder, attached to a note", async () => {
+    const content = `a deliverable ${WORD}`;
+    writeFileSync(join(work, "report.txt"), content);
+    const save = (args) =>
+      call("hive_save_file", { type: FILE_TYPE, customer: RUN, ...args });
+
+    const saved = await save({
+      local_path: "report.txt",
+      note_path: `${DIR}a.md`,
+    });
+    assert.ok(!saved.isError, text(saved));
+    assert.equal(
+      text(saved),
+      `Saved outputs/${FILE_TYPE}/${RUN}/report.txt, attached to ${DIR}a.md.`,
+    );
+    const path = `${filesBase()}/${RUN}/report.txt`;
+
+    const row = await rest(
+      `files?select=name,mime,size_bytes,note_id&storage_path=eq.${path}`,
+      { jwt: agentJwt },
+    );
+    const note = data(await call("hive_read", { path: `${DIR}a.md` }));
+    assert.deepEqual(row.json, [
+      {
+        name: "report.txt",
+        mime: "text/plain",
+        size_bytes: content.length,
+        note_id: note.id,
+      },
+    ]);
+
+    const download = (jwt) =>
+      storage(`object/authenticated/files/${path}`, { jwt });
+    assert.deepEqual(await download(ownerJwt), { status: 200, text: content });
+    assert.deepEqual(await download(agentJwt), { status: 200, text: content });
+    assert.notEqual((await download()).status, 200, "a signed-out download");
+
+    const again = await save({ local_path: "report.txt" });
+    assert.equal(again.isError, true);
+    assert.match(text(again), /already saved/);
+
+    // The agent can neither delete nor overwrite what is stored.
+    await storage(`object/files/${path}`, { jwt: agentJwt, method: "DELETE" });
+    const over = await storage(`object/files/${path}`, {
+      jwt: agentJwt,
+      method: "PUT",
+      raw: "overwritten",
+    });
+    assert.notEqual(over.status, 200, over.text);
+    assert.deepEqual(await download(ownerJwt), { status: 200, text: content });
+  });
+
+  test("hive_save_file refuses files outside the working folder and hidden files", async () => {
+    writeFileSync(join(outside, "secret.txt"), "not for the hive");
+    writeFileSync(join(work, ".env"), "SECRET=1");
+    const save = (local_path) =>
+      call("hive_save_file", { type: FILE_TYPE, customer: RUN, local_path });
+
+    const far = await save(join(outside, "secret.txt"));
+    assert.equal(far.isError, true, text(far));
+    assert.match(text(far), /outside the working folder/);
+    const hidden = await save(".env");
+    assert.equal(hidden.isError, true, text(hidden));
+    assert.match(text(hidden), /Hidden files/);
+    const missing = await save("nothing-here.pdf");
+    assert.equal(missing.isError, true, text(missing));
+
+    assert.deepEqual(await myTestFiles(), [`${filesBase()}/${RUN}/report.txt`]);
   });
 
   test("the server refuses to start with a wrong token", async () => {
