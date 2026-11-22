@@ -8,106 +8,106 @@ keystone light any --quiet #8b8b93 -> #6b6b72
 keystone light any --acc #5a6ed5 -> #4f62c8
 keystone light any dots=theme --hue-1 #009390 -> #007976
 keystone light any dots=theme --hue-3 #0090a8 -> #00768a
-keystone light any dots=theme --hue-5 #008ac6 -> #0074a8
+keystone light any dots=theme --hue-5 #008ac6 -> #0071a3
 keystone light any dots=theme --hue-7 #4a7dd9 -> #3668c2
-keystone light any dots=classic --hue-1 #c98a1b -> #956300
+keystone light any dots=classic --hue-1 #c98a1b -> #916100
 keystone light any dots=classic --hue-2 #2f7fd1 -> #186dbd
-keystone light any dots=classic --hue-3 #d9567f -> #bd3c68
+keystone light any dots=classic --hue-3 #d9567f -> #ba3965
 keystone light any dots=classic --hue-4 #8b62d9 -> #7c52c8
 keystone light any dots=classic --hue-5 #1fa57a -> #007a58
-keystone light any dots=classic --hue-6 #db6a22 -> #b44f00
-keystone light any dots=classic --hue-7 #1c9baa -> #007884
+keystone light any dots=classic --hue-6 #db6a22 -> #af4d00
+keystone light any dots=classic --hue-7 #1c9baa -> #007481
 keystone light any dots=classic --hue-8 #7f9e1f -> #5c7500
-graphite dark any --quiet #7c7e88 -> #91939d
-graphite dark any dots=theme --hue-1 #717178 -> #92929a
-graphite dark any dots=theme --hue-2 #b3b3bc -> #c2c2cb
-graphite dark any dots=theme --hue-3 #818189 -> #9d9da6
-graphite dark any dots=theme --hue-4 #c5c5cd -> #cfcfd8
-graphite dark any dots=theme --hue-5 #919199 -> #a9a9b2
+graphite dark any --quiet #7c7e88 -> #9496a0
+graphite dark any dots=theme --hue-1 #717178 -> #94949c
+graphite dark any dots=theme --hue-2 #b3b3bc -> #c3c3cc
+graphite dark any dots=theme --hue-3 #818189 -> #9f9fa8
+graphite dark any dots=theme --hue-4 #c5c5cd -> #d0d0d8
+graphite dark any dots=theme --hue-5 #919199 -> #ababb4
 graphite dark any dots=theme --hue-6 #d6d6df -> #dcdce5
-graphite dark any dots=theme --hue-7 #a2a2aa -> #b6b6be
-graphite light any --muted #595960 -> #4e4e55
+graphite dark any dots=theme --hue-7 #a2a2aa -> #b7b7c0
+graphite light any --muted #595960 -> #4b4b52
 graphite light any --quiet #8b8b93 -> #68686f
 graphite light any dots=theme --hue-2 #6e6e76 -> #4e4e55
 graphite light any dots=theme --hue-3 #3c3c43 -> #35353c
-graphite light any dots=theme --hue-4 #7f7f87 -> #57575e
+graphite light any dots=theme --hue-4 #7f7f87 -> #56565e
 graphite light any dots=theme --hue-5 #4c4c54 -> #3d3d44
 graphite light any dots=theme --hue-6 #919199 -> #5f5f67
-graphite light any dots=theme --hue-7 #5d5d64 -> #46464d
-graphite light any dots=theme --hue-8 #a4a4ac -> #686870
+graphite light any dots=theme --hue-7 #5d5d64 -> #45454c
+graphite light any dots=theme --hue-8 #a4a4ac -> #68686f
 graphite light any dots=classic --hue-1 #c98a1b -> #8d5e00
 graphite light any dots=classic --hue-2 #2f7fd1 -> #136aba
 graphite light any dots=classic --hue-3 #d9567f -> #b63562
 graphite light any dots=classic --hue-4 #8b62d9 -> #7a4fc5
 graphite light any dots=classic --hue-5 #1fa57a -> #007755
 graphite light any dots=classic --hue-6 #db6a22 -> #ab4b00
-graphite light any dots=classic --hue-7 #1c9baa -> #007481
-graphite light any dots=classic --hue-8 #7f9e1f -> #597200
-aurora dark any --quiet #7c7e88 -> #91939d
-aurora light any --muted #4b5c59 -> #435451
-aurora light any --quiet #8b8b93 -> #6b6b72
+graphite light any dots=classic --hue-7 #1c9baa -> #00717d
+graphite light any dots=classic --hue-8 #7f9e1f -> #576f00
+aurora dark any --quiet #7c7e88 -> #9496a0
+aurora light any --muted #4b5c59 -> #40514e
+aurora light any --quiet #8b8b93 -> #68686f
 aurora light any --acc #0f7d71 -> #00776b
 aurora light any dots=theme --hue-1 #069954 -> #007a42
-aurora light any dots=theme --hue-3 #00957f -> #007a68
-aurora light any dots=theme --hue-5 #009298 -> #00787d
+aurora light any dots=theme --hue-3 #00957f -> #007765
+aurora light any dots=theme --hue-5 #009298 -> #007579
 aurora light any dots=theme --hue-7 #008eb1 -> #007492
 aurora light any dots=classic --hue-1 #c98a1b -> #916100
-aurora light any dots=classic --hue-2 #2f7fd1 -> #186dbd
+aurora light any dots=classic --hue-2 #2f7fd1 -> #136aba
 aurora light any dots=classic --hue-3 #d9567f -> #ba3965
 aurora light any dots=classic --hue-4 #8b62d9 -> #7c52c8
 aurora light any dots=classic --hue-5 #1fa57a -> #007a58
 aurora light any dots=classic --hue-6 #db6a22 -> #af4d00
 aurora light any dots=classic --hue-7 #1c9baa -> #007481
 aurora light any dots=classic --hue-8 #7f9e1f -> #597200
-sunset dark any --quiet #7c7e88 -> #8b8d97
-sunset light any --muted #66544c -> #5d4c44
+sunset dark any --quiet #7c7e88 -> #8e909a
+sunset light any --muted #66544c -> #5b4941
 sunset light any --quiet #8b8b93 -> #68686f
-sunset light any --acc #b65318 -> #af4d0e
-sunset light any dots=theme --hue-1 #9366c9 -> #8154b5
+sunset light any --acc #b65318 -> #ac4a07
+sunset light any dots=theme --hue-1 #9366c9 -> #7e51b2
 sunset light any dots=theme --hue-3 #ad5cb0 -> #9a4a9d
 sunset light any dots=theme --hue-5 #bf558e -> #ab437c
 sunset light any dots=theme --hue-7 #c95368 -> #b44057
-sunset light any dots=classic --hue-1 #c98a1b -> #916100
+sunset light any dots=classic --hue-1 #c98a1b -> #8d5e00
 sunset light any dots=classic --hue-2 #2f7fd1 -> #136aba
-sunset light any dots=classic --hue-3 #d9567f -> #ba3965
-sunset light any dots=classic --hue-4 #8b62d9 -> #7c52c8
-sunset light any dots=classic --hue-5 #1fa57a -> #007a58
-sunset light any dots=classic --hue-6 #db6a22 -> #af4d00
+sunset light any dots=classic --hue-3 #d9567f -> #b63562
+sunset light any dots=classic --hue-4 #8b62d9 -> #7a4fc5
+sunset light any dots=classic --hue-5 #1fa57a -> #007755
+sunset light any dots=classic --hue-6 #db6a22 -> #ab4b00
 sunset light any dots=classic --hue-7 #1c9baa -> #007481
 sunset light any dots=classic --hue-8 #7f9e1f -> #597200
-nebula dark any --quiet #7c7e88 -> #858791
+nebula dark any --quiet #7c7e88 -> #888a94
 nebula light any --muted #5a5666 -> #524e5e
-nebula light any --quiet #8b8b93 -> #6b6b72
+nebula light any --quiet #8b8b93 -> #68686f
 nebula light any dots=theme --hue-1 #009392 -> #007575
 nebula light any dots=theme --hue-3 #008faa -> #00758c
 nebula light any dots=theme --hue-5 #0089c9 -> #0070a6
 nebula light any dots=theme --hue-7 #4f7cd9 -> #3b67c2
 nebula light any dots=classic --hue-1 #c98a1b -> #916100
-nebula light any dots=classic --hue-2 #2f7fd1 -> #186dbd
+nebula light any dots=classic --hue-2 #2f7fd1 -> #136aba
 nebula light any dots=classic --hue-3 #d9567f -> #ba3965
 nebula light any dots=classic --hue-4 #8b62d9 -> #7c52c8
 nebula light any dots=classic --hue-5 #1fa57a -> #007a58
 nebula light any dots=classic --hue-6 #db6a22 -> #af4d00
 nebula light any dots=classic --hue-7 #1c9baa -> #007481
 nebula light any dots=classic --hue-8 #7f9e1f -> #597200
-lagoon dark any --quiet #7c7e88 -> #8e909a
-lagoon light any --muted #455a5b -> #405455
+lagoon dark any --quiet #7c7e88 -> #91939d
+lagoon light any --muted #455a5b -> #3d5253
 lagoon light any --quiet #8b8b93 -> #68686f
 lagoon light any --acc #02787d -> #00757a
-lagoon light any dots=theme --hue-1 #2a984b -> #007c33
+lagoon light any dots=theme --hue-1 #2a984b -> #007832
 lagoon light any dots=theme --hue-3 #009678 -> #00785f
 lagoon light any dots=theme --hue-5 #009393 -> #007575
-lagoon light any dots=theme --hue-7 #008faa -> #00758c
-lagoon light any dots=classic --hue-1 #c98a1b -> #916100
-lagoon light any dots=classic --hue-2 #2f7fd1 -> #186dbd
+lagoon light any dots=theme --hue-7 #008faa -> #007288
+lagoon light any dots=classic --hue-1 #c98a1b -> #8d5e00
+lagoon light any dots=classic --hue-2 #2f7fd1 -> #136aba
 lagoon light any dots=classic --hue-3 #d9567f -> #ba3965
 lagoon light any dots=classic --hue-4 #8b62d9 -> #7c52c8
-lagoon light any dots=classic --hue-5 #1fa57a -> #007a58
+lagoon light any dots=classic --hue-5 #1fa57a -> #007755
 lagoon light any dots=classic --hue-6 #db6a22 -> #af4d00
 lagoon light any dots=classic --hue-7 #1c9baa -> #007481
 lagoon light any dots=classic --hue-8 #7f9e1f -> #597200
-tropic dark any --quiet #7c7e88 -> #8e909a
-tropic light any --muted #485a54 -> #43544f
+tropic dark any --quiet #7c7e88 -> #91939d
+tropic light any --muted #485a54 -> #40524c
 tropic light any --quiet #8b8b93 -> #68686f
 tropic light any --acc #047b62 -> #00785f
 tropic light any dots=theme --hue-1 #b17000 -> #965e00
@@ -118,7 +118,7 @@ tropic light any dots=classic --hue-1 #c98a1b -> #916100
 tropic light any dots=classic --hue-2 #2f7fd1 -> #136aba
 tropic light any dots=classic --hue-3 #d9567f -> #ba3965
 tropic light any dots=classic --hue-4 #8b62d9 -> #7c52c8
-tropic light any dots=classic --hue-5 #1fa57a -> #007a58
+tropic light any dots=classic --hue-5 #1fa57a -> #007755
 tropic light any dots=classic --hue-6 #db6a22 -> #af4d00
 tropic light any dots=classic --hue-7 #1c9baa -> #007481
 tropic light any dots=classic --hue-8 #7f9e1f -> #597200
@@ -131,78 +131,78 @@ orchid light any dots=theme --hue-5 #6f73d7 -> #5c5ec0
 orchid light any dots=theme --hue-7 #9267ca -> #7d52b3
 orchid light any dots=classic --hue-1 #c98a1b -> #8d5e00
 orchid light any dots=classic --hue-2 #2f7fd1 -> #136aba
-orchid light any dots=classic --hue-3 #d9567f -> #ba3965
+orchid light any dots=classic --hue-3 #d9567f -> #b63562
 orchid light any dots=classic --hue-4 #8b62d9 -> #7a4fc5
 orchid light any dots=classic --hue-5 #1fa57a -> #007755
-orchid light any dots=classic --hue-6 #db6a22 -> #af4d00
+orchid light any dots=classic --hue-6 #db6a22 -> #ab4b00
 orchid light any dots=classic --hue-7 #1c9baa -> #007481
 orchid light any dots=classic --hue-8 #7f9e1f -> #597200
-peach dark any --quiet #7c7e88 -> #8b8d97
+peach dark any --quiet #7c7e88 -> #8e909a
 peach light any --muted #62504d -> #5a4845
 peach light any --quiet #8b8b93 -> #65656d
 peach light any dots=theme --hue-1 #b658a0 -> #9f438a
 peach light any dots=theme --hue-3 #c5547c -> #ad3e68
 peach light any dots=theme --hue-5 #ca5554 -> #b23f40
 peach light any dots=theme --hue-7 #c65e23 -> #a94700
-peach light any dots=classic --hue-1 #c98a1b -> #8d5e00
+peach light any dots=classic --hue-1 #c98a1b -> #8a5b00
 peach light any dots=classic --hue-2 #2f7fd1 -> #0e67b6
 peach light any dots=classic --hue-3 #d9567f -> #b63562
 peach light any dots=classic --hue-4 #8b62d9 -> #774cc1
 peach light any dots=classic --hue-5 #1fa57a -> #007353
-peach light any dots=classic --hue-6 #db6a22 -> #ab4b00
+peach light any dots=classic --hue-6 #db6a22 -> #a74900
 peach light any dots=classic --hue-7 #1c9baa -> #00717d
 peach light any dots=classic --hue-8 #7f9e1f -> #576f00
-glacier dark any --quiet #7c7e88 -> #8e909a
+glacier dark any --quiet #7c7e88 -> #91939d
 glacier light any --muted #4d575c -> #485156
-glacier light any --quiet #8b8b93 -> #6b6b72
+glacier light any --quiet #8b8b93 -> #68686f
 glacier light any dots=theme --hue-1 #669014 -> #507300
 glacier light any dots=theme --hue-3 #20984f -> #007b3a
 glacier light any dots=theme --hue-5 #00967b -> #007862
 glacier light any dots=theme --hue-7 #009394 -> #007576
 glacier light any dots=classic --hue-1 #c98a1b -> #916100
-glacier light any dots=classic --hue-2 #2f7fd1 -> #186dbd
+glacier light any dots=classic --hue-2 #2f7fd1 -> #136aba
 glacier light any dots=classic --hue-3 #d9567f -> #ba3965
 glacier light any dots=classic --hue-4 #8b62d9 -> #7c52c8
 glacier light any dots=classic --hue-5 #1fa57a -> #007a58
 glacier light any dots=classic --hue-6 #db6a22 -> #af4d00
 glacier light any dots=classic --hue-7 #1c9baa -> #007481
 glacier light any dots=classic --hue-8 #7f9e1f -> #597200
-dusk dark any --quiet #7c7e88 -> #8b8d97
+dusk dark any --quiet #7c7e88 -> #8e909a
 dusk light any --muted #515464 -> #494c5c
-dusk light any --quiet #8b8b93 -> #68686f
-dusk light any dots=theme --hue-1 #0088cd -> #006fa9
+dusk light any --quiet #8b8b93 -> #65656d
+dusk light any dots=theme --hue-1 #0088cd -> #006ca5
 dusk light any dots=theme --hue-3 #537bd9 -> #3d63be
 dusk light any dots=theme --hue-5 #7c6fd4 -> #685abd
-dusk light any dots=theme --hue-7 #9c63c2 -> #8a51ae
+dusk light any dots=theme --hue-7 #9c63c2 -> #874eab
 dusk light any dots=classic --hue-1 #c98a1b -> #8d5e00
-dusk light any dots=classic --hue-2 #2f7fd1 -> #136aba
-dusk light any dots=classic --hue-3 #d9567f -> #ba3965
+dusk light any dots=classic --hue-2 #2f7fd1 -> #0e67b6
+dusk light any dots=classic --hue-3 #d9567f -> #b63562
 dusk light any dots=classic --hue-4 #8b62d9 -> #7a4fc5
 dusk light any dots=classic --hue-5 #1fa57a -> #007755
 dusk light any dots=classic --hue-6 #db6a22 -> #ab4b00
-dusk light any dots=classic --hue-7 #1c9baa -> #007481
-dusk light any dots=classic --hue-8 #7f9e1f -> #597200
+dusk light any dots=classic --hue-7 #1c9baa -> #00717d
+dusk light any dots=classic --hue-8 #7f9e1f -> #576f00
 berry dark any --quiet #7c7e88 -> #8b8d97
-berry light any --muted #625051 -> #5a4849
+berry light any --muted #625051 -> #574546
 berry light any --quiet #8b8b93 -> #65656d
 berry light any dots=theme --hue-1 #587ad9 -> #405fbb
 berry light any dots=theme --hue-3 #7f6ed3 -> #6856b8
-berry light any dots=theme --hue-5 #9e62c0 -> #894da9
-berry light any dots=theme --hue-7 #b559a3 -> #9e448d
+berry light any dots=theme --hue-5 #9e62c0 -> #854aa6
+berry light any dots=theme --hue-7 #b559a3 -> #9b418a
 berry light any dots=classic --hue-1 #c98a1b -> #8a5b00
 berry light any dots=classic --hue-2 #2f7fd1 -> #0e67b6
-berry light any dots=classic --hue-3 #d9567f -> #b63562
+berry light any dots=classic --hue-3 #d9567f -> #b3325f
 berry light any dots=classic --hue-4 #8b62d9 -> #774cc1
 berry light any dots=classic --hue-5 #1fa57a -> #007353
 berry light any dots=classic --hue-6 #db6a22 -> #a74900
 berry light any dots=classic --hue-7 #1c9baa -> #00717d
-berry light any dots=classic --hue-8 #7f9e1f -> #576f00
-candy dark any --quiet #7c7e88 -> #8b8d97
-candy light any --muted #5e5157 -> #584c52
+berry light any dots=classic --hue-8 #7f9e1f -> #546c00
+candy dark any --quiet #7c7e88 -> #8e909a
+candy light any --muted #5e5157 -> #56494f
 candy light any --quiet #8b8b93 -> #68686f
-candy light any dots=theme --hue-1 #00929a -> #00757b
+candy light any dots=theme --hue-1 #00929a -> #007178
 candy light any dots=theme --hue-3 #008db3 -> #00708f
-candy light any dots=theme --hue-5 #1e85d4 -> #006db4
+candy light any dots=theme --hue-5 #1e85d4 -> #006ab0
 candy light any dots=theme --hue-7 #6078d9 -> #4a60be
 candy light any dots=classic --hue-1 #c98a1b -> #8d5e00
 candy light any dots=classic --hue-2 #2f7fd1 -> #136aba
@@ -211,66 +211,66 @@ candy light any dots=classic --hue-4 #8b62d9 -> #7a4fc5
 candy light any dots=classic --hue-5 #1fa57a -> #007755
 candy light any dots=classic --hue-6 #db6a22 -> #ab4b00
 candy light any dots=classic --hue-7 #1c9baa -> #007481
-candy light any dots=classic --hue-8 #7f9e1f -> #597200
-citrus dark any --quiet #7c7e88 -> #8e909a
+candy light any dots=classic --hue-8 #7f9e1f -> #576f00
+citrus dark any --quiet #7c7e88 -> #91939d
 citrus light any --muted #545748 -> #4f5143
-citrus light any --quiet #8b8b93 -> #6b6b72
-citrus light any dots=theme --hue-1 #c95366 -> #b84358
+citrus light any --quiet #8b8b93 -> #68686f
+citrus light any dots=theme --hue-1 #c95366 -> #b44055
 citrus light any dots=theme --hue-3 #c9593b -> #b44628
-citrus light any dots=theme --hue-5 #bc6700 -> #a35900
-citrus light any dots=theme --hue-7 #a57700 -> #8b6400
-citrus light any dots=classic --hue-1 #c98a1b -> #916100
-citrus light any dots=classic --hue-2 #2f7fd1 -> #186dbd
+citrus light any dots=theme --hue-5 #bc6700 -> #9f5600
+citrus light any dots=theme --hue-7 #a57700 -> #886100
+citrus light any dots=classic --hue-1 #c98a1b -> #8d5e00
+citrus light any dots=classic --hue-2 #2f7fd1 -> #136aba
 citrus light any dots=classic --hue-3 #d9567f -> #ba3965
 citrus light any dots=classic --hue-4 #8b62d9 -> #7c52c8
-citrus light any dots=classic --hue-5 #1fa57a -> #007a58
+citrus light any dots=classic --hue-5 #1fa57a -> #007755
 citrus light any dots=classic --hue-6 #db6a22 -> #af4d00
 citrus light any dots=classic --hue-7 #1c9baa -> #007481
 citrus light any dots=classic --hue-8 #7f9e1f -> #597200
-prism dark any --quiet #7c7e88 -> #8e909a
-prism light any --muted #45595d -> #3d5155
-prism light any --quiet #8b8b93 -> #68686f
-prism light any --acc #077783 -> #007480
-prism light any dots=theme --hue-1 #009297 -> #007579
+prism dark any --quiet #7c7e88 -> #91939d
+prism light any --muted #45595d -> #3a4e52
+prism light any --quiet #8b8b93 -> #65656d
+prism light any --acc #077783 -> #00717c
+prism light any dots=theme --hue-1 #009297 -> #007175
 prism light any dots=theme --hue-3 #008eaf -> #00718c
 prism light any dots=theme --hue-5 #0087d1 -> #006ca8
 prism light any dots=theme --hue-7 #587ad9 -> #4262be
 prism light any dots=classic --hue-1 #c98a1b -> #8d5e00
-prism light any dots=classic --hue-2 #2f7fd1 -> #136aba
+prism light any dots=classic --hue-2 #2f7fd1 -> #0e67b6
 prism light any dots=classic --hue-3 #d9567f -> #b63562
-prism light any dots=classic --hue-4 #8b62d9 -> #7a4fc5
-prism light any dots=classic --hue-5 #1fa57a -> #007755
+prism light any dots=classic --hue-4 #8b62d9 -> #774cc1
+prism light any dots=classic --hue-5 #1fa57a -> #007353
 prism light any dots=classic --hue-6 #db6a22 -> #ab4b00
-prism light any dots=classic --hue-7 #1c9baa -> #007481
-prism light any dots=classic --hue-8 #7f9e1f -> #597200
-mocha dark any --quiet #7c7e88 -> #8b8d97
+prism light any dots=classic --hue-7 #1c9baa -> #00717d
+prism light any dots=classic --hue-8 #7f9e1f -> #576f00
+mocha dark any --quiet #7c7e88 -> #8e909a
 mocha light any --muted #5b544e -> #554f49
-mocha light any --quiet #8b8b93 -> #6b6b72
+mocha light any --quiet #8b8b93 -> #68686f
 mocha light any dots=theme --hue-1 #aa5db3 -> #974ba0
-mocha light any dots=theme --hue-3 #bc5694 -> #ab4785
+mocha light any dots=theme --hue-3 #bc5694 -> #a84482
 mocha light any dots=theme --hue-5 #c8536f -> #b3405e
 mocha light any dots=theme --hue-7 #ca5745 -> #b54433
 mocha light any dots=classic --hue-1 #c98a1b -> #916100
-mocha light any dots=classic --hue-2 #2f7fd1 -> #186dbd
+mocha light any dots=classic --hue-2 #2f7fd1 -> #136aba
 mocha light any dots=classic --hue-3 #d9567f -> #ba3965
 mocha light any dots=classic --hue-4 #8b62d9 -> #7c52c8
-mocha light any dots=classic --hue-5 #1fa57a -> #007a58
+mocha light any dots=classic --hue-5 #1fa57a -> #007755
 mocha light any dots=classic --hue-6 #db6a22 -> #af4d00
 mocha light any dots=classic --hue-7 #1c9baa -> #007481
 mocha light any dots=classic --hue-8 #7f9e1f -> #597200
 neon dark any --quiet #7c7e88 -> #91939d
-neon light any --muted #4a5a4d -> #425245
-neon light any --quiet #8b8b93 -> #68686f
+neon light any --muted #4a5a4d -> #3f4f42
+neon light any --quiet #8b8b93 -> #65656d
 neon light any --acc #037e3f -> #00773b
 neon light any dots=theme --hue-1 #1a9951 -> #00783b
-neon light any dots=theme --hue-3 #00967c -> #007863
-neon light any dots=theme --hue-5 #009296 -> #007578
+neon light any dots=theme --hue-3 #00967c -> #007560
+neon light any dots=theme --hue-5 #009296 -> #007175
 neon light any dots=theme --hue-7 #008eae -> #00718b
 neon light any dots=classic --hue-1 #c98a1b -> #8d5e00
-neon light any dots=classic --hue-2 #2f7fd1 -> #136aba
-neon light any dots=classic --hue-3 #d9567f -> #ba3965
+neon light any dots=classic --hue-2 #2f7fd1 -> #0e67b6
+neon light any dots=classic --hue-3 #d9567f -> #b63562
 neon light any dots=classic --hue-4 #8b62d9 -> #7a4fc5
 neon light any dots=classic --hue-5 #1fa57a -> #007755
 neon light any dots=classic --hue-6 #db6a22 -> #ab4b00
-neon light any dots=classic --hue-7 #1c9baa -> #007481
-neon light any dots=classic --hue-8 #7f9e1f -> #597200
+neon light any dots=classic --hue-7 #1c9baa -> #00717d
+neon light any dots=classic --hue-8 #7f9e1f -> #576f00

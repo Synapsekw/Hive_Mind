@@ -58,6 +58,24 @@ describe("colourLiterals", () => {
     expect(first.text).toBe('const bad = "#8ea2eb";');
   });
 
+  it("does not lose code after an apostrophe or a // in JSX text", () => {
+    const jsx = mkdtempSync(join(tmpdir(), "hive-lint-jsx-"));
+    writeFileSync(
+      join(jsx, "Note.tsx"),
+      [
+        "export const A = () => <p>Don't panic</p>;",
+        'export const B = <i style={{ color: "#ff0000" }} />;',
+        'export const C = <p>see a // b</p>; const d = "#00ff00";',
+        'export const E = "rgb(1, 2, 3)";',
+        "  // a whole-line comment with #123456 is ignored",
+        "/* a block at line start with #abcdef",
+        '   ends here */ const f = "#0000ff";',
+      ].join("\n"),
+    );
+    expect(colourLiterals(jsx).map((f) => f.line)).toEqual([2, 3, 4, 7]);
+    rmSync(jsx, { recursive: true, force: true });
+  });
+
   it("is empty for a clean folder", () => {
     const clean = mkdtempSync(join(tmpdir(), "hive-lint-clean-"));
     writeFileSync(join(clean, "x.ts"), 'export const x = "var(--brand)";');

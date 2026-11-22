@@ -231,10 +231,17 @@ function washAt(wash: RGB[], x: number, y: number, w: number, h: number): RGB {
  * 280 px (card between), sampled at the reference viewports 1600 × 1000 and 1280 × 620. If the
  * layout's widths or the supported viewports change materially, revisit these figures: the
  * blooms are sized in % of the page, so what lies behind each surface moves with them.
+ * Fix round 3 added 1440 × 900, 2560 × 1440 and 3840 × 2160: the Vivid card glows are 224 px
+ * tall whatever the viewport, so where they land on the page blooms depends on its size, and
+ * the dense check (dense.test.ts, 1920 × 1080 and 1100 × 560) found misses of up to 0.012 below
+ * 3:1 with the two reference viewports alone.
  */
-const VIEWPORTS: [number, number][] = [
+export const MODEL_VIEWPORTS: [number, number][] = [
   [1600, 1000],
   [1280, 620],
+  [1440, 900],
+  [2560, 1440],
+  [3840, 2160],
 ];
 const RAIL = 208;
 const PANEL = 280;
@@ -272,68 +279,136 @@ export type SampleOptions = {
   railScrim?: number;
 };
 
+type Point = [number, number];
+type PageSurface = "card" | "rail" | "panel" | "popover";
+
+/** The model of one viewport: the surfaces' rectangles, their colour at a point, their peaks. */
+export type PageModel = {
+  rects: Record<"rail" | "card" | "panel", Rect>;
+  /** The opaque colour(s) a surface shows at a page point (the card gives plain and under the stage glow). */
+  at: Record<PageSurface, (x: number, y: number) => RGB[]>;
+  /** Points where a gradient peaks inside each surface: every centre clamped into its rectangle. */
+  peaks: Record<PageSurface, Point[]>;
+};
+
+const clampInto = ([x0, y0, x1, y1]: Rect, x: number, y: number): Point => [
+  Math.min(x1, Math.max(x0, x)),
+  Math.min(y1, Math.max(y0, y)),
+];
+
 /**
- * Every sampled background, before reducing to extremes (for analysis and tests). Blur is
- * ignored: it averages neighbours, so the unblurred extremes are the conservative case.
+ * The page at a w × h viewport, pointwise (for `surfaceSamples` and the dense contrast check).
+ * Blur is ignored: it averages neighbours, so the unblurred extremes are the conservative case.
  * - rail: the page at its points;
- * - card: `--glass` over the page, with the Vivid top-edge glow evaluated on the card box; plus
+ * - card: `--glass` over the page, with the Vivid top-edge glows evaluated on the card box; plus
  *   the stage's faint brand glow (prototype line 97, 8%) at its centre strength over every point;
  * - panel: `--glass2` over the page;
  * - popover (opened from the rail): `--glass` over the rail's points.
+ * A radial's strength falls with a separable ellipse distance, so its peak inside a rectangle is
+ * its centre clamped into that rectangle; those points are the `peaks`.
+ */
+export function pageModel(
+  theme: string,
+  mode: Mode,
+  reach: Reach,
+  w: number,
+  h: number,
+  options: SampleOptions = {},
+): PageModel {
+  const s = seeds(theme, mode);
+  const r = reached(s, mode, reach);
+  const layers = radials(blooms(s, mode), options.bloomFactor ?? 1);
+  const glass2 = FIXED[mode].glass2;
+  const stage = withAlpha(s.brand, 0.08);
+  const rects = layout(w, h);
+  const page = (x: number, y: number) => {
+    let c = washAt(s.wash, x, y, w, h);
+    for (let i = layers.length - 1; i >= 0; i--)
+      c = over(radialAt(layers[i]!, x, y, w, h), c);
+    return c;
+  };
+  const [cx0, cy0, cx1, cy1] = rects.card;
+  const cw = cx1 - cx0;
+  const ch = cy1 - cy0;
+  // The Vivid glows: `60% 224px at 14% 0` and `30% 224px at 76% 0`, transparent at 70%.
+  const glows: Radial[] = r.glow.map((colour, i) => ({
+    rx: i === 0 ? 0.6 : 0.3,
+    ry: 224 / ch,
+    cx: i === 0 ? 0.14 : 0.76,
+    cy: 0,
+    end: 0.7,
+    colour,
+  }));
+  const rail = (x: number, y: number) => {
+    const c = page(x, y);
+    return options.railScrim ? over(black(options.railScrim), c) : c;
+  };
+  const centres: Point[] = layers.map((g) => [g.cx * w, g.cy * h]);
+  // Every centre clamped into the rectangle, and every crossing of those clamped x and y lines
+  // (where two gradients overlap, the brightest point tends to sit on such a crossing).
+  const peaks = (rect: Rect, extra: Point[] = []) => {
+    const pts = [...centres, ...extra].map(([x, y]) => clampInto(rect, x, y));
+    const xs = [...new Set(pts.map((p) => p[0]))];
+    const ys = [...new Set(pts.map((p) => p[1]))];
+    const cross = xs.flatMap((x) => ys.map((y): Point => [x, y]));
+    const seen = new Set(pts.map((p) => p.join()));
+    return [...pts, ...cross.filter((p) => !seen.has(p.join()))];
+  };
+  return {
+    rects,
+    at: {
+      rail: (x, y) => [rail(x, y)],
+      popover: (x, y) => [over(r.glass, page(x, y))],
+      panel: (x, y) => {
+        const c = over(glass2, page(x, y));
+        return [options.panelScrim ? over(black(options.panelScrim), c) : c];
+      },
+      card: (x, y) => {
+        let c = over(r.glass, page(x, y));
+        for (let i = glows.length - 1; i >= 0; i--)
+          c = over(radialAt(glows[i]!, x - cx0, y - cy0, cw, ch), c);
+        return [c, over(stage, c)];
+      },
+    },
+    peaks: {
+      rail: peaks(rects.rail),
+      popover: peaks(rects.rail),
+      panel: peaks(rects.panel),
+      card: peaks(
+        rects.card,
+        glows.map((g) => [cx0 + g.cx * cw, cy0] as Point),
+      ),
+    },
+  };
+}
+
+/**
+ * Every sampled background, before reducing to extremes (for analysis and tests): each surface
+ * on a GRID × GRID grid plus its gradient peaks, at both reference viewports.
  */
 export function surfaceSamples(
   theme: string,
   mode: Mode,
   reach: Reach,
   options: SampleOptions = {},
-): Record<"card" | "rail" | "panel" | "popover", RGB[]> {
-  const s = seeds(theme, mode);
-  const r = reached(s, mode, reach);
-  const layers = radials(blooms(s, mode), options.bloomFactor ?? 1);
-  const glass2 = FIXED[mode].glass2;
-  const stage = withAlpha(s.brand, 0.08);
-  const out = {
-    card: [] as RGB[],
-    rail: [] as RGB[],
-    panel: [] as RGB[],
-    popover: [] as RGB[],
+): Record<PageSurface, RGB[]> {
+  const out: Record<PageSurface, RGB[]> = {
+    card: [],
+    rail: [],
+    panel: [],
+    popover: [],
   };
-  for (const [w, h] of VIEWPORTS) {
-    const page = (x: number, y: number) => {
-      let c = washAt(s.wash, x, y, w, h);
-      for (let i = layers.length - 1; i >= 0; i--)
-        c = over(radialAt(layers[i]!, x, y, w, h), c);
-      return c;
+  for (const [w, h] of MODEL_VIEWPORTS) {
+    const m = pageModel(theme, mode, reach, w, h, options);
+    const where: Record<PageSurface, Rect> = {
+      card: m.rects.card,
+      rail: m.rects.rail,
+      panel: m.rects.panel,
+      popover: m.rects.rail,
     };
-    const rects = layout(w, h);
-    for (const [x, y] of grid(rects.rail)) {
-      const c = page(x, y);
-      out.rail.push(options.railScrim ? over(black(options.railScrim), c) : c);
-      out.popover.push(over(r.glass, c));
-    }
-    for (const [x, y] of grid(rects.panel)) {
-      const c = over(glass2, page(x, y));
-      out.panel.push(
-        options.panelScrim ? over(black(options.panelScrim), c) : c,
-      );
-    }
-    const [cx0, cy0, cx1, cy1] = rects.card;
-    const cw = cx1 - cx0;
-    // The Vivid glows: `60% 224px at 14% 0` and `30% 224px at 76% 0`, transparent at 70%.
-    const glows: Radial[] = r.glow.map((colour, i) => ({
-      rx: i === 0 ? 0.6 : 0.3,
-      ry: 224 / (cy1 - cy0),
-      cx: i === 0 ? 0.14 : 0.76,
-      cy: 0,
-      end: 0.7,
-      colour,
-    }));
-    for (const [x, y] of grid(rects.card)) {
-      let c = over(r.glass, page(x, y));
-      for (let i = glows.length - 1; i >= 0; i--)
-        c = over(radialAt(glows[i]!, x - cx0, y - cy0, cw, cy1 - cy0), c);
-      out.card.push(c, over(stage, c));
-    }
+    for (const k of ["rail", "popover", "panel", "card"] as const)
+      for (const [x, y] of [...grid(where[k]), ...m.peaks[k]])
+        out[k].push(...m.at[k](x, y));
   }
   return out;
 }

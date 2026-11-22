@@ -19,6 +19,8 @@ import {
   dotTokens,
   reachTokens,
   resetTokens,
+  MODEL_VIEWPORTS,
+  pageModel,
   surfaceSamples,
 } from "./tokens";
 
@@ -236,12 +238,45 @@ describe("backgrounds", () => {
 describe("surfaceSamples", () => {
   const lum = (c: { r: number; g: number; b: number }) => luminance(c);
 
-  it("samples a 12 × 12 grid per surface at two viewports", () => {
-    const s = surfaceSamples("keystone", "dark", "tinted");
-    expect(s.rail).toHaveLength(2 * 144);
-    expect(s.panel).toHaveLength(2 * 144);
-    expect(s.popover).toHaveLength(2 * 144);
-    expect(s.card).toHaveLength(2 * 2 * 144); // each point plain and under the stage glow
+  it("samples a 12 × 12 grid plus the gradient peaks per surface at every model viewport", () => {
+    expect(MODEL_VIEWPORTS).toContainEqual([1600, 1000]);
+    expect(MODEL_VIEWPORTS).toContainEqual([1280, 620]);
+    for (const reach of ["tinted", "vivid"] as const) {
+      const s = surfaceSamples("keystone", "dark", reach);
+      const sum = (k: "rail" | "panel" | "popover" | "card") =>
+        MODEL_VIEWPORTS.reduce(
+          (n, [w, h]) =>
+            n +
+            144 +
+            pageModel("keystone", "dark", reach, w, h).peaks[k].length,
+          0,
+        );
+      expect(s.rail).toHaveLength(sum("rail"));
+      expect(s.panel).toHaveLength(sum("panel"));
+      expect(s.popover).toHaveLength(sum("popover"));
+      // Each card point plain and under the stage glow.
+      expect(s.card).toHaveLength(2 * sum("card"));
+    }
+  });
+
+  it("samples every gradient's peak, the Vivid card glows included", () => {
+    const m = pageModel("aurora", "light", "vivid", 1600, 1000);
+    const [x0, y0, x1] = m.rects.card;
+    const cw = x1 - x0;
+    const has = (pts: [number, number][], x: number, y: number) =>
+      pts.some(
+        ([px, py]) => Math.abs(px - x) < 1e-9 && Math.abs(py - y) < 1e-9,
+      );
+    expect(has(m.peaks.card, x0 + 0.14 * cw, y0)).toBe(true);
+    expect(has(m.peaks.card, x0 + 0.76 * cw, y0)).toBe(true);
+    // The pooled glow at 60% 40% lies inside the card: its centre itself is a peak.
+    expect(has(m.peaks.card, 0.6 * 1600, 0.4 * 1000)).toBe(true);
+    // The top-left bloom at 8% -6% is clamped onto the rail's top edge.
+    expect(has(m.peaks.rail, 0.08 * 1600, 0)).toBe(true);
+    // And the samples contain the glow peak's colour.
+    const peak = m.at.card(x0 + 0.14 * cw, y0)[0]!;
+    const samples = surfaceSamples("aurora", "light", "vivid").card;
+    expect(samples.some((c) => toHex(c) === toHex(peak))).toBe(true);
   });
 
   it("is the bare wash where no bloom reaches, and the blooms only lighten a dark wash", () => {
