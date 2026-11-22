@@ -119,9 +119,10 @@ claims — `agent_id`, `workspace_id`, `trust_tier` — and the database uses th
 - accepting or declining a link is refused;
 - a self-hosted agent's writes are forced into quarantine.
 
-**Audit log:** every sharing change a person makes writes one row to `audit_log`: setting or
-changing a note's or a folder's sharing, releasing a held note, deleting or renaming a folder that
-has a rule, and moving a note so that a different folder rule applies. A row records the hive,
+**Audit log:** these sharing changes by a person each write one row to `audit_log`: a note's own
+setting changed; a held note released; a folder rule set, changed, removed, renamed or deleted; a
+note moved by a person when that changes who can read it. Not yet recorded: a change to a
+member's default visibility, and accepting a link. A row records the hive,
 the person, the note id or the folder's path, and the settings before and after. It never holds a
 note's text, title or path. Only the hive owner can read the audit log; there is no screen for it
 yet.

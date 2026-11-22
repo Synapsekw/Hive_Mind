@@ -133,11 +133,12 @@ once, without anyone reviewing it, except a note from a self-hosted agent, which
 the member releases it. Agents cannot move notes or change folders, so an agent cannot share a
 note by putting it somewhere else.
 
-Every sharing change a person makes is written to the audit log: a note's or a folder's setting,
-releasing a held note, deleting or renaming a folder that has a rule, and moving a note so that a
-different rule applies to it. Only the hive owner can read the audit log. It records who changed
-what and the before and after settings, and a folder's path; it never holds a note's text, title
-or path.
+The audit log records these sharing changes made by a person: a note's own setting changed; a
+held note released; a folder rule set, changed, removed, renamed or deleted; and a note moved by
+a person when that changes who can read it. Not yet recorded: a change to a member's default
+visibility, and accepting a link. Only the hive owner can read the audit log. It records who
+changed what and the before and after settings, and a folder's path; it never holds a note's
+text, title or path.
 
 ## Agent tools
 
