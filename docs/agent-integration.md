@@ -47,8 +47,14 @@ records. Those exist only in the web app for signed-in people.
 
 - Writes are confined to the agent's own workspace by row-level security; a cross-member write
   fails at the database, not in application code.
-- Every write is versioned; a bad write is reverted from the Vault.
+- Every write is versioned. Reverting a bad write from the Vault is not built yet; for now the earlier version stays in the history.
 - Self-hosted agents' writes are quarantined; the member releases them.
+- Agents cannot move a note (change its path), and cannot change, rename or delete a folder
+  record. Folder sharing rules follow the path, so a move could otherwise share a note.
+- A note an agent writes into a folder its member has shared is shared at once, with nobody
+  reviewing it first: the folder's rule covers every note under it, including new ones. The only
+  exception is a self-hosted agent, whose notes stay held until the member releases them. The
+  vault says this every time a person shares a folder.
 
 ### 3.2 Inbound content hygiene (designed)
 
@@ -111,7 +117,11 @@ it first and write back the full text.
 When two notes concern the same client or project, propose a link once with hive_propose_link.
 
 Never attempt to change sharing or visibility, and never try to delete a note; the user controls
-those in the web app. If a note seems to belong with the group, say so once.
+those in the web app. If a note seems to belong with the group, say so once. You cannot change a
+note's path (you may change its title). The user may have shared some folders: a note you write
+inside one may become readable by the people it is shared with as soon as you save it. Write a
+note where it belongs; never choose a folder in order to share or hide it. Sharing is the user's
+decision.
 
 When you produce a file the user will want to keep (a proposal, a spreadsheet, a deck), save it
 with hive_save_file, giving its type and customer, and attach it to the note it belongs to. The
@@ -125,6 +135,8 @@ sessions/<YYYY-MM-DD>-<slug>.md: work done, decisions, open items, and the files
 ```
 
 When `hive_session_note` lands, the last paragraph will use it instead of `hive_write`.
+
+Notes from a self-hosted agent are held until the user releases them, even inside a shared folder.
 
 `hive_save_file` reads from the member's disk, so it is limited to the server's working folder
 (`HIVE_FILES_ROOT`, default the folder the agent runs in) and refuses hidden files; see

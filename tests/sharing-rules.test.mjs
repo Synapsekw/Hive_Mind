@@ -105,6 +105,7 @@ test("another hive and the public see nothing", async () => {
 });
 
 test("a folder rule shares every note inside it", async () => {
+  // The rule reaches notes by their path; folder_id plays no part.
   const f = await as(
     person("ahmed"),
     `insert into public.folders (workspace_id, member_id, path, visibility) values ($1, $2, 'clients', 'group') returning id`,
@@ -112,11 +113,19 @@ test("a folder rule shares every note inside it", async () => {
   );
   await as(
     person("ahmed"),
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     values ($1, $2, $3, 'clients/a.md', 'ahmed in shared folder')`,
+    [hive, members.ahmed, ws.ahmed],
+  );
+  await as(
+    person("ahmed"),
     `insert into public.notes (hive_id, member_id, workspace_id, folder_id, path, title)
-     values ($1, $2, $3, $4, 'clients/a.md', 'ahmed in shared folder')`,
+     values ($1, $2, $3, $4, 'elsewhere/b.md', 'ahmed linked to folder by id only')`,
     [hive, members.ahmed, ws.ahmed, f[0].id],
   );
-  assert.ok((await titles(person("sara"))).includes("ahmed in shared folder"));
+  const seen = await titles(person("sara"));
+  assert.ok(seen.includes("ahmed in shared folder"));
+  assert.ok(!seen.includes("ahmed linked to folder by id only"));
 });
 
 test("nobody can write into someone else's space", async () => {
@@ -935,6 +944,1019 @@ test("only your own agents are named", async () => {
   assert.ok(
     !(await map(person("ahmed"))).agents.some((a) => a.id === expiring),
   );
+});
+
+// ------------------------------------------------------------ folder rules
+// A note's sharing is its own setting, else the rule of the nearest folder
+// above it by path (same workspace), else the member's default. These tests
+// run before the 5,000-note cap test so they stay fast.
+
+const fr = {};
+const addFolder = (
+  name,
+  path,
+  visibility = null,
+  shared_with = [],
+  workspace,
+) =>
+  as(
+    person(name),
+    `insert into public.folders (workspace_id, member_id, path, visibility, shared_with)
+     values ($1, $2, $3, $4, $5) returning id`,
+    [workspace ?? ws[name], members[name], path, visibility, shared_with],
+  ).then((r) => r[0].id);
+const canRead = async (who, id) =>
+  (await as(who, `select id from public.notes where id = $1`, [id])).length ===
+  1;
+const sharing = async (who, id) =>
+  (
+    await as(
+      who,
+      `select public.note_visibility(n) as effective,
+              public.note_shared_with(n) as effective_with,
+              public.note_rule_folder(n) as rule_folder,
+              public.note_access(n) as access
+         from public.notes n where n.id = $1`,
+      [id],
+    )
+  )[0];
+const agentWrites = (agent, name, path, title) =>
+  as(
+    agent,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     values ($1, $2, $3, $4, $5) returning id, quarantined`,
+    [hive, members[name], ws[name], path, title],
+  ).then((r) => r[0]);
+
+test("a folder rule reaches a note by its path", async () => {
+  await addFolder("dani", "fr/reach", "group");
+  fr.reach = await addAt(
+    person("dani"),
+    "dani",
+    "fr/reach/deep/x.md",
+    "fr reach",
+  );
+  fr.beside = await addAt(person("dani"), "dani", "fr/reachx.md", "fr beside");
+  assert.equal(await canRead(person("ahmed"), fr.reach), true);
+  assert.equal(await canRead(person("sara"), fr.reach), true);
+  assert.equal(await canRead(person("ahmed"), fr.beside), false);
+  assert.equal(await canRead(person("outsider"), fr.reach), false);
+});
+
+test("a note an agent writes into a shared folder is shared at once", async () => {
+  await addFolder("dani", "fr/team", "group");
+  await addFolder("dani", "fr/forsara", "members", [members.sara]);
+  const agent = await agentFor("dani");
+  fr.team = (
+    await agentWrites(agent, "dani", "fr/team/by-agent.md", "fr team")
+  ).id;
+  fr.forSara = (
+    await agentWrites(agent, "dani", "fr/forsara/by-agent.md", "fr for sara")
+  ).id;
+  assert.equal(await canRead(person("ahmed"), fr.team), true);
+  assert.equal(await canRead(person("sara"), fr.forSara), true);
+  assert.equal(await canRead(person("ahmed"), fr.forSara), false);
+});
+
+test("the nearest folder with a rule wins", async () => {
+  await addFolder("dani", "fr/nest", "group");
+  await addFolder("dani", "fr/nest/inner", "members", [members.sara]);
+  fr.outer = await addAt(person("dani"), "dani", "fr/nest/y.md", "fr outer");
+  fr.inner = await addAt(
+    person("dani"),
+    "dani",
+    "fr/nest/inner/x.md",
+    "fr inner",
+  );
+  assert.equal(await canRead(person("ahmed"), fr.outer), true);
+  assert.equal(await canRead(person("ahmed"), fr.inner), false);
+  assert.equal(await canRead(person("sara"), fr.inner), true);
+});
+
+test("a folder with no rule inherits from the one above", async () => {
+  await addFolder("dani", "fr/inh", "group");
+  await addFolder("dani", "fr/inh/sub", null);
+  fr.inherits = await addAt(
+    person("dani"),
+    "dani",
+    "fr/inh/sub/x.md",
+    "fr inherits",
+  );
+  assert.equal(await canRead(person("ahmed"), fr.inherits), true);
+});
+
+test("a note's own setting beats its folder", async () => {
+  fr.ownPrivate = await addAt(
+    person("dani"),
+    "dani",
+    "fr/team/mine.md",
+    "fr own private",
+    { visibility: "private" },
+  );
+  fr.ownSara = await addAt(
+    person("dani"),
+    "dani",
+    "fr/team/sara.md",
+    "fr own sara",
+    { visibility: "members", shared_with: [members.sara] },
+  );
+  assert.equal(await canRead(person("ahmed"), fr.ownPrivate), false);
+  assert.equal(await canRead(person("sara"), fr.ownPrivate), false);
+  assert.equal(await canRead(person("ahmed"), fr.ownSara), false);
+  assert.equal(await canRead(person("sara"), fr.ownSara), true);
+});
+
+test("a folder only captures its own path", async () => {
+  await addFolder("dani", "fr/clients/ac", "group");
+  const acme = await addAt(
+    person("dani"),
+    "dani",
+    "fr/clients/acme/x.md",
+    "fr acme",
+  );
+  assert.equal(await canRead(person("ahmed"), acme), false);
+
+  // like-wildcards in a folder path match literally.
+  await addFolder("dani", "fr/a%b", "group");
+  await addFolder("dani", "fr/a_b", "group");
+  const axb = await addAt(person("dani"), "dani", "fr/axb/n.md", "fr axb");
+  const deep = await addAt(person("dani"), "dani", "fr/axbz/n.md", "fr axbz");
+  const literal = await addAt(person("dani"), "dani", "fr/a%b/n.md", "fr a%b");
+  assert.equal(await canRead(person("ahmed"), axb), false);
+  assert.equal(await canRead(person("ahmed"), deep), false);
+  assert.equal(await canRead(person("ahmed"), literal), true);
+
+  // Case-sensitive.
+  const upper = await addAt(person("dani"), "dani", "fr/Team/x.md", "fr Team");
+  assert.equal(await canRead(person("ahmed"), upper), false);
+
+  // The same path in another workspace, or another member's, has no effect.
+  const other = (
+    await as(
+      person("dani"),
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Folder rules') returning id`,
+      [hive, members.dani],
+    )
+  )[0].id;
+  await addFolder("dani", "fr/elsewhere", "group", [], other);
+  await addFolder("sara", "fr/elsewhere", "group");
+  const here = await addAt(
+    person("dani"),
+    "dani",
+    "fr/elsewhere/x.md",
+    "fr elsewhere",
+  );
+  assert.equal(await canRead(person("ahmed"), here), false);
+  assert.equal(await canRead(person("sara"), here), false);
+});
+
+test("an agent cannot move a note", async () => {
+  const agent = await agentFor("dani");
+  const n = (await agentWrites(agent, "dani", "fr/move/a.md", "fr move")).id;
+  await assert.rejects(
+    as(agent, `update public.notes set path = 'fr/team/a.md' where id = $1`, [
+      n,
+    ]),
+    /agents cannot move a note/,
+  );
+  assert.equal(await canRead(person("ahmed"), n), false);
+  // The agent may still edit the note in place.
+  await as(agent, `update public.notes set body = 'edited' where id = $1`, [n]);
+
+  // A person may move it, and the note then follows its new folder.
+  const moved = await as(
+    person("dani"),
+    `update public.notes set path = 'fr/team/a.md' where id = $1 returning path`,
+    [n],
+  );
+  assert.equal(moved[0].path, "fr/team/a.md");
+  assert.equal(await canRead(person("ahmed"), n), true);
+});
+
+test("a self-hosted agent's note in a shared folder stays held", async () => {
+  await addFolder("sara", "fr/held", "group");
+  const agent = await agentFor("sara", "self_hosted");
+  const n = await agentWrites(agent, "sara", "fr/held/x.md", "fr held");
+  assert.equal(n.quarantined, true);
+  assert.equal(await canRead(person("dani"), n.id), false);
+  assert.equal(await canRead(person("ahmed"), n.id), false);
+  assert.equal(await canRead(person("sara"), n.id), true);
+  // Its owner sees what it would become once released.
+  const s = await sharing(person("sara"), n.id);
+  assert.equal(s.effective, "group");
+  assert.equal(s.access, "own");
+});
+
+test("note_rule_folder and note_access say where sharing comes from", async () => {
+  assert.deepEqual(await sharing(person("ahmed"), fr.team), {
+    effective: "group",
+    effective_with: [],
+    rule_folder: "fr/team",
+    access: "shared",
+  });
+  assert.equal((await sharing(person("dani"), fr.team)).access, "own");
+  assert.deepEqual(await sharing(person("sara"), fr.forSara), {
+    effective: "members",
+    effective_with: [members.sara],
+    rule_folder: "fr/forsara",
+    access: "shared",
+  });
+  // The nearest rule is named, and a folder with no rule is skipped.
+  assert.equal(
+    (await sharing(person("sara"), fr.inner)).rule_folder,
+    "fr/nest/inner",
+  );
+  assert.equal(
+    (await sharing(person("ahmed"), fr.inherits)).rule_folder,
+    "fr/inh",
+  );
+  // A note with its own setting still names the folder it sits in.
+  assert.deepEqual(await sharing(person("sara"), fr.ownSara), {
+    effective: "members",
+    effective_with: [members.sara],
+    rule_folder: "fr/team",
+    access: "shared",
+  });
+  assert.deepEqual(await sharing(person("dani"), fr.ownPrivate), {
+    effective: "private",
+    effective_with: [],
+    rule_folder: "fr/team",
+    access: "own",
+  });
+  // No rule folder above: null.
+  assert.equal(
+    (await sharing(person("dani"), await noteId("dani group"))).rule_folder,
+    null,
+  );
+  // Opened only by an accepted link.
+  assert.deepEqual(
+    await sharing(person("dani"), await noteId("sara kestrel")),
+    {
+      effective: "private",
+      effective_with: [],
+      rule_folder: null,
+      access: "link",
+    },
+  );
+
+  // Handed a note the caller cannot read, they reveal nothing.
+  const raw = (
+    await db.query(
+      `select to_jsonb(n) as j from public.notes n where id = $1`,
+      [fr.inner],
+    )
+  ).rows[0].j;
+  const probe = (
+    await as(
+      person("ahmed"),
+      `select public.note_rule_folder(r) as rule_folder, public.note_access(r) as access
+         from jsonb_populate_record(null::public.notes, $1) r`,
+      [raw],
+    )
+  )[0];
+  assert.deepEqual(probe, { rule_folder: null, access: null });
+  // A forged row claiming to be the caller's own reveals nothing either.
+  const forged = { ...raw, member_id: members.ahmed };
+  const probe2 = (
+    await as(
+      person("ahmed"),
+      `select public.note_rule_folder(r) as rule_folder, public.note_access(r) as access
+         from jsonb_populate_record(null::public.notes, $1) r`,
+      [forged],
+    )
+  )[0];
+  assert.deepEqual(probe2, { rule_folder: null, access: null });
+  // The internal lookup is not callable by anyone signed in.
+  await assert.rejects(
+    as(
+      person("dani"),
+      `select public.note_folder_rule(n) from public.notes n limit 1`,
+    ),
+    /permission denied/,
+  );
+});
+
+test("folder_share_preview counts exactly", async () => {
+  await addFolder("dani", "fp", "group");
+  await addFolder("dani", "fp/dec", "group");
+  await addFolder("dani", "fp/dec/norule", null);
+  await addFolder("dani", "fp/dec/inner", "private");
+  for (const p of ["fp/dec/a.md", "fp/dec/b.md", "fp/dec/norule/c.md"])
+    await addAt(person("dani"), "dani", p, `fp ${p}`);
+  await addAt(person("dani"), "dani", "fp/dec/own.md", "fp own", {
+    visibility: "private",
+  });
+  await addAt(person("dani"), "dani", "fp/dec/inner/x.md", "fp inner x");
+  await addAt(person("dani"), "dani", "fp/dec/inner/deep/y.md", "fp inner y");
+  const held = await agentWrites(
+    await agentFor("dani", "self_hosted"),
+    "dani",
+    "fp/dec/held.md",
+    "fp held",
+  );
+  assert.equal(held.quarantined, true);
+  // Not under fp/dec.
+  await addAt(person("dani"), "dani", "fp/dec.md", "fp dec file");
+  await addAt(person("dani"), "dani", "fp/decx/z.md", "fp decx");
+  await addAt(person("ahmed"), "ahmed", "fp/dec/ahmed.md", "fp ahmed");
+
+  const preview = (who, w, p) =>
+    as(who, `select public.folder_share_preview($1, $2) as p`, [w, p]).then(
+      (r) => r[0].p,
+    );
+  assert.deepEqual(await preview(person("dani"), ws.dani, "fp/dec"), {
+    follows: 4,
+    own_setting: 1,
+    under_nested_rule: 2,
+    held: 1,
+  });
+  assert.deepEqual(await preview(person("dani"), ws.dani, "fp/nothing"), {
+    follows: 0,
+    own_setting: 0,
+    under_nested_rule: 0,
+    held: 0,
+  });
+
+  await assert.rejects(
+    preview(await agentFor("dani"), ws.dani, "fp/dec"),
+    /for people only/,
+  );
+  await assert.rejects(
+    preview(person("ahmed"), ws.dani, "fp/dec"),
+    /not your workspace/,
+  );
+  await assert.rejects(
+    preview(person("outsider"), ws.dani, "fp/dec"),
+    /not your workspace/,
+  );
+  await assert.rejects(preview(null, ws.dani, "fp/dec"), /permission denied/);
+});
+
+const auditSince = async (id) =>
+  (
+    await db.query(
+      `select id, hive_id, member_id, agent_id, action, note_id, detail
+         from public.audit_log where id > $1 order by id`,
+      [id],
+    )
+  ).rows;
+const lastAudit = async () =>
+  Number(
+    (await db.query(`select coalesce(max(id), 0) as m from public.audit_log`))
+      .rows[0].m,
+  );
+
+test("every sharing change leaves one audit row", async () => {
+  const start = await lastAudit();
+  const none = { visibility: null, shared_with: [] };
+  const note = await addAt(
+    person("dani"),
+    "dani",
+    "au/secret-path.md",
+    "audit secret title",
+    { body: "audit-secret-body" },
+  );
+  assert.deepEqual(
+    await auditSince(start),
+    [],
+    "a plain insert is not audited",
+  );
+
+  const set = (v, sw = []) =>
+    as(
+      person("dani"),
+      `update public.notes set visibility = $2, shared_with = $3 where id = $1`,
+      [note, v, sw],
+    );
+  let mark = await lastAudit();
+  await set("group");
+  let rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "note.sharing");
+  assert.equal(rows[0].note_id, note);
+  assert.equal(rows[0].hive_id, hive);
+  assert.equal(rows[0].member_id, members.dani);
+  assert.equal(rows[0].agent_id, null);
+  assert.deepEqual(rows[0].detail, {
+    from: none,
+    to: { visibility: "group", shared_with: [] },
+  });
+
+  mark = await lastAudit();
+  await set("private");
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].detail, {
+    from: { visibility: "group", shared_with: [] },
+    to: { visibility: "private", shared_with: [] },
+  });
+
+  mark = await lastAudit();
+  await set("members", [members.ahmed]);
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].detail, {
+    from: { visibility: "private", shared_with: [] },
+    to: { visibility: "members", shared_with: [members.ahmed] },
+  });
+
+  // Unchanged updates, and edits to the text, write nothing.
+  mark = await lastAudit();
+  await set("members", [members.ahmed]);
+  await as(
+    person("dani"),
+    `update public.notes set body = 'audit-secret-body 2' where id = $1`,
+    [note],
+  );
+  assert.deepEqual(await auditSince(mark), []);
+
+  // An insert that carries a setting counts.
+  mark = await lastAudit();
+  const born = await addAt(person("dani"), "dani", "au/born.md", "au born", {
+    visibility: "group",
+  });
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "note.sharing");
+  assert.equal(rows[0].note_id, born);
+  assert.deepEqual(rows[0].detail, {
+    from: none,
+    to: { visibility: "group", shared_with: [] },
+  });
+
+  // A folder rule created by insert, then changed by update (an upsert).
+  mark = await lastAudit();
+  await addFolder("dani", "au/plain", null);
+  assert.deepEqual(await auditSince(mark), [], "a folder with no rule");
+  await addFolder("dani", "au/rule", "group");
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "folder.sharing");
+  assert.equal(rows[0].note_id, null);
+  assert.equal(rows[0].member_id, members.dani);
+  assert.equal(rows[0].hive_id, hive);
+  assert.deepEqual(rows[0].detail, {
+    path: "au/rule",
+    from: none,
+    to: { visibility: "group", shared_with: [] },
+  });
+  const upsert = (v, sw) =>
+    as(
+      person("dani"),
+      `insert into public.folders (workspace_id, member_id, path, visibility, shared_with)
+       values ($1, $2, 'au/rule', $3, $4)
+       on conflict (workspace_id, path) do update
+         set visibility = excluded.visibility, shared_with = excluded.shared_with`,
+      [ws.dani, members.dani, v, sw],
+    );
+  mark = await lastAudit();
+  await upsert("members", [members.sara]);
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "folder.sharing");
+  assert.deepEqual(rows[0].detail, {
+    path: "au/rule",
+    from: { visibility: "group", shared_with: [] },
+    to: { visibility: "members", shared_with: [members.sara] },
+  });
+  mark = await lastAudit();
+  await upsert("members", [members.sara]);
+  assert.deepEqual(await auditSince(mark), [], "an unchanged upsert");
+
+  // A release.
+  const agent = await agentFor("dani", "self_hosted");
+  mark = await lastAudit();
+  const held = await agentWrites(agent, "dani", "au/held.md", "au held");
+  assert.equal(held.quarantined, true);
+  assert.deepEqual(await auditSince(mark), [], "an agent's write");
+  await as(
+    person("dani"),
+    `update public.notes set quarantined = false where id = $1`,
+    [held.id],
+  );
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "note.released");
+  assert.equal(rows[0].note_id, held.id);
+  assert.equal(rows[0].member_id, members.dani);
+  assert.equal(rows[0].agent_id, null);
+  assert.deepEqual(rows[0].detail, {});
+
+  // A write with no person behind it is not audited.
+  mark = await lastAudit();
+  await db.query(`select set_config('request.jwt.claims', '', false)`);
+  await db.query(`update public.notes set visibility = 'group' where id = $1`, [
+    note,
+  ]);
+  assert.deepEqual(await auditSince(mark), []);
+
+  // No row carries a note's path, title or body.
+  const text = JSON.stringify(await auditSince(start));
+  for (const s of [
+    "au/secret-path.md",
+    "audit secret title",
+    "audit-secret-body",
+    "au/born.md",
+    "au/held.md",
+  ])
+    assert.ok(!text.includes(s), `the audit log carries ${s}`);
+});
+
+test("only the hive owner reads the audit log", async () => {
+  // Ahmed's own change is recorded for the owner to read.
+  const mark = await lastAudit();
+  const a = await addAt(person("ahmed"), "ahmed", "au/ahmed.md", "au ahmed");
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [a],
+  );
+  const read = (who) =>
+    as(who, `select action, member_id from public.audit_log where id > $1`, [
+      mark,
+    ]);
+  assert.deepEqual(await read(person("dani")), [
+    { action: "note.sharing", member_id: members.ahmed },
+  ]);
+  assert.ok(
+    (await as(person("dani"), `select id from public.audit_log`)).length,
+  );
+  for (const who of [
+    person("ahmed"),
+    person("sara"),
+    person("outsider"),
+    await agentFor("dani"),
+  ])
+    assert.deepEqual(await as(who, `select id from public.audit_log`), []);
+  assert.deepEqual(await as(null, `select id from public.audit_log`), []);
+  // Nobody writes it by hand.
+  await assert.rejects(
+    as(
+      person("dani"),
+      `insert into public.audit_log (hive_id, action) values ($1, 'forged')`,
+      [hive],
+    ),
+    /row-level security/,
+  );
+});
+
+// The outsider's own member and workspace (another hive).
+const outsiderSpace = async () =>
+  (
+    await db.query(
+      `select m.id as member_id, w.id as workspace_id
+         from public.members m join public.workspaces w on w.member_id = m.id
+        where m.user_id = $1 limit 1`,
+      [users.outsider],
+    )
+  ).rows[0];
+
+test("nobody can move a folder rule into someone else's workspace", async () => {
+  const secret = await addAt(
+    person("dani"),
+    "dani",
+    "fx/victim/secret.md",
+    "fx secret",
+  );
+  const out = await outsiderSpace();
+  const mark = await lastAudit();
+  const repoint = (who, id, set) =>
+    as(who, `update public.folders set ${set} = $2 where id = $1`, [
+      id,
+      set === "workspace_id" ? ws.dani : members.dani,
+    ]);
+
+  // A colleague re-points their own rule folder at Dani's workspace.
+  const mine = await addFolder("ahmed", "fx/victim", "group");
+  await assert.rejects(
+    repoint(person("ahmed"), mine, "workspace_id"),
+    /a folder cannot move to another member or workspace/,
+  );
+  await assert.rejects(
+    repoint(person("ahmed"), mine, "member_id"),
+    /a folder cannot move to another member or workspace/,
+  );
+  // A member of another hive tries the same.
+  const theirs = (
+    await as(
+      person("outsider"),
+      `insert into public.folders (workspace_id, member_id, path, visibility)
+       values ($1, $2, 'fx/victim', 'group') returning id`,
+      [out.workspace_id, out.member_id],
+    )
+  )[0].id;
+  await assert.rejects(
+    repoint(person("outsider"), theirs, "workspace_id"),
+    /a folder cannot move to another member or workspace/,
+  );
+  // Even between one's own workspaces.
+  const second = (
+    await db.query(
+      `select id from public.workspaces where member_id = $1 and name = 'Folder rules'`,
+      [members.dani],
+    )
+  ).rows[0].id;
+  const own = await addFolder("dani", "fx/own", "group");
+  await assert.rejects(
+    as(
+      person("dani"),
+      `update public.folders set workspace_id = $2 where id = $1`,
+      [own, second],
+    ),
+    /a folder cannot move/,
+  );
+
+  // Nor can anyone insert a folder into a workspace that is not their own.
+  await assert.rejects(
+    addFolder("ahmed", "fx/victim", "group", [], ws.dani),
+    /workspace does not belong to this member/,
+  );
+  await assert.rejects(
+    as(
+      person("ahmed"),
+      `insert into public.folders (workspace_id, member_id, path, visibility)
+       values ($1, $2, 'fx/victim', 'group')`,
+      [ws.dani, members.dani],
+    ),
+    /row-level security/,
+  );
+  await assert.rejects(
+    as(
+      person("outsider"),
+      `insert into public.folders (workspace_id, member_id, path, visibility)
+       values ($1, $2, 'fx/victim', 'group')`,
+      [ws.dani, out.member_id],
+    ),
+    /workspace does not belong to this member/,
+  );
+
+  for (const who of ["ahmed", "sara"])
+    assert.equal(await canRead(person(who), secret), false, who);
+  // The only rows in this hive are the colleagues' own folder inserts.
+  for (const r of (await auditSince(mark)).filter((r) => r.hive_id === hive))
+    assert.ok([members.ahmed, members.dani].includes(r.member_id), r.detail);
+
+  // Defence in depth: a folder row whose member is not the workspace's owner
+  // (impossible through the API now) still shares nothing.
+  await db.query(`select set_config('request.jwt.claims', '', false)`);
+  await db.query(
+    `alter table public.folders disable trigger folders_before_write`,
+  );
+  try {
+    await db.query(
+      `insert into public.folders (workspace_id, member_id, path, visibility)
+       values ($1, $2, 'fx/victim', 'group')`,
+      [ws.dani, members.ahmed],
+    );
+  } finally {
+    await db.query(
+      `alter table public.folders enable trigger folders_before_write`,
+    );
+  }
+  for (const who of ["ahmed", "sara"])
+    assert.equal(await canRead(person(who), secret), false, who);
+  assert.equal((await sharing(person("dani"), secret)).rule_folder, null);
+});
+
+test("nobody can move a note into someone else's space", async () => {
+  const out = await outsiderSpace();
+  const n = await addAt(person("ahmed"), "ahmed", "nx/a.md", "nx ahmed");
+  await assert.rejects(
+    as(
+      person("ahmed"),
+      `update public.notes set workspace_id = $2 where id = $1`,
+      [n, ws.dani],
+    ),
+    /a note cannot move to another member, workspace or hive/,
+  );
+  await assert.rejects(
+    as(
+      person("ahmed"),
+      `update public.notes set member_id = $2 where id = $1`,
+      [n, members.dani],
+    ),
+    /a note cannot move to another member, workspace or hive/,
+  );
+  // An outsider cannot touch a note in this hive at all.
+  const touched = await as(
+    person("outsider"),
+    `update public.notes set workspace_id = $2 where id = $1 returning id`,
+    [n, out.workspace_id],
+  );
+  assert.equal(touched.length, 0);
+  // Nor insert one into a workspace that is not theirs.
+  await assert.rejects(
+    as(
+      person("ahmed"),
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'nx/forged.md', 'nx forged')`,
+      [hive, members.ahmed, ws.dani],
+    ),
+    /workspace does not belong to this member/,
+  );
+  await assert.rejects(
+    as(
+      person("outsider"),
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'nx/forged.md', 'nx forged')`,
+      [hive, out.member_id, ws.dani],
+    ),
+    /workspace does not belong to this member/,
+  );
+  const row = (
+    await db.query(
+      `select member_id, workspace_id from public.notes where id = $1`,
+      [n],
+    )
+  ).rows[0];
+  assert.deepEqual(row, { member_id: members.ahmed, workspace_id: ws.ahmed });
+});
+
+test("a forged note row reveals no folder rule", async () => {
+  await addFolder("dani", "fg/acme-secret", "members", [members.sara]);
+  const forged = {
+    id: "00000000-0000-0000-0000-000000000001",
+    hive_id: hive,
+    member_id: members.dani,
+    workspace_id: ws.dani,
+    path: "fg/acme-secret/guess.md",
+    title: "x",
+    quarantined: false,
+    shared_with: [],
+  };
+  const ask = (who, row) =>
+    as(
+      who,
+      `select public.note_visibility(r) as v, public.note_shared_with(r) as sw,
+              coalesce(public.can_read_note(r), false) as c
+         from jsonb_populate_record(null::public.notes, $1) r`,
+      [row],
+    ).then((r) => r[0]);
+  // Not even the member's default visibility.
+  const nothing = { v: null, sw: null, c: false };
+  assert.deepEqual(await ask(person("ahmed"), forged), nothing);
+  assert.deepEqual(await ask(person("sara"), forged), nothing);
+  assert.deepEqual(await ask(person("outsider"), forged), nothing);
+  assert.deepEqual(await ask(await agentFor("ahmed"), forged), nothing);
+  const out = await outsiderSpace();
+  assert.deepEqual(
+    await ask(person("outsider"), {
+      ...forged,
+      member_id: members.sara,
+      workspace_id: out.workspace_id,
+    }),
+    nothing,
+  );
+  // A stored note's id with a guessed path is still a forgery.
+  const real = await addAt(person("dani"), "dani", "fg/other.md", "fg other");
+  assert.deepEqual(
+    await ask(person("ahmed"), { ...forged, id: real }),
+    nothing,
+  );
+  // The public cannot call them at all.
+  for (const fn of ["note_visibility", "note_shared_with", "can_read_note"])
+    await assert.rejects(
+      as(
+        null,
+        `select public.${fn}(r) from jsonb_populate_record(null::public.notes, $1) r`,
+        [forged],
+      ),
+      /permission denied/,
+      fn,
+    );
+  // The workspace's owner gets the real answer, and a stored note under the
+  // folder resolves for the colleague it is shared with.
+  assert.deepEqual(await ask(person("dani"), forged), {
+    v: "members",
+    sw: [members.sara],
+    c: true,
+  });
+  const stored = await addAt(
+    person("dani"),
+    "dani",
+    "fg/acme-secret/real.md",
+    "fg real",
+  );
+  assert.equal((await sharing(person("sara"), stored)).effective, "members");
+  assert.equal(await canRead(person("ahmed"), stored), false);
+});
+
+test("a locked note's path cannot be guessed", async () => {
+  // Dani's note under a rule naming Sara only; Ahmed sees a locked stub.
+  const locked = await addAt(
+    person("dani"),
+    "dani",
+    "fg/acme-secret/deal.md",
+    "fg deal",
+  );
+  const stub = nodeOf(await map(person("ahmed")), locked);
+  assert.equal(stub.locked, true);
+  const probe = (who, row, path) =>
+    as(
+      who,
+      `select public.note_visibility(r) as v, public.note_shared_with(r) as sw,
+              coalesce(public.can_read_note(r), false) as c,
+              public.note_rule_folder(r) as rf, public.note_access(r) as a
+         from jsonb_populate_record(null::public.notes, $1) r`,
+      [{ ...row, path }],
+    ).then((r) => r[0]);
+  const row = {
+    id: stub.id,
+    hive_id: hive,
+    member_id: stub.member_id,
+    workspace_id: ws.dani,
+    title: "x",
+    quarantined: false,
+    shared_with: [],
+  };
+  const nothing = { v: null, sw: null, c: false, rf: null, a: null };
+  for (const who of [person("ahmed"), await agentFor("ahmed")]) {
+    assert.deepEqual(await probe(who, row, "fg/acme-secret/other.md"), nothing);
+    assert.deepEqual(await probe(who, row, "fg/acme-secret/deal.md"), nothing);
+  }
+
+  // A private rule over a member whose default is the whole hive: a wrong
+  // guess must not answer "readable" while the right one answers "not".
+  await db.query(
+    `update public.members set default_visibility = 'group' where id = $1`,
+    [members.ahmed],
+  );
+  try {
+    await addFolder("ahmed", "po/locked", "private");
+    const hidden = await addAt(
+      person("ahmed"),
+      "ahmed",
+      "po/locked/deal.md",
+      "po deal",
+    );
+    assert.equal(await canRead(person("sara"), hidden), false);
+    const r2 = {
+      ...row,
+      id: hidden,
+      member_id: members.ahmed,
+      workspace_id: ws.ahmed,
+    };
+    assert.deepEqual(
+      await probe(person("sara"), r2, "po/locked/other.md"),
+      nothing,
+    );
+    assert.deepEqual(
+      await probe(person("sara"), r2, "po/locked/deal.md"),
+      nothing,
+    );
+    // The owner, and a reader of a shared note, still get real answers.
+    assert.equal(
+      (await probe(person("ahmed"), r2, "po/locked/deal.md")).v,
+      "private",
+    );
+    const open = await addAt(person("ahmed"), "ahmed", "po/open.md", "po open");
+    assert.deepEqual(
+      await probe(person("sara"), { ...r2, id: open }, "anything.md"),
+      { v: "group", sw: [], c: true, rf: null, a: "shared" },
+    );
+    // The owner's insert ... returning still sees the folder rule.
+    const back = await as(
+      person("ahmed"),
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'po/locked/new.md', 'po new')
+       returning public.note_visibility(notes) as v, public.note_shared_with(notes) as sw`,
+      [hive, members.ahmed, ws.ahmed],
+    );
+    assert.deepEqual(back, [{ v: "private", sw: [] }]);
+  } finally {
+    await db.query(
+      `update public.members set default_visibility = 'private' where id = $1`,
+      [members.ahmed],
+    );
+  }
+});
+
+test("moving a note, renaming or deleting a rule folder is audited", async () => {
+  const none = { visibility: null, shared_with: [] };
+  const group = { visibility: "group", shared_with: [] };
+  const priv = { visibility: "private", shared_with: [] };
+  await addFolder("dani", "ad/shared", "group");
+  const n = await addAt(person("dani"), "dani", "ad/plain/x.md", "ad x");
+  const move = (to, extra = "") =>
+    as(
+      person("dani"),
+      `update public.notes set path = $2 ${extra} where id = $1`,
+      [n, to],
+    );
+
+  // Into a shared folder: one row with the effective values, no path.
+  let mark = await lastAudit();
+  await move("ad/shared/x.md");
+  let rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "note.sharing");
+  assert.equal(rows[0].note_id, n);
+  assert.equal(rows[0].member_id, members.dani);
+  assert.deepEqual(rows[0].detail, { from: priv, to: group, moved: true });
+  assert.equal(await canRead(person("ahmed"), n), true);
+
+  // And out again.
+  mark = await lastAudit();
+  await move("ad/plain/x.md");
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].detail, { from: group, to: priv, moved: true });
+
+  // A move that changes nothing effective writes nothing.
+  mark = await lastAudit();
+  await move("ad/plain2/x.md");
+  assert.deepEqual(await auditSince(mark), []);
+
+  // A move and an own setting in one update: one row.
+  mark = await lastAudit();
+  await move("ad/shared/x.md", ", visibility = 'private'");
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].detail, { from: none, to: priv });
+
+  // Renaming a rule folder.
+  const f = await addFolder("dani", "ad/ren", "group");
+  const inside = await addAt(person("dani"), "dani", "ad/ren/y.md", "ad y");
+  assert.equal(await canRead(person("ahmed"), inside), true);
+  mark = await lastAudit();
+  await as(
+    person("dani"),
+    `update public.folders set path = 'ad/ren2' where id = $1`,
+    [f],
+  );
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "folder.sharing");
+  assert.equal(rows[0].note_id, null);
+  assert.deepEqual(rows[0].detail, {
+    path: "ad/ren",
+    new_path: "ad/ren2",
+    from: group,
+    to: group,
+  });
+  assert.equal(await canRead(person("ahmed"), inside), false);
+
+  // Deleting a rule folder.
+  await as(
+    person("dani"),
+    `update public.folders set path = 'ad/ren' where id = $1`,
+    [f],
+  );
+  assert.equal(await canRead(person("ahmed"), inside), true);
+  mark = await lastAudit();
+  await as(person("dani"), `delete from public.folders where id = $1`, [f]);
+  rows = await auditSince(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "folder.sharing");
+  assert.equal(rows[0].member_id, members.dani);
+  assert.equal(rows[0].hive_id, hive);
+  assert.deepEqual(rows[0].detail, { path: "ad/ren", from: group, to: null });
+  assert.equal(await canRead(person("ahmed"), inside), false);
+
+  // A folder with no rule, renamed or deleted, writes nothing.
+  const plain = await addFolder("dani", "ad/norule", null);
+  mark = await lastAudit();
+  await as(
+    person("dani"),
+    `update public.folders set path = 'ad/norule2' where id = $1`,
+    [plain],
+  );
+  await as(person("dani"), `delete from public.folders where id = $1`, [plain]);
+  assert.deepEqual(await auditSince(mark), []);
+
+  // Deleting a workspace takes its folders and notes with it, unaudited.
+  const gone = (
+    await as(
+      person("dani"),
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Doomed') returning id`,
+      [hive, members.dani],
+    )
+  )[0].id;
+  await addFolder("dani", "doomed", "group", [], gone);
+  mark = await lastAudit();
+  const deleted = await as(
+    person("dani"),
+    `delete from public.workspaces where id = $1 returning id`,
+    [gone],
+  );
+  assert.equal(deleted.length, 1);
+  assert.deepEqual(await auditSince(mark), []);
+
+  const text = JSON.stringify(await auditSince(0));
+  for (const s of ["ad/plain", "ad/shared/x.md", "ad x", "ad/ren/y.md"])
+    assert.ok(!text.includes(s), `the audit log carries ${s}`);
+});
+
+test("the map follows folder rules", async () => {
+  const ahmed = await map(person("ahmed"));
+  const team = nodeOf(ahmed, fr.team);
+  assert.equal(team.locked, false);
+  assert.equal(team.path, "fr/team/by-agent.md");
+  assert.equal(nodeOf(ahmed, fr.reach).locked, false);
+  assert.equal(nodeOf(ahmed, fr.inherits).locked, false);
+  assert.equal(nodeOf(ahmed, fr.inner).locked, true);
+  assert.equal(nodeOf(ahmed, fr.ownPrivate).locked, true);
+  assert.equal(nodeOf(await map(person("sara")), fr.inner).locked, false);
 });
 
 test("the map is capped at 5,000 items, newest first", async () => {

@@ -85,6 +85,28 @@ test("a locked dot shows only that it is private", async ({ page }) => {
   for (const t of titles) expect(text).not.toContain(t);
 });
 
+test("a readable note links to the vault and a locked one does not", async ({
+  page,
+}) => {
+  await open(page);
+  const note = fixturePayload(Date.now()).nodes.find(
+    (n) => n.title === HOSTILE_TITLE,
+  )!;
+  await page.locator('[data-map-dot][aria-label^="<img src=x"]').click();
+  await expect(
+    rail(page).getByRole("link", { name: "Open in vault" }),
+  ).toHaveAttribute("href", `/vault?note=${note.id}`);
+
+  await page
+    .locator('[data-map-dot][data-kind="note"][data-locked]')
+    .first()
+    .click();
+  await expect(rail(page)).toContainText("has not shared this");
+  await expect(
+    rail(page).getByRole("link", { name: "Open in vault" }),
+  ).toHaveCount(0);
+});
+
 test("a hostile title is shown as text", async ({ page }) => {
   await open(page);
   const dot = page.locator('[data-map-dot][aria-label^="<img src=x"]');

@@ -15,8 +15,9 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
 - A scripted walkthrough (`pnpm demo`) of two people and their agents.
 - An MCP server with seven tools, proven against the live project by `pnpm test:live`.
 - An importer for a folder of markdown notes.
-- The web app (`web/`) has sign-in and the map. The other pages are not built; `docs/ui/` holds
-  the design prototypes for the map and chat.
+- The web app (`web/`) has sign-in, the map and the vault, where a person reads their notes and
+  decides who may read them. The other pages are not built; `docs/ui/` holds the design
+  prototypes for the map and chat.
 
 ## Start here
 
@@ -44,7 +45,7 @@ pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 
 `supabase status` then prints the local URL and keys. Copy `.env.example` to `.env` and fill it
-in. The hosted dev project is `tokyttkztrkjvkaksdnh`; all four migrations are applied to it and it holds
+in. The hosted dev project is `tokyttkztrkjvkaksdnh`; all five migrations are applied to it and it holds
 one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
 
 ### Run the web app
@@ -56,9 +57,15 @@ Copy `web/.env.example` to `web/.env.local` and fill in the project URL and the 
 pnpm dev:web          # open http://localhost:3000 and sign in
 ```
 
-`/dev/map` shows the map on sample data, without an account. `pnpm --filter @hive-mind/web
-test:e2e` runs the browser test; run `pnpm --filter @hive-mind/web exec playwright install
-chromium` once first. The browser test is run by hand; it is not part of CI.
+To open the vault, choose **Vault** in the left rail, or select a note on the map and choose
+**Open in vault**. It shows your workspaces as tabs, then "Shared with me" for notes colleagues
+have shared with you. Choose a note or a folder and use the sharing pill to change who can read
+it; nothing is saved until you choose "Save".
+
+`/dev/map` and `/dev/vault` show the two screens on sample data, without an account.
+`pnpm --filter @hive-mind/web test:e2e` runs the browser tests; run
+`pnpm --filter @hive-mind/web exec playwright install chromium` once first. The browser tests are
+run by hand; they are not part of CI.
 
 ### Create your hive and connect an agent
 
@@ -112,15 +119,26 @@ the person behind the agent token in `.env`. Other file types wait for file stor
 
 ## How sharing works
 
-| Who                               | Can read                                                                                                              | Can write                                                              |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| A member                          | Their own notes, notes shared with the group or with them, and notes on the other side of a link both owners accepted | Their own space only                                                   |
-| Their agent                       | The same                                                                                                              | Only the workspace its token is bound to; never sharing, never deletes |
-| A self-hosted agent               | Shared notes and what it wrote itself                                                                                 | Its writes are held until the member releases them                     |
-| Another hive, or nobody signed in | Nothing                                                                                                               | Nothing                                                                |
+| Who                               | Can read                                                                                                              | Can write                                                                                  |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| A member                          | Their own notes, notes shared with the group or with them, and notes on the other side of a link both owners accepted | Their own space only                                                                       |
+| Their agent                       | The same                                                                                                              | Only the workspace its token is bound to; never sharing, never deletes, never moves a note |
+| A self-hosted agent               | Shared notes and what it wrote itself                                                                                 | Its writes are held until the member releases them                                         |
+| Another hive, or nobody signed in | Nothing                                                                                                               | Nothing                                                                                    |
 
-A note's visibility is its own setting, else its folder's, else the member's
-default (private).
+A note's visibility is its own setting, else the rule of the nearest folder above it that has
+one, else the member's default (private). Folder rules follow the path: a note anywhere under a
+shared folder is shared, including a note an agent writes there later. That note is shared at
+once, without anyone reviewing it, except a note from a self-hosted agent, which is held until
+the member releases it. Agents cannot move notes or change folders, so an agent cannot share a
+note by putting it somewhere else.
+
+The audit log records these sharing changes made by a person: a note's own setting changed; a
+held note released; a folder rule set, changed, removed, renamed or deleted; and a note moved by
+a person when that changes who can read it. Not yet recorded: a change to a member's default
+visibility, and accepting a link. Only the hive owner can read the audit log. It records who
+changed what and the before and after settings, and a folder's path; it never holds a note's
+text, title or path.
 
 ## Agent tools
 
@@ -135,7 +153,7 @@ default (private).
 
 ## Not built yet
 
-Web app, file storage, entity detection, automatic link discovery, synthesis
+The rest of the web app (chat, settings, an audit-log screen), file storage, entity detection, automatic link discovery, synthesis
 pages, the housekeeper, semantic search, hosted sign-in. Agent sign-in currently
 relies on the project's JWT secret, which fits the local stack and will be
 revisited before hosting.
