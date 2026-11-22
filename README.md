@@ -7,14 +7,14 @@ people accept. Working name; the brand is not decided.
 
 ## Status
 
-Phase 0 is done; nothing has run against a real Supabase stack yet. **Where we are right now:**
-[`vault/00-north-star.md`](vault/00-north-star.md).
+Phase 1 is under way: the engine runs on a hosted Supabase project and the owner's Claude uses it.
+**Where we are right now:** [`vault/00-north-star.md`](vault/00-north-star.md).
 
-- Database schema and sharing rules, as Supabase migrations.
-- Ten tests for the sharing rules. They pass.
+- Database schema, sharing rules and file storage, as Supabase migrations.
+- Tests for the sharing rules, including files, that need no Docker. They pass.
 - A scripted walkthrough (`pnpm demo`) of two people and their agents.
-- An MCP server with six tools. It typechecks, but has **not yet been run against a live
-  Supabase stack**. That is the first task of Phase 1.
+- An MCP server with seven tools, proven against the live project by `pnpm test:live`.
+- An importer for a folder of markdown notes.
 - No web app yet. `docs/ui/` holds the design prototypes for the map and chat.
 
 ## Start here
