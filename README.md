@@ -15,7 +15,8 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
 - A scripted walkthrough (`pnpm demo`) of two people and their agents.
 - An MCP server with seven tools, proven against the live project by `pnpm test:live`.
 - An importer for a folder of markdown notes.
-- No web app yet. `docs/ui/` holds the design prototypes for the map and chat.
+- The web app (`web/`) has sign-in and the map. The other pages are not built; `docs/ui/` holds
+  the design prototypes for the map and chat.
 
 ## Start here
 
