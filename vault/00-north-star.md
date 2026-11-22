@@ -51,6 +51,7 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 - **Not done from Phase 1:** the local Docker stack; about 930 of the DRA vault's notes and all of its non-markdown files; saving files from self-hosted agents.
 - **In flight:** none.
 - **Next:** Phase 2, the web app and map. Start with `brainstorming` on sign-in and the map over real data ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]); the UI rules in AGENTS.md #3 and #5 apply.
+- **UI look changed on 2026-11-22:** the map in `web/` was built with the navy look; the agreed look is now Keystone glass with 17 themes, light mode and theme-driven dot colours ([[2026-11-22-decision-13-keystone-glass-look-with-themes]], `docs/ui-concept.md` section 2, `docs/ui/map.dc.html`, `docs/ui/themes.json`). Restyling `web/` to it is not started.
 - **Workflow note:** from an agent session `finish-task.sh` leaves one empty worktree folder to delete after `ExitWorktree` ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
 - **Owed — Danijel:** install Docker + the Supabase CLI for the local stack; decide whether to import the rest of the DRA vault, and whether to keep the Acme test notes.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
