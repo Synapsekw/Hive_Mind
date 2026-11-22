@@ -1692,11 +1692,21 @@ test("a forged note row reveals no folder rule", async () => {
          from jsonb_populate_record(null::public.notes, $1) r`,
       [row],
     ).then((r) => r[0]);
-  const nothing = { v: "private", sw: [], c: false };
+  // Not even the member's default visibility.
+  const nothing = { v: null, sw: null, c: false };
   assert.deepEqual(await ask(person("ahmed"), forged), nothing);
   assert.deepEqual(await ask(person("sara"), forged), nothing);
   assert.deepEqual(await ask(person("outsider"), forged), nothing);
   assert.deepEqual(await ask(await agentFor("ahmed"), forged), nothing);
+  const out = await outsiderSpace();
+  assert.deepEqual(
+    await ask(person("outsider"), {
+      ...forged,
+      member_id: members.sara,
+      workspace_id: out.workspace_id,
+    }),
+    nothing,
+  );
   // A stored note's id with a guessed path is still a forgery.
   const real = await addAt(person("dani"), "dani", "fg/other.md", "fg other");
   assert.deepEqual(
@@ -1729,6 +1739,96 @@ test("a forged note row reveals no folder rule", async () => {
   );
   assert.equal((await sharing(person("sara"), stored)).effective, "members");
   assert.equal(await canRead(person("ahmed"), stored), false);
+});
+
+test("a locked note's path cannot be guessed", async () => {
+  // Dani's note under a rule naming Sara only; Ahmed sees a locked stub.
+  const locked = await addAt(
+    person("dani"),
+    "dani",
+    "fg/acme-secret/deal.md",
+    "fg deal",
+  );
+  const stub = nodeOf(await map(person("ahmed")), locked);
+  assert.equal(stub.locked, true);
+  const probe = (who, row, path) =>
+    as(
+      who,
+      `select public.note_visibility(r) as v, public.note_shared_with(r) as sw,
+              coalesce(public.can_read_note(r), false) as c,
+              public.note_rule_folder(r) as rf, public.note_access(r) as a
+         from jsonb_populate_record(null::public.notes, $1) r`,
+      [{ ...row, path }],
+    ).then((r) => r[0]);
+  const row = {
+    id: stub.id,
+    hive_id: hive,
+    member_id: stub.member_id,
+    workspace_id: ws.dani,
+    title: "x",
+    quarantined: false,
+    shared_with: [],
+  };
+  const nothing = { v: null, sw: null, c: false, rf: null, a: null };
+  for (const who of [person("ahmed"), await agentFor("ahmed")]) {
+    assert.deepEqual(await probe(who, row, "fg/acme-secret/other.md"), nothing);
+    assert.deepEqual(await probe(who, row, "fg/acme-secret/deal.md"), nothing);
+  }
+
+  // A private rule over a member whose default is the whole hive: a wrong
+  // guess must not answer "readable" while the right one answers "not".
+  await db.query(
+    `update public.members set default_visibility = 'group' where id = $1`,
+    [members.ahmed],
+  );
+  try {
+    await addFolder("ahmed", "po/locked", "private");
+    const hidden = await addAt(
+      person("ahmed"),
+      "ahmed",
+      "po/locked/deal.md",
+      "po deal",
+    );
+    assert.equal(await canRead(person("sara"), hidden), false);
+    const r2 = {
+      ...row,
+      id: hidden,
+      member_id: members.ahmed,
+      workspace_id: ws.ahmed,
+    };
+    assert.deepEqual(
+      await probe(person("sara"), r2, "po/locked/other.md"),
+      nothing,
+    );
+    assert.deepEqual(
+      await probe(person("sara"), r2, "po/locked/deal.md"),
+      nothing,
+    );
+    // The owner, and a reader of a shared note, still get real answers.
+    assert.equal(
+      (await probe(person("ahmed"), r2, "po/locked/deal.md")).v,
+      "private",
+    );
+    const open = await addAt(person("ahmed"), "ahmed", "po/open.md", "po open");
+    assert.deepEqual(
+      await probe(person("sara"), { ...r2, id: open }, "anything.md"),
+      { v: "group", sw: [], c: true, rf: null, a: "shared" },
+    );
+    // The owner's insert ... returning still sees the folder rule.
+    const back = await as(
+      person("ahmed"),
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'po/locked/new.md', 'po new')
+       returning public.note_visibility(notes) as v, public.note_shared_with(notes) as sw`,
+      [hive, members.ahmed, ws.ahmed],
+    );
+    assert.deepEqual(back, [{ v: "private", sw: [] }]);
+  } finally {
+    await db.query(
+      `update public.members set default_visibility = 'private' where id = $1`,
+      [members.ahmed],
+    );
+  }
 });
 
 test("moving a note, renaming or deleting a rule folder is audited", async () => {
