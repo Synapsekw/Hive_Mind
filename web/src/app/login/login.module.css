@@ -88,7 +88,6 @@
   border-radius: 8px;
   font: inherit;
   cursor: pointer;
-  transition: border-color 0.24s var(--ease);
 }
 
 .primary {
@@ -97,12 +96,20 @@
   background: var(--grad);
   color: var(--on-brand);
   font-weight: 500;
+  transition: filter 0.24s var(--ease);
+}
+
+.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 
 .quiet {
   border: 1px solid var(--line);
   background: none;
   color: var(--fg2);
+  transition:
+    border-color 0.24s var(--ease),
+    color 0.24s var(--ease);
 }
 
 .quiet:hover:not(:disabled) {
@@ -128,6 +135,6 @@
   (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
 ) {
   .panel {
-    background: var(--bg);
+    background: var(--glow), var(--bg);
   }
 }

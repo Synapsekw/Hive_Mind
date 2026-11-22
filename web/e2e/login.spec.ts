@@ -53,10 +53,11 @@ for (const look of LOOKS) {
     expect(await again.evaluate((e) => getComputedStyle(e).borderRadius)).toBe(
       "8px",
     );
-    await page.keyboard.press("Tab");
-    await page.getByRole("link", { name: "Try again" }).focus();
-    await page.keyboard.press("Shift+Tab");
-    await page.keyboard.press("Tab");
+    // Reach the link by keyboard, so the ring is the :focus-visible one.
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press("Tab");
+      if (await again.evaluate((e) => e === document.activeElement)) break;
+    }
     await expect(again).toBeFocused();
     const o = await again.evaluate((e) => {
       const c = getComputedStyle(e);
@@ -91,6 +92,14 @@ test("sign-in: Tab shows a visible outline on each field it reaches", async ({
   f = await outlined();
   expect(f).toMatchObject({ tag: "INPUT", type: "password" });
   expect(f.style).not.toBe("none");
-  // Without a configured project the buttons are disabled and Tab skips them; their ring is
-  // the shared :focus-visible rule, exercised on the enabled notice link above.
+  // The buttons are disabled, and skipped by Tab, when web/.env.local is absent; where the
+  // project is configured the submit button comes next and shows the same ring.
+  const submit = page.locator('button[type="submit"]');
+  if (await submit.isEnabled()) {
+    await page.keyboard.press("Tab");
+    await expect(submit).toBeFocused();
+    f = await outlined();
+    expect(f.style).not.toBe("none");
+    expect(f.width).not.toBe("0px");
+  }
 });

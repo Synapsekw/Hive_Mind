@@ -3,19 +3,6 @@
    tokens with var(). */
 @import "../theme/themes.generated.css";
 
-/* Temporary aliases so the screens not yet restyled keep resolving (Task 6 deletes them).
-   Declared on every scope too, so they follow the chrome and reset values. */
-:root,
-[data-scope] {
-  --panel: var(--surface);
-  --text: var(--fg);
-  --text-2: var(--muted);
-  --text-quiet: var(--quiet);
-  --accent: var(--acc);
-  --fill-1: var(--fill);
-  --fill-2: var(--fill-on);
-}
-
 :root {
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }

@@ -57,6 +57,12 @@ Copy `web/.env.example` to `web/.env.local` and fill in the project URL and the 
 pnpm dev:web          # open http://localhost:3000 and sign in
 ```
 
+The app has 17 colour themes, each in dark and light, chosen under **Appearance** at the bottom
+of the left rail. The choice is kept in the `hive-look` cookie in that browser, not on the
+account. All theme colours come from one generated stylesheet,
+`web/src/theme/themes.generated.css`; after changing `web/src/theme/themes.json` or the theme
+code, regenerate it with `pnpm --filter @hive-mind/web themes`.
+
 To open the vault, choose **Vault** in the left rail, or select a note on the map and choose
 **Open in vault**. It shows your workspaces as tabs, then "Shared with me" for notes colleagues
 have shared with you. Choose a note or a folder and use the sharing pill to change who can read

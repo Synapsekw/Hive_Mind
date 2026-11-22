@@ -174,12 +174,21 @@ every adjustment (which token, which combination, from and to); the report is co
 stylesheet so a reviewer can see what moved. If a pair cannot pass by lightness alone the test
 fails and names it; that case comes back to Danijel rather than being waived.
 
+**Margin** (added during the build, 2026-11-22). The adjustment aims slightly above the minimums
+the test asserts: 4.6:1 where the minimum is 4.5:1, and 3.1:1 where it is 3:1. The page model
+samples a finite set of window sizes, and on very wide windows the glows land a little
+differently; a colour tuned to exactly the minimum was seen to dip to 2.988:1 there. The test
+still asserts 4.5:1 and 3:1.
+
 ### 4. Without `backdrop-filter`
 
 Inside `@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))`:
-the card's background is the opaque `--bg`; the side panel's is `--panel-solid` (its glass
-composited over the middle wash stop, computed by `tokens()`); popovers use `--surface`. Edges,
-radius and shadow are unchanged. The contrast test covers these values.
+the card's background is the opaque `--bg` (under the Vivid top-edge glows, `--glow`, where the
+card has them); the side panel's is `--panel-solid` (its glass composited over the middle wash
+stop, computed by `tokens()`); popovers use `--surface`. Edges, radius and shadow are unchanged.
+The contrast test covers these values. As built, the popover rule is in `globals.css` (on
+`[data-scope="reset"]`) and each screen's stylesheet carries the rule for its own card and side
+panel; `web/src/theme/usage.test.ts` fails if a stylesheet uses glass without one.
 
 ### 5. Layout and components
 
