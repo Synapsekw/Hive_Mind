@@ -5,49 +5,31 @@ import { join, relative, resolve, sep } from "node:path";
 const LITERAL =
   /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b|\b(?:rgba?|hsla?|oklch)\(/i;
 
-/** Blanks out comments (keeping newlines so line numbers hold); strings are kept. */
-function stripComments(src: string, css: boolean): string {
-  let out = "";
-  let i = 0;
-  let quote: string | null = null;
-  while (i < src.length) {
-    const ch = src[i]!;
-    const next = src[i + 1];
-    if (quote) {
-      out += ch;
-      if (ch === "\\" && next !== undefined) {
-        out += next;
-        i += 2;
-        continue;
-      }
-      if (ch === quote) quote = null;
-      i++;
-      continue;
+/**
+ * The text of each line that is code, or "" for a line that is entirely a comment: a line whose
+ * first non-blank characters are `//` (not in CSS), or a line inside a `/* … *\/` block that
+ * starts at the beginning of a line (after the block closes, the rest of that line is code).
+ * Nothing else is treated as a comment: JSX text like "Don't" or "a // b" cannot be told from
+ * code without parsing, so such lines are scanned whole. A false positive in a comment is
+ * acceptable; a missed literal is not.
+ */
+function codeLines(src: string, css: boolean): string[] {
+  let inBlock = false;
+  return src.split("\n").map((line) => {
+    let rest = line;
+    if (!inBlock) {
+      const t = rest.trimStart();
+      if (!css && t.startsWith("//")) return "";
+      if (!t.startsWith("/*")) return rest;
+      inBlock = true;
+      rest = t.slice(2);
     }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      quote = ch;
-      out += ch;
-      i++;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      const end = src.indexOf("*/", i + 2);
-      const stop = end === -1 ? src.length : end + 2;
-      out += src.slice(i, stop).replace(/[^\n]/g, " ");
-      i = stop;
-      continue;
-    }
-    if (!css && ch === "/" && next === "/") {
-      const end = src.indexOf("\n", i);
-      const stop = end === -1 ? src.length : end;
-      out += " ".repeat(stop - i);
-      i = stop;
-      continue;
-    }
-    out += ch;
-    i++;
-  }
-  return out;
+    const close = rest.indexOf("*/");
+    if (close === -1) return "";
+    inBlock = false;
+    // Whatever follows the block's end on that line is scanned as code.
+    return rest.slice(close + 2);
+  });
 }
 
 function files(dir: string): string[] {
@@ -68,8 +50,9 @@ function files(dir: string): string[] {
 
 /**
  * Colour literals in the `.ts`, `.tsx` and `.css` files under `dir` (resolved from the working
- * directory, which is `web/` under Vitest), skipping `*.test.*` files and comments. `file` is
- * relative to `dir`, with forward slashes; one entry per offending line.
+ * directory, which is `web/` under Vitest), skipping `*.test.*` files and lines that are
+ * entirely a comment (see `codeLines`). `file` is relative to `dir`, with forward slashes; one
+ * entry per offending line.
  */
 export function colourLiterals(
   dir: string,
@@ -79,7 +62,7 @@ export function colourLiterals(
   for (const path of files(root).sort()) {
     const src = readFileSync(path, "utf8");
     const raw = src.split("\n");
-    const clean = stripComments(src, path.endsWith(".css")).split("\n");
+    const clean = codeLines(src, path.endsWith(".css"));
     clean.forEach((text, i) => {
       if (LITERAL.test(text))
         found.push({
