@@ -1,7 +1,7 @@
 ---
 type: north-star
 status: active
-last-updated: 2026-11-22-1230
+last-updated: 2026-11-22-1500
 tags: [project/hive-mind, north-star]
 related:
   - "[[README]]"
@@ -33,7 +33,7 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 [[platform-roadmap]] and the session notes. **Commit + checkpoint after each phase.**
 
 - **0 — Setup** — <span style="color:#22c55e">**[Done]**</span> — Repo, schema, sharing rules with 10 tests, MCP server skeleton, no-Docker demo, workflows and this vault. ([[2026-11-20-2130-map-design-and-first-backend-slice]], [[2026-11-21-1400-project-setup-and-dev-memory]])
-- **1 — Local end to end** — <span style="color:#eab308">**[In progress]**</span> — MCP server on a live stack, the owner's Claude connected, existing notes imported, file storage. Plan: [[2026-11-21-local-end-to-end]].
+- **1 — Local end to end** — <span style="color:#22c55e">**[Done]**</span> — On the hosted dev project: MCP server with seven tools, the owner's Claude connected, a first batch of notes imported, file storage, and the sharing rules proven live with two members. The local Docker stack was skipped. Plan: [[2026-11-21-local-end-to-end]].
 - **2 — Web app and map** — **[Not started]** — Sign-in, the brain-dashboard map on real data, vault browser with sharing controls, inbox.
 - **3 — Hosting and colleagues** — **[Not started]** — Remote MCP connector, invitations, token management, the first colleague connected.
 - **4 — Linking** — **[Not started]** — Entity registry, link discovery, overlap notifications, the handshake UI, semantic search.
@@ -42,7 +42,7 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 
 ## 3. Now
 
-- **Phase:** **Phase 1, T1 (hosted half), T2, T3, T4 and T5 done.** The schema, the sharing rules and the MCP server run on the hosted dev project, and the owner's Claude Code is connected to it.
+- **Phase:** **Phase 1 is done on the hosted dev project (T1 to T6); Phase 2 has not started.** Its "done when" is met: a note written through a Claude session is unreadable to a second member, searchable by its owner, and imported notes are searchable. Not done: the local Docker stack (T1's other half) and the remaining ~930 notes of the DRA vault.
 - **Branch:** `develop` is ahead of `main` (docs and vault only; no promotion PR yet). No `task/*` branches, no worktrees.
 - **The MCP server works on the live database** (T2, 2026-11-22): all six tools pass `pnpm test:live` (`tests/mcp.integration.test.mjs`), which also proves on real Supabase that an agent identity cannot delete a note or set sharing. Nothing in `mcp/` needed changing. The sign-in depends on the project's legacy JWT secret: do not revoke it ([[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]]).
 - **`pnpm test` proves the SQL, not Supabase** ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]); the auth schema and roles are stubbed in `scripts/local-db.mjs`. `pnpm test:live` is the check against real Supabase, and it does not run in CI.
@@ -50,8 +50,9 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 - **The owner's Claude is connected** (T3 wiring, 2026-11-22): `hive` is registered for the user account in Claude Code, launched with `node --env-file` so secrets stay in the repo's `.env`; it runs the main checkout's `mcp/dist`, so rebuild after changes under `mcp/`. Only `E:\Dev\hive-work` (untracked, outside the repo) carries the instructions to use it. The template in `docs/agent-integration.md` §5 covers the built tools only. The real session ran on 2026-11-22: the agent created a client note, appended facts, wrote a session note, and a fresh session answered from the hive. One template fix came out of it (facts stated together go in one append). The hive now holds two test notes about a made-up client, Acme.
 - **Notes can be imported** (T4, 2026-11-22): `pnpm import:vault <folder> <workspace>` creates one private note per markdown file, as the person, and is safe to re-run. The first 25 notes of Danijel's DRA vault (`Decisions`, `MOCs`, `Home.md`) are in a separate `DRA` workspace, which the agent can read and search but not change; about 930 notes remain to import. Other file types wait for T5.
 - **Files can be saved** (T5, 2026-11-22): migration `20261122063919_file_storage` (private `files` bucket; a file is read by whoever can read its note; agents never delete or overwrite) is applied to the hosted project, and `hive_save_file` is the seventh tool. The rules are tested against a stand-in for the storage tables, the real Storage API by `pnpm test:live`; the local stack the plan asked for is still missing. The tool reads only the agent's working folder ([[2026-11-22-decision-12-agents-save-files-only-from-the-working-folder]]). Self-hosted agents cannot save files yet.
+- **Two members proven live** (T6, 2026-11-22): `tests/two-members.integration.test.mjs`, part of `pnpm test:live`, runs two agents through two MCP servers and shows on real Supabase that a private note stays private, an agent cannot share but its owner can, and a link opens two private notes only after both people accept. The second member is a standing test account, `Test Colleague` (`test-colleague@hive-mind.invalid`, no password, created by SQL because sign-up would have emailed a made-up address); its agent token is `HIVE_AGENT_TOKEN_2` in `.env`.
 - **In flight:** none.
-- **Next:** **T6** (second member proof) of [[2026-11-21-local-end-to-end]], the last task of Phase 1. Then Phase 2, the web app and map.
+- **Next:** Phase 2, the web app and map: start with `brainstorming` on sign-in and the map over real data ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 - **Workflow note:** `finish-task.sh` now refreshes the main checkout (install + build) after a merge and no longer fails at cleanup; from an agent session one empty worktree folder remains to delete after `ExitWorktree` ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
 - **Owed — Danijel:** install Docker + the Supabase CLI on the build machine for the local stack.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
