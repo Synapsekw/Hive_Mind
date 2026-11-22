@@ -267,9 +267,9 @@ same time.
 
 ## Settled details (from the builder check)
 
-- **Scopes.** The light-mode chrome and reset rules live in the generated global stylesheet as
-  `[data-mode="light"] [data-scope="chrome"]` and `[data-scope="reset"]`; components set
-  `data-scope`. CSS Modules only read tokens through `var()`.
+- **Scopes.** The light-mode chrome and reset rules live in the generated global stylesheet, one
+  block per theme: `[data-theme][data-mode="light"] [data-scope="chrome"]` and
+  `[data-theme][data-mode] [data-scope="reset"]`; components set `data-scope`. CSS Modules only read tokens through `var()`.
 - **`color-scheme`** is set per `[data-mode]` block.
 - **Compositing for the contrast test** (changed during the build, 2026-11-22). The first rule
   stacked every glow at full strength under every surface; that never happens on the page and it
@@ -290,12 +290,14 @@ same time.
   selected ring's gap use `--bg`.
 - **Layout.** The root layout becomes async and reads the cookie; `<html>` gets
   `suppressHydrationWarning` only if a warning actually appears.
-- **Fonts** are wired through `next/font/local` from the packages' files, for preload and
-  `font-display: swap`.
+- **Fonts** are wired through `next/font/local`, for preload and `font-display: swap`. As built,
+  the two variable-font files and their licences are copied into `web/src/app/fonts/`; the app
+  does not depend on the font packages.
 - **Stylesheet size** is asserted in the generator test (15 KB gzipped).
 - **Browser tests pick a look** by setting the `hive-look` cookie on the browser context through a
   small helper.
-- **Print** drops the wash and glass and uses the solid `--bg`. **`forced-colors: active`** removes
+- **Print** drops the wash and glass and, as built, uses the system colours `Canvas` and
+  `CanvasText` (dark text on white paper in either mode). **`forced-colors: active`** removes
   gradients and glass and uses system colours.
 - **Sign-in with no cookie** shows the default look.
 - **Nav icons** are the prototype's inline drawings for Map and Vault.

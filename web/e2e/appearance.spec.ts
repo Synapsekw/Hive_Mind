@@ -208,6 +208,37 @@ test("the rail is the chrome scope and marks the current page", async ({
   );
 });
 
+test("a tab that changed its own look still follows another tab's later change", async ({
+  page,
+  context,
+}) => {
+  // Both tabs open on the default look.
+  await open(page);
+  const other = await context.newPage();
+  await open(other);
+  // This tab picks a theme itself: the attribute is set in place, outside React's render.
+  await button(page).click();
+  await group(page, "Theme").getByRole("radio", { name: "Aurora" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "aurora");
+  // The other tab, still holding the default theme, changes the mode and rewrites the cookie.
+  await button(other).click();
+  await group(other, "Mode").getByRole("radio", { name: "Light" }).click();
+  expect(await lookCookie(other)).toBe("keystone.light.tinted.theme");
+  await other.close();
+
+  await page.evaluate(() =>
+    (
+      window as unknown as { nd: { router: { refresh(): void } } }
+    ).nd.router.refresh(),
+  );
+  // The page, the panel and the cookie agree again: every attribute follows the cookie.
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "keystone");
+  await expect(
+    group(page, "Theme").getByRole("radio", { name: "Keystone" }),
+  ).toHaveAttribute("aria-checked", "true");
+});
+
 test("a look changed in another tab is followed after a server refresh", async ({
   page,
   context,

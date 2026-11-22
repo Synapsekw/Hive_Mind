@@ -68,7 +68,8 @@ To open the vault, choose **Vault** in the left rail, or select a note on the ma
 have shared with you. Choose a note or a folder and use the sharing pill to change who can read
 it; nothing is saved until you choose "Save".
 
-`/dev/map` and `/dev/vault` show the two screens on sample data, without an account.
+`/dev/map` and `/dev/vault` show the two screens on sample data, without an account;
+`/dev/notice` shows the failed-load notice.
 `pnpm --filter @hive-mind/web test:e2e` runs the browser tests; run
 `pnpm --filter @hive-mind/web exec playwright install chromium` once first. The browser tests are
 run by hand; they are not part of CI.

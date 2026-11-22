@@ -76,7 +76,7 @@ function rows(mode: Mode): Row[] {
       {
         scope: "rail/panel",
         tokens: base,
-        names: ["--fg", "--muted"],
+        names: ["--fg", "--fg2", "--muted"],
         on: sides,
         min: 4.5,
       },

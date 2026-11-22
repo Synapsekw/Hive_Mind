@@ -51,7 +51,7 @@ map was built with.
 
 ### Themes, mode and reach
 
-Appearance is three independent choices, per person, changed in an Appearance panel (bottom of the
+Appearance is four independent choices (theme, mode, reach and dot colours), kept per browser, changed in an Appearance panel (bottom of the
 left rail in the prototype; it can move to Settings).
 
 - **Theme (17):** Keystone (default), Graphite, Aurora, Sunset, Nebula, Lagoon, Tropic, Orchid,

@@ -19,12 +19,16 @@ type LookApi = { look: Look; setLook(patch: Partial<Look>): void };
 
 const LookContext = createContext<LookApi | null>(null);
 
-function apply(look: Look) {
+function paint(look: Look) {
   const d = document.documentElement.dataset;
   d.theme = look.theme;
   d.mode = look.mode;
   d.reach = look.reach;
   d.dots = look.dots;
+}
+
+function apply(look: Look) {
+  paint(look);
   // A blocked cookie (privacy settings, sandboxed frame) must never break the switch.
   try {
     document.cookie = lookCookie(look, location.protocol === "https:");
@@ -52,10 +56,13 @@ export function LookProvider({
   }, []);
   // A server refresh (router.refresh(), e.g. the map's Refresher on focus) renders the layout
   // again with the cookie as it is now, which another tab may have changed: follow it, so the
-  // panel shows that choice and the next change keeps its other fields.
+  // panel shows that choice and the next change keeps its other fields. The attributes are
+  // set here as well: React only rewrites one whose rendered value changed, and it does not
+  // know about a value this tab set in place, so it would leave that one behind.
   const key = formatLook(initial);
   useEffect(() => {
     latest.current = initial;
+    paint(initial);
     set(initial);
     // `key` stands for `initial`'s four values; a new object with the same look is no change.
   }, [key]);
