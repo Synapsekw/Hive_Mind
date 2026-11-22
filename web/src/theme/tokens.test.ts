@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { css, fromHex, luminance, mix, toHex } from "./colour";
+import {
+  contrast,
+  css,
+  fromHex,
+  luminance,
+  mix,
+  toHex,
+  toOklch,
+} from "./colour";
 import { DOT_MODES, MODES, REACHES, THEMES } from "./look";
 import data from "./themes.json";
 import {
@@ -185,6 +193,24 @@ describe("dotTokens", () => {
       );
     }
   });
+});
+
+describe("low-chroma greys (Graphite)", () => {
+  for (const mode of MODES)
+    it(`are at least 0.02 apart in lightness and pass 3:1 on the card in ${mode}`, () => {
+      const d = dotTokens("graphite", mode, "theme");
+      const values = Object.values(d).map(fromHex);
+      const ls = values.map((c) => toOklch(c).l);
+      for (let i = 0; i < 8; i++)
+        for (let j = i + 1; j < 8; j++)
+          expect(Math.abs(ls[i]! - ls[j]!)).toBeGreaterThanOrEqual(0.02);
+      for (const reach of REACHES) {
+        const b = backgrounds("graphite", mode, reach);
+        for (const c of values)
+          for (const bg of [...b.card, ...b.cardSolid])
+            expect(contrast(c, bg)).toBeGreaterThanOrEqual(3);
+      }
+    });
 });
 
 describe("backgrounds", () => {

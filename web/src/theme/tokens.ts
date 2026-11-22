@@ -226,7 +226,12 @@ function washAt(wash: RGB[], x: number, y: number, w: number, h: number): RGB {
     : mix(wash[1]!, wash[2]!, (p - 0.46) / 0.54);
 }
 
-/** Reference viewports and the prototype's layout (rail 208, side panel 280, card between). */
+/**
+ * Layout assumption of the contrast model: the prototype's rail of 208 px and side panel of
+ * 280 px (card between), sampled at the reference viewports 1600 × 1000 and 1280 × 620. If the
+ * layout's widths or the supported viewports change materially, revisit these figures: the
+ * blooms are sized in % of the page, so what lies behind each surface moves with them.
+ */
 const VIEWPORTS: [number, number][] = [
   [1600, 1000],
   [1280, 620],
@@ -510,6 +515,46 @@ function themeDots(s: Seeds, mode: Mode): RGB[] {
   });
 }
 
+/**
+ * Fix round 2: for a low-chroma brand (Graphite), the eight greys are spaced evenly across the
+ * part of the prototype's lightness run that passes 3:1 on every card background (all reaches),
+ * keeping the prototype's topic order, instead of clamping each grey on its own. The run is
+ * dark 0.55 → 0.55 + 7 × 0.055, light 0.30 → 0.30 + 7 × 0.06; it is walked from its start in
+ * 0.001 steps, and the spaced range runs from the first passing lightness to the last one
+ * before the first failure after it. Returns null (prototype values stand) when the brand has
+ * chroma, when the prototype's eight already pass, or when nothing in the run passes.
+ */
+function spacedGreys(s: Seeds, mode: Mode, on: Labelled[]): RGB[] | null {
+  const h1 = toOklch(s.brand);
+  if (h1.c >= 0.03) return null;
+  const h2 = toOklch(s.brand2);
+  const hue = Number(
+    (h1.h + (((h2.h - h1.h + 540) % 360) - 180) / 2).toFixed(0),
+  );
+  const light = mode === "light";
+  const start = light ? 0.3 : 0.55;
+  const step = light ? 0.06 : 0.055;
+  const grey = (l: number) => quantize(fromOklch(l, 0.012, hue));
+  const passes = (l: number) => worst(opaque(grey(l)), on).ratio >= 3;
+  const ks = [0, 4, 1, 5, 2, 6, 3, 7];
+  if (ks.every((k) => passes(Number((start + k * step).toFixed(3)))))
+    return null;
+  const span = Math.round(7 * step * 1000);
+  let lo: number | null = null;
+  let hi: number | null = null;
+  for (let n = 0; n <= span; n++) {
+    const l = Number((start + n / 1000).toFixed(3));
+    if (passes(l)) {
+      if (lo === null) lo = l;
+      hi = l;
+    } else if (lo !== null) break;
+  }
+  if (lo === null || hi === null) return null;
+  const from = lo;
+  const to = hi;
+  return ks.map((k) => grey(Number((from + (k * (to - from)) / 7).toFixed(3))));
+}
+
 const CHROME_KEYS = [
   "--fg",
   "--fg2",
@@ -682,10 +727,23 @@ function resolve(theme: string, mode: Mode): Resolved {
   for (const dm of DOT_MODES) {
     const raw =
       dm === "theme" ? themeDots(s, mode) : CLASSIC[mode].map(fromHex);
+    const spaced = dm === "theme" ? spacedGreys(s, mode, dotOn) : null;
+    const start = spaced ?? raw;
     const final: RGBA[] = [];
     raw.forEach((c, i) => {
-      const avoid = new Set([...final, ...raw.slice(i + 1)].map(css));
-      final.push(run(`dots=${dm} --hue-${i + 1}`, opaque(c), dotOn, 3, avoid));
+      const token = `dots=${dm} --hue-${i + 1}`;
+      const from = opaque(start[i]!);
+      if (css(from) !== css(c))
+        adjustments.push({
+          token,
+          theme,
+          mode,
+          reach: "any",
+          from: css(c),
+          to: css(from),
+        });
+      const avoid = new Set([...final, ...start.slice(i + 1)].map(css));
+      final.push(run(token, from, dotOn, 3, avoid));
     });
     dots[dm] = Object.fromEntries(
       final.map((c, i) => [`--hue-${i + 1}`, css(c)]),
