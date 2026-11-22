@@ -783,6 +783,45 @@
   background: var(--fill-2);
 }
 
+/* ---- Fit the screen ----
+   When the three columns sit side by side, the page is exactly one screen
+   tall: the map scales to the room the panel has, and a rail scrolls on its
+   own if it ever runs long. Narrower or very short windows keep the stacked,
+   scrolling layout above. */
+
+@media (min-width: 1100px) and (min-height: 560px) {
+  .root {
+    height: 100dvh;
+    min-height: 0;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .nav,
+  .details {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .panel {
+    min-height: 0;
+  }
+
+  .stageFit {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    container-type: size;
+  }
+
+  .stageFit > .stage {
+    flex: none;
+    width: min(100cqw, calc(100cqh * 1000 / 760));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dot,
   .billboard {
