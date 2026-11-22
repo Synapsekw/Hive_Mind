@@ -771,6 +771,61 @@ test("links stay as narrow as links_select", async () => {
   assert.ok(!has(sara, mine, theirs));
 });
 
+test("a link to an item that is not on the map is absent", async () => {
+  // Sara's self-hosted agent writes a note: it is held, invisible to others.
+  const agent = await agentFor("sara", "self_hosted");
+  const held = (
+    await as(
+      agent,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'maps/held/linked.md', 'map sara held linked') returning id`,
+      [hive, members.sara, ws.sara],
+    )
+  )[0].id;
+  const saras = await addAt(
+    person("sara"),
+    "sara",
+    "maps/held/own.md",
+    "map sara own",
+  );
+  const insertLink = (who, from, to) =>
+    as(
+      who,
+      `insert into public.links (hive_id, from_note, to_note, tier, score) values ($1, $2, $3, 1, 1) returning id, status`,
+      [hive, from, to],
+    ).then((r) => r[0]);
+  // Two of Sara's notes: accepted at once.
+  assert.equal(
+    (await insertLink(person("sara"), saras, held)).status,
+    "accepted",
+  );
+  // Dani's note to Sara's held note, accepted by both people.
+  const dmine = await addAt(
+    person("dani"),
+    "dani",
+    "maps/l/to-held.md",
+    "map to held",
+  );
+  const link = await insertLink(person("dani"), dmine, held);
+  assert.equal(
+    (
+      await as(person("sara"), `select public.respond_to_link($1, true) as s`, [
+        link.id,
+      ])
+    )[0].s,
+    "accepted",
+  );
+
+  const dani = await map(person("dani"));
+  assert.ok(!dani.links.some((l) => l.from === dmine || l.to === dmine));
+  assert.ok(nodeOf(dani, dmine), "Dani's own note is still on the map");
+  assert.ok(!JSON.stringify(dani).includes(held), "the held note leaked");
+
+  const sara = await map(person("sara"));
+  const touching = sara.links.filter((l) => l.to === held);
+  assert.deepEqual(touching.map((l) => l.from).sort(), [dmine, saras].sort());
+});
+
 test("agents, outsiders and the public are refused", async () => {
   await assert.rejects(map(await agentFor("dani")), /map_graph is for people/);
   await assert.rejects(
@@ -862,9 +917,30 @@ test("only your own agents are named", async () => {
     after.agents.find((a) => a.id === made.agent_id),
     undefined,
   );
+
+  // So is an expired one.
+  const expiring = (
+    await as(
+      person("ahmed"),
+      `select * from public.create_agent($1, 'map expiring agent', 'chatgpt')`,
+      [ws.ahmed],
+    )
+  )[0].agent_id;
+  assert.ok((await map(person("dani"))).agents.some((a) => a.id === expiring));
+  await db.query(
+    `update public.agents set expires_at = now() - interval '1 minute' where id = $1`,
+    [expiring],
+  );
+  assert.ok(!(await map(person("dani"))).agents.some((a) => a.id === expiring));
+  assert.ok(
+    !(await map(person("ahmed"))).agents.some((a) => a.id === expiring),
+  );
 });
 
 test("the map is capped at 5,000 items, newest first", async () => {
+  // Everything Dani sees before the bulk insert is newer than the bulk rows.
+  const before = (await map(person("dani"))).nodes.map((n) => n.id);
+  assert.ok(before.length < 5000);
   // Old notes, bulk-inserted outside any session, push the hive over the cap.
   await db.query(`select set_config('request.jwt.claims', '', false)`);
   await db.query(
@@ -881,4 +957,16 @@ test("the map is capped at 5,000 items, newest first", async () => {
   assert.ok(nodeOf(m, ids.looseFile));
   const times = m.nodes.map((n) => Date.parse(n.updated_at));
   for (let i = 1; i < times.length; i++) assert.ok(times[i - 1] >= times[i]);
+
+  // The rows that were cut are exactly the oldest bulk rows.
+  const kept = new Set(m.nodes.map((n) => n.id));
+  for (const id of before) assert.ok(kept.has(id), `newer item ${id} was cut`);
+  const bulk = (
+    await db.query(
+      `select id from public.notes where path like 'maps/bulk/%' order by updated_at desc, id`,
+    )
+  ).rows.map((r) => r.id);
+  const room = 5000 - before.length;
+  assert.ok(bulk.slice(0, room).every((id) => kept.has(id)));
+  assert.ok(bulk.slice(room).every((id) => !kept.has(id)));
 });

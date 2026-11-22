@@ -10,6 +10,8 @@
 --   Someone else's quarantined note, and a file attached to it, are left out.
 --   Bodies and frontmatter are never returned. Links are those links_select
 --   already shows (one end is the caller's own), and only accepted ones.
+--   Agents are listed when neither revoked nor expired; names only for the
+--   caller's own.
 --
 --   The function is security definer, so row-level security does not apply
 --   inside it: every read below is filtered by p_hive and decided explicitly
@@ -28,8 +30,14 @@ language sql immutable set search_path = '' as $$
   from (select array_remove(string_to_array(coalesce(p_path, ''), '/'), '') as s) t
 $$;
 
+-- plan_cache_mode: after a few calls plpgsql may switch to a generic plan,
+-- built without the hive's real size; for a hive that has since grown, that
+-- plan joins the kept rows back by nested loop and runs many times slower.
 create function public.map_graph(p_hive uuid) returns jsonb
-language plpgsql stable security definer set search_path = '' as $$
+language plpgsql stable security definer
+set search_path = ''
+set plan_cache_mode = force_custom_plan
+as $$
 declare
   v_cap constant integer := 5000;
   v_me uuid;
@@ -50,36 +58,54 @@ begin
     raise exception 'not a member of this hive';
   end if;
 
+  -- Pick the newest items on raw columns first, so the readability test below
+  -- runs for at most v_cap rows. Someone else's quarantined note, and a file
+  -- attached to one, never make it into the list.
   with items as (
-    select n.id, 'note'::text as kind, public.note_topic(n.path) as topic,
-           n.member_id, n.updated_at,
-           public.can_read_note(n) as readable,
-           n.title, n.path, n.workspace_id,
-           (n.written_by_agent is not null) as by_agent,
-           case when n.member_id = v_me then n.written_by_agent end as agent_id,
-           null::uuid as note_id
+    select n.id, 'note'::text as kind, n.updated_at, null::uuid as file_note
       from public.notes n
      where n.hive_id = p_hive
        and (n.member_id = v_me or not n.quarantined)
     union all
-    select f.id, 'file'::text,
-           case when fn.id is null then 'Files' else public.note_topic(fn.path) end,
-           f.member_id, f.created_at,
-           (f.member_id = v_me or (fn.id is not null and public.can_read_note(fn))),
-           f.name, f.storage_path, f.workspace_id,
-           false,
-           null::uuid,
-           f.note_id
+    select f.id, 'file'::text, f.created_at, fn.id
       from public.files f
       left join public.notes fn on fn.id = f.note_id and fn.hive_id = p_hive
      where f.hive_id = p_hive
        and (f.member_id = v_me or fn.id is null or not fn.quarantined)
   ),
-  kept as (
+  picked as (
     select i.*, count(*) over () as total
       from items i
      order by i.updated_at desc, i.id
      limit v_cap
+  ),
+  -- Materialized, so can_read_note runs once per row and not once for every
+  -- place the final select uses `readable`.
+  kept as materialized (
+    select p.id, p.kind, p.updated_at, p.total,
+           public.note_topic(n.path) as topic,
+           n.member_id,
+           public.can_read_note(n) as readable,
+           n.title, n.path, n.workspace_id,
+           (n.written_by_agent is not null) as by_agent,
+           case when n.member_id = v_me then n.written_by_agent end as agent_id,
+           null::uuid as note_id
+      from picked p
+      join public.notes n on n.id = p.id and n.hive_id = p_hive
+     where p.kind = 'note'
+    union all
+    select p.id, p.kind, p.updated_at, p.total,
+           case when fn.id is null then 'Files' else public.note_topic(fn.path) end,
+           f.member_id,
+           (f.member_id = v_me or (fn.id is not null and public.can_read_note(fn))),
+           f.name, f.storage_path, f.workspace_id,
+           false,
+           null::uuid,
+           f.note_id
+      from picked p
+      join public.files f on f.id = p.id and f.hive_id = p_hive
+      left join public.notes fn on fn.id = p.file_note and fn.hive_id = p_hive
+     where p.kind = 'file'
   )
   select coalesce(max(k.total), 0),
          coalesce(jsonb_agg(jsonb_build_object(
@@ -121,7 +147,8 @@ begin
     from public.agents a
     join public.members m on m.id = a.member_id
    where m.hive_id = p_hive
-     and a.revoked_at is null;
+     and a.revoked_at is null
+     and (a.expires_at is null or a.expires_at > now());
 
   -- As narrow as links_select: one of the two notes is the caller's own.
   -- Both ends must also be readable nodes on this map.
@@ -151,5 +178,11 @@ begin
 end
 $$;
 
-revoke all on function public.map_graph(uuid) from public, anon;
-grant execute on function public.map_graph(uuid) to authenticated;
+revoke all on function
+  public.note_topic(text),
+  public.map_graph(uuid)
+from public, anon;
+grant execute on function
+  public.note_topic(text),
+  public.map_graph(uuid)
+to authenticated;

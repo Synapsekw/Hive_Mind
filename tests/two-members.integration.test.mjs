@@ -197,7 +197,14 @@ describe("two members and their agents on a live database", { skip }, () => {
       const stub = m.nodes.find((n) => n.id === ids[other]);
       assert.ok(stub, `${other} is missing from the map`);
       assert.equal(stub.locked, true);
-      for (const k of ["title", "path", "workspace_id", "by_agent", "agent_id"])
+      for (const k of [
+        "title",
+        "path",
+        "workspace_id",
+        "by_agent",
+        "agent_id",
+        "note_id",
+      ])
         assert.equal(stub[k], null, k);
       const raw = JSON.stringify(m);
       assert.ok(!raw.includes(`${other} ${WORD}`), "the map carries a body");
