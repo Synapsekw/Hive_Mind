@@ -1,7 +1,7 @@
 ---
 type: north-star
 status: active
-last-updated: 2026-11-22-1500
+last-updated: 2026-11-22-1114
 tags: [project/hive-mind, north-star]
 related:
   - "[[README]]"
@@ -33,7 +33,7 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 [[platform-roadmap]] and the session notes. **Commit + checkpoint after each phase.**
 
 - **0 — Setup** — <span style="color:#22c55e">**[Done]**</span> — Repo, schema, sharing rules with 10 tests, MCP server skeleton, no-Docker demo, workflows and this vault. ([[2026-11-20-2130-map-design-and-first-backend-slice]], [[2026-11-21-1400-project-setup-and-dev-memory]])
-- **1 — Local end to end** — <span style="color:#22c55e">**[Done]**</span> — On the hosted dev project: MCP server with seven tools, the owner's Claude connected, a first batch of notes imported, file storage, and the sharing rules proven live with two members. The local Docker stack was skipped. Plan: [[2026-11-21-local-end-to-end]].
+- **1 — Local end to end** — <span style="color:#22c55e">**[Done]**</span> — On the hosted dev project: MCP server with seven tools, the owner's Claude connected, a first batch of notes imported, file storage, and the sharing rules proven live with two members. The local Docker stack was skipped. Plan: [[2026-11-21-local-end-to-end]]. ([[2026-11-22-0923-hosted-db-bringup]], [[2026-11-22-1114-phase-1-on-the-hosted-project]])
 - **2 — Web app and map** — **[Not started]** — Sign-in, the brain-dashboard map on real data, vault browser with sharing controls, inbox.
 - **3 — Hosting and colleagues** — **[Not started]** — Remote MCP connector, invitations, token management, the first colleague connected.
 - **4 — Linking** — **[Not started]** — Entity registry, link discovery, overlap notifications, the handshake UI, semantic search.
@@ -42,19 +42,17 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 
 ## 3. Now
 
-- **Phase:** **Phase 1 is done on the hosted dev project (T1 to T6); Phase 2 has not started.** Its "done when" is met: a note written through a Claude session is unreadable to a second member, searchable by its owner, and imported notes are searchable. Not done: the local Docker stack (T1's other half) and the remaining ~930 notes of the DRA vault.
-- **Branch:** `develop` is ahead of `main` (docs and vault only; no promotion PR yet). No `task/*` branches, no worktrees.
-- **The MCP server works on the live database** (T2, 2026-11-22): all six tools pass `pnpm test:live` (`tests/mcp.integration.test.mjs`), which also proves on real Supabase that an agent identity cannot delete a note or set sharing. Nothing in `mcp/` needed changing. The sign-in depends on the project's legacy JWT secret: do not revoke it ([[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]]).
-- **`pnpm test` proves the SQL, not Supabase** ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]); the auth schema and roles are stubbed in `scripts/local-db.mjs`. `pnpm test:live` is the check against real Supabase, and it does not run in CI.
-- **The hosted dev project is up** (T1, hosted half, 2026-11-22): `tokyttkztrkjvkaksdnh`, wired in `.mcp.json` as `supabase-dev`. Both migrations applied under the repo's version stamps; one hive (`Synapse`), one owner, one workspace, one agent (`Claude`); the token is in the local `.env`. `agent_login` works through the public API and a signed-out caller reads nothing. Runbook: `docs/hosted-db-bringup.md`; session [[2026-11-22-0923-hosted-db-bringup]]. Migrations applied through the MCP must be re-stamped ([[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]]). The local Docker stack is still not set up.
-- **The owner's Claude is connected** (T3 wiring, 2026-11-22): `hive` is registered for the user account in Claude Code, launched with `node --env-file` so secrets stay in the repo's `.env`; it runs the main checkout's `mcp/dist`, so rebuild after changes under `mcp/`. Only `E:\Dev\hive-work` (untracked, outside the repo) carries the instructions to use it. The template in `docs/agent-integration.md` §5 covers the built tools only. The real session ran on 2026-11-22: the agent created a client note, appended facts, wrote a session note, and a fresh session answered from the hive. One template fix came out of it (facts stated together go in one append). The hive now holds two test notes about a made-up client, Acme.
-- **Notes can be imported** (T4, 2026-11-22): `pnpm import:vault <folder> <workspace>` creates one private note per markdown file, as the person, and is safe to re-run. The first 25 notes of Danijel's DRA vault (`Decisions`, `MOCs`, `Home.md`) are in a separate `DRA` workspace, which the agent can read and search but not change; about 930 notes remain to import. Other file types wait for T5.
-- **Files can be saved** (T5, 2026-11-22): migration `20261122063919_file_storage` (private `files` bucket; a file is read by whoever can read its note; agents never delete or overwrite) is applied to the hosted project, and `hive_save_file` is the seventh tool. The rules are tested against a stand-in for the storage tables, the real Storage API by `pnpm test:live`; the local stack the plan asked for is still missing. The tool reads only the agent's working folder ([[2026-11-22-decision-12-agents-save-files-only-from-the-working-folder]]). Self-hosted agents cannot save files yet.
-- **Two members proven live** (T6, 2026-11-22): `tests/two-members.integration.test.mjs`, part of `pnpm test:live`, runs two agents through two MCP servers and shows on real Supabase that a private note stays private, an agent cannot share but its owner can, and a link opens two private notes only after both people accept. The second member is a standing test account, `Test Colleague` (`test-colleague@hive-mind.invalid`, no password, created by SQL because sign-up would have emailed a made-up address); its agent token is `HIVE_AGENT_TOKEN_2` in `.env`.
+- **Phase:** **Phase 1 is done on the hosted dev project; Phase 2 has not started.** A note written through a Claude session is unreadable to a second member and searchable by its owner, and imported notes are searchable ([[2026-11-22-1114-phase-1-on-the-hosted-project]]).
+- **Branch:** `develop` is well ahead of `main` (all of Phase 1); no promotion PR yet. No `task/*` branches, no worktrees.
+- **What runs today:** hosted dev project `tokyttkztrkjvkaksdnh` (`supabase-dev` in `.mcp.json`) with three migrations, hive `Synapse`, two members (Danijel as owner; `Test Colleague`, a no-password test account) and two workspaces of notes: `Main` (the agent's) and `DRA` (25 imported notes, read-only to the agent). The MCP server has seven tools; Danijel's Claude Code uses it from `E:\Dev\hive-work`. Runbook: `docs/hosted-db-bringup.md`.
+- **How it is checked:** `pnpm test` (45 tests, no Docker) proves the SQL against stand-ins for Supabase auth and storage ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]). `pnpm test:live` (17 checks) proves the real thing, including two members and file storage, and **does not run in CI**.
+- **Do not revoke the project's legacy JWT secret:** agent sign-in and the importer depend on it; replace the mechanism before phase 3 ([[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]]).
+- **Migrations applied through the Supabase MCP must be re-stamped** to the repo's version ([[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]]).
+- **Not done from Phase 1:** the local Docker stack; about 930 of the DRA vault's notes and all of its non-markdown files; saving files from self-hosted agents.
 - **In flight:** none.
-- **Next:** Phase 2, the web app and map: start with `brainstorming` on sign-in and the map over real data ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
-- **Workflow note:** `finish-task.sh` now refreshes the main checkout (install + build) after a merge and no longer fails at cleanup; from an agent session one empty worktree folder remains to delete after `ExitWorktree` ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
-- **Owed — Danijel:** install Docker + the Supabase CLI on the build machine for the local stack.
+- **Next:** Phase 2, the web app and map. Start with `brainstorming` on sign-in and the map over real data ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]); the UI rules in AGENTS.md #3 and #5 apply. Consider promoting `develop` to `main` first.
+- **Workflow note:** from an agent session `finish-task.sh` leaves one empty worktree folder to delete after `ExitWorktree` ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
+- **Owed — Danijel:** install Docker + the Supabase CLI for the local stack; decide whether to import the rest of the DRA vault, and whether to keep the Acme test notes.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
 
 ### Last session
