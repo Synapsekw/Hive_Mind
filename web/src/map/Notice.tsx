@@ -12,7 +12,7 @@ export function Notice({
 }) {
   return (
     <div className={s.root}>
-      <Shell agents={[]} />
+      <Shell current="map" />
       <main aria-label="Hive map" className={s.panel}>
         <div className={s.notice}>
           <p className={s.noticeText}>{children}</p>

@@ -1,4 +1,5 @@
-// The left rail: the mark, the one destination that exists (Map), the agents and sign out.
+// The left rail: the mark, the destinations (Map, Vault), the agents when given, and sign out.
+import Link from "next/link";
 import s from "./map.module.css";
 
 export type AgentRow = {
@@ -9,7 +10,18 @@ export type AgentRow = {
   connected: boolean;
 };
 
-export function Shell({ agents }: { agents: AgentRow[] }) {
+const DESTINATIONS = [
+  { key: "map", href: "/", name: "Map" },
+  { key: "vault", href: "/vault", name: "Vault" },
+] as const;
+
+export function Shell({
+  current,
+  agents = [],
+}: {
+  current: "map" | "vault";
+  agents?: AgentRow[];
+}) {
   return (
     <aside aria-label="Navigation" className={s.nav}>
       <div className={s.brand}>
@@ -17,9 +29,16 @@ export function Shell({ agents }: { agents: AgentRow[] }) {
         <span className={s.brandName}>Hive</span>
       </div>
       <nav aria-label="Main" className={s.links}>
-        <span aria-current="page" className={s.current}>
-          Map
-        </span>
+        {DESTINATIONS.map((d) => (
+          <Link
+            key={d.key}
+            href={d.href}
+            aria-current={d.key === current ? "page" : undefined}
+            className={d.key === current ? s.current : s.destination}
+          >
+            {d.name}
+          </Link>
+        ))}
       </nav>
       <section className={s.agents}>
         {agents.length > 0 && (

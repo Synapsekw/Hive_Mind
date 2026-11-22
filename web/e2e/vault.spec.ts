@@ -1,0 +1,326 @@
+import { expect, test, type Page, type Request } from "@playwright/test";
+import {
+  fixturePreview,
+  fixtureVault,
+  GROUP_FOLDER,
+  HOSTILE_NOTE_ID,
+} from "../src/vault/fixture";
+import { folderSentence, noteSentence } from "../src/vault/sentences";
+
+// The fixture's content does not depend on `now`, only its dates do.
+const DATA = fixtureVault(0);
+const idOf = (title: string) => DATA.notes.find((n) => n.title === title)!.id;
+const README = idOf("Readme");
+const HELD = idOf("Workshop transcript, raw");
+
+async function open(page: Page, query = "") {
+  page.on("dialog", (d) => {
+    throw new Error(`unexpected dialog: ${d.message()}`);
+  });
+  await page.goto(`/dev/vault${query}`, { waitUntil: "networkidle" });
+  await expect(page.getByRole("main", { name: "Vault" })).toBeVisible();
+}
+
+const calls = (page: Page) =>
+  page.evaluate(
+    () =>
+      (window as unknown as { __vaultCalls?: unknown[] }).__vaultCalls ?? [],
+  );
+
+const noteLinks = (page: Page) =>
+  page.getByRole("navigation", { name: "Notes" }).getByRole("link");
+
+const folders = (page: Page) =>
+  page.getByRole("navigation", { name: "Folders" });
+
+const noteControl = (page: Page) =>
+  page.getByRole("group", { name: "Who can read this note" });
+
+function watch(page: Page) {
+  const seen: Request[] = [];
+  page.on("request", (r) => seen.push(r));
+  return () =>
+    seen
+      .filter((r) => ["document", "fetch", "xhr"].includes(r.resourceType()))
+      .map((r) => `${r.resourceType()} ${r.url()}`);
+}
+
+for (const size of [
+  { width: 1920, height: 1080 },
+  { width: 1600, height: 1000 },
+  { width: 1366, height: 768 },
+  { width: 1280, height: 620 },
+]) {
+  test(`the vault fits a ${size.width} x ${size.height} window without scrolling`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await open(page, `?note=${HOSTILE_NOTE_ID}`);
+    const fit = await page.evaluate(() => {
+      const main = document.querySelector("main")!.getBoundingClientRect();
+      const root = document.documentElement;
+      return {
+        pageScrolls:
+          root.scrollHeight > window.innerHeight ||
+          root.scrollWidth > window.innerWidth,
+        panelBottom: main.bottom,
+        panelRight: main.right,
+      };
+    });
+    expect(fit.pageScrolls).toBe(false);
+    expect(fit.panelBottom).toBeLessThanOrEqual(size.height);
+    expect(fit.panelRight).toBeLessThanOrEqual(size.width);
+  });
+}
+
+test("choosing a folder and filtering narrow the list without a request", async ({
+  page,
+}) => {
+  await open(page);
+  const all = DATA.notes.length;
+  await expect(noteLinks(page)).toHaveCount(all);
+  const requests = watch(page);
+
+  await folders(page)
+    .getByRole("button", { name: /^decisions\b/ })
+    .click();
+  await expect(noteLinks(page)).toHaveCount(
+    DATA.notes.filter((n) => n.path.startsWith("decisions/")).length,
+  );
+  await expect(
+    folders(page).getByRole("button", { name: /^decisions\b/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  await folders(page)
+    .getByRole("button", { name: /^All notes\b/ })
+    .click();
+  await page.getByRole("searchbox", { name: "Filter notes" }).fill("brief");
+  await expect(noteLinks(page)).toHaveCount(2);
+
+  await page.waitForTimeout(400);
+  expect(requests()).toEqual([]);
+});
+
+test("the folder and the filter survive choosing a note", async ({ page }) => {
+  await open(page);
+  await folders(page)
+    .getByRole("button", { name: /^research\b/ })
+    .click();
+  await page.getByRole("searchbox", { name: "Filter notes" }).fill("guide");
+  await noteLinks(page).first().click();
+  await expect(page).toHaveURL(/note=/);
+  await expect(
+    page.getByRole("region", { name: "Note" }).getByRole("heading", {
+      name: "Interview guide",
+      level: 2,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("searchbox", { name: "Filter notes" }),
+  ).toHaveValue("guide");
+  await expect(
+    folders(page).getByRole("button", { name: /^research\b/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(noteLinks(page)).toHaveCount(1);
+});
+
+test("a hostile note renders as text", async ({ page }) => {
+  const requests: string[] = [];
+  page.on("request", (r) => requests.push(r.url()));
+  await open(page, `?note=${HOSTILE_NOTE_ID}`);
+  const preview = page.getByRole("region", { name: "Note" });
+  await expect(preview.getByRole("table")).toBeVisible();
+  await expect(
+    preview.getByRole("heading", { level: 1, name: "Vendor call" }),
+  ).toBeVisible();
+  await expect(
+    preview.getByRole("heading", { level: 2, name: "Quote" }),
+  ).toBeVisible();
+
+  // Next's own payload scripts carry the body as data; no script element may *be* the note's.
+  const injected = await page.evaluate(
+    () =>
+      [...document.querySelectorAll("script")].filter(
+        (s) => s.textContent?.trim() === "alert(1)",
+      ).length,
+  );
+  expect(injected).toBe(0);
+  await expect(preview.locator("script")).toHaveCount(0);
+  await expect(page.locator('img[src="x"]')).toHaveCount(0);
+  await expect(preview.locator("img")).toHaveCount(0);
+  await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
+  await expect(preview.getByRole("link", { name: "pixel" })).toBeVisible();
+  const external = preview.getByRole("link", { name: "vendor site" });
+  await expect(external).toHaveAttribute("target", "_blank");
+  await expect(external).toHaveAttribute("rel", "noopener noreferrer");
+  await page.waitForTimeout(300);
+  expect(requests.filter((u) => u.includes("example.invalid"))).toEqual([]);
+});
+
+test("the note control writes nothing until Save", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  const pill = page.getByRole("button", { name: /^Sharing: / });
+  await pill.click();
+  await expect(noteControl(page)).toBeVisible();
+  await expect(
+    noteControl(page).getByRole("radio", { checked: true }),
+  ).toBeFocused();
+
+  await noteControl(page)
+    .getByRole("radio", { name: "Everyone in Synapse" })
+    .check();
+  await expect(noteControl(page)).toContainText(
+    noteSentence({
+      choice: { visibility: "group", shared_with: [] },
+      hive: "Synapse",
+      hiveSize: 3,
+      names: [],
+      folderRule: null,
+    }),
+  );
+  expect(await calls(page)).toEqual([]);
+
+  await noteControl(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(noteControl(page)).toHaveCount(0);
+  await expect(pill).toBeFocused();
+  expect(await calls(page)).toEqual([]);
+
+  await pill.click();
+  await page.keyboard.press("Escape");
+  await expect(noteControl(page)).toHaveCount(0);
+  await expect(pill).toBeFocused();
+
+  await pill.click();
+  await noteControl(page)
+    .getByRole("radio", { name: "Everyone in Synapse" })
+    .check();
+  await noteControl(page).getByRole("button", { name: "Save" }).click();
+  await expect(noteControl(page)).toHaveCount(0);
+  expect(await calls(page)).toEqual([
+    {
+      name: "saveNote",
+      args: [README, { visibility: "group", shared_with: [] }],
+    },
+  ]);
+});
+
+test("Specific people with nobody ticked cannot be saved", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await page.getByRole("button", { name: /^Sharing: / }).click();
+  await noteControl(page)
+    .getByRole("radio", { name: "Specific people" })
+    .check();
+  const save = noteControl(page).getByRole("button", { name: "Save" });
+  await expect(save).toBeDisabled();
+  // Everyone except me is offered.
+  await expect(noteControl(page).getByRole("checkbox")).toHaveCount(2);
+  await noteControl(page).getByRole("checkbox", { name: "Sara" }).check();
+  await expect(save).toBeEnabled();
+  await expect(noteControl(page)).toContainText(
+    "Sara will be able to read this note.",
+  );
+});
+
+test("the folder control shows the database's exact counts", async ({
+  page,
+}) => {
+  await open(page);
+  await folders(page)
+    .getByRole("button", { name: new RegExp(`^${GROUP_FOLDER}\\b`) })
+    .click();
+  await page.getByRole("button", { name: /^Folder sharing: / }).click();
+  const control = page.getByRole("group", {
+    name: `Who can read ${GROUP_FOLDER}`,
+  });
+  await expect(control).toContainText(
+    folderSentence({
+      folder: GROUP_FOLDER,
+      choice: { visibility: "group", shared_with: [] },
+      hive: "Synapse",
+      hiveSize: 3,
+      names: [],
+      preview: fixturePreview(DATA, GROUP_FOLDER),
+    }),
+  );
+  await expect(control.getByRole("radio", { name: "No rule" })).toBeVisible();
+  expect(await calls(page)).toEqual([
+    { name: "preview", args: [DATA.workspaces[0]!.id, GROUP_FOLDER] },
+  ]);
+});
+
+test("a note under a folder rule offers Same as folder", async ({ page }) => {
+  await open(page, `?note=${idOf("Client list")}`);
+  await page.getByRole("button", { name: /^Sharing: / }).click();
+  await expect(
+    noteControl(page).getByRole("radio", { name: "Same as folder" }),
+  ).toBeChecked();
+  await expect(
+    noteControl(page).getByRole("radio", { name: "No rule" }),
+  ).toHaveCount(0);
+});
+
+test("a refused change keeps the control open", async ({ page }) => {
+  await open(page, `?fail=1&note=${README}`);
+  await page.getByRole("button", { name: /^Sharing: / }).click();
+  await noteControl(page)
+    .getByRole("radio", { name: "Everyone in Synapse" })
+    .check();
+  await noteControl(page).getByRole("button", { name: "Save" }).click();
+  await expect(noteControl(page)).toContainText("That change was refused.");
+  await expect(noteControl(page)).toBeVisible();
+});
+
+test("a folder that cannot be counted cannot be saved", async ({ page }) => {
+  await open(page, "?fail=1");
+  await folders(page)
+    .getByRole("button", { name: new RegExp(`^${GROUP_FOLDER}\\b`) })
+    .click();
+  await page.getByRole("button", { name: /^Folder sharing: / }).click();
+  const control = page.getByRole("group", {
+    name: `Who can read ${GROUP_FOLDER}`,
+  });
+  await expect(control).toContainText(
+    "Couldn't count the notes in this folder.",
+  );
+  await control.getByRole("radio", { name: "Private" }).check();
+  await expect(control.getByRole("button", { name: "Save" })).toBeDisabled();
+});
+
+test("held notes are listed and can be released", async ({ page }) => {
+  await open(page, `?note=${HELD}`);
+  await folders(page)
+    .getByRole("button", { name: /^Held\b/ })
+    .click();
+  await expect(noteLinks(page)).toHaveCount(
+    DATA.notes.filter((n) => n.quarantined).length,
+  );
+  const preview = page.getByRole("region", { name: "Note" });
+  await expect(preview).toContainText(
+    "This note was written by a self-hosted agent.",
+  );
+  await preview.getByRole("button", { name: "Release" }).click();
+  expect(await calls(page)).toEqual([{ name: "release", args: [HELD] }]);
+});
+
+test("the shared tab groups colleagues' notes and offers no control", async ({
+  page,
+}) => {
+  await open(page, "?tab=shared");
+  await expect(
+    page.getByRole("link", { name: "Shared with me" }),
+  ).toHaveAttribute("aria-current", "page");
+  const list = page.getByRole("navigation", { name: "Notes" });
+  await expect(list.getByRole("heading", { name: "Ahmed" })).toBeVisible();
+  await expect(list.getByRole("heading", { name: "Sara" })).toBeVisible();
+  await list.getByRole("link", { name: /Pricing options/ }).click();
+  const preview = page.getByRole("region", { name: "Note" });
+  await expect(preview).toContainText("Opened by a link");
+  await expect(page.getByRole("button", { name: /^Sharing: / })).toHaveCount(0);
+});
+
+test("an unknown note says it isn't available", async ({ page }) => {
+  await open(page, "?note=00000000-0000-4000-8000-ffffffffffff");
+  await expect(page.getByRole("region", { name: "Note" })).toContainText(
+    "That note isn't available.",
+  );
+});

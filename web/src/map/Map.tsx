@@ -156,7 +156,7 @@ export function HiveMap({
 
   return (
     <div className={s.root}>
-      <Shell agents={agents} />
+      <Shell current="map" agents={agents} />
       <main aria-label="Hive map" className={s.panel}>
         <TopBar
           stats={stats}
