@@ -176,6 +176,43 @@ describe("two members and their agents on a live database", { skip }, () => {
     assert.deepEqual(direct.json, [], "b read a's private note directly");
   });
 
+  test("the map shows each member the other's private note as a stub", async () => {
+    const mapOf = async (who) => {
+      const r = await rest("rpc/map_graph", {
+        jwt: who.person,
+        method: "POST",
+        body: { p_hive: who.me.hive_id },
+      });
+      assert.equal(r.status, 200, r.text);
+      return r.json;
+    };
+    for (const [who, own, other] of [
+      [a, "a-private", "b-private"],
+      [b, "b-private", "a-private"],
+    ]) {
+      const m = await mapOf(who);
+      const mine = m.nodes.find((n) => n.id === ids[own]);
+      assert.equal(mine.locked, false);
+      assert.equal(mine.path, `${DIR}${own}.md`);
+      const stub = m.nodes.find((n) => n.id === ids[other]);
+      assert.ok(stub, `${other} is missing from the map`);
+      assert.equal(stub.locked, true);
+      for (const k of ["title", "path", "workspace_id", "by_agent", "agent_id"])
+        assert.equal(stub[k], null, k);
+      const raw = JSON.stringify(m);
+      assert.ok(!raw.includes(`${other} ${WORD}`), "the map carries a body");
+      assert.ok(!raw.includes(`${DIR}${other}.md`), "the map carries a path");
+    }
+    // An agent cannot draw the map.
+    const byAgent = await rest("rpc/map_graph", {
+      jwt: a.agent,
+      method: "POST",
+      body: { p_hive: a.me.hive_id },
+    });
+    assert.equal(byAgent.status, 400, byAgent.text);
+    assert.match(byAgent.text, /map_graph is for people/);
+  });
+
   test("an agent cannot share a note; once its owner does, the other member reads it", async () => {
     const w = await a.call("hive_write", {
       path: `${DIR}a-shared.md`,

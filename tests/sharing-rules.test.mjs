@@ -478,3 +478,407 @@ test("a self-hosted agent cannot save files", async () => {
   // It does not see the member's own files either, only shared ones.
   assert.deepEqual(await stored(agent), ["for-group.pdf"]);
 });
+
+// --------------------------------------------------------------------- map
+// public.map_graph(hive) draws every note and file of a hive in one call. It
+// is security definer, so these tests check what each caller gets back.
+
+const map = async (who, h = hive) =>
+  (await as(who, `select public.map_graph($1) as m`, [h]))[0].m;
+const nodeOf = (payload, id) => payload.nodes.find((n) => n.id === id);
+const addAt = (who, name, path, title, extra = {}) =>
+  as(
+    who,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, body, visibility, shared_with)
+     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+    [
+      hive,
+      members[name],
+      ws[name],
+      path,
+      title,
+      extra.body ?? "body",
+      extra.visibility ?? null,
+      extra.shared_with ?? [],
+    ],
+  ).then((r) => r[0].id);
+const addFile = (who, name, file, note = null) =>
+  as(
+    who,
+    `insert into public.files (hive_id, member_id, workspace_id, note_id, storage_path, name)
+     values ($1, $2, $3, $4, $5, $6) returning id`,
+    [hive, members[name], ws[name], note, filePath(name, file), file],
+  ).then((r) => r[0].id);
+const STUB_KEYS = [
+  "agent_id",
+  "by_agent",
+  "id",
+  "kind",
+  "locked",
+  "member_id",
+  "note_id",
+  "path",
+  "title",
+  "topic",
+  "updated_at",
+  "workspace_id",
+];
+const ids = {};
+
+test("note_topic cuts the folder to two levels", async () => {
+  const topic = async (p) =>
+    (await db.query(`select public.note_topic($1) as t`, [p])).rows[0].t;
+  assert.equal(await topic("clients/acme/pricing.md"), "clients/acme");
+  assert.equal(await topic("clients/acme/2026/q1/x.md"), "clients/acme");
+  assert.equal(await topic("Decisions/x.md"), "Decisions");
+  assert.equal(await topic("Home.md"), "General");
+  assert.equal(await topic("/Home.md"), "General");
+  assert.equal(await topic(""), "General");
+  assert.equal(await topic(null), "General");
+  assert.equal(await topic("a//b/c.md"), "a/b");
+});
+
+test("the map shows your own notes in full", async () => {
+  ids.secret = await addAt(
+    person("dani"),
+    "dani",
+    "maps/dani/deep/secret.md",
+    "map dani secret",
+    { body: "map-secret-body-text" },
+  );
+  const m = await map(person("dani"));
+  const n = nodeOf(m, ids.secret);
+  assert.equal(n.locked, false);
+  assert.equal(n.kind, "note");
+  assert.equal(n.title, "map dani secret");
+  assert.equal(n.path, "maps/dani/deep/secret.md");
+  assert.equal(n.workspace_id, ws.dani);
+  assert.equal(n.topic, "maps/dani");
+  assert.equal(n.member_id, members.dani);
+  assert.equal(n.by_agent, false);
+  assert.equal(n.agent_id, null);
+  assert.equal(n.note_id, null);
+  assert.equal(m.truncated, false);
+  const me = m.members.find((x) => x.id === members.dani);
+  assert.deepEqual(me, { id: members.dani, display_name: "Dani", is_me: true });
+  assert.equal(m.members.find((x) => x.id === members.ahmed).is_me, false);
+  assert.equal(m.members.length, 3);
+});
+
+test("a colleague's private note is a stub", async () => {
+  const n = nodeOf(await map(person("ahmed")), ids.secret);
+  assert.deepEqual(Object.keys(n).sort(), STUB_KEYS);
+  assert.equal(n.locked, true);
+  for (const k of [
+    "title",
+    "path",
+    "workspace_id",
+    "by_agent",
+    "agent_id",
+    "note_id",
+  ])
+    assert.equal(n[k], null, k);
+  assert.equal(n.kind, "note");
+  assert.equal(n.topic, "maps/dani");
+  assert.equal(n.member_id, members.dani);
+  assert.ok(n.updated_at);
+});
+
+test("a shared note is shown in full", async () => {
+  const agent = await agentFor("dani");
+  ids.daniAgent = agent.agent_id;
+  ids.byAgent = (
+    await as(
+      agent,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'maps/shared/by-agent.md', 'map dani group') returning id`,
+      [hive, members.dani, ws.dani],
+    )
+  )[0].id;
+  await as(
+    person("dani"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [ids.byAgent],
+  );
+
+  const mine = nodeOf(await map(person("dani")), ids.byAgent);
+  assert.equal(mine.by_agent, true);
+  assert.equal(mine.agent_id, ids.daniAgent);
+
+  const n = nodeOf(await map(person("ahmed")), ids.byAgent);
+  assert.equal(n.locked, false);
+  assert.equal(n.title, "map dani group");
+  assert.equal(n.path, "maps/shared/by-agent.md");
+  assert.equal(n.workspace_id, ws.dani);
+  assert.equal(n.by_agent, true);
+  assert.equal(n.agent_id, null);
+});
+
+test("quarantined items of others are absent", async () => {
+  const agent = await agentFor("sara", "self_hosted");
+  const held = (
+    await as(
+      agent,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'maps/held/x.md', 'map sara held') returning id, quarantined`,
+      [hive, members.sara, ws.sara],
+    )
+  )[0];
+  assert.equal(held.quarantined, true);
+  const file = await addFile(person("sara"), "sara", "map-held.pdf", held.id);
+
+  const sara = await map(person("sara"));
+  assert.equal(nodeOf(sara, held.id).locked, false);
+  assert.equal(nodeOf(sara, file).locked, false);
+  for (const who of ["dani", "ahmed"]) {
+    const m = await map(person(who));
+    assert.equal(nodeOf(m, held.id), undefined, who);
+    assert.equal(nodeOf(m, file), undefined, who);
+  }
+  // The earlier quarantined note is absent too.
+  const earlier = await noteId("held for review");
+  assert.equal(nodeOf(await map(person("dani")), earlier), undefined);
+});
+
+test("a colleague's private file is a stub and a shared file is not", async () => {
+  ids.looseFile = await addFile(person("dani"), "dani", "map-loose.pdf");
+  ids.sharedFile = await addFile(
+    person("dani"),
+    "dani",
+    "map-shared.pdf",
+    ids.byAgent,
+  );
+  ids.privFile = await addFile(
+    person("dani"),
+    "dani",
+    "map-private.pdf",
+    ids.secret,
+  );
+
+  const mine = await map(person("dani"));
+  const own = nodeOf(mine, ids.privFile);
+  assert.equal(own.locked, false);
+  assert.equal(own.kind, "file");
+  assert.equal(own.title, "map-private.pdf");
+  assert.equal(own.path, filePath("dani", "map-private.pdf"));
+  assert.equal(own.note_id, ids.secret);
+  assert.equal(own.by_agent, false);
+  assert.equal(own.agent_id, null);
+  assert.equal(own.topic, "maps/dani");
+  assert.equal(nodeOf(mine, ids.looseFile).topic, "Files");
+
+  const m = await map(person("ahmed"));
+  for (const id of [ids.looseFile, ids.privFile]) {
+    const n = nodeOf(m, id);
+    assert.deepEqual(Object.keys(n).sort(), STUB_KEYS);
+    assert.equal(n.locked, true);
+    assert.equal(n.kind, "file");
+    for (const k of [
+      "title",
+      "path",
+      "workspace_id",
+      "by_agent",
+      "agent_id",
+      "note_id",
+    ])
+      assert.equal(n[k], null, k);
+    assert.equal(n.member_id, members.dani);
+    assert.ok(n.updated_at);
+  }
+  assert.equal(nodeOf(m, ids.looseFile).topic, "Files");
+  const shared = nodeOf(m, ids.sharedFile);
+  assert.equal(shared.locked, false);
+  assert.equal(shared.title, "map-shared.pdf");
+  assert.equal(shared.note_id, ids.byAgent);
+  assert.equal(shared.by_agent, false);
+  assert.equal(shared.topic, "maps/shared");
+});
+
+test("links stay as narrow as links_select", async () => {
+  const g1 = await addAt(person("ahmed"), "ahmed", "maps/a/g1.md", "map g1", {
+    visibility: "group",
+  });
+  const g2 = await addAt(person("ahmed"), "ahmed", "maps/a/g2.md", "map g2", {
+    visibility: "group",
+  });
+  const between = (
+    await as(
+      person("ahmed"),
+      `insert into public.links (hive_id, from_note, to_note, tier, score) values ($1, $2, $3, 2, 0.5) returning status`,
+      [hive, g1, g2],
+    )
+  )[0];
+  assert.equal(between.status, "accepted");
+
+  const mine = await addAt(
+    person("dani"),
+    "dani",
+    "maps/l/mine.md",
+    "map mine",
+  );
+  const theirs = await addAt(
+    person("ahmed"),
+    "ahmed",
+    "maps/l/theirs.md",
+    "map theirs",
+  );
+  const link = (
+    await as(
+      person("dani"),
+      `insert into public.links (hive_id, from_note, to_note, tier, score) values ($1, $2, $3, 1, 0.75) returning id`,
+      [hive, mine, theirs],
+    )
+  )[0].id;
+  const pending = await addAt(
+    person("ahmed"),
+    "ahmed",
+    "maps/l/pending.md",
+    "map pending",
+  );
+  await as(
+    person("dani"),
+    `insert into public.links (hive_id, from_note, to_note, tier, score) values ($1, $2, $3, 3, 0.25)`,
+    [hive, mine, pending],
+  );
+
+  const has = (m, from, to) =>
+    m.links.some((l) => l.from === from && l.to === to);
+  let dani = await map(person("dani"));
+  assert.ok(!has(dani, mine, theirs), "a proposed link is not on the map");
+  assert.ok(!has(dani, mine, pending));
+  await as(person("ahmed"), `select public.respond_to_link($1, true)`, [link]);
+
+  dani = await map(person("dani"));
+  assert.ok(!has(dani, g1, g2), "a link between two colleagues' notes leaked");
+  assert.deepEqual(
+    dani.links.find((l) => l.from === mine),
+    { from: mine, to: theirs, tier: 1, score: 0.75 },
+  );
+  assert.equal(nodeOf(dani, theirs).locked, false);
+  assert.ok(!has(dani, mine, pending));
+  const unlocked = new Set(
+    dani.nodes.filter((n) => !n.locked).map((n) => n.id),
+  );
+  for (const l of dani.links) {
+    assert.ok(unlocked.has(l.from) && unlocked.has(l.to), "link to a stub");
+  }
+
+  const ahmed = await map(person("ahmed"));
+  assert.ok(has(ahmed, g1, g2));
+  assert.ok(has(ahmed, mine, theirs));
+  const sara = await map(person("sara"));
+  assert.ok(!has(sara, g1, g2));
+  assert.ok(!has(sara, mine, theirs));
+});
+
+test("agents, outsiders and the public are refused", async () => {
+  await assert.rejects(map(await agentFor("dani")), /map_graph is for people/);
+  await assert.rejects(
+    map(await agentFor("ahmed", "self_hosted")),
+    /map_graph is for people/,
+  );
+  await assert.rejects(map(person("outsider")), /not a member of this hive/);
+  await assert.rejects(map(null), /permission denied/);
+  await assert.rejects(
+    map({ role: "authenticated" }),
+    /not a member of this hive/,
+  );
+
+  const other = (
+    await as(
+      person("outsider"),
+      `select hive_id from public.members where user_id = $1`,
+      [users.outsider],
+    )
+  )[0].hive_id;
+  await assert.rejects(map(person("dani"), other), /not a member/);
+  const theirs = await map(person("outsider"), other);
+  const text = JSON.stringify(theirs);
+  for (const id of [
+    hive,
+    members.dani,
+    members.ahmed,
+    members.sara,
+    ws.dani,
+    ids.secret,
+    ids.byAgent,
+    ids.looseFile,
+  ])
+    assert.ok(!text.includes(id), `outsider's map carries ${id}`);
+  assert.deepEqual(theirs.nodes, []);
+  assert.deepEqual(theirs.links, []);
+  assert.equal(theirs.members.length, 1);
+});
+
+test("the map never carries bodies", async () => {
+  for (const who of ["dani", "ahmed", "sara"]) {
+    const text = JSON.stringify(await map(person(who)));
+    assert.ok(!text.includes('"body"'), who);
+    assert.ok(!text.includes('"frontmatter"'), who);
+    assert.ok(!text.includes("map-secret-body-text"), who);
+    assert.ok(!text.includes("token_hash"), who);
+  }
+  const ahmed = JSON.stringify(await map(person("ahmed")));
+  assert.ok(!ahmed.includes("map dani secret"));
+  assert.ok(!ahmed.includes("secret.md"));
+  assert.ok(!ahmed.includes("map-private.pdf"));
+  assert.ok(!ahmed.includes("map-loose.pdf"));
+});
+
+test("only your own agents are named", async () => {
+  const made = (
+    await as(
+      person("ahmed"),
+      `select * from public.create_agent($1, 'map ahmed agent', 'chatgpt')`,
+      [ws.ahmed],
+    )
+  )[0];
+  const dani = await map(person("dani"));
+  const theirs = dani.agents.find((a) => a.id === made.agent_id);
+  assert.deepEqual(theirs, {
+    id: made.agent_id,
+    member_id: members.ahmed,
+    provider: "chatgpt",
+    trust_tier: "vendor",
+    last_used_at: null,
+    name: null,
+  });
+  assert.ok(!JSON.stringify(dani).includes("map ahmed agent"));
+  assert.equal(
+    dani.agents.find((a) => a.id === ids.daniAgent).name,
+    "Files agent",
+  );
+  const ahmed = await map(person("ahmed"));
+  assert.equal(
+    ahmed.agents.find((a) => a.id === made.agent_id).name,
+    "map ahmed agent",
+  );
+  assert.equal(ahmed.agents.find((a) => a.id === ids.daniAgent).name, null);
+
+  // A revoked agent is gone from the map.
+  await as(person("ahmed"), `select public.revoke_agent($1)`, [made.agent_id]);
+  const after = await map(person("dani"));
+  assert.equal(
+    after.agents.find((a) => a.id === made.agent_id),
+    undefined,
+  );
+});
+
+test("the map is capped at 5,000 items, newest first", async () => {
+  // Old notes, bulk-inserted outside any session, push the hive over the cap.
+  await db.query(`select set_config('request.jwt.claims', '', false)`);
+  await db.query(
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, updated_at)
+     select $1, $2, $3, 'maps/bulk/' || g || '.md', 'map bulk ' || g,
+            timestamptz '2000-01-01' + g * interval '1 second'
+       from generate_series(1, 5000) g`,
+    [hive, members.sara, ws.sara],
+  );
+  const m = await map(person("dani"));
+  assert.equal(m.truncated, true);
+  assert.equal(m.nodes.length, 5000);
+  assert.ok(nodeOf(m, ids.secret), "the newest items are kept");
+  assert.ok(nodeOf(m, ids.looseFile));
+  const times = m.nodes.map((n) => Date.parse(n.updated_at));
+  for (let i = 1; i < times.length; i++) assert.ok(times[i - 1] >= times[i]);
+});
