@@ -152,8 +152,9 @@ reducing chroma. **Classic** is the fixed eight of `ui-concept.md` §2, with its
 
 A unit test (no browser) runs over every theme × mode × reach — 102 combinations — and, for dots,
 over both dot settings. Translucent layers are composited before measuring: the card is `--glass`
-over the wash; the side panel is `--glass2` over the wash; each is measured against all three wash
-stops and against the brightest point of the bloom on that stop, and the worst case counts.
+over the page background; the side panel is `--glass2` over it; the rail is the page background
+itself. The page background (the wash with its glows) is worked out at sample points across each
+surface, and the worst case counts ("Settled details" has the method).
 
 | Pair                                                              | Minimum  |
 | ----------------------------------------------------------------- | -------- |
@@ -261,9 +262,17 @@ same time.
   `[data-mode="light"] [data-scope="chrome"]` and `[data-scope="reset"]`; components set
   `data-scope`. CSS Modules only read tokens through `var()`.
 - **`color-scheme`** is set per `[data-mode]` block.
-- **Compositing for the contrast test.** Blur is ignored. A background is the layer's colour over
-  each of the three wash stops, once plain and once with every bloom tint that can overlap it
-  applied at its full strength (the gradient's 0% stop); the worst result counts.
+- **Compositing for the contrast test** (changed during the build, 2026-11-22). The first rule
+  stacked every glow at full strength under every surface; that never happens on the page and it
+  flattened the text colours, so it was replaced. The page background is now computed as the
+  browser draws it (the 168° wash with each radial glow evaluated at the point) on a grid across
+  each surface, plus the centre of every glow, at several window sizes, with the rail 208 px wide
+  and the side panel 280 px. Blur and the glass's `saturate(1.5)` are ignored. A second test
+  re-checks the result on a denser grid at window sizes the first does not use. If the rail or
+  panel widths change, the model must be updated.
+- **Greys for a theme without colour.** The eight topic greys are spaced evenly across the
+  lightness range that passes 3:1, instead of each being adjusted on its own, so they stay
+  distinguishable.
 - **One token, two backgrounds.** Chrome text must pass on the rail and on the side panel: the
   adjustment loops until both pass, and if they pull in opposite directions the test fails and
   names the pair.
