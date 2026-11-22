@@ -207,3 +207,98 @@ test("the rail is the chrome scope and marks the current page", async ({
     /.*/,
   );
 });
+
+test("a look changed in another tab is followed after a server refresh", async ({
+  page,
+  context,
+}) => {
+  await open(page);
+  // The other tab, same browser: it changes the theme and the mode, which rewrites the cookie.
+  const other = await context.newPage();
+  await open(other);
+  await button(other).click();
+  await group(other, "Theme").getByRole("radio", { name: "Aurora" }).click();
+  await group(other, "Mode").getByRole("radio", { name: "Light" }).click();
+  expect(await lookCookie(other)).toBe("aurora.light.tinted.theme");
+  await other.close();
+
+  // The first tab refreshes from the server, as the map's Refresher does on focus. /dev/map has
+  // no Refresher (it needs a session), so call the same router.refresh() through the router
+  // Next exposes in development (window.nd).
+  await page.evaluate(() =>
+    (
+      window as unknown as { nd: { router: { refresh(): void } } }
+    ).nd.router.refresh(),
+  );
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "aurora");
+  await button(page).click();
+  await expect(
+    group(page, "Theme").getByRole("radio", { name: "Aurora" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(
+    group(page, "Mode").getByRole("radio", { name: "Light" }),
+  ).toHaveAttribute("aria-checked", "true");
+
+  // A following change keeps the other tab's fields.
+  await group(page, "How far the colour reaches")
+    .getByRole("radio", { name: "Vivid" })
+    .click();
+  expect(await lookCookie(page)).toBe("aurora.light.vivid.theme");
+  expect(await attrs(page)).toMatchObject({
+    theme: "aurora",
+    mode: "light",
+    reach: "vivid",
+    dots: "theme",
+  });
+});
+
+test("in forced colours the swatches stay visible and the choice is outlined", async ({
+  page,
+}) => {
+  await page.emulateMedia({ forcedColors: "active" });
+  await open(page);
+  await button(page).click();
+  const style = (name: string) =>
+    group(page, "Theme")
+      .getByRole("radio", { name })
+      .evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return {
+          outline: cs.outlineStyle,
+          width: parseFloat(cs.outlineWidth),
+          image: cs.backgroundImage,
+        };
+      });
+  const chosen = await style("Keystone");
+  expect(chosen.outline).not.toBe("none");
+  expect(chosen.width).toBeGreaterThan(0);
+  expect(chosen.image).toContain("gradient");
+  const other = await style("Aurora");
+  expect(other.image).toContain("gradient");
+  expect(other.outline).toBe("none");
+});
+
+/** Relative brightness 0..1 of a computed `rgb(...)` colour. */
+const brightness = (rgb: string) => {
+  const [r, g, b] = rgb.match(/[\d.]+/g)!.map(Number);
+  return (0.2126 * r! + 0.7152 * g! + 0.0722 * b!) / 255;
+};
+
+test("printing in dark mode gives dark text on a light page", async ({
+  page,
+}) => {
+  await open(page);
+  const rail = page.getByRole("complementary", { name: "Navigation" });
+  const railColour = () => rail.evaluate((el) => getComputedStyle(el).color);
+  const screen = await railColour();
+  expect(brightness(screen)).toBeGreaterThan(0.7);
+
+  await page.emulateMedia({ media: "print" });
+  const printed = await railColour();
+  const body = await page.evaluate(
+    () => getComputedStyle(document.body).backgroundColor,
+  );
+  expect(printed).not.toBe(screen);
+  expect(brightness(printed)).toBeLessThan(0.3);
+  expect(brightness(body)).toBeGreaterThan(0.8);
+});

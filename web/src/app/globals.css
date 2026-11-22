@@ -73,10 +73,30 @@ textarea {
   }
 }
 
-/* Print: no wash, no glass, the solid content colour. */
+/* Print: dark text on white paper in either mode. The page takes the system colours with a
+   light scheme (Canvas, CanvasText), the wash, bloom and glass go, and the text tokens follow
+   CanvasText / GrayText, also inside the chrome and reset scopes. */
 @media print {
+  :root {
+    color-scheme: light !important;
+    --wash: none !important;
+    --bloom: none !important;
+    --glow: none !important;
+    --glass: transparent !important;
+    --glass2: transparent !important;
+  }
+
+  :root,
+  [data-scope] {
+    --fg: CanvasText !important;
+    --fg2: CanvasText !important;
+    --muted: GrayText !important;
+    --quiet: GrayText !important;
+  }
+
   body {
-    background: var(--bg);
+    background: Canvas;
+    color: CanvasText;
   }
 
   *,
@@ -88,17 +108,23 @@ textarea {
   }
 }
 
-/* Forced colours: the system's colours, no gradients and no glass. */
+/* Forced colours: the system's colours, no gradients and no glass. An element marked
+   data-keep-colours (the theme swatches) opts out with forced-color-adjust: none. */
 @media (forced-colors: active) {
   body {
     background: Canvas;
     color: CanvasText;
   }
 
+  :not([data-keep-colours]),
+  :not([data-keep-colours])::before,
+  :not([data-keep-colours])::after {
+    background-image: none !important;
+  }
+
   *,
   *::before,
   *::after {
-    background-image: none !important;
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }

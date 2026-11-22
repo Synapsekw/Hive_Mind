@@ -7,13 +7,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { formatLook, LOOK_COOKIE, type Look } from "../theme/look";
-
-const YEAR = 60 * 60 * 24 * 365;
+import { formatLook, type Look } from "../theme/look";
+import { lookCookie } from "./cookie";
 
 type LookApi = { look: Look; setLook(patch: Partial<Look>): void };
 
@@ -25,7 +25,12 @@ function apply(look: Look) {
   d.mode = look.mode;
   d.reach = look.reach;
   d.dots = look.dots;
-  document.cookie = `${LOOK_COOKIE}=${formatLook(look)}; Path=/; Max-Age=${YEAR}; SameSite=Lax`;
+  // A blocked cookie (privacy settings, sandboxed frame) must never break the switch.
+  try {
+    document.cookie = lookCookie(look, location.protocol === "https:");
+  } catch {
+    // The look still applies for this page; it just is not remembered.
+  }
 }
 
 export function LookProvider({
@@ -45,6 +50,15 @@ export function LookProvider({
     apply(next);
     set(next);
   }, []);
+  // A server refresh (router.refresh(), e.g. the map's Refresher on focus) renders the layout
+  // again with the cookie as it is now, which another tab may have changed: follow it, so the
+  // panel shows that choice and the next change keeps its other fields.
+  const key = formatLook(initial);
+  useEffect(() => {
+    latest.current = initial;
+    set(initial);
+    // `key` stands for `initial`'s four values; a new object with the same look is no change.
+  }, [key]);
   const api = useMemo(() => ({ look, setLook }), [look, setLook]);
   return <LookContext.Provider value={api}>{children}</LookContext.Provider>;
 }

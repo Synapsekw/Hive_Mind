@@ -85,6 +85,7 @@ function Radios<T extends string>({
             aria-checked={on}
             tabIndex={on ? 0 : -1}
             className={swatches ? s.swatch : s.segment}
+            data-keep-colours={swatches ? "" : undefined}
             aria-label={swatches ? o.label : undefined}
             title={swatches ? o.label : undefined}
             // The one inline colour in the app: a theme's own seeds, read from themes.json.
@@ -128,6 +129,7 @@ export function Appearance() {
         <span aria-hidden="true" className={s.slot}>
           <span
             className={s.current}
+            data-keep-colours=""
             style={{ background: swatch(look.theme, look.mode) }}
           />
         </span>
