@@ -38,6 +38,7 @@ local stack.
 pnpm install
 pnpm test             # sharing rules + hooks, no Docker needed
 pnpm demo             # two people and their agents, step by step, no Docker needed
+pnpm test:live        # the MCP server against the database in .env; cleans up after itself
 pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 

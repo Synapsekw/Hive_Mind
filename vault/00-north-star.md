@@ -1,7 +1,7 @@
 ---
 type: north-star
 status: active
-last-updated: 2026-11-22-0923
+last-updated: 2026-11-22-1000
 tags: [project/hive-mind, north-star]
 related:
   - "[[README]]"
@@ -42,13 +42,13 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 
 ## 3. Now
 
-- **Phase:** **Phase 1 has started.** The schema and sharing rules now run on the hosted dev project; the MCP server has still not run against it.
+- **Phase:** **Phase 1, T1 (hosted half) and T2 done.** The schema, the sharing rules and the MCP server all run on the hosted dev project.
 - **Branch:** `develop` is ahead of `main` (docs and vault only; no promotion PR yet). No `task/*` branches, no worktrees.
-- **The MCP server is untested end to end** ([[2026-11-20-gotcha-02-mcp-server-untested-end-to-end]]). It typechecks. Its sign-in signs a JWT with the project secret and has never met a live database; expect that to need work on the hosted project.
-- **Green tests prove the SQL, not Supabase** ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]). The auth schema and roles are stubbed in `scripts/local-db.mjs`.
+- **The MCP server works on the live database** (T2, 2026-11-22): all six tools pass `pnpm test:live` (`tests/mcp.integration.test.mjs`), which also proves on real Supabase that an agent identity cannot delete a note or set sharing. Nothing in `mcp/` needed changing. The sign-in depends on the project's legacy JWT secret: do not revoke it ([[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]]).
+- **`pnpm test` proves the SQL, not Supabase** ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]); the auth schema and roles are stubbed in `scripts/local-db.mjs`. `pnpm test:live` is the check against real Supabase, and it does not run in CI.
 - **The hosted dev project is up** (T1, hosted half, 2026-11-22): `tokyttkztrkjvkaksdnh`, wired in `.mcp.json` as `supabase-dev`. Both migrations applied under the repo's version stamps; one hive (`Synapse`), one owner, one workspace, one agent (`Claude`); the token is in the local `.env`. `agent_login` works through the public API and a signed-out caller reads nothing. Runbook: `docs/hosted-db-bringup.md`; session [[2026-11-22-0923-hosted-db-bringup]]. Migrations applied through the MCP must be re-stamped ([[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]]). The local Docker stack is still not set up.
 - **In flight:** none.
-- **Next:** **T2**, the critical path of [[2026-11-21-local-end-to-end]]: run the MCP server against the live database (unblocked now). **T4** (vault importer) is independent and can run alongside.
+- **Next:** **T3** of [[2026-11-21-local-end-to-end]]: connect the owner's Claude to the server and use it for a real session. **T5** (file storage) and **T6** (second member proof) are also unblocked; **T4** (vault importer) is independent.
 - **Workflow trap:** on Windows `finish-task.sh` merges and pushes, then fails to remove the worktree the session sits in ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
 - **Owed — Danijel:** install Docker + the Supabase CLI on the build machine for the local stack.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
