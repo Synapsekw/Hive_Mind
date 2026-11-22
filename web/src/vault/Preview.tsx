@@ -39,7 +39,7 @@ function Release({
     else setRefused(true);
   }
   return (
-    <div className={s.release}>
+    <div data-scope="reset" className={s.release}>
       <p className={s.sentence}>{releaseSentence(noteMark(note, members))}</p>
       {refused && (
         <p role="alert" className={s.refused}>

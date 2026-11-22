@@ -127,20 +127,20 @@ export function Backdrop({
   return (
     <svg aria-hidden="true" viewBox="0 0 1000 760" className={s.svg}>
       {guides && (
-        <path d={guides} fill="none" stroke="#1b2433" strokeWidth="1" />
+        <path d={guides} fill="none" className={s.guides} strokeWidth="1" />
       )}
       <g key={view} className={s.edges}>
         <path
           d={edges.base}
           fill="none"
-          stroke="#5a6c8e"
+          className={s.edgeBase}
           strokeWidth="0.6"
           strokeOpacity={edges.baseOpacity}
         />
         <path
           d={edges.hi}
           fill="none"
-          stroke="#e6ebf5"
+          className={s.edgeHi}
           strokeWidth="1"
           strokeOpacity=".8"
         />
@@ -149,7 +149,7 @@ export function Backdrop({
         <path
           d={ticks(model, pos, act)}
           fill="none"
-          stroke="#5f6e8a"
+          className={s.ticks}
           strokeWidth="4"
           strokeLinecap="round"
         />
@@ -159,7 +159,6 @@ export function Backdrop({
           className={s.core}
           d={swarm(act.today)}
           fill="none"
-          stroke="#7fd4f5"
           strokeWidth="2.2"
           strokeLinecap="round"
         />

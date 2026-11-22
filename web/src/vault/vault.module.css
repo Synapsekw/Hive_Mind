@@ -1,14 +1,13 @@
-/* The vault screen. Tokens come from globals.css and match the map's (map.module.css). */
+/* The vault screen in Keystone glass, in the map's grammar (map.module.css): the rail
+   (web/src/shell/) on the wash, then one frosted card holding the tabs, the filter and the three
+   columns, split by hairlines. The sharing control and the release box open inside the card as
+   reset popovers (data-scope="reset"). Colours are tokens only (themes.generated.css). */
 
 .root {
-  --line: #1b2433;
-  --soft: #b4bed0;
-  --raised: #263142;
   min-height: 100vh;
   display: flex;
   flex-wrap: wrap;
-  background: var(--bg);
-  color: var(--text);
+  color: var(--fg);
   font-size: 14px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
@@ -22,9 +21,9 @@
 .root button:focus-visible,
 .root input:focus-visible,
 .root a:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--acc);
   outline-offset: 2px;
-  border-radius: 999px;
+  border-radius: 8px;
 }
 
 .srOnly {
@@ -36,18 +35,22 @@
   white-space: nowrap;
 }
 
-/* ---- The panel ---- */
+/* ---- The card ---- */
 
 .panel {
   flex: 999 1 620px;
   min-width: 0;
-  margin: 12px 12px 12px 0;
-  padding: 18px 22px 0;
-  border-radius: 22px;
-  background: var(--panel);
+  margin: 8px 8px 8px 4px;
+  padding: 16px 20px 0;
+  border: 1px solid var(--edge-card);
+  border-radius: 20px;
+  background: var(--glow), var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 
 .bar {
@@ -58,33 +61,41 @@
   gap: 10px 16px;
 }
 
+/* The workspace tabs: the map's view switch, a 10 px hairline track with 7 px segments. */
 .tabs {
   display: flex;
   flex-wrap: wrap;
   padding: 3px;
-  border-radius: 999px;
-  background: var(--fill-1);
+  border: 1px solid var(--line);
+  border-radius: 10px;
 }
 
 .tab {
   display: inline-flex;
   align-items: center;
-  height: 32px;
-  padding: 0 16px;
-  border-radius: 999px;
-  color: var(--text-2);
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 7px;
+  color: var(--muted);
   font-size: 13px;
   text-decoration: none;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
 }
 
 .tab:hover {
-  color: var(--text);
+  color: var(--fg);
 }
 
 .tab[aria-current="page"] {
-  background: var(--raised);
-  color: var(--text);
+  background: var(--fill-on);
+  color: var(--fg);
   font-weight: 500;
+}
+
+.root .tab:focus-visible {
+  border-radius: 7px;
 }
 
 .filter {
@@ -96,17 +107,22 @@
 .search {
   flex: 1;
   min-width: 0;
-  height: 36px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--fill-1);
-  color: var(--text);
-  font-size: 14px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
+  font-size: 13px;
+  transition: border-color 0.24s var(--ease);
+}
+
+.search:hover {
+  border-color: var(--line-hi);
 }
 
 .search::placeholder {
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 /* ---- Columns ---- */
@@ -114,8 +130,9 @@
 .cols {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 28px;
-  padding-bottom: 18px;
+  gap: 24px;
+  padding: 14px 0 18px;
+  border-top: 1px solid var(--line);
 }
 
 /* Positioned, so screen-reader-only text inside a column stays inside its scroll box. */
@@ -135,7 +152,9 @@
 }
 
 .heldItem {
-  margin-top: 14px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 
 .folderRow {
@@ -157,7 +176,7 @@
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: none;
   cursor: pointer;
 }
@@ -166,10 +185,10 @@
   flex: none;
   width: 8px;
   height: 5px;
-  background: var(--text-2);
+  background: var(--muted);
   clip-path: polygon(0 0, 100% 0, 50% 100%);
   transform: rotate(-90deg);
-  transition: transform 0.15s ease;
+  transition: transform 0.18s var(--ease);
 }
 
 .caret[data-open] {
@@ -177,7 +196,7 @@
 }
 
 .disclose:hover .caret {
-  background: var(--text);
+  background: var(--fg);
 }
 
 .folder {
@@ -187,23 +206,27 @@
   align-items: center;
   gap: 8px;
   height: 32px;
-  padding: 0 12px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: none;
-  color: var(--soft);
-  font-size: 14px;
+  color: var(--fg2);
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
 }
 
 .folder:hover {
-  color: var(--text);
+  background: var(--fill);
+  color: var(--fg);
 }
 
 .folder[aria-pressed="true"] {
-  background: var(--fill-1);
-  color: var(--text);
+  background: var(--sel);
+  color: var(--fg);
   font-weight: 500;
 }
 
@@ -217,28 +240,30 @@
 
 .folderCount {
   flex: none;
-  font-size: 12px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
   font-weight: 400;
-  color: var(--text-quiet);
+  color: var(--muted);
 }
 
-/* ---- Marks ---- */
+/* ---- Marks: a shape and its words, never colour alone ---- */
 
 .glyph {
   flex: none;
   display: inline-block;
+  box-sizing: border-box;
   width: 9px;
   height: 9px;
   border-radius: 50%;
 }
 
 .glyph[data-kind="group"] {
-  background: var(--accent);
+  background: var(--fg2);
 }
 
 .glyph[data-kind="members"] {
-  box-shadow: inset 0 0 0 1.5px var(--accent);
-  background: linear-gradient(90deg, var(--accent) 50%, transparent 50%);
+  border: 1.5px solid var(--fg2);
+  background: linear-gradient(90deg, var(--fg2) 50%, transparent 50%);
 }
 
 .markTag {
@@ -260,14 +285,14 @@
 .notes {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .listHead {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 14px;
+  padding: 0 12px;
 }
 
 .listTitleRow {
@@ -284,15 +309,16 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 32px;
 }
 
 .listCount {
   flex: none;
-  font-size: 13px;
-  color: var(--text-2);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .noteNav {
@@ -313,22 +339,19 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  padding: 8px 14px;
-  border-radius: 14px;
-  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--fg);
   text-decoration: none;
-}
-
-.root .row:focus-visible {
-  border-radius: 14px;
+  transition: background 0.18s var(--ease);
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--fill-1) 60%, transparent);
+  background: var(--fill);
 }
 
 .row[aria-current="page"] {
-  background: var(--fill-1);
+  background: var(--sel);
 }
 
 .rowTitle {
@@ -345,31 +368,28 @@
 .rowMeta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   font-size: 12px;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .rowMark {
   margin-left: auto;
   min-width: 0;
   display: flex;
-  color: var(--soft);
+  color: var(--fg2);
 }
 
+/* Held, Agent, Opened by a link: small hairline tags. */
 .tag {
   flex: none;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: var(--fill-2);
-  color: var(--soft);
+  padding: 0 6px;
+  border: 1px solid var(--line-hi);
+  border-radius: 6px;
+  color: var(--fg2);
   font-size: 11px;
-  line-height: 18px;
-}
-
-.row[aria-current="page"] .tag {
-  background: var(--raised);
+  line-height: 16px;
 }
 
 .group + .group {
@@ -377,19 +397,22 @@
 }
 
 .groupName {
-  margin: 0 0 4px;
-  padding: 0 14px;
-  font-size: 13px;
+  margin: 0 0 6px;
+  padding: 0 12px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
   font-weight: 400;
-  color: var(--text-2);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .empty,
 .more {
   margin: 0;
-  padding: 8px 14px;
+  padding: 8px 12px;
   max-width: 40ch;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .more {
@@ -415,7 +438,9 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
-  padding-bottom: 22px;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
 }
 
 .noteTitle {
@@ -429,8 +454,9 @@
 
 .path {
   margin: 0;
-  font-size: 13px;
-  color: var(--text-quiet);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 
@@ -440,13 +466,13 @@
   flex-wrap: wrap;
   gap: 4px 18px;
   font-size: 13px;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 .cut {
   margin: 0 0 12px;
   font-size: 13px;
-  color: var(--text-2);
+  color: var(--muted);
 }
 
 /* ---- Sharing control ---- */
@@ -455,24 +481,28 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   align-self: stretch;
   min-width: 0;
 }
 
+/* The button that opens it: a hairline control showing the current mark. */
 .pill {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   max-width: 100%;
   height: 32px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--fill-1);
-  color: var(--text);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
   font-size: 13px;
   cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease);
 }
 
 .pill > span:nth-last-child(2) {
@@ -482,26 +512,49 @@
   text-overflow: ellipsis;
 }
 
-.pill:hover,
-.pill[aria-expanded="true"] {
-  background: var(--fill-2);
+.pill:hover {
+  border-color: var(--line-hi);
 }
 
-.control {
+.pill[aria-expanded="true"] {
+  border-color: var(--line-hi);
+  background: var(--fill-on);
+}
+
+/* The control and the release box: reset popovers in the document flow. */
+.control,
+.release {
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px 18px;
-  border-radius: 18px;
-  background: var(--fill-1);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  color: var(--fg);
 }
 
-.options,
+.release {
+  margin-top: 4px;
+}
+
+/* The choices: the Appearance panel's segmented row. */
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--fill);
+}
+
 .people {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
 }
 
 .option,
@@ -510,133 +563,157 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 999px;
-  color: var(--text-2);
   font-size: 13px;
   cursor: pointer;
   user-select: none;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease),
+    border-color 0.24s var(--ease);
 }
 
-.option:hover,
-.person:hover {
-  color: var(--text);
+.option {
+  flex: 1 1 auto;
+  justify-content: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.option:hover {
+  color: var(--fg);
 }
 
 .option:has(input:checked) {
-  background: var(--raised);
-  color: var(--text);
+  background: var(--fill-on);
+  color: var(--fg);
   font-weight: 500;
 }
 
 .option:has(input:focus-visible),
 .person:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--acc);
   outline-offset: 2px;
 }
 
 .person {
-  padding-left: 10px;
-  background: var(--fill-2);
-  color: var(--soft);
+  height: 32px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--fg2);
+}
+
+.person:hover {
+  border-color: var(--line-hi);
+  color: var(--fg);
 }
 
 .person:has(input:checked) {
-  color: var(--text);
+  border-color: var(--line-hi);
+  background: var(--fill);
+  color: var(--fg);
 }
 
 .tick {
   position: relative;
   flex: none;
+  box-sizing: border-box;
   width: 14px;
   height: 14px;
+  border: 1.5px solid var(--line-hi);
   border-radius: 4px;
-  background: var(--raised);
 }
 
 .person:has(input:checked) .tick {
-  background: var(--accent);
+  border: 0;
+  background: var(--grad);
 }
 
 .person:has(input:checked) .tick::after {
   content: "";
   position: absolute;
   inset: 3px 2px 2px;
-  background: var(--bg);
+  background: var(--on-brand);
   clip-path: polygon(0 52%, 14% 38%, 38% 62%, 86% 6%, 100% 20%, 38% 92%);
 }
 
 .sentence {
   margin: 0;
   max-width: 62ch;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.55;
-  color: var(--text);
+  color: var(--fg);
 }
 
 .sentence[data-quiet] {
-  color: var(--text-2);
+  color: var(--muted);
 }
 
+/* A refusal is said in words; the bar beside it only draws the eye. */
 .refused {
   margin: 0;
+  padding-left: 10px;
   font-size: 14px;
-  font-weight: 500;
-  color: var(--hue-6);
+  font-weight: 600;
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--hue-6);
 }
 
 .actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .primary,
 .secondary {
   height: 34px;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 999px;
+  padding: 0 16px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
 }
 
 .primary {
-  background: var(--accent);
-  color: var(--bg);
+  border: 0;
+  background: var(--grad);
+  color: var(--on-brand);
+  transition: filter 0.18s var(--ease);
 }
 
+.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+/* Disabled: no gradient, a dashed hairline and quiet text, in either mode. */
 .primary:disabled {
-  background: var(--raised);
-  color: var(--text-quiet);
-  cursor: default;
+  border: 1px dashed var(--line-hi);
+  background: none;
+  color: var(--quiet);
+  cursor: not-allowed;
 }
 
 .secondary {
-  background: var(--fill-2);
-  color: var(--text);
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--fg);
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease);
 }
 
 .secondary:hover {
-  background: var(--raised);
-}
-
-.release {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 4px;
-  padding: 16px 18px 18px;
-  border-radius: 18px;
-  background: var(--fill-1);
+  border-color: var(--line-hi);
+  background: var(--fill);
 }
 
 /* ---- Markdown ---- */
 
 .markdown {
-  color: var(--soft);
+  color: var(--fg2);
   font-size: 15px;
   line-height: 1.65;
   overflow-wrap: anywhere;
@@ -653,9 +730,10 @@
 .markdown h5,
 .markdown h6 {
   margin: 1.6em 0 0.5em;
-  color: var(--text);
+  color: var(--fg);
   font-weight: 600;
   line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 
 .markdown h1 {
@@ -691,33 +769,39 @@
   margin-top: 0.25em;
 }
 
+.markdown li::marker {
+  color: var(--muted);
+}
+
 .markdown a {
-  color: var(--accent);
+  color: var(--acc);
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--acc) 45%, transparent);
   text-underline-offset: 3px;
 }
 
 .markdown a:hover {
-  text-decoration-color: var(--accent);
+  text-decoration-color: var(--acc);
 }
 
 .markdown strong {
-  color: var(--text);
+  color: var(--fg);
   font-weight: 600;
 }
 
 .markdown code {
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 6px;
-  background: var(--fill-1);
+  background: var(--fill);
+  font-family: var(--font-mono), monospace;
   font-size: 13px;
 }
 
 .markdown pre {
-  padding: 12px 16px;
-  border-radius: 14px;
-  background: var(--fill-1);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
   overflow-x: auto;
 }
 
@@ -727,9 +811,9 @@
 }
 
 .markdown blockquote {
-  padding-left: 16px;
-  color: var(--text-2);
-  box-shadow: inset 2px 0 0 var(--line);
+  padding-left: 14px;
+  color: var(--muted);
+  box-shadow: inset 2px 0 0 var(--line-hi);
 }
 
 .markdown hr {
@@ -752,17 +836,33 @@
   padding: 7px 16px 7px 0;
   text-align: left;
   vertical-align: top;
-  box-shadow: inset 0 -1px 0 var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 .markdown th {
-  color: var(--text);
+  color: var(--fg);
   font-weight: 500;
+  border-bottom-color: var(--line-hi);
 }
 
 .imageLink::before {
   content: "Image: ";
-  color: var(--text-2);
+  color: var(--muted);
+}
+
+/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
+
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .panel {
+    background: var(--glow), var(--bg);
+  }
+
+  .control,
+  .release {
+    background: var(--surface);
+  }
 }
 
 /* ---- Side by side from 1100 x 560 ----
@@ -780,13 +880,41 @@
   }
 }
 
+/* Side by side, the columns are split by hairlines instead of gaps. */
 @media (min-width: 1100px) {
   .cols {
     grid-template-columns: 220px minmax(260px, 340px) minmax(0, 1fr);
+    gap: 0;
+    padding-top: 0;
   }
 
   .cols[data-shared] {
     grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  }
+
+  .folders,
+  .notes,
+  .preview {
+    padding-top: 14px;
+  }
+
+  .folders {
+    padding-right: 12px;
+    border-right: 1px solid var(--line);
+  }
+
+  .notes {
+    padding-left: 12px;
+    padding-right: 12px;
+    border-right: 1px solid var(--line);
+  }
+
+  .cols[data-shared] .notes {
+    padding-left: 0;
+  }
+
+  .preview {
+    padding-left: 24px;
   }
 }
 
@@ -816,36 +944,94 @@
     overflow-y: auto;
     padding-bottom: 18px;
     scrollbar-width: thin;
-    scrollbar-color: var(--fill-2) transparent;
+    scrollbar-color: var(--fill-on) transparent;
   }
 
+  /* The list header stays put and only the list under it scrolls, so no row ever passes
+     beneath the header and it needs no ground of its own on the glass. (A blurred veil does
+     not work here: inside the card's own backdrop-filter the nested blur has nothing to blur,
+     and a solid ground shows as a band on the light card.) */
   .notes {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    /* clip, not hidden: the column is then not a scroll box at all, so nothing (a script, a
+       focus jump) can scroll the header out of view. */
+    overflow: clip;
+    padding-bottom: 0;
   }
 
   .notes > .listHead {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    padding-bottom: 12px;
-    background: var(--panel);
+    flex: none;
+    margin: 0 -12px;
+    padding: 0 24px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .cols[data-shared] .notes > .listHead {
+    margin-left: 0;
+    padding-left: 12px;
+  }
+
+  .notes > .noteNav {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px 0 18px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fill-on) transparent;
   }
 
   /* An open sharing control can be taller than the column: the header then scrolls with the
      list, so Save, Cancel and every note stay reachable by scrolling the column. */
-  .notes > .listHead:has(.control) {
-    position: static;
+  .notes:has(.control) {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .notes:has(.control) > .noteNav {
+    overflow: visible;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .caret {
+  .caret,
+  .tab,
+  .search,
+  .folder,
+  .row,
+  .pill,
+  .option,
+  .person,
+  .primary,
+  .secondary {
     transition: none;
   }
 }
 
-/* A native radio or checkbox laid over its pill: invisible, but it is what is clicked and
-   focused, so the pill keeps native keyboard and screen-reader behaviour. */
+/* Forced colours: the chosen and current states are drawn in Highlight, since backgrounds are
+   overridden. */
+@media (forced-colors: active) {
+  .tab[aria-current="page"],
+  .folder[aria-pressed="true"],
+  .row[aria-current="page"],
+  .option:has(input:checked) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .glyph {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+  }
+
+  .glyph[data-kind="group"] {
+    background: CanvasText;
+  }
+}
+
+/* A native radio or checkbox laid over its control: invisible, but it is what is clicked and
+   focused, so the control keeps native keyboard and screen-reader behaviour. */
 .hiddenInput {
   position: absolute;
   inset: 0;

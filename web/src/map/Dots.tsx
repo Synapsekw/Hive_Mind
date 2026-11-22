@@ -4,7 +4,8 @@ import { memo, type CSSProperties } from "react";
 import type { MapModel, ModelNode } from "./types";
 import s from "./map.module.css";
 
-export const SOFT = "#b4bed0";
+/** The index, agents and kind marks: the secondary text colour of the current scope. */
+export const SOFT = "var(--fg2)";
 
 /** Two decimals, written the way the browser writes them back (no trailing zeros). */
 const pct = (v: number) => String(Math.round(v * 100) / 100);
@@ -17,7 +18,7 @@ const KIND_WORD: Record<ModelNode["kind"], string> = {
   root: "index",
 };
 
-/** The node's colour: its topic's hue, or a soft grey for the index and agents. */
+/** The node's colour: its topic's hue, or the secondary text colour for the index and agents. */
 export function colour(model: MapModel, n: ModelNode): string {
   const t = n.topic >= 0 ? model.topics[n.topic] : undefined;
   return t ? `var(--hue-${t.hue + 1})` : SOFT;

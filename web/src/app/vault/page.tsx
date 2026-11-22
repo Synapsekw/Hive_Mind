@@ -1,4 +1,4 @@
-import { Notice } from "../../map/Notice";
+import { Notice } from "../../shell/Notice";
 import { createServerSupabase } from "../../lib/supabase/server";
 import { Vault } from "../../vault/Vault";
 import { preview, release, saveFolder, saveNote } from "./actions";

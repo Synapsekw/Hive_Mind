@@ -6,6 +6,7 @@ import {
   HOSTILE_NOTE_ID,
 } from "../src/vault/fixture";
 import { folderSentence, noteSentence } from "../src/vault/sentences";
+import { setLook } from "./look";
 
 // The fixture's content does not depend on `now`, only its dates do.
 const DATA = fixtureVault(0);
@@ -45,33 +46,90 @@ function watch(page: Page) {
       .map((r) => `${r.resourceType()} ${r.url()}`);
 }
 
-for (const size of [
-  { width: 1920, height: 1080 },
-  { width: 1600, height: 1000 },
-  { width: 1366, height: 768 },
-  { width: 1280, height: 620 },
-]) {
-  test(`the vault fits a ${size.width} x ${size.height} window without scrolling`, async ({
-    page,
-  }) => {
-    await page.setViewportSize(size);
-    await open(page, `?note=${HOSTILE_NOTE_ID}`);
-    const fit = await page.evaluate(() => {
-      const main = document.querySelector("main")!.getBoundingClientRect();
-      const root = document.documentElement;
-      return {
-        pageScrolls:
-          root.scrollHeight > window.innerHeight ||
-          root.scrollWidth > window.innerWidth,
-        panelBottom: main.bottom,
-        panelRight: main.right,
-      };
+// The default look, and a light, vivid one whose glass and type differ the most from it.
+const LOOKS = [undefined, "aurora.light.vivid.classic"] as const;
+const named = (look: string | undefined) => (look ? ` (${look})` : "");
+
+for (const look of LOOKS)
+  for (const size of [
+    { width: 1920, height: 1080 },
+    { width: 1600, height: 1000 },
+    { width: 1366, height: 768 },
+    { width: 1280, height: 620 },
+  ]) {
+    test(`the vault fits a ${size.width} x ${size.height} window without scrolling${named(look)}`, async ({
+      page,
+      context,
+    }) => {
+      if (look) await setLook(context, look);
+      await page.setViewportSize(size);
+      await open(page, `?note=${HOSTILE_NOTE_ID}`);
+      const fit = await page.evaluate(() => {
+        const main = document.querySelector("main")!.getBoundingClientRect();
+        const root = document.documentElement;
+        return {
+          pageScrolls:
+            root.scrollHeight > window.innerHeight ||
+            root.scrollWidth > window.innerWidth,
+          panelBottom: main.bottom,
+          panelRight: main.right,
+        };
+      });
+      expect(fit.pageScrolls).toBe(false);
+      expect(fit.panelBottom).toBeLessThanOrEqual(size.height);
+      expect(fit.panelRight).toBeLessThanOrEqual(size.width);
     });
-    expect(fit.pageScrolls).toBe(false);
-    expect(fit.panelBottom).toBeLessThanOrEqual(size.height);
-    expect(fit.panelRight).toBeLessThanOrEqual(size.width);
+  }
+
+test("the vault sits on frosted glass", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  const blur = await page
+    .getByRole("main", { name: "Vault" })
+    .evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return (
+        cs.backdropFilter ||
+        cs.getPropertyValue("-webkit-backdrop-filter") ||
+        ""
+      );
+    });
+  expect(blur).toContain("blur(30px)");
+});
+
+test("no control in the vault is a pill", async ({ page }) => {
+  await open(page, `?note=${HELD}`);
+  // Open the note control so its options, people and buttons are drawn too.
+  await page.getByRole("button", { name: /^Sharing: / }).click();
+  await noteControl(page)
+    .getByRole("radio", { name: "Specific people" })
+    .check();
+  const pills = await page.evaluate(() =>
+    [...document.querySelectorAll("main *")]
+      .filter((e) =>
+        getComputedStyle(e).borderRadius.split(" ").includes("999px"),
+      )
+      .map((e) => e.outerHTML.slice(0, 100)),
+  );
+  expect(pills).toEqual([]);
+});
+
+test("in light mode the open control has dark text on a surface of its own", async ({
+  page,
+  context,
+}) => {
+  await setLook(context, "aurora.light.vivid.classic");
+  await open(page, `?note=${README}`);
+  await page.getByRole("button", { name: /^Sharing: / }).click();
+  const look = await noteControl(page).evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { color: cs.color, background: cs.backgroundColor };
   });
-}
+  expect(look.color).not.toBe("rgb(255, 255, 255)");
+  expect(look.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(look.background).not.toBe("transparent");
+  // A reset scope: the light card's text tokens, not the chrome's white.
+  await expect(noteControl(page)).toHaveAttribute("data-scope", "reset");
+});
 
 test("choosing a folder and filtering narrow the list without a request", async ({
   page,
@@ -337,58 +395,63 @@ test("the shared tab groups colleagues' notes and offers no control", async ({
   await expect(page.getByRole("button", { name: /^Sharing: / })).toHaveCount(0);
 });
 
-for (const size of [
-  { width: 1280, height: 620 },
-  // The shortest window that still keeps the columns side by side.
-  { width: 1100, height: 560 },
-])
-  test(`at ${size.width} x ${size.height} an open folder control keeps Save and the list reachable`, async ({
-    page,
-  }) => {
-    await page.setViewportSize(size);
-    await open(page);
-    await folders(page)
-      .getByRole("button", { name: new RegExp(`^${GROUP_FOLDER}\\b`) })
-      .click();
-    await page.getByRole("button", { name: /^Folder sharing: / }).click();
-    const control = page.getByRole("group", {
-      name: `Who can read ${GROUP_FOLDER}`,
+for (const look of LOOKS)
+  for (const size of [
+    { width: 1280, height: 620 },
+    // The shortest window that still keeps the columns side by side.
+    { width: 1100, height: 560 },
+  ])
+    test(`at ${size.width} x ${size.height} an open folder control keeps Save and the list reachable${named(look)}`, async ({
+      page,
+      context,
+    }) => {
+      if (look) await setLook(context, look);
+      await page.setViewportSize(size);
+      await open(page);
+      await folders(page)
+        .getByRole("button", { name: new RegExp(`^${GROUP_FOLDER}\\b`) })
+        .click();
+      await page.getByRole("button", { name: /^Folder sharing: / }).click();
+      const control = page.getByRole("group", {
+        name: `Who can read ${GROUP_FOLDER}`,
+      });
+      // The tallest state: Specific people with everyone ticked, so the sentence is longest.
+      await control.getByRole("radio", { name: "Specific people" }).check();
+      for (const box of await control.getByRole("checkbox").all())
+        await box.check();
+      await expect(control).toContainText(
+        "Ahmed and Sara will be able to read",
+      );
+
+      // Seen and clickable: its centre is inside the window and nothing (a sticky header, a
+      // clipping box) covers it there.
+      const inView = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        const x = r.left + r.width / 2;
+        const y = r.top + r.height / 2;
+        if (r.height === 0 || y < 0 || y > window.innerHeight) return false;
+        const hit = document.elementFromPoint(x, y);
+        return !!hit && (hit === el || el.contains(hit));
+      };
+
+      for (const name of ["Save", "Cancel"]) {
+        const button = control.getByRole("button", { name });
+        await button.scrollIntoViewIfNeeded();
+        expect(await button.evaluate(inView)).toBe(true);
+      }
+      await expect(control.getByRole("button", { name: "Save" })).toBeEnabled();
+
+      const last = noteLinks(page).last();
+      await last.scrollIntoViewIfNeeded();
+      expect(await last.evaluate(inView)).toBe(true);
+
+      const pageScrolls = await page.evaluate(
+        () =>
+          document.documentElement.scrollHeight > window.innerHeight ||
+          document.documentElement.scrollWidth > window.innerWidth,
+      );
+      expect(pageScrolls).toBe(false);
     });
-    // The tallest state: Specific people with everyone ticked, so the sentence is longest.
-    await control.getByRole("radio", { name: "Specific people" }).check();
-    for (const box of await control.getByRole("checkbox").all())
-      await box.check();
-    await expect(control).toContainText("Ahmed and Sara will be able to read");
-
-    // Seen and clickable: its centre is inside the window and nothing (a sticky header, a
-    // clipping box) covers it there.
-    const inView = (el: Element) => {
-      const r = el.getBoundingClientRect();
-      const x = r.left + r.width / 2;
-      const y = r.top + r.height / 2;
-      if (r.height === 0 || y < 0 || y > window.innerHeight) return false;
-      const hit = document.elementFromPoint(x, y);
-      return !!hit && (hit === el || el.contains(hit));
-    };
-
-    for (const name of ["Save", "Cancel"]) {
-      const button = control.getByRole("button", { name });
-      await button.scrollIntoViewIfNeeded();
-      expect(await button.evaluate(inView)).toBe(true);
-    }
-    await expect(control.getByRole("button", { name: "Save" })).toBeEnabled();
-
-    const last = noteLinks(page).last();
-    await last.scrollIntoViewIfNeeded();
-    expect(await last.evaluate(inView)).toBe(true);
-
-    const pageScrolls = await page.evaluate(
-      () =>
-        document.documentElement.scrollHeight > window.innerHeight ||
-        document.documentElement.scrollWidth > window.innerWidth,
-    );
-    expect(pageScrolls).toBe(false);
-  });
 
 test("an unknown note says it isn't available", async ({ page }) => {
   await open(page, "?note=00000000-0000-4000-8000-ffffffffffff");

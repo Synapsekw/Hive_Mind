@@ -1,21 +1,10 @@
+/* Global look. Every colour token comes from the generated stylesheet, switched by the four
+   attributes on <html> (data-theme, data-mode, data-reach, data-dots). CSS Modules only read
+   tokens with var(). */
+@import "../theme/themes.generated.css";
+
 :root {
-  --bg: #06090f;
-  --panel: #0b101a;
-  --text: #e6ebf5;
-  --text-2: #8a96ad;
-  --text-quiet: #5f6b84;
-  --accent: #cff4ff;
-  --fill-1: #141b28;
-  --fill-2: #1a2231;
-  --hue-1: #f5b556;
-  --hue-2: #62b8ff;
-  --hue-3: #ff8fb3;
-  --hue-4: #c4a2ff;
-  --hue-5: #5fe0b0;
-  --hue-6: #ff9d5c;
-  --hue-7: #5cd6e6;
-  --hue-8: #c3e36a;
-  color-scheme: dark;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * {
@@ -28,15 +17,106 @@ body {
   padding: 0;
 }
 
+/* The page: the bloom radials over the theme wash, fixed to the window so a scrolling page
+   does not tile or stretch it. */
 body {
-  background: var(--bg);
-  color: var(--text);
+  min-height: 100vh;
+  background-color: var(--bg);
+  background-image: var(--bloom), var(--wash);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  color: var(--fg);
+  font-family: var(--font-sans), system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
 
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* A scope redefines the text tokens; its own colour has to follow them. */
+[data-scope] {
+  color: var(--fg);
+}
+
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--acc);
   outline-offset: 2px;
+}
+
+/* Without backdrop-filter the glass would show the wash straight through: shared surfaces go
+   solid. Screens add the same for their own cards (var(--bg)) and side panels
+   (var(--panel-solid)). */
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  :root [data-scope="reset"] {
+    background: var(--surface);
+  }
+}
+
+/* Print: dark text on white paper in either mode. The page takes the system colours with a
+   light scheme (Canvas, CanvasText), the wash, bloom and glass go, and the text tokens follow
+   CanvasText / GrayText, also inside the chrome and reset scopes. */
+@media print {
+  :root {
+    color-scheme: light !important;
+    --wash: none !important;
+    --bloom: none !important;
+    --glow: none !important;
+    --glass: transparent !important;
+    --glass2: transparent !important;
+  }
+
+  :root,
+  [data-scope] {
+    --fg: CanvasText !important;
+    --fg2: CanvasText !important;
+    --muted: GrayText !important;
+    --quiet: GrayText !important;
+  }
+
+  body {
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  *,
+  *::before,
+  *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+}
+
+/* Forced colours: the system's colours, no gradients and no glass. An element marked
+   data-keep-colours (the theme swatches) opts out with forced-color-adjust: none. */
+@media (forced-colors: active) {
+  body {
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  :not([data-keep-colours]),
+  :not([data-keep-colours])::before,
+  :not([data-keep-colours])::after {
+    background-image: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  :focus-visible {
+    outline-color: Highlight;
+  }
 }
