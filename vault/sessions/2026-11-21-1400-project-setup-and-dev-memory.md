@@ -50,7 +50,7 @@ context injected, work happens in task worktrees, and every block ends with a no
 
 ## Open threads
 
-- `.codex/hooks.json` assumes the project lives at `C:\Users\D\Hive_Mind`; edit it if not.
+- `.codex/hooks.json` assumes the project lives at `E:\Dev\Hive_Mind`; edit it if it moves.
 - The hooks and task scripts were checked on Linux, not on Windows Git Bash.
 - `.env` still needs the anon key and JWT secret; `supabase-dev` needs its OAuth step.
 - No plan board yet; add `/board` when one is wanted.

@@ -2,6 +2,15 @@
 // Hive Mind MCP server (local, stdio).
 // Exchanges the agent token for the member's identity, then talks to Supabase
 // as that member. Every permission is enforced by the database, not here.
+import { readFile, realpath, stat } from "node:fs/promises";
+import {
+  basename,
+  extname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -272,6 +281,128 @@ server.tool(
       : done(
           "Link proposed. It shows up in the Inbox for the people involved.",
         );
+  },
+);
+
+// The folder this server may read files from. It is a guard on the local disk,
+// not a hive permission: without it, a note that fools the agent could have any
+// file on the machine copied into the hive.
+const FILES_ROOT = process.env.HIVE_FILES_ROOT || process.cwd();
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MIME: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".docx":
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx":
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".csv": "text/csv",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".html": "text/html",
+  ".json": "application/json",
+  ".zip": "application/zip",
+};
+// One safe path segment: letters, digits, dot, dash, underscore; never hidden.
+const segment = (s: string) =>
+  s
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "");
+
+server.tool(
+  "hive_save_file",
+  "Save a file you produced (PDF, document, spreadsheet, image) into the hive under outputs/<type>/<customer>/. The file must be inside the folder you are working in. It is private unless attached to a note the person has shared.",
+  {
+    local_path: z
+      .string()
+      .min(1)
+      .describe("Path of the file on this machine, inside the working folder"),
+    type: z.string().min(1).describe("Kind of deliverable, e.g. proposal"),
+    customer: z.string().min(1).describe("Client or project it is for"),
+    name: z
+      .string()
+      .optional()
+      .describe("File name to store it under; defaults to the local name"),
+    note_path: z
+      .string()
+      .optional()
+      .describe("A note in your workspace to attach the file to"),
+  },
+  async ({ local_path, type, customer, name, note_path }) => {
+    let root: string, file: string;
+    try {
+      root = await realpath(FILES_ROOT);
+      file = await realpath(resolve(root, local_path));
+    } catch {
+      return fail(`No file at ${local_path}.`);
+    }
+    const rel = relative(root, file);
+    if (!rel || rel.startsWith("..") || isAbsolute(rel))
+      return fail(`${local_path} is outside the working folder ${root}.`);
+    if (rel.split(sep).some((part) => part.startsWith(".")))
+      return fail("Hidden files and folders cannot be saved to the hive.");
+    const info = await stat(file);
+    if (!info.isFile()) return fail(`${local_path} is not a file.`);
+    if (info.size > MAX_FILE_BYTES)
+      return fail(`${local_path} is larger than 50 MB.`);
+
+    const parts = [type, customer, name ?? basename(file)].map(segment);
+    if (parts.some((p) => !p))
+      return fail("The type, customer and file name must contain letters.");
+    const hivePath = `outputs/${parts.join("/")}`;
+
+    const { db: s, me } = await db();
+    let noteId: string | null = null;
+    if (note_path) {
+      const note = await s
+        .from("notes")
+        .select("id")
+        .eq("workspace_id", me.workspace_id)
+        .eq("path", note_path)
+        .maybeSingle();
+      if (note.error) return fail(note.error.message);
+      if (!note.data) return fail(`No note at ${note_path}.`);
+      noteId = note.data.id;
+    }
+
+    const storagePath = `${me.member_id}/${me.workspace_id}/${hivePath}`;
+    const mime =
+      MIME[extname(file).toLowerCase()] ?? "application/octet-stream";
+    const up = await s.storage
+      .from("files")
+      .upload(storagePath, await readFile(file), {
+        contentType: mime,
+        upsert: false,
+      });
+    if (up.error)
+      return fail(
+        /exist|duplicate/i.test(up.error.message)
+          ? `A file is already saved at ${hivePath}. Give it another name.`
+          : `Upload failed: ${up.error.message}`,
+      );
+
+    const row = await s.from("files").insert({
+      hive_id: me.hive_id,
+      member_id: me.member_id,
+      workspace_id: me.workspace_id,
+      note_id: noteId,
+      storage_path: storagePath,
+      name: parts[2],
+      mime,
+      size_bytes: info.size,
+    });
+    if (row.error)
+      return fail(
+        `The file was uploaded to ${hivePath} but could not be recorded: ${row.error.message}`,
+      );
+    return done(
+      `Saved ${hivePath}` + (note_path ? `, attached to ${note_path}.` : "."),
+    );
   },
 );
 

@@ -312,3 +312,169 @@ test("search returns only what the caller may read", async () => {
   );
   assert.equal(ahmed.length, 0);
 });
+
+// ------------------------------------------------------------------- files
+// storage.objects is stubbed in scripts/local-db.mjs: one row per stored file,
+// under row-level security, as in Supabase Storage. These tests cover the
+// rules; `pnpm test:live` covers the real Storage API.
+
+const agentFor = async (name, tier = "vendor") => {
+  const made = (
+    await as(
+      person(name),
+      `select * from public.create_agent($1, 'Files agent', 'other', $2)`,
+      [ws[name], tier],
+    )
+  )[0];
+  const login = (
+    await as(null, `select * from public.agent_login($1)`, [made.token])
+  )[0];
+  return {
+    sub: login.user_id,
+    role: "authenticated",
+    agent_id: login.agent_id,
+    workspace_id: login.workspace_id,
+    trust_tier: login.trust_tier,
+  };
+};
+const filePath = (name, file, workspace = ws[name]) =>
+  `${members[name]}/${workspace}/outputs/proposal/acme/${file}`;
+const upload = (who, path) =>
+  as(
+    who,
+    `insert into storage.objects (bucket_id, name) values ('files', $1) returning name`,
+    [path],
+  );
+const stored = async (who) =>
+  (
+    await as(
+      who,
+      `select name from storage.objects where bucket_id = 'files' order by name`,
+    )
+  )
+    .map((r) => r.name.split("/").pop())
+    .sort();
+const fileRow = (who, name, path, { note = null, workspace = ws[name] } = {}) =>
+  as(
+    who,
+    `insert into public.files (hive_id, member_id, workspace_id, note_id, storage_path, name)
+     values ($1, $2, $3, $4, $5, 'a file') returning id`,
+    [hive, members[name], workspace, note, path],
+  );
+const noteId = async (title) =>
+  (await db.query(`select id from public.notes where title = $1`, [title]))
+    .rows[0].id;
+
+test("a file is stored in its owner's space and nowhere else", async () => {
+  await upload(person("dani"), filePath("dani", "loose.pdf"));
+
+  await assert.rejects(upload(person("ahmed"), filePath("dani", "forged.pdf")));
+  await assert.rejects(upload(person("dani"), "no-owner.pdf"));
+  await assert.rejects(
+    upload(person("dani"), `${members.dani}/${ws.ahmed}/outputs/x.pdf`),
+  );
+  await assert.rejects(upload(null, filePath("dani", "anonymous.pdf")));
+
+  assert.deepEqual(await stored(person("dani")), ["loose.pdf"]);
+  assert.deepEqual(await stored(person("ahmed")), []);
+  assert.deepEqual(await stored(person("outsider")), []);
+  assert.deepEqual(await stored(null), []);
+});
+
+test("a file is read by whoever can read the note it is attached to", async () => {
+  const shared = filePath("dani", "for-group.pdf");
+  const priv = filePath("dani", "private.pdf");
+  await upload(person("dani"), shared);
+  await upload(person("dani"), priv);
+  await fileRow(person("dani"), "dani", shared, {
+    note: await noteId("dani group"),
+  });
+  await fileRow(person("dani"), "dani", priv, {
+    note: await noteId("dani private"),
+  });
+
+  assert.deepEqual(await stored(person("sara")), ["for-group.pdf"]);
+  assert.deepEqual(await stored(person("outsider")), []);
+  assert.deepEqual(await stored(null), []);
+  assert.deepEqual(await stored(person("dani")), [
+    "for-group.pdf",
+    "loose.pdf",
+    "private.pdf",
+  ]);
+  const rows = await as(
+    person("sara"),
+    `select storage_path from public.files`,
+  );
+  assert.deepEqual(
+    rows.map((r) => r.storage_path),
+    [shared],
+  );
+});
+
+test("a file row cannot point at someone else's file or note", async () => {
+  // Ahmed claims Dani's private file as his own.
+  await assert.rejects(
+    fileRow(person("ahmed"), "ahmed", filePath("dani", "private.pdf")),
+    /own member and workspace/,
+  );
+  const mine = filePath("ahmed", "mine.pdf");
+  await upload(person("ahmed"), mine);
+  await assert.rejects(
+    fileRow(person("ahmed"), "ahmed", mine, {
+      note: await noteId("dani group"),
+    }),
+    /your own note/,
+  );
+  assert.deepEqual(await stored(person("ahmed")), [
+    "for-group.pdf",
+    "mine.pdf",
+  ]);
+});
+
+test("an agent saves files only in its own workspace and never deletes or overwrites", async () => {
+  const agent = await agentFor("dani");
+  const second = (
+    await as(
+      person("dani"),
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Second') returning id`,
+      [hive, members.dani],
+    )
+  )[0].id;
+
+  const path = filePath("dani", "by-agent.pdf");
+  await upload(agent, path);
+  await fileRow(agent, "dani", path);
+
+  const elsewhere = filePath("dani", "elsewhere.pdf", second);
+  await assert.rejects(upload(agent, elsewhere));
+  await assert.rejects(
+    fileRow(agent, "dani", elsewhere, { workspace: second }),
+  );
+  await upload(person("dani"), elsewhere);
+
+  const gone = (who) =>
+    as(who, `delete from storage.objects where name = $1 returning name`, [
+      path,
+    ]);
+  const renamed = (who) =>
+    as(
+      who,
+      `update storage.objects set name = name || '.x' where name = $1 returning name`,
+      [path],
+    );
+  assert.equal((await gone(agent)).length, 0);
+  assert.equal((await renamed(agent)).length, 0);
+  assert.equal((await gone(person("ahmed"))).length, 0);
+  assert.equal((await renamed(person("dani"))).length, 0);
+  assert.equal((await gone(person("dani"))).length, 1);
+});
+
+test("a self-hosted agent cannot save files", async () => {
+  const agent = await agentFor("sara", "self_hosted");
+  const path = filePath("sara", "held.pdf");
+  await assert.rejects(upload(agent, path));
+  await upload(person("sara"), path);
+  await assert.rejects(fileRow(agent, "sara", path), /self-hosted/);
+  // It does not see the member's own files either, only shared ones.
+  assert.deepEqual(await stored(agent), ["for-group.pdf"]);
+});

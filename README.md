@@ -7,14 +7,14 @@ people accept. Working name; the brand is not decided.
 
 ## Status
 
-Phase 0 is done; nothing has run against a real Supabase stack yet. **Where we are right now:**
-[`vault/00-north-star.md`](vault/00-north-star.md).
+Phase 1 is under way: the engine runs on a hosted Supabase project and the owner's Claude uses it.
+**Where we are right now:** [`vault/00-north-star.md`](vault/00-north-star.md).
 
-- Database schema and sharing rules, as Supabase migrations.
-- Ten tests for the sharing rules. They pass.
+- Database schema, sharing rules and file storage, as Supabase migrations.
+- Tests for the sharing rules, including files, that need no Docker. They pass.
 - A scripted walkthrough (`pnpm demo`) of two people and their agents.
-- An MCP server with six tools. It typechecks, but has **not yet been run against a live
-  Supabase stack**. That is the first task of Phase 1.
+- An MCP server with seven tools, proven against the live project by `pnpm test:live`.
+- An importer for a folder of markdown notes.
 - No web app yet. `docs/ui/` holds the design prototypes for the map and chat.
 
 ## Start here
@@ -38,11 +38,13 @@ local stack.
 pnpm install
 pnpm test             # sharing rules + hooks, no Docker needed
 pnpm demo             # two people and their agents, step by step, no Docker needed
+pnpm test:live        # the MCP server and two members against the database in .env; cleans up
 pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 
 `supabase status` then prints the local URL and keys. Copy `.env.example` to `.env` and fill it
-in. The hosted dev project is `tokyttkztrkjvkaksdnh`; no migrations are applied to it yet.
+in. The hosted dev project is `tokyttkztrkjvkaksdnh`; both migrations are applied to it and it holds
+one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
 
 ### Create your hive and connect an agent
 
@@ -58,28 +60,32 @@ select * from public.create_agent(
 
 `create_agent` returns the agent token once. Put it in `.env` as `HIVE_AGENT_TOKEN`.
 
-3. Build the server and point your agent at it:
+3. Build the server and register it with Claude Code. The server reads its settings from the
+   repo's `.env`, so no secret is copied into a client config:
 
 ```sh
 pnpm build
+claude mcp add --scope user hive -- node --env-file=/absolute/path/to/Hive_Mind/.env /absolute/path/to/Hive_Mind/mcp/dist/index.js
+claude mcp list        # hive should show as connected
 ```
 
-```json
-{
-  "mcpServers": {
-    "hive": {
-      "command": "node",
-      "args": ["/absolute/path/to/Hive_Mind/mcp/dist/index.js"],
-      "env": {
-        "SUPABASE_URL": "http://127.0.0.1:54321",
-        "SUPABASE_ANON_KEY": "...",
-        "SUPABASE_JWT_SECRET": "...",
-        "HIVE_AGENT_TOKEN": "hive_..."
-      }
-    }
-  }
-}
+Rebuild (`pnpm build`) after any change under `mcp/`; the client runs the built file.
+
+4. Tell one folder to use it: put the instruction template from
+   [docs/agent-integration.md](docs/agent-integration.md#5-instruction-template) into that folder's
+   `CLAUDE.md` and open Claude Code there. Other folders can reach the server but will not use it
+   unless asked.
+
+### Import existing notes
+
+```sh
+pnpm import:vault "<folder of markdown>" <workspace> --dry-run
+pnpm import:vault "<folder of markdown>" <workspace> --include Decisions --exclude Templates
 ```
+
+One hive note per `.md` file, at its relative path, private, in the named workspace (created if
+missing). Re-running updates only the notes whose file changed and never deletes. It signs in as
+the person behind the agent token in `.env`. Other file types wait for file storage.
 
 ## Working in this repo
 

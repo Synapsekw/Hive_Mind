@@ -1,14 +1,14 @@
 ---
 type: index
 status: active
-last-updated: 2026-11-21
+last-updated: 2026-11-22
 tags: [project/hive-mind, adr, index]
 ---
 
 # Decision and gotcha index
 
 One line each. Two separate sequences: `decision-NN` and `gotcha-NN`. Before minting a new one,
-take the **next free number** (decision **12**, gotcha **04**) and add a row here. Never rename
+take the **next free number** (decision **13**, gotcha **07**) and add a row here. Never rename
 an existing file.
 
 ## Product and sharing model
@@ -23,7 +23,8 @@ an existing file.
 - **D03** [[2026-11-16-decision-03-desktop-apps-first-over-mcp]] — MCP connector first; hosted chat only via vendor programmes
 - **D06** [[2026-11-20-decision-06-local-first-on-the-supabase-stack]] — local Supabase, migrations as files
 - **D08** [[2026-11-20-decision-08-every-row-belongs-to-a-hive]] — tenancy from day one
-- **D09** [[2026-11-20-decision-09-embeddings-and-storage-deferred]] — no embeddings or storage in the first slice
+- **D09** [[2026-11-20-decision-09-embeddings-and-storage-deferred]] — no embeddings or storage in the first slice (storage arrived 2026-11-22)
+- **D12** [[2026-11-22-decision-12-agents-save-files-only-from-the-working-folder]] — the save tool reads only the working folder, never hidden files
 
 ## UI
 
@@ -37,5 +38,8 @@ an existing file.
 ## Gotchas
 
 - **G01** [[2026-11-20-gotcha-01-tests-stub-supabase-auth]] — green tests prove the SQL, not real Supabase
-- **G02** [[2026-11-20-gotcha-02-mcp-server-untested-end-to-end]] — the MCP sign-in has never run on a live stack
+- **G02** [[2026-11-20-gotcha-02-mcp-server-untested-end-to-end]] — resolved: the MCP server runs on the hosted project (`pnpm test:live`)
 - **G03** [[2026-11-16-gotcha-03-brand-name-is-unresolved]] — "Hive Mind" and "Cortex" are both crowded
+- **G04** [[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]] — re-stamp MCP-applied migrations to the repo version
+- **G05** [[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]] — resolved: the finish no longer fails at cleanup; an empty folder may remain
+- **G06** [[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]] — do not revoke the legacy JWT secret; replace the sign-in before phase 3
