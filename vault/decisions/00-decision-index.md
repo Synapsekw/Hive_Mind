@@ -1,14 +1,14 @@
 ---
 type: index
 status: active
-last-updated: 2026-11-21
+last-updated: 2026-11-22
 tags: [project/hive-mind, adr, index]
 ---
 
 # Decision and gotcha index
 
 One line each. Two separate sequences: `decision-NN` and `gotcha-NN`. Before minting a new one,
-take the **next free number** (decision **12**, gotcha **04**) and add a row here. Never rename
+take the **next free number** (decision **12**, gotcha **06**) and add a row here. Never rename
 an existing file.
 
 ## Product and sharing model
@@ -39,3 +39,5 @@ an existing file.
 - **G01** [[2026-11-20-gotcha-01-tests-stub-supabase-auth]] — green tests prove the SQL, not real Supabase
 - **G02** [[2026-11-20-gotcha-02-mcp-server-untested-end-to-end]] — the MCP sign-in has never run on a live stack
 - **G03** [[2026-11-16-gotcha-03-brand-name-is-unresolved]] — "Hive Mind" and "Cortex" are both crowded
+- **G04** [[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]] — re-stamp MCP-applied migrations to the repo version
+- **G05** [[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]] — on Windows the finish merges, then cleanup fails

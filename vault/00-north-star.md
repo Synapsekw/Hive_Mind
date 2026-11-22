@@ -1,7 +1,7 @@
 ---
 type: north-star
 status: active
-last-updated: 2026-11-22-0815
+last-updated: 2026-11-22-0923
 tags: [project/hive-mind, north-star]
 related:
   - "[[README]]"
@@ -33,7 +33,7 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 [[platform-roadmap]] and the session notes. **Commit + checkpoint after each phase.**
 
 - **0 — Setup** — <span style="color:#22c55e">**[Done]**</span> — Repo, schema, sharing rules with 10 tests, MCP server skeleton, no-Docker demo, workflows and this vault. ([[2026-11-20-2130-map-design-and-first-backend-slice]], [[2026-11-21-1400-project-setup-and-dev-memory]])
-- **1 — Local end to end** — <span style="color:#eab308">**[Next]**</span> — MCP server on a live stack, the owner's Claude connected, existing notes imported, file storage. Plan: [[2026-11-21-local-end-to-end]].
+- **1 — Local end to end** — <span style="color:#eab308">**[In progress]**</span> — MCP server on a live stack, the owner's Claude connected, existing notes imported, file storage. Plan: [[2026-11-21-local-end-to-end]].
 - **2 — Web app and map** — **[Not started]** — Sign-in, the brain-dashboard map on real data, vault browser with sharing controls, inbox.
 - **3 — Hosting and colleagues** — **[Not started]** — Remote MCP connector, invitations, token management, the first colleague connected.
 - **4 — Linking** — **[Not started]** — Entity registry, link discovery, overlap notifications, the handshake UI, semantic search.
@@ -43,12 +43,13 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 ## 3. Now
 
 - **Phase:** **Phase 1 has started.** The schema and sharing rules now run on the hosted dev project; the MCP server has still not run against it.
-- **Branch:** `develop` == `main`. No `task/*` branches, no worktrees.
+- **Branch:** `develop` is ahead of `main` (docs and vault only; no promotion PR yet). No `task/*` branches, no worktrees.
 - **The MCP server is untested end to end** ([[2026-11-20-gotcha-02-mcp-server-untested-end-to-end]]). It typechecks. Its sign-in signs a JWT with the project secret and has never met a live database; expect that to need work on the hosted project.
 - **Green tests prove the SQL, not Supabase** ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]). The auth schema and roles are stubbed in `scripts/local-db.mjs`.
-- **The hosted dev project is up** (T1, hosted half, 2026-11-22): `tokyttkztrkjvkaksdnh`, wired in `.mcp.json` as `supabase-dev`. Both migrations applied under the repo's version stamps; one hive (`Synapse`), one owner, one workspace, one agent (`Claude`); the token is in the local `.env`. `agent_login` works through the public API and a signed-out caller reads nothing. Runbook: `docs/hosted-db-bringup.md`. The local Docker stack is still not set up.
+- **The hosted dev project is up** (T1, hosted half, 2026-11-22): `tokyttkztrkjvkaksdnh`, wired in `.mcp.json` as `supabase-dev`. Both migrations applied under the repo's version stamps; one hive (`Synapse`), one owner, one workspace, one agent (`Claude`); the token is in the local `.env`. `agent_login` works through the public API and a signed-out caller reads nothing. Runbook: `docs/hosted-db-bringup.md`; session [[2026-11-22-0923-hosted-db-bringup]]. Migrations applied through the MCP must be re-stamped ([[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]]). The local Docker stack is still not set up.
 - **In flight:** none.
 - **Next:** **T2**, the critical path of [[2026-11-21-local-end-to-end]]: run the MCP server against the live database (unblocked now). **T4** (vault importer) is independent and can run alongside.
+- **Workflow trap:** on Windows `finish-task.sh` merges and pushes, then fails to remove the worktree the session sits in ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
 - **Owed — Danijel:** install Docker + the Supabase CLI on the build machine for the local stack.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
 
