@@ -76,6 +76,17 @@ Rebuild (`pnpm build`) after any change under `mcp/`; the client runs the built 
    `CLAUDE.md` and open Claude Code there. Other folders can reach the server but will not use it
    unless asked.
 
+### Import existing notes
+
+```sh
+pnpm import:vault "<folder of markdown>" <workspace> --dry-run
+pnpm import:vault "<folder of markdown>" <workspace> --include Decisions --exclude Templates
+```
+
+One hive note per `.md` file, at its relative path, private, in the named workspace (created if
+missing). Re-running updates only the notes whose file changed and never deletes. It signs in as
+the person behind the agent token in `.env`. Other file types wait for file storage.
+
 ## Working in this repo
 
 - The main checkout stays on `develop`. Build in a task worktree: `scripts/start-task.sh <name>`,
