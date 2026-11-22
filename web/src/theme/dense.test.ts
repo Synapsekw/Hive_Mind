@@ -30,6 +30,9 @@ import {
 const VIEWPORTS: [number, number][] = [
   [1920, 1080],
   [1100, 560],
+  // Ultrawide windows, where the fixed 224 px Vivid card glows sit differently on the page glows.
+  [3440, 1440],
+  [2560, 1080],
 ];
 const N = 60;
 
@@ -66,19 +69,18 @@ function dense(
   return out;
 }
 
-/** Worst ratio of a foreground over many backgrounds. Opaque: only the luminance extremes matter. */
+/**
+ * Worst ratio of a foreground over many backgrounds. An opaque foreground's ratio depends only on
+ * the two luminances, so it is measured against every sample's luminance (the extremes alone
+ * would miss a foreground whose luminance lies inside the background's range).
+ */
 function worst(fg: RGBA, bgs: RGB[], lums: number[]): number {
   if (fg.a >= 1) {
     const lf = luminance(fg);
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const l of lums) {
-      if (l < lo) lo = l;
-      if (l > hi) hi = l;
-    }
-    const ratio = (l: number) =>
-      (Math.max(lf, l) + 0.05) / (Math.min(lf, l) + 0.05);
-    return Math.min(ratio(lo), ratio(hi));
+    let w = Infinity;
+    for (const l of lums)
+      w = Math.min(w, (Math.max(lf, l) + 0.05) / (Math.min(lf, l) + 0.05));
+    return w;
   }
   let w = Infinity;
   for (const bg of bgs) w = Math.min(w, contrast(over(fg, bg), bg));
