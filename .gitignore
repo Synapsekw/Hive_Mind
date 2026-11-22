@@ -5,6 +5,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# web (Next.js)
+.next/
+web/next-env.d.ts
+
 # testing
 /coverage
 /test-results

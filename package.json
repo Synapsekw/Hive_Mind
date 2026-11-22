@@ -8,10 +8,11 @@
     "pnpm": ">=10"
   },
   "scripts": {
-    "typecheck": "pnpm --filter @hive-mind/mcp typecheck",
+    "typecheck": "pnpm -r typecheck",
     "lint": "prettier --check .",
-    "test": "node --test \"tests/**/*.test.mjs\" \".claude/hooks/*.test.mjs\"",
-    "build": "pnpm --filter @hive-mind/mcp build",
+    "test": "node --test \"tests/**/*.test.mjs\" \".claude/hooks/*.test.mjs\" && pnpm --filter @hive-mind/web test",
+    "build": "pnpm -r build",
+    "dev:web": "pnpm --filter @hive-mind/web dev",
     "test:live": "pnpm build && node --env-file=.env --test --test-concurrency=1 tests/mcp.integration.test.mjs tests/two-members.integration.test.mjs",
     "demo": "node scripts/demo.mjs",
     "import:vault": "node --env-file=.env scripts/import-vault.mjs",
