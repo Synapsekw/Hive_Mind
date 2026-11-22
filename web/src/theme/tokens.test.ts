@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { css, fromHex, mix, toHex } from "./colour";
+import { css, fromHex, luminance, mix, toHex } from "./colour";
 import { DOT_MODES, MODES, REACHES, THEMES } from "./look";
 import data from "./themes.json";
 import {
@@ -11,6 +11,7 @@ import {
   dotTokens,
   reachTokens,
   resetTokens,
+  surfaceSamples,
 } from "./tokens";
 
 const CLASSIC = {
@@ -189,16 +190,70 @@ describe("dotTokens", () => {
 describe("backgrounds", () => {
   it("lists every surface, with single opaque solids", () => {
     const b = backgrounds("keystone", "dark", "tinted");
-    expect(b.card).toHaveLength(6);
-    expect(b.rail).toHaveLength(6);
-    expect(b.panel).toHaveLength(6);
-    expect(b.popover).toHaveLength(7);
+    // The 8 extremes of the sampled page (lightest, darkest, then min/max per channel).
+    expect(b.card).toHaveLength(8);
+    expect(b.rail).toHaveLength(8);
+    expect(b.panel).toHaveLength(8);
+    expect(b.popover).toHaveLength(9);
+    expect(b.popover[8]).toEqual(
+      fromHex(reachTokens("keystone", "dark", "tinted")["--surface"]!),
+    );
     expect(b.cardSolid).toEqual([
       fromHex(reachTokens("keystone", "dark", "tinted")["--bg"]!),
     ]);
     expect(b.panelSolid).toEqual([
       fromHex(baseTokens("keystone", "dark")["--panel-solid"]!),
     ]);
+  });
+});
+
+describe("surfaceSamples", () => {
+  const lum = (c: { r: number; g: number; b: number }) => luminance(c);
+
+  it("samples a 12 × 12 grid per surface at two viewports", () => {
+    const s = surfaceSamples("keystone", "dark", "tinted");
+    expect(s.rail).toHaveLength(2 * 144);
+    expect(s.panel).toHaveLength(2 * 144);
+    expect(s.popover).toHaveLength(2 * 144);
+    expect(s.card).toHaveLength(2 * 2 * 144); // each point plain and under the stage glow
+  });
+
+  it("is the bare wash where no bloom reaches, and the blooms only lighten a dark wash", () => {
+    const bare = surfaceSamples("keystone", "dark", "subtle", {
+      bloomFactor: 0,
+    });
+    const full = surfaceSamples("keystone", "dark", "subtle");
+    const stops = data.themes[0]!.dark.wash.map(fromHex);
+    // The rail's top-left corner sits on the first stop's side of the 168° wash.
+    const corner = bare.rail[0]!;
+    expect(lum(corner)).toBeLessThanOrEqual(lum(stops[0]!) + 1e-9);
+    full.rail.forEach((c, i) =>
+      expect(lum(c)).toBeGreaterThanOrEqual(lum(bare.rail[i]!) - 1e-12),
+    );
+  });
+
+  it("darkens under a scrim", () => {
+    const plain = surfaceSamples("aurora", "light", "tinted");
+    const dim = surfaceSamples("aurora", "light", "tinted", {
+      panelScrim: 0.2,
+      railScrim: 0.2,
+    });
+    plain.panel.forEach((c, i) =>
+      expect(lum(dim.panel[i]!)).toBeLessThan(lum(c)),
+    );
+    plain.rail.forEach((c, i) =>
+      expect(lum(dim.rail[i]!)).toBeLessThan(lum(c)),
+    );
+  });
+
+  it("backgrounds() keeps the lightest and darkest sample", () => {
+    const s = surfaceSamples("sunset", "light", "vivid");
+    const b = backgrounds("sunset", "light", "vivid");
+    for (const k of ["card", "rail", "panel"] as const) {
+      const ls = s[k].map(lum);
+      expect(lum(b[k][0]!)).toBe(Math.max(...ls));
+      expect(lum(b[k][1]!)).toBe(Math.min(...ls));
+    }
   });
 });
 
