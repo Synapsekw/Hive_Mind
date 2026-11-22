@@ -1,13 +1,11 @@
 /* The vault screen. Tokens come from globals.css and match the map's (map.module.css). */
 
 .root {
-  --line: #1b2433;
   --soft: #b4bed0;
   --raised: #263142;
   min-height: 100vh;
   display: flex;
   flex-wrap: wrap;
-  background: var(--bg);
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;

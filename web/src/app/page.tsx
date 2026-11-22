@@ -1,5 +1,5 @@
 import { HiveMap } from "../map/Map";
-import { Notice } from "../map/Notice";
+import { Notice } from "../shell/Notice";
 import { createServerSupabase } from "../lib/supabase/server";
 import { loadMap } from "./load-map";
 import { Refresher } from "./Refresher";
