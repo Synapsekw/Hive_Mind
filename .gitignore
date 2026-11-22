@@ -12,6 +12,8 @@ web/next-env.d.ts
 # testing
 /coverage
 /test-results
+web/test-results/
+web/playwright-report/
 
 # misc
 .DS_Store

@@ -56,6 +56,12 @@ const AGENT_SARA = "00000000-0000-4000-8000-0000000000a4";
 const MIN = 60_000;
 const DAY = 86_400_000;
 
+/** A hostile title (300 characters) the browser test uses to prove titles render as text. */
+export const HOSTILE_TITLE = (
+  "<img src=x onerror=alert(1)> " +
+  "a title written by someone else that runs far longer than a line, ".repeat(5)
+).slice(0, 300);
+
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 export function fixturePayload(now: number): MapPayload {
@@ -110,6 +116,22 @@ export function fixturePayload(now: number): MapPayload {
         if (!file) lastNote = id;
       }
     }
+  });
+
+  // Not added to `readableByTopic`, so the links below are the same as without it.
+  nodes.push({
+    id: "00000000-0000-4000-9000-999999999999",
+    kind: "note",
+    topic: "Ops handbook",
+    member_id: ME,
+    updated_at: iso(now - 2 * 60 * MIN),
+    locked: false,
+    title: HOSTILE_TITLE,
+    path: "Ops handbook/hostile-title.md",
+    workspace_id: "ws-1",
+    by_agent: true,
+    agent_id: AGENT_CLAUDE,
+    note_id: null,
   });
 
   const links: MapPayload["links"] = [];

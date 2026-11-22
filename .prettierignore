@@ -3,6 +3,8 @@ node_modules
 dist
 .next/
 web/next-env.d.ts
+web/test-results/
+web/playwright-report/
 # Design prototypes exported from the canvas: reference only, never reformatted.
 docs/ui/
 # Obsidian config and Templater templates (the <% %> syntax is not valid YAML).
@@ -15,3 +17,4 @@ vault/_attachments/
 .claude/worktrees/
 supabase/.temp/
 supabase/.branches/
+web/AGENTS.md
