@@ -1,7 +1,7 @@
 ---
 type: spec
 status: active
-last-updated: 2026-11-21
+last-updated: 2026-11-22
 tags: [project/hive-mind, spec, master]
 ---
 
@@ -38,17 +38,17 @@ decide what is shared.
 
 ## 4. Architecture
 
-| Component       | Technology                            | Responsibility                                                             |
-| --------------- | ------------------------------------- | -------------------------------------------------------------------------- |
-| Database        | Supabase Postgres                     | Hives, members, agents, notes, files, entities, links, synthesis, audit    |
-| Access control  | Supabase Auth + row-level security    | Member identity, agent claims, visibility enforced in every query          |
-| Agent interface | MCP server (TypeScript)               | overview, search, read, write, append, propose link                        |
-| Object storage  | Supabase Storage (private buckets)    | Deliverables; signed URLs only (not built)                                 |
-| Vector search   | pgvector                              | Embedding per note for semantic search and tier-4 links (not built)        |
-| Background jobs | Edge Functions + triggers + `pg_cron` | Entity extraction, link proposal, synthesis, housekeeper (not built)       |
-| Realtime        | Supabase Realtime                     | Pushes link suggestions and notifications to the web app (not built)       |
-| Web app         | Next.js                               | Map, inbox, vault, gallery, entity pages, settings (not built)             |
-| Hosted chat     | Vendor sign-in programmes             | Optional browser chat on the member's own plan, subject to vendor approval |
+| Component       | Technology                            | Responsibility                                                                                 |
+| --------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Database        | Supabase Postgres                     | Hives, members, agents, notes, files, entities, links, synthesis, audit                        |
+| Access control  | Supabase Auth + row-level security    | Member identity, agent claims, visibility enforced in every query                              |
+| Agent interface | MCP server (TypeScript)               | overview, search, read, write, append, propose link                                            |
+| Object storage  | Supabase Storage (private buckets)    | Deliverables; signed URLs only (not built)                                                     |
+| Vector search   | pgvector                              | Embedding per note for semantic search and tier-4 links (not built)                            |
+| Background jobs | Edge Functions + triggers + `pg_cron` | Entity extraction, link proposal, synthesis, housekeeper (not built)                           |
+| Realtime        | Supabase Realtime                     | Pushes link suggestions and notifications to the web app (not built)                           |
+| Web app         | Next.js                               | Map, inbox, vault, gallery, entity pages, settings. Built so far: sign-in and the map (`web/`) |
+| Hosted chat     | Vendor sign-in programmes             | Optional browser chat on the member's own plan, subject to vendor approval                     |
 
 The desktop apps talk to the database only through the MCP server. The web app goes direct with
 the signed-in person's identity. Nothing uses the service-role key except background jobs.
@@ -104,7 +104,13 @@ claims — `agent_id`, `workspace_id`, `trust_tier` — and the database uses th
 
 **Functions:** `create_hive`, `add_member`, `create_agent` (returns the token once; only a hash is
 stored), `revoke_agent`, `agent_login` (token → identity), `respond_to_link`, `search_notes`
-(keyword search, runs with the caller's rights).
+(keyword search, runs with the caller's rights), `map_graph` and `note_topic`.
+
+`map_graph(hive)` returns the hive map for a signed-in person: the items they may read in full,
+everything else as a stub with only its kind, topic, owner and date. It is refused for agents. A
+hollow dot on the map therefore reveals that an item exists, who owns it, its topic (the first two
+folder levels) and when it last changed, and nothing else. Members now also see their
+colleagues' agents by provider, trust tier and last sign-in, never the agent's name.
 
 ## 7. MCP server — built, not yet run against a live stack
 

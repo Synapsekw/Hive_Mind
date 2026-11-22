@@ -15,7 +15,8 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
 - A scripted walkthrough (`pnpm demo`) of two people and their agents.
 - An MCP server with seven tools, proven against the live project by `pnpm test:live`.
 - An importer for a folder of markdown notes.
-- No web app yet. `docs/ui/` holds the design prototypes for the map and chat.
+- The web app (`web/`) has sign-in and the map. The other pages are not built; `docs/ui/` holds
+  the design prototypes for the map and chat.
 
 ## Start here
 
@@ -43,8 +44,21 @@ pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 
 `supabase status` then prints the local URL and keys. Copy `.env.example` to `.env` and fill it
-in. The hosted dev project is `tokyttkztrkjvkaksdnh`; both migrations are applied to it and it holds
+in. The hosted dev project is `tokyttkztrkjvkaksdnh`; all four migrations are applied to it and it holds
 one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
+
+### Run the web app
+
+Copy `web/.env.example` to `web/.env.local` and fill in the project URL and the publishable key
+(dashboard → Project Settings → API). Then:
+
+```sh
+pnpm dev:web          # open http://localhost:3000 and sign in
+```
+
+`/dev/map` shows the map on sample data, without an account. `pnpm --filter @hive-mind/web
+test:e2e` runs the browser test; run `pnpm --filter @hive-mind/web exec playwright install
+chromium` once first. The browser test is run by hand; it is not part of CI.
 
 ### Create your hive and connect an agent
 

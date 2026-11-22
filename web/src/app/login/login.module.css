@@ -1,0 +1,102 @@
+.page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.panel {
+  width: 100%;
+  max-width: 360px;
+  background: var(--panel);
+  border-radius: 22px;
+  padding: 40px 32px 32px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 32px;
+}
+
+.mark {
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%);
+}
+
+.name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--text-quiet);
+  padding-left: 16px;
+}
+
+.input {
+  height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fill-1);
+  color: var(--text);
+  font: inherit;
+}
+
+.input:focus-visible {
+  background: var(--fill-2);
+}
+
+.primary,
+.quiet {
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary {
+  margin-top: 8px;
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 500;
+}
+
+.quiet {
+  background: none;
+  color: var(--text-2);
+}
+
+.primary:disabled,
+.quiet:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status {
+  margin: 4px 0 0;
+  min-height: 21px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-2);
+}

@@ -1,0 +1,42 @@
+:root {
+  --bg: #06090f;
+  --panel: #0b101a;
+  --text: #e6ebf5;
+  --text-2: #8a96ad;
+  --text-quiet: #5f6b84;
+  --accent: #cff4ff;
+  --fill-1: #141b28;
+  --fill-2: #1a2231;
+  --hue-1: #f5b556;
+  --hue-2: #62b8ff;
+  --hue-3: #ff8fb3;
+  --hue-4: #c4a2ff;
+  --hue-5: #5fe0b0;
+  --hue-6: #ff9d5c;
+  --hue-7: #5cd6e6;
+  --hue-8: #c3e36a;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
