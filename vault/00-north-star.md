@@ -1,7 +1,7 @@
 ---
 type: north-star
 status: active
-last-updated: 2026-11-22-1946
+last-updated: 2026-11-22-2050
 tags: [project/hive-mind, north-star]
 related:
   - "[[README]]"
@@ -34,7 +34,7 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 
 - **0 — Setup** — <span style="color:#22c55e">**[Done]**</span> — Repo, schema, sharing rules with 10 tests, MCP server skeleton, no-Docker demo, workflows and this vault. ([[2026-11-20-2130-map-design-and-first-backend-slice]], [[2026-11-21-1400-project-setup-and-dev-memory]])
 - **1 — Local end to end** — <span style="color:#22c55e">**[Done]**</span> — On the hosted dev project: MCP server with seven tools, the owner's Claude connected, a first batch of notes imported, file storage, and the sharing rules proven live with two members. The local Docker stack was skipped. Plan: [[2026-11-21-local-end-to-end]]. ([[2026-11-22-0923-hosted-db-bringup]], [[2026-11-22-1114-phase-1-on-the-hosted-project]])
-- **2 — Web app and map** — <span style="color:#eab308">**[In progress]**</span> — Sign-in, the map on real data and the vault with sharing controls are on `develop`; the Keystone glass restyle is built on a task branch; the file gallery and the inbox are not started. ([[2026-11-22-1946-phase-2-map-vault-and-restyle-in-flight]])
+- **2 — Web app and map** — <span style="color:#eab308">**[In progress]**</span> — Sign-in, the map on real data, the vault with sharing controls and the Keystone glass look with 17 themes are on `develop`; the file gallery and the inbox are not started. ([[2026-11-22-1946-phase-2-map-vault-and-restyle-in-flight]], [[2026-11-22-2050-keystone-glass-merged]])
 - **3 — Hosting and colleagues** — **[Not started]** — Remote MCP connector, invitations, token management, the first colleague connected.
 - **4 — Linking** — **[Not started]** — Entity registry, link discovery, overlap notifications, the handshake UI, semantic search.
 - **5 — Synthesis and upkeep** — **[Not started]** — Synthesis pages, contradiction flags, the housekeeper, health reports.
@@ -42,17 +42,18 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 
 ## 3. Now
 
-- **Phase:** **Phase 2 is in progress.** A signed-in member sees the hive as a map and, in the vault, reads their notes and decides per note or per folder who else may read them ([[2026-11-22-1946-phase-2-map-vault-and-restyle-in-flight]]).
-- **Branch:** `develop` holds the map and the vault (`193c31f`) and is ahead of `main`; nothing of Phase 2 is promoted yet. One open task branch: `task/keystone-glass` (pushed), worktree `.claude/worktrees/keystone-glass`.
+- **Phase:** **Phase 2 is in progress.** A signed-in member sees the hive as a map and, in the vault, reads their notes and decides per note or per folder who else may read them, all in the Keystone glass look with a per-browser choice of theme ([[2026-11-22-2050-keystone-glass-merged]]).
+- **Branch:** `develop` holds the map, the vault and the restyle (`b42bd6b`) and is ahead of `main`; nothing of Phase 2 is promoted yet. No worktrees. The merged branch `task/keystone-glass` is still to be deleted, locally and on GitHub.
 - **What runs today:** the web app in `web/` (`pnpm dev:web`; needs `web/.env.local`) with `/`, `/vault` and `/login`; hosted dev project `tokyttkztrkjvkaksdnh` (`supabase-dev` in `.mcp.json`) with five migrations, hive `Synapse`, two members (Danijel as owner; `Test Colleague`, a no-password test account) and two workspaces of notes: `Main` (the agent's) and `DRA` (25 imported notes, read-only to the agent). The MCP server has seven tools; Danijel's Claude Code uses it from `E:\Dev\hive-work`. Runbook: `docs/hosted-db-bringup.md`.
 - **How it is checked:** `pnpm test` (75 database and tooling tests plus the web unit tests, no Docker) proves the SQL against stand-ins for Supabase auth and storage ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]). `pnpm test:live` (19 checks) proves the real thing, and the browser tests in `web/e2e` cover the screens on sample data; **neither runs in CI**.
 - **Do not revoke the project's legacy JWT secret:** agent sign-in and the importer depend on it; replace the mechanism before phase 3 ([[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]]).
 - **Migrations applied through the Supabase MCP must be re-stamped** to the repo's version ([[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]]).
 - **Not done from Phase 1:** the local Docker stack; about 930 of the DRA vault's notes and all of its non-markdown files; saving files from self-hosted agents.
-- **In flight:** the Keystone glass restyle of `web/` ([[2026-11-22-decision-13-keystone-glass-look-with-themes]]) on `task/keystone-glass`. Built and reviewed there: theme engine with a contrast test, look cookie, fonts, shared rail with an Appearance panel, map, vault; built, not yet reviewed: sign-in and notices. Left: the clean-up task (old colour aliases, no-blur fallback, all-themes sweep, doc corrections), the whole-branch review and the merge. The build ledger is `.superpowers/sdd/2026-11-22-keystone-glass/progress.md` inside the worktree (git-ignored).
-- **Next:** finish and merge the restyle; then the file gallery, then the inbox (each its own `/develop` task); promote `develop` to `main` when Phase 2 is green.
-- **Known gaps in what shipped:** a change to a member's default visibility and accepting a link are not written to the audit log; vault load time for a 2,000-note workspace is unmeasured.
+- **In flight:** none.
+- **Next:** the file gallery, then the inbox (each its own `/develop` task); promote `develop` to `main` when Phase 2 is green.
+- **Known gaps in what shipped:** a change to a member's default visibility and accepting a link are not written to the audit log; vault load time for a 2,000-note workspace is unmeasured; the activity bars in the map's side panel are below 3:1 contrast, and some light-mode "Follow theme" dot colours are nearly alike ([[2026-11-22-2050-keystone-glass-merged]]).
 - **Workflow note:** from an agent session `finish-task.sh` leaves one empty worktree folder to delete after `ExitWorktree` ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
+- **Machines:** development is now also on a Mac (`/Users/danijeljovanovic/Dev/Hive_Mind`), which has no agent token, so `pnpm test:live`, the importer and the MCP server run only on the Windows machine until a token is copied or a second agent is created.
 - **Owed — Danijel:** install Docker + the Supabase CLI for the local stack; decide whether to import the rest of the DRA vault, and whether to keep the Acme test notes.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
 
