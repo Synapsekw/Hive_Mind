@@ -60,28 +60,21 @@ select * from public.create_agent(
 
 `create_agent` returns the agent token once. Put it in `.env` as `HIVE_AGENT_TOKEN`.
 
-3. Build the server and point your agent at it:
+3. Build the server and register it with Claude Code. The server reads its settings from the
+   repo's `.env`, so no secret is copied into a client config:
 
 ```sh
 pnpm build
+claude mcp add --scope user hive -- node --env-file=/absolute/path/to/Hive_Mind/.env /absolute/path/to/Hive_Mind/mcp/dist/index.js
+claude mcp list        # hive should show as connected
 ```
 
-```json
-{
-  "mcpServers": {
-    "hive": {
-      "command": "node",
-      "args": ["/absolute/path/to/Hive_Mind/mcp/dist/index.js"],
-      "env": {
-        "SUPABASE_URL": "http://127.0.0.1:54321",
-        "SUPABASE_ANON_KEY": "...",
-        "SUPABASE_JWT_SECRET": "...",
-        "HIVE_AGENT_TOKEN": "hive_..."
-      }
-    }
-  }
-}
-```
+Rebuild (`pnpm build`) after any change under `mcp/`; the client runs the built file.
+
+4. Tell one folder to use it: put the instruction template from
+   [docs/agent-integration.md](docs/agent-integration.md#5-instruction-template) into that folder's
+   `CLAUDE.md` and open Claude Code there. Other folders can reach the server but will not use it
+   unless asked.
 
 ## Working in this repo
 
