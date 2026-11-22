@@ -43,14 +43,14 @@ From the master spec §10 — **status + one-line outcome only**. Per-slice deta
 ## 3. Now
 
 - **Phase:** **Phase 1 is done on the hosted dev project; Phase 2 has not started.** A note written through a Claude session is unreadable to a second member and searchable by its owner, and imported notes are searchable ([[2026-11-22-1114-phase-1-on-the-hosted-project]]).
-- **Branch:** `develop` is well ahead of `main` (all of Phase 1); no promotion PR yet. No `task/*` branches, no worktrees.
+- **Branch:** Phase 1 was promoted to `main` on 2026-11-22 (PR #1, merge commit); `develop` carries only this note beyond it. No `task/*` branches, no worktrees.
 - **What runs today:** hosted dev project `tokyttkztrkjvkaksdnh` (`supabase-dev` in `.mcp.json`) with three migrations, hive `Synapse`, two members (Danijel as owner; `Test Colleague`, a no-password test account) and two workspaces of notes: `Main` (the agent's) and `DRA` (25 imported notes, read-only to the agent). The MCP server has seven tools; Danijel's Claude Code uses it from `E:\Dev\hive-work`. Runbook: `docs/hosted-db-bringup.md`.
 - **How it is checked:** `pnpm test` (45 tests, no Docker) proves the SQL against stand-ins for Supabase auth and storage ([[2026-11-20-gotcha-01-tests-stub-supabase-auth]]). `pnpm test:live` (17 checks) proves the real thing, including two members and file storage, and **does not run in CI**.
 - **Do not revoke the project's legacy JWT secret:** agent sign-in and the importer depend on it; replace the mechanism before phase 3 ([[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]]).
 - **Migrations applied through the Supabase MCP must be re-stamped** to the repo's version ([[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]]).
 - **Not done from Phase 1:** the local Docker stack; about 930 of the DRA vault's notes and all of its non-markdown files; saving files from self-hosted agents.
 - **In flight:** none.
-- **Next:** Phase 2, the web app and map. Start with `brainstorming` on sign-in and the map over real data ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]); the UI rules in AGENTS.md #3 and #5 apply. Consider promoting `develop` to `main` first.
+- **Next:** Phase 2, the web app and map. Start with `brainstorming` on sign-in and the map over real data ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]); the UI rules in AGENTS.md #3 and #5 apply.
 - **Workflow note:** from an agent session `finish-task.sh` leaves one empty worktree folder to delete after `ExitWorktree` ([[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]]).
 - **Owed — Danijel:** install Docker + the Supabase CLI for the local stack; decide whether to import the rest of the DRA vault, and whether to keep the Acme test notes.
 - **Owed — product:** the brand name ([[2026-11-16-gotcha-03-brand-name-is-unresolved]]); applications to the vendor sign-in programmes (needed only for phase 6, but approval takes time).
