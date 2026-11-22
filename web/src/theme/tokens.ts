@@ -4,6 +4,7 @@
 
 import {
   contrast,
+  luminance,
   css,
   fromHex,
   fromOklch,
@@ -171,26 +172,208 @@ function bloomCss(b: Blooms): string {
   ].join(", ");
 }
 
-/** Paints `layers` (top first, as CSS lists them) over an opaque colour. */
-function stack(under: RGB, layers: RGBA[]): RGB {
-  let c = under;
-  for (let i = layers.length - 1; i >= 0; i--) c = over(layers[i]!, c);
-  return c;
+// ---------------------------------------------------------------------------------------------
+// The real page background, evaluated at points (fix round 1: replaces "every bloom stacked")
+
+/** A radial gradient `rx ry at cx cy, colour 0%, transparent end`; sizes as fractions of the box. */
+type Radial = {
+  rx: number;
+  ry: number;
+  cx: number;
+  cy: number;
+  end: number;
+  colour: RGBA;
+};
+
+/** The five page radials in the prototype's order (line 366 then the bloom of line 361), top first. */
+function radials(b: Blooms, factor: number): Radial[] {
+  const [p1, p2] = b.pooled;
+  const [e1, e2, e3] = b.edge;
+  const k = (c: RGBA): RGBA => withAlpha(c, c.a * factor);
+  return [
+    { rx: 0.46, ry: 0.58, cx: 0.6, cy: 0.4, end: 0.72, colour: k(p1!) },
+    { rx: 0.34, ry: 0.42, cx: 0.34, cy: 0.78, end: 0.72, colour: k(p2!) },
+    { rx: 1.1, ry: 0.85, cx: 0.08, cy: -0.06, end: 0.58, colour: k(e1!) },
+    { rx: 0.9, ry: 0.6, cx: 1, cy: 1, end: 0.6, colour: k(e2!) },
+    { rx: 0.7, ry: 0.4, cx: 0, cy: 0.8, end: 0.6, colour: k(e3!) },
+  ];
+}
+
+/**
+ * A radial's colour at (x, y) in a w × h box. Colour to `transparent` fades the alpha only
+ * (browsers interpolate premultiplied), linearly from the 0% stop to the end stop.
+ */
+function radialAt(g: Radial, x: number, y: number, w: number, h: number): RGBA {
+  const t = Math.hypot(
+    (x - g.cx * w) / (g.rx * w),
+    (y - g.cy * h) / (g.ry * h),
+  );
+  return withAlpha(g.colour, t >= g.end ? 0 : g.colour.a * (1 - t / g.end));
+}
+
+/** `linear-gradient(168deg, w0 0%, w1 46%, w2 100%)` at (x, y) in a w × h box. */
+function washAt(wash: RGB[], x: number, y: number, w: number, h: number): RGB {
+  const a = (168 * Math.PI) / 180;
+  const dx = Math.sin(a);
+  const dy = -Math.cos(a);
+  const length = Math.abs(w * dx) + Math.abs(h * dy);
+  const p = Math.min(
+    1,
+    Math.max(0, ((x - w / 2) * dx + (y - h / 2) * dy) / length + 0.5),
+  );
+  return p <= 0.46
+    ? mix(wash[0]!, wash[1]!, p / 0.46)
+    : mix(wash[1]!, wash[2]!, (p - 0.46) / 0.54);
+}
+
+/** Reference viewports and the prototype's layout (rail 208, side panel 280, card between). */
+const VIEWPORTS: [number, number][] = [
+  [1600, 1000],
+  [1280, 620],
+];
+const RAIL = 208;
+const PANEL = 280;
+const GRID = 12;
+
+type Rect = [x0: number, y0: number, x1: number, y1: number];
+
+function layout(w: number, h: number): Record<"rail" | "card" | "panel", Rect> {
+  const panelLeft = w - 8 - PANEL;
+  return {
+    rail: [0, 0, RAIL, h],
+    // margin 8px 4px; the panel's left margin is 4px.
+    card: [RAIL + 4, 8, panelLeft - 4 - 4, h - 8],
+    panel: [panelLeft, 8, w - 8, h - 8],
+  };
+}
+
+/** GRID × GRID points across a rectangle, corners and edges included. */
+function grid([x0, y0, x1, y1]: Rect): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < GRID; i++)
+    for (let j = 0; j < GRID; j++)
+      out.push([
+        x0 + ((x1 - x0) * i) / (GRID - 1),
+        y0 + ((y1 - y0) * j) / (GRID - 1),
+      ]);
+  return out;
+}
+
+export type SampleOptions = {
+  /** Multiplies every bloom strength (1 = as designed). */
+  bloomFactor?: number;
+  /** Alpha of a black layer over the side panel's glass, and over the rail. */
+  panelScrim?: number;
+  railScrim?: number;
+};
+
+/**
+ * Every sampled background, before reducing to extremes (for analysis and tests). Blur is
+ * ignored: it averages neighbours, so the unblurred extremes are the conservative case.
+ * - rail: the page at its points;
+ * - card: `--glass` over the page, with the Vivid top-edge glow evaluated on the card box; plus
+ *   the stage's faint brand glow (prototype line 97, 8%) at its centre strength over every point;
+ * - panel: `--glass2` over the page;
+ * - popover (opened from the rail): `--glass` over the rail's points.
+ */
+export function surfaceSamples(
+  theme: string,
+  mode: Mode,
+  reach: Reach,
+  options: SampleOptions = {},
+): Record<"card" | "rail" | "panel" | "popover", RGB[]> {
+  const s = seeds(theme, mode);
+  const r = reached(s, mode, reach);
+  const layers = radials(blooms(s, mode), options.bloomFactor ?? 1);
+  const glass2 = FIXED[mode].glass2;
+  const stage = withAlpha(s.brand, 0.08);
+  const out = {
+    card: [] as RGB[],
+    rail: [] as RGB[],
+    panel: [] as RGB[],
+    popover: [] as RGB[],
+  };
+  for (const [w, h] of VIEWPORTS) {
+    const page = (x: number, y: number) => {
+      let c = washAt(s.wash, x, y, w, h);
+      for (let i = layers.length - 1; i >= 0; i--)
+        c = over(radialAt(layers[i]!, x, y, w, h), c);
+      return c;
+    };
+    const rects = layout(w, h);
+    for (const [x, y] of grid(rects.rail)) {
+      const c = page(x, y);
+      out.rail.push(options.railScrim ? over(black(options.railScrim), c) : c);
+      out.popover.push(over(r.glass, c));
+    }
+    for (const [x, y] of grid(rects.panel)) {
+      const c = over(glass2, page(x, y));
+      out.panel.push(
+        options.panelScrim ? over(black(options.panelScrim), c) : c,
+      );
+    }
+    const [cx0, cy0, cx1, cy1] = rects.card;
+    const cw = cx1 - cx0;
+    // The Vivid glows: `60% 224px at 14% 0` and `30% 224px at 76% 0`, transparent at 70%.
+    const glows: Radial[] = r.glow.map((colour, i) => ({
+      rx: i === 0 ? 0.6 : 0.3,
+      ry: 224 / (cy1 - cy0),
+      cx: i === 0 ? 0.14 : 0.76,
+      cy: 0,
+      end: 0.7,
+      colour,
+    }));
+    for (const [x, y] of grid(rects.card)) {
+      let c = over(r.glass, page(x, y));
+      for (let i = glows.length - 1; i >= 0; i--)
+        c = over(radialAt(glows[i]!, x - cx0, y - cy0, cw, cy1 - cy0), c);
+      out.card.push(c, over(stage, c));
+    }
+  }
+  return out;
+}
+
+const EXTREMES = [
+  "lightest",
+  "darkest",
+  "least red",
+  "most red",
+  "least green",
+  "most green",
+  "least blue",
+  "most blue",
+] as const;
+
+/** The samples' extremes, in the order of EXTREMES: by luminance, then per channel. */
+function extremes(list: RGB[]): RGB[] {
+  const by = (f: (c: RGB) => number) => {
+    let lo = list[0]!;
+    let hi = list[0]!;
+    for (const c of list) {
+      if (f(c) < f(lo)) lo = c;
+      if (f(c) > f(hi)) hi = c;
+    }
+    return [lo, hi];
+  };
+  const [dark, light] = by(luminance);
+  return [
+    light!,
+    dark!,
+    ...by((c) => c.r),
+    ...by((c) => c.g),
+    ...by((c) => c.b),
+  ];
 }
 
 const panelSolid = (s: Seeds, mode: Mode) =>
   quantize(over(FIXED[mode].glass2, s.wash[1]!));
 
 /**
- * The opaque colours each surface can sit on, for the contrast test (spec "Settled details":
- * blur ignored; each surface over each of the three wash stops, plain and with every bloom tint
- * that can overlap it at its full 0%-stop strength, stacked). Overlap, conservatively:
- * - rail: the three edge blooms (it runs the full height of the left edge);
- * - card and side panel: the two pooled glows behind the card plus the three edge blooms; the
- *   card's tinted variant also carries the Vivid top-edge glow over the glass;
- * - popover (the Appearance panel and other reset popovers, glass, opened from the rail): the
- *   edge blooms, plus `--surface`, its solid fallback (spec §4);
- * - cardSolid: the opaque `--bg`; panelSolid: `--glass2` over the middle wash stop.
+ * The opaque colours each surface can sit on, for the contrast test: the extremes of the real
+ * page background sampled on a 12 × 12 grid over each surface at 1600 × 1000 and 1280 × 620
+ * (see `surfaceSamples`). Each of card, rail, panel holds the 8 extremes; popover holds its 8
+ * plus `--surface`, its solid fallback (spec §4). cardSolid is the opaque `--bg`; panelSolid
+ * is `--glass2` over the middle wash stop.
  */
 export function backgrounds(
   theme: string,
@@ -199,26 +382,12 @@ export function backgrounds(
 ): Record<Surface, RGB[]> {
   const s = seeds(theme, mode);
   const r = reached(s, mode, reach);
-  const b = blooms(s, mode);
-  const all = [...b.pooled, ...b.edge];
-  const glass2 = FIXED[mode].glass2;
+  const sm = surfaceSamples(theme, mode, reach);
   return {
-    card: s.wash.flatMap((w) => [
-      over(r.glass, w),
-      stack(over(r.glass, stack(w, all)), r.glow),
-    ]),
-    rail: s.wash.flatMap((w) => [w, stack(w, b.edge)]),
-    panel: s.wash.flatMap((w) => [
-      over(glass2, w),
-      over(glass2, stack(w, all)),
-    ]),
-    popover: [
-      ...s.wash.flatMap((w) => [
-        over(r.glass, w),
-        over(r.glass, stack(w, b.edge)),
-      ]),
-      r.surface,
-    ],
+    card: extremes(sm.card),
+    rail: extremes(sm.rail),
+    panel: extremes(sm.panel),
+    popover: [...extremes(sm.popover), r.surface],
     cardSolid: [r.bg],
     panelSolid: [panelSolid(s, mode)],
   };
@@ -244,11 +413,12 @@ function groupByReach(labels: string[]): string[] {
   );
 }
 
-/** Names entry `i` of `backgrounds()[surface]`, e.g. "panel over wash stop 1 with blooms". */
+/** Names entry `i` of `backgrounds()[surface]`, e.g. "panel, lightest sample". */
 function describe(surface: Surface, i: number): string {
   if (surface === "cardSolid" || surface === "panelSolid") return surface;
-  if (surface === "popover" && i === 6) return "popover --surface (solid)";
-  return `${surface} over wash stop ${Math.floor(i / 2) + 1}${i % 2 ? " with blooms" : ""}`;
+  if (surface === "popover" && i === EXTREMES.length)
+    return "popover --surface (solid)";
+  return `${surface}, ${EXTREMES[i]} sample`;
 }
 
 function worst(fg: RGBA, on: Labelled[]): { ratio: number; against: string } {
