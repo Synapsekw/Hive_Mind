@@ -830,6 +830,12 @@
     padding-bottom: 12px;
     background: var(--panel);
   }
+
+  /* An open sharing control can be taller than the column: the header then scrolls with the
+     list, so Save, Cancel and every note stay reachable by scrolling the column. */
+  .notes > .listHead:has(.control) {
+    position: static;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

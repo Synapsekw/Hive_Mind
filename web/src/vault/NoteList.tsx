@@ -32,6 +32,9 @@ function Row({ note, current, href, now, members, showMark }: RowProps) {
           <span>{shortDate(note.updated_at, now)}</span>
           {note.quarantined && <span className={s.tag}>Held</span>}
           {note.by_agent && <span className={s.tag}>Agent</span>}
+          {note.access === "link" && (
+            <span className={s.tag}>Opened by a link</span>
+          )}
           {showMark && mark.kind !== "private" && (
             <span className={s.rowMark}>
               <MarkTag mark={mark} />

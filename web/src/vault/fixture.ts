@@ -54,6 +54,8 @@ export const HOSTILE_BODY = [
   "",
   "![pixel](https://example.invalid/pixel.png)",
   "",
+  "[![badge](https://example.invalid/badge.png)](https://example.com/project)",
+  "",
 ].join("\n");
 
 type Own = {

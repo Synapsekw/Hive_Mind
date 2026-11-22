@@ -127,6 +127,11 @@ test("the folder and the filter survive choosing a note", async ({ page }) => {
 test("a hostile note renders as text", async ({ page }) => {
   const requests: string[] = [];
   page.on("request", (r) => requests.push(r.url()));
+  const errors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") errors.push(m.text());
+  });
+  page.on("pageerror", (e) => errors.push(e.message));
   await open(page, `?note=${HOSTILE_NOTE_ID}`);
   const preview = page.getByRole("region", { name: "Note" });
   await expect(preview.getByRole("table")).toBeVisible();
@@ -153,8 +158,16 @@ test("a hostile note renders as text", async ({ page }) => {
   const external = preview.getByRole("link", { name: "vendor site" });
   await expect(external).toHaveAttribute("target", "_blank");
   await expect(external).toHaveAttribute("rel", "noopener noreferrer");
+  // An image inside a link stays one link: no anchor inside an anchor.
+  await expect(preview.locator("a a")).toHaveCount(0);
+  const badge = preview.getByRole("link", { name: /badge/ });
+  await expect(badge).toHaveCount(1);
+  await expect(badge).toHaveAttribute("href", "https://example.com/project");
   await page.waitForTimeout(300);
   expect(requests.filter((u) => u.includes("example.invalid"))).toEqual([]);
+  expect(
+    errors.filter((e) => /hydrat|cannot be a descendant/i.test(e)),
+  ).toEqual([]);
 });
 
 test("the note control writes nothing until Save", async ({ page }) => {
@@ -312,11 +325,70 @@ test("the shared tab groups colleagues' notes and offers no control", async ({
   const list = page.getByRole("navigation", { name: "Notes" });
   await expect(list.getByRole("heading", { name: "Ahmed" })).toBeVisible();
   await expect(list.getByRole("heading", { name: "Sara" })).toBeVisible();
+  await expect(
+    list.getByRole("link", { name: /Pricing options/ }),
+  ).toContainText("Opened by a link");
+  await expect(
+    list.getByRole("link", { name: /Site visit/ }),
+  ).not.toContainText("Opened by a link");
   await list.getByRole("link", { name: /Pricing options/ }).click();
   const preview = page.getByRole("region", { name: "Note" });
   await expect(preview).toContainText("Opened by a link");
   await expect(page.getByRole("button", { name: /^Sharing: / })).toHaveCount(0);
 });
+
+for (const size of [
+  { width: 1280, height: 620 },
+  // The shortest window that still keeps the columns side by side.
+  { width: 1100, height: 560 },
+])
+  test(`at ${size.width} x ${size.height} an open folder control keeps Save and the list reachable`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await open(page);
+    await folders(page)
+      .getByRole("button", { name: new RegExp(`^${GROUP_FOLDER}\\b`) })
+      .click();
+    await page.getByRole("button", { name: /^Folder sharing: / }).click();
+    const control = page.getByRole("group", {
+      name: `Who can read ${GROUP_FOLDER}`,
+    });
+    // The tallest state: Specific people with everyone ticked, so the sentence is longest.
+    await control.getByRole("radio", { name: "Specific people" }).check();
+    for (const box of await control.getByRole("checkbox").all())
+      await box.check();
+    await expect(control).toContainText("Ahmed and Sara will be able to read");
+
+    // Seen and clickable: its centre is inside the window and nothing (a sticky header, a
+    // clipping box) covers it there.
+    const inView = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      if (r.height === 0 || y < 0 || y > window.innerHeight) return false;
+      const hit = document.elementFromPoint(x, y);
+      return !!hit && (hit === el || el.contains(hit));
+    };
+
+    for (const name of ["Save", "Cancel"]) {
+      const button = control.getByRole("button", { name });
+      await button.scrollIntoViewIfNeeded();
+      expect(await button.evaluate(inView)).toBe(true);
+    }
+    await expect(control.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    const last = noteLinks(page).last();
+    await last.scrollIntoViewIfNeeded();
+    expect(await last.evaluate(inView)).toBe(true);
+
+    const pageScrolls = await page.evaluate(
+      () =>
+        document.documentElement.scrollHeight > window.innerHeight ||
+        document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(pageScrolls).toBe(false);
+  });
 
 test("an unknown note says it isn't available", async ({ page }) => {
   await open(page, "?note=00000000-0000-4000-8000-ffffffffffff");
