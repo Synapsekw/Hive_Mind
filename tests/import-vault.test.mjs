@@ -10,7 +10,10 @@ import { openDb } from "../scripts/local-db.mjs";
 import {
   importVault,
   listMarkdown,
+  ownMembership,
   parseNote,
+  personCredentials,
+  personSession,
 } from "../scripts/import-vault.mjs";
 
 const { db, as } = await openDb();
@@ -318,4 +321,170 @@ test("one note that the database refuses does not stop the rest", async () => {
   assert.deepEqual(r.failed, [
     { path: "New/bad.md", error: "refused by the database" },
   ]);
+});
+
+// ------------------------------------------------------------------ sign-in
+// The importer signs in as the person through Supabase Auth. `fetch` and the
+// terminal prompts are injected, so nothing here touches a network or a TTY.
+
+const answer = (status, body) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
+});
+const recording = (status, body) => {
+  const calls = [];
+  const fetchFn = async (url, init) => {
+    calls.push({ url, init });
+    return answer(status, body);
+  };
+  return { calls, fetchFn };
+};
+const site = { url: "https://hive.example", anonKey: "publishable-key" };
+const who = { email: "dani@example.com", password: "correct horse battery" };
+
+test("personSession posts the password grant and returns the session", async () => {
+  const { calls, fetchFn } = recording(200, {
+    access_token: "session-jwt",
+    user: { id: "user-1" },
+  });
+  const session = await personSession({ ...site, ...who }, fetchFn);
+  assert.deepEqual(session, { jwt: "session-jwt", userId: "user-1" });
+
+  assert.equal(calls.length, 1);
+  const [{ url, init }] = calls;
+  assert.equal(url, "https://hive.example/auth/v1/token?grant_type=password");
+  assert.equal(init.method, "POST");
+  assert.equal(init.headers.apikey, "publishable-key");
+  assert.equal(init.headers["Content-Type"], "application/json");
+  assert.equal(init.headers.Authorization, undefined);
+  assert.deepEqual(JSON.parse(init.body), who);
+});
+
+test("a refused sign-in says so without the email or the password", async () => {
+  // Echo both back, as a careless server might: neither may reach the message.
+  const refusals = [
+    recording(400, {
+      error_code: "invalid_credentials",
+      msg: `Invalid login for ${who.email} with ${who.password}`,
+    }),
+    recording(500, `boom ${who.email} ${who.password}`),
+    recording(200, { user: { id: "user-1" } }),
+    recording(200, { access_token: "session-jwt" }),
+    recording(200, "not json"),
+    {
+      fetchFn: async () => {
+        throw new Error(`could not send ${who.email} ${who.password}`);
+      },
+    },
+  ];
+  for (const { fetchFn } of refusals)
+    await assert.rejects(personSession({ ...site, ...who }, fetchFn), (e) => {
+      assert.match(e.message, /Sign-in failed/);
+      for (const text of [e.message, String(e.stack), String(e.cause ?? "")]) {
+        assert.ok(!text.includes(who.email));
+        assert.ok(!text.includes(who.password));
+      }
+      return true;
+    });
+});
+
+test("ownMembership reads the person's own oldest member row", async () => {
+  const { calls, fetchFn } = recording(200, [
+    { id: "member-1", hive_id: "hive-1" },
+  ]);
+  const mine = await ownMembership(
+    { ...site, jwt: "session-jwt", userId: "user-1" },
+    fetchFn,
+  );
+  assert.deepEqual(mine, { memberId: "member-1", hiveId: "hive-1" });
+
+  assert.equal(calls.length, 1);
+  const [{ url, init }] = calls;
+  assert.equal(
+    url,
+    "https://hive.example/rest/v1/members?user_id=eq.user-1&order=created_at,id&limit=1&select=id,hive_id",
+  );
+  assert.equal(init.method ?? "GET", "GET");
+  assert.equal(init.headers.apikey, "publishable-key");
+  assert.equal(init.headers.Authorization, "Bearer session-jwt");
+  assert.equal(init.body, undefined);
+});
+
+test("ownMembership refuses a person who is in no hive, or an answer it cannot use", async () => {
+  const args = { ...site, jwt: "session-jwt", userId: "user-1" };
+  await assert.rejects(ownMembership(args, recording(200, []).fetchFn), {
+    message: "You are not in a hive",
+  });
+  await assert.rejects(
+    ownMembership(args, recording(401, { message: "JWT expired" }).fetchFn),
+    (e) => {
+      assert.match(e.message, /401/);
+      assert.ok(!e.message.includes("session-jwt"));
+      return true;
+    },
+  );
+});
+
+test("credentials come from the environment when both are set, with no prompt", async () => {
+  const never = async () => assert.fail("must not prompt");
+  assert.deepEqual(
+    await personCredentials({
+      env: {
+        HIVE_PERSON_EMAIL: who.email,
+        HIVE_PERSON_PASSWORD: who.password,
+      },
+      isTTY: false,
+      ask: never,
+      askHidden: never,
+    }),
+    who,
+  );
+});
+
+test("credentials are asked on the terminal otherwise, the password unseen", async () => {
+  const asked = [];
+  const ask = async (q) => (asked.push(["shown", q]), `  ${who.email} `);
+  const askHidden = async (q) => (asked.push(["hidden", q]), who.password);
+  // One of the two alone is not enough: both are asked for.
+  for (const env of [{}, { HIVE_PERSON_EMAIL: "other@example.com" }]) {
+    asked.length = 0;
+    assert.deepEqual(
+      await personCredentials({ env, isTTY: true, ask, askHidden }),
+      who,
+    );
+    assert.deepEqual(
+      asked.map(([how]) => how),
+      ["shown", "hidden"],
+    );
+    assert.match(asked[0][1], /email/i);
+    assert.match(asked[1][1], /password/i);
+  }
+  await assert.rejects(
+    personCredentials({
+      env: {},
+      isTTY: true,
+      ask,
+      askHidden: async () => "",
+    }),
+    /email and a password/,
+  );
+});
+
+test("with no terminal and no credentials in the environment it refuses", async () => {
+  const never = async () => assert.fail("must not prompt");
+  await assert.rejects(
+    personCredentials({
+      env: { HIVE_PERSON_PASSWORD: who.password },
+      isTTY: false,
+      ask: never,
+      askHidden: never,
+    }),
+    (e) => {
+      assert.match(e.message, /HIVE_PERSON_EMAIL/);
+      assert.match(e.message, /HIVE_PERSON_PASSWORD/);
+      assert.ok(!e.message.includes(who.password));
+      return true;
+    },
+  );
 });

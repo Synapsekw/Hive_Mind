@@ -4,7 +4,9 @@
 // in CI there is no .env, so it skips itself.
 //
 // It writes only under `_integration-test/<run id>/` in the agent's workspace.
-// Agents cannot delete notes, so the cleanup signs in as the workspace's owner.
+// Agents cannot delete notes, so the cleanup signs in as the workspace's owner
+// (HIVE_PERSON_EMAIL, HIVE_PERSON_PASSWORD). Without those, every check that
+// writes is skipped, so nothing is left behind.
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -13,12 +15,7 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const NEEDED = [
-  "SUPABASE_URL",
-  "SUPABASE_ANON_KEY",
-  "SUPABASE_JWT_SECRET",
-  "HIVE_AGENT_TOKEN",
-];
+const NEEDED = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "HIVE_AGENT_TOKEN"];
 const SERVER = fileURLToPath(new URL("../mcp/dist/index.js", import.meta.url));
 const missing = NEEDED.filter((n) => !process.env[n]);
 const skip = missing.length
@@ -36,6 +33,10 @@ const WORD = `hivetest${RUN}`;
 const FILE_TYPE = "_integration-test";
 
 const { SUPABASE_URL: URL_, SUPABASE_ANON_KEY: ANON } = process.env;
+const { HIVE_PERSON_EMAIL: EMAIL, HIVE_PERSON_PASSWORD: PASSWORD } =
+  process.env;
+const NO_PERSON =
+  "no person credentials: set HIVE_PERSON_EMAIL and HIVE_PERSON_PASSWORD";
 
 // Supabase Storage, as one identity (or signed out).
 async function storage(path, { jwt, method = "GET", body, raw } = {}) {
@@ -77,6 +78,61 @@ async function rest(path, { jwt, method = "GET", body, prefer } = {}) {
   return { status: res.status, json, text };
 }
 
+// An agent's identity: the function checks the token and signs the JWT. The
+// answer carries the JWT, so a failure reports the status and the reason only.
+async function agentSession(body) {
+  const res = await fetch(`${URL_}/functions/v1/agent-session`, {
+    method: "POST",
+    headers: { apikey: ANON, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    // Not JSON; the status is what the caller checks.
+  }
+  return { status: res.status, json };
+}
+async function agentSignIn(token) {
+  const r = await agentSession({ token });
+  assert.equal(
+    r.status,
+    200,
+    `agent-session answered ${r.status}: ${r.json?.error ?? "no reason given"}${
+      r.status === 404 ? " (is the function deployed?)" : ""
+    }`,
+  );
+  assert.equal(typeof r.json?.access_token, "string", "no access_token");
+  const { access_token: jwt, ...me } = r.json;
+  return { jwt, me };
+}
+
+// A person's identity: Supabase Auth, email and password.
+async function personSignIn(email, password) {
+  const res = await fetch(`${URL_}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: ANON, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    // Not JSON; the status is what the caller checks.
+  }
+  assert.equal(
+    res.status,
+    200,
+    `person sign-in answered ${res.status}: ${json?.error_code ?? "no reason given"}`,
+  );
+  assert.equal(typeof json?.access_token, "string", "no access_token");
+  return { jwt: json.access_token, userId: json.user?.id };
+}
+
+const b64url = (v) => Buffer.from(JSON.stringify(v)).toString("base64url");
+const decode = (part) => JSON.parse(Buffer.from(part, "base64url").toString());
+
 const text = (result) => result.content.map((c) => c.text).join("\n");
 function data(result) {
   const t = text(result);
@@ -95,12 +151,25 @@ describe("MCP server against a live database", { skip }, () => {
   let Client, StdioClientTransport, client, me, ownerJwt, agentJwt;
   // The folder the server may read files from, and one it may not.
   let work, outside;
+  // Skips a check that needs the workspace's owner; true when it did.
+  const noPerson = (t) => {
+    if (ownerJwt) return false;
+    t.skip(NO_PERSON);
+    return true;
+  };
 
   const start = async (env = {}) => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [SERVER],
-      env: { ...process.env, HIVE_FILES_ROOT: work, ...env },
+      // The server gets the agent token only, never a person's password.
+      env: {
+        ...process.env,
+        HIVE_PERSON_EMAIL: "",
+        HIVE_PERSON_PASSWORD: "",
+        HIVE_FILES_ROOT: work,
+        ...env,
+      },
       stderr: "pipe",
     });
     const c = new Client({ name: "hive-integration-test", version: "0.0.0" });
@@ -177,33 +246,19 @@ describe("MCP server against a live database", { skip }, () => {
     ({ StdioClientTransport } = await load(
       "@modelcontextprotocol/sdk/client/stdio.js",
     ));
-    const { SignJWT } = await load("jose");
 
-    const login = await rest("rpc/agent_login", {
-      method: "POST",
-      body: { p_token: process.env.HIVE_AGENT_TOKEN },
-    });
-    assert.equal(login.status, 200, `agent_login failed: ${login.text}`);
-    me = login.json[0];
+    ({ jwt: agentJwt, me } = await agentSignIn(process.env.HIVE_AGENT_TOKEN));
 
-    const sign = (claims) => {
-      const now = Math.floor(Date.now() / 1000);
-      return new SignJWT({ role: "authenticated", ...claims })
-        .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-        .setSubject(me.user_id)
-        .setAudience("authenticated")
-        .setIssuedAt(now)
-        .setExpirationTime(now + 600)
-        .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET));
-    };
-    ownerJwt = await sign({});
-    agentJwt = await sign({
-      agent_id: me.agent_id,
-      workspace_id: me.workspace_id,
-      trust_tier: me.trust_tier,
-    });
-
-    await cleanUp();
+    if (EMAIL && PASSWORD) {
+      const person = await personSignIn(EMAIL, PASSWORD);
+      assert.equal(
+        person.userId,
+        me.user_id,
+        "HIVE_PERSON_EMAIL is not the account behind HIVE_AGENT_TOKEN",
+      );
+      ownerJwt = person.jwt;
+      await cleanUp();
+    }
     work = mkdtempSync(join(tmpdir(), "hive-live-work-"));
     outside = mkdtempSync(join(tmpdir(), "hive-live-outside-"));
     client = await start();
@@ -211,12 +266,13 @@ describe("MCP server against a live database", { skip }, () => {
 
   after(async () => {
     await client?.close();
+    for (const dir of [work, outside])
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    // Without the owner nothing was written: every check that writes skipped.
     if (!ownerJwt) return;
     await cleanUp();
     assert.deepEqual(await myTestNotes(), [], "test notes were left behind");
     assert.deepEqual(await myTestFiles(), [], "test files were left behind");
-    for (const dir of [work, outside])
-      if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
   test("offers exactly the seven tools, none that share, accept or delete", async () => {
@@ -237,15 +293,17 @@ describe("MCP server against a live database", { skip }, () => {
   test("hive_overview shows the agent's workspace", async () => {
     const o = data(await call("hive_overview"));
     const ws = await rest(`workspaces?select=name&id=eq.${me.workspace_id}`, {
-      jwt: ownerJwt,
+      jwt: ownerJwt ?? agentJwt,
     });
+    assert.equal(ws.status, 200, ws.text);
     assert.equal(o.workspace, ws.json[0].name);
     assert.equal(o.trust_tier, me.trust_tier);
     assert.ok(Array.isArray(o.recent_notes));
     assert.ok(Array.isArray(o.topics));
   });
 
-  test("hive_write creates a note, then updates it at the same path", async () => {
+  test("hive_write creates a note, then updates it at the same path", async (t) => {
+    if (noPerson(t)) return;
     const created = await call("hive_write", {
       path: `${DIR}a.md`,
       title: "Integration A",
@@ -264,7 +322,8 @@ describe("MCP server against a live database", { skip }, () => {
     assert.match(text(updated), /^Updated /);
   });
 
-  test("hive_read finds the note by path and by id", async () => {
+  test("hive_read finds the note by path and by id", async (t) => {
+    if (noPerson(t)) return;
     const byPath = data(await call("hive_read", { path: `${DIR}a.md` }));
     assert.equal(byPath.body, `second body ${WORD}`);
     assert.equal(byPath.version, 2);
@@ -277,7 +336,8 @@ describe("MCP server against a live database", { skip }, () => {
     assert.equal(none.isError, true);
   });
 
-  test("hive_append adds a dated line", async () => {
+  test("hive_append adds a dated line", async (t) => {
+    if (noPerson(t)) return;
     const r = await call("hive_append", {
       path: `${DIR}a.md`,
       text: "a durable fact",
@@ -288,7 +348,8 @@ describe("MCP server against a live database", { skip }, () => {
     assert.equal(note.version, 3);
   });
 
-  test("hive_search finds the note by a unique word", async () => {
+  test("hive_search finds the note by a unique word", async (t) => {
+    if (noPerson(t)) return;
     const hits = data(await call("hive_search", { query: WORD }));
     assert.deepEqual(
       hits.map((h) => h.path),
@@ -297,7 +358,8 @@ describe("MCP server against a live database", { skip }, () => {
     assert.equal("body" in hits[0], false, "search must not return bodies");
   });
 
-  test("hive_propose_link links two of the agent's own notes", async () => {
+  test("hive_propose_link links two of the agent's own notes", async (t) => {
+    if (noPerson(t)) return;
     const b = await call("hive_write", {
       path: `${DIR}b.md`,
       title: "Integration B",
@@ -321,7 +383,8 @@ describe("MCP server against a live database", { skip }, () => {
     assert.deepEqual(links.json, [{ status: "accepted", tier: 2 }]);
   });
 
-  test("the database refuses an agent that deletes a note or sets sharing", async () => {
+  test("the database refuses an agent that deletes a note or sets sharing", async (t) => {
+    if (noPerson(t)) return;
     const note = data(await call("hive_read", { path: `${DIR}a.md` }));
 
     const del = await rest(`notes?id=eq.${note.id}`, {
@@ -351,7 +414,8 @@ describe("MCP server against a live database", { skip }, () => {
     assert.deepEqual(r.json, []);
   });
 
-  test("hive_save_file stores a file from the working folder, attached to a note", async () => {
+  test("hive_save_file stores a file from the working folder, attached to a note", async (t) => {
+    if (noPerson(t)) return;
     const content = `a deliverable ${WORD}`;
     writeFileSync(join(work, "report.txt"), content);
     const save = (args) =>
@@ -403,7 +467,8 @@ describe("MCP server against a live database", { skip }, () => {
     assert.deepEqual(await download(ownerJwt), { status: 200, text: content });
   });
 
-  test("hive_save_file refuses files outside the working folder and hidden files", async () => {
+  test("hive_save_file refuses files outside the working folder and hidden files", async (t) => {
+    if (noPerson(t)) return;
     writeFileSync(join(outside, "secret.txt"), "not for the hive");
     writeFileSync(join(work, ".env"), "SECRET=1");
     const save = (local_path) =>
@@ -423,5 +488,55 @@ describe("MCP server against a live database", { skip }, () => {
 
   test("the server refuses to start with a wrong token", async () => {
     await assert.rejects(start({ HIVE_AGENT_TOKEN: "hive_not_a_real_token" }));
+  });
+
+  test("agent-session refuses a wrong token and a body without one", async () => {
+    const wrong = await agentSession({ token: `hive_${"0".repeat(64)}` });
+    assert.equal(wrong.status, 401, "a wrong token was not refused with 401");
+    assert.deepEqual(Object.keys(wrong.json ?? {}), ["error"]);
+
+    const none = await agentSession({});
+    assert.equal(none.status, 400, "a body without a token was not a 400");
+    assert.deepEqual(Object.keys(none.json ?? {}), ["error"]);
+  });
+
+  test("an agent JWT from agent-session names the agent and lasts an hour", () => {
+    const [header, payload] = agentJwt.split(".");
+    assert.equal(decode(header).alg, "ES256", "alg");
+    const claims = decode(payload);
+    assert.equal(claims.agent_id, me.agent_id, "agent_id");
+    assert.equal(claims.sub, me.user_id, "sub");
+    assert.equal(claims.workspace_id, me.workspace_id, "workspace_id");
+    assert.equal(claims.trust_tier, me.trust_tier, "trust_tier");
+    assert.equal(claims.role, "authenticated", "role");
+    assert.equal(claims.exp - claims.iat, 3600, "exp - iat");
+  });
+
+  test("the database refuses a JWT with the right claims signed by another key", async () => {
+    // The real token's header (same kid) and claims, signed by a key made here.
+    const [header, payload] = agentJwt.split(".");
+    const now = Math.floor(Date.now() / 1000);
+    const signed = `${b64url(decode(header))}.${b64url({
+      ...decode(payload),
+      iat: now,
+      exp: now + 3600,
+    })}`;
+    const { privateKey } = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+    const signature = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      privateKey,
+      new TextEncoder().encode(signed),
+    );
+    const forged = `${signed}.${Buffer.from(signature).toString("base64url")}`;
+
+    const r = await rest("notes?select=id&limit=1", { jwt: forged });
+    assert.equal(r.status, 401, "a JWT signed by a foreign key was accepted");
+    // The same request with the real token is let in.
+    const real = await rest("notes?select=id&limit=1", { jwt: agentJwt });
+    assert.equal(real.status, 200, "the real agent JWT was refused");
   });
 });

@@ -4,8 +4,10 @@
 // agent token (HIVE_AGENT_TOKEN_2) in the environment it skips itself.
 //
 // The agents act through two real MCP servers. Sharing a note and accepting a
-// link are people's decisions, so the test makes them signed in as each person,
-// and only on notes it created under `_integration-test/<run id>/`.
+// link are people's decisions, so the test makes them signed in as each person
+// (HIVE_PERSON_EMAIL, HIVE_PERSON_PASSWORD and the same with _2), and only on
+// notes it created under `_integration-test/<run id>/`. Only a person can
+// delete a note, so without both people every check that writes is skipped.
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -15,7 +17,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const NEEDED = [
   "SUPABASE_URL",
   "SUPABASE_ANON_KEY",
-  "SUPABASE_JWT_SECRET",
   "HIVE_AGENT_TOKEN",
   "HIVE_AGENT_TOKEN_2",
 ];
@@ -57,6 +58,58 @@ async function rest(path, { jwt, method = "GET", body, prefer } = {}) {
   return { status: res.status, json, text };
 }
 
+// An agent's identity: the function checks the token and signs the JWT. The
+// answer carries the JWT, so a failure reports the status and the reason only.
+async function agentSession(body) {
+  const res = await fetch(`${URL_}/functions/v1/agent-session`, {
+    method: "POST",
+    headers: { apikey: ANON, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    // Not JSON; the status is what the caller checks.
+  }
+  return { status: res.status, json };
+}
+async function agentSignIn(token) {
+  const r = await agentSession({ token });
+  assert.equal(
+    r.status,
+    200,
+    `agent-session answered ${r.status}: ${r.json?.error ?? "no reason given"}${
+      r.status === 404 ? " (is the function deployed?)" : ""
+    }`,
+  );
+  assert.equal(typeof r.json?.access_token, "string", "no access_token");
+  const { access_token: jwt, ...me } = r.json;
+  return { jwt, me };
+}
+
+// A person's identity: Supabase Auth, email and password.
+async function personSignIn(email, password) {
+  const res = await fetch(`${URL_}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: ANON, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    // Not JSON; the status is what the caller checks.
+  }
+  assert.equal(
+    res.status,
+    200,
+    `person sign-in answered ${res.status}: ${json?.error_code ?? "no reason given"}`,
+  );
+  assert.equal(typeof json?.access_token, "string", "no access_token");
+  return { jwt: json.access_token, userId: json.user?.id };
+}
+
 const text = (result) => result.content.map((c) => c.text).join("\n");
 const data = (result) => {
   const t = text(result);
@@ -68,9 +121,26 @@ const data = (result) => {
 
 describe("two members and their agents on a live database", { skip }, () => {
   // a is the hive's owner, b the second member.
-  const a = { token: process.env.HIVE_AGENT_TOKEN };
-  const b = { token: process.env.HIVE_AGENT_TOKEN_2 };
+  const a = {
+    token: process.env.HIVE_AGENT_TOKEN,
+    names: ["HIVE_PERSON_EMAIL", "HIVE_PERSON_PASSWORD"],
+  };
+  const b = {
+    token: process.env.HIVE_AGENT_TOKEN_2,
+    names: ["HIVE_PERSON_EMAIL_2", "HIVE_PERSON_PASSWORD_2"],
+  };
   const ids = {};
+  // Skips a check that needs both people signed in; true when it did.
+  const noPeople = (t) => {
+    const absent = [a, b].filter((who) => !who.person);
+    if (!absent.length) return false;
+    t.skip(
+      `no person credentials: set ${absent
+        .map((who) => who.names.join(" and "))
+        .join(", ")}`,
+    );
+    return true;
+  };
 
   const paths = async (who, query) =>
     data(await who.call("hive_search", { query })).map((n) => n.path);
@@ -97,32 +167,24 @@ describe("two members and their agents on a live database", { skip }, () => {
     const { StdioClientTransport } = await load(
       "@modelcontextprotocol/sdk/client/stdio.js",
     );
-    const { SignJWT } = await load("jose");
+
+    // The servers get the agent tokens only, never a person's password.
+    const serverEnv = { ...process.env };
+    for (const who of [a, b]) for (const n of who.names) delete serverEnv[n];
 
     for (const who of [a, b]) {
-      const login = await rest("rpc/agent_login", {
-        method: "POST",
-        body: { p_token: who.token },
-      });
-      assert.equal(login.status, 200, `agent_login failed: ${login.text}`);
-      who.me = login.json[0];
-      const sign = (claims) => {
-        const now = Math.floor(Date.now() / 1000);
-        return new SignJWT({ role: "authenticated", ...claims })
-          .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-          .setSubject(who.me.user_id)
-          .setAudience("authenticated")
-          .setIssuedAt(now)
-          .setExpirationTime(now + 600)
-          .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET));
-      };
-      who.person = await sign({});
-      who.agent = await sign({
-        agent_id: who.me.agent_id,
-        workspace_id: who.me.workspace_id,
-        trust_tier: who.me.trust_tier,
-      });
-      await cleanUp(who);
+      ({ jwt: who.agent, me: who.me } = await agentSignIn(who.token));
+      const [email, password] = who.names.map((n) => process.env[n]);
+      if (email && password) {
+        const person = await personSignIn(email, password);
+        assert.equal(
+          person.userId,
+          who.me.user_id,
+          `${who.names[0]} is not the account behind this member's agent token`,
+        );
+        who.person = person.jwt;
+        await cleanUp(who);
+      }
 
       who.client = new Client({
         name: "hive-two-member-test",
@@ -132,7 +194,7 @@ describe("two members and their agents on a live database", { skip }, () => {
         new StdioClientTransport({
           command: process.execPath,
           args: [SERVER],
-          env: { ...process.env, HIVE_AGENT_TOKEN: who.token },
+          env: { ...serverEnv, HIVE_AGENT_TOKEN: who.token },
           stderr: "pipe",
         }),
       );
@@ -150,7 +212,8 @@ describe("two members and their agents on a live database", { skip }, () => {
     }
   });
 
-  test("a private note stays private to the other member and their agent", async () => {
+  test("a private note stays private to the other member and their agent", async (t) => {
+    if (noPeople(t)) return;
     for (const [who, name] of [
       [a, "a-private"],
       [b, "b-private"],
@@ -176,7 +239,8 @@ describe("two members and their agents on a live database", { skip }, () => {
     assert.deepEqual(direct.json, [], "b read a's private note directly");
   });
 
-  test("the map shows each member the other's private note as a stub", async () => {
+  test("the map shows each member the other's private note as a stub", async (t) => {
+    if (noPeople(t)) return;
     const mapOf = async (who) => {
       const r = await rest("rpc/map_graph", {
         jwt: who.person,
@@ -220,7 +284,8 @@ describe("two members and their agents on a live database", { skip }, () => {
     assert.match(byAgent.text, /map_graph is for people/);
   });
 
-  test("an agent cannot share a note; once its owner does, the other member reads it", async () => {
+  test("an agent cannot share a note; once its owner does, the other member reads it", async (t) => {
+    if (noPeople(t)) return;
     const w = await a.call("hive_write", {
       path: `${DIR}a-shared.md`,
       title: "a-shared",
@@ -267,7 +332,8 @@ describe("two members and their agents on a live database", { skip }, () => {
     assert.deepEqual(edit.json, []);
   });
 
-  test("a link opens two private notes only after both people accept", async () => {
+  test("a link opens two private notes only after both people accept", async (t) => {
+    if (noPeople(t)) return;
     const proposed = await a.call("hive_propose_link", {
       from_path: `${DIR}a-private.md`,
       to_id: ids["b-private"],
@@ -380,7 +446,8 @@ describe("two members and their agents on a live database", { skip }, () => {
     }
   });
 
-  test("the rest of each member's hive stays out of the other's reach", async () => {
+  test("the rest of each member's hive stays out of the other's reach", async (t) => {
+    if (noPeople(t)) return;
     // b sees none of a's real notes: only what this test shared or linked.
     const seen = await rest(
       `notes?select=path&member_id=eq.${a.me.member_id}`,
@@ -393,7 +460,8 @@ describe("two members and their agents on a live database", { skip }, () => {
     ]);
   });
 
-  test("a folder shared by its owner shares the note an agent writes there", async () => {
+  test("a folder shared by its owner shares the note an agent writes there", async (t) => {
+    if (noPeople(t)) return;
     const folder = `${DIR}shared-folder`;
     const notePath = `${folder}/by-agent.md`;
     let folderId;

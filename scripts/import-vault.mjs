@@ -9,12 +9,16 @@
 // else. It never deletes a note and never sets sharing: everything arrives
 // private. Wiki links stay in the text for the later link job.
 //
-// It signs in as the person who owns the agent token in .env, not as an
-// agent: the notes are theirs, and an agent may only write in its own workspace.
-// Every permission is still decided by the database.
-import { createHmac } from "node:crypto";
+// It signs in as a person, not as an agent: the notes are theirs, and an agent
+// may only write in its own workspace. It asks for the person's email and
+// password on the terminal (the password is not shown), or takes them from
+// HIVE_PERSON_EMAIL and HIVE_PERSON_PASSWORD for an unattended run. The
+// password is used once to sign in and is not stored. Every permission is
+// still decided by the database.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, posix } from "node:path";
+import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
 
@@ -331,19 +335,122 @@ export function restStore({ url, anonKey, jwt, memberId, hiveId }) {
   };
 }
 
-// A short-lived identity for the person behind the agent token. No agent_id
-// claim, so the database treats it as the person.
-function personJwt(userId, secret) {
-  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
-  const now = Math.floor(Date.now() / 1000);
-  const head = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({
-    role: "authenticated",
-    sub: userId,
-    aud: "authenticated",
-    iat: now,
-    exp: now + 1800,
-  })}`;
-  return `${head}.${createHmac("sha256", secret).update(head).digest("base64url")}`;
+// ------------------------------------------------------------------ sign-in
+
+// Signs the person in through Supabase Auth. What the server answers on a
+// refusal is not repeated: it may quote the email, and nothing here may ever
+// carry the password.
+export async function personSession(
+  { url, anonKey, email, password },
+  fetchFn = fetch,
+) {
+  let res;
+  try {
+    res = await fetchFn(`${url}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { apikey: anonKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new Error("Sign-in failed: the hive is not reachable");
+  }
+  if (!res.ok)
+    throw new Error(
+      res.status === 400 || res.status === 401
+        ? `Sign-in failed (${res.status}): check the email and the password`
+        : `Sign-in failed (${res.status})`,
+    );
+  let data;
+  try {
+    data = JSON.parse(await res.text());
+  } catch {
+    data = null;
+  }
+  const jwt = data?.access_token;
+  const userId = data?.user?.id;
+  if (typeof jwt !== "string" || !jwt || typeof userId !== "string" || !userId)
+    throw new Error("Sign-in failed: the answer held no session");
+  return { jwt, userId };
+}
+
+// The person's own oldest membership, read with their session: the member row
+// and hive the notes go under. The database decides what they may see.
+export async function ownMembership(
+  { url, anonKey, jwt, userId },
+  fetchFn = fetch,
+) {
+  const res = await fetchFn(
+    `${url}/rest/v1/members?user_id=eq.${encodeURIComponent(userId)}` +
+      "&order=created_at,id&limit=1&select=id,hive_id",
+    { headers: { apikey: anonKey, Authorization: `Bearer ${jwt}` } },
+  );
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text;
+    try {
+      detail = JSON.parse(text).message ?? text;
+    } catch {
+      // Not JSON; report it as it came.
+    }
+    throw new Error(`Could not read your membership: ${res.status} ${detail}`);
+  }
+  const [row] = JSON.parse(text);
+  if (!row) throw new Error("You are not in a hive");
+  return { memberId: row.id, hiveId: row.hive_id };
+}
+
+// Email and password: from the environment when both are there, otherwise
+// asked on the terminal. `ask` shows what is typed, `askHidden` does not.
+export async function personCredentials({ env, isTTY, ask, askHidden }) {
+  if (env.HIVE_PERSON_EMAIL && env.HIVE_PERSON_PASSWORD)
+    return {
+      email: env.HIVE_PERSON_EMAIL,
+      password: env.HIVE_PERSON_PASSWORD,
+    };
+  if (!isTTY)
+    throw new Error(
+      "No terminal to ask for your email and password. Run this in a terminal, " +
+        "or set both HIVE_PERSON_EMAIL and HIVE_PERSON_PASSWORD.",
+    );
+  const email = (await ask("Hive email: ")).trim();
+  const password = await askHidden("Hive password (not shown): ");
+  if (!email || !password)
+    throw new Error("Sign-in needs an email and a password");
+  return { email, password };
+}
+
+// The two prompts on the real terminal. Questions go to stderr so the report
+// on stdout stays clean. While the password is typed, nothing readline writes
+// reaches the screen.
+function terminalPrompts() {
+  let hidden = false;
+  const output = new Writable({
+    write(chunk, encoding, done) {
+      if (!hidden) process.stderr.write(chunk, encoding);
+      done();
+    },
+  });
+  const rl = createInterface({ input: process.stdin, output, terminal: true });
+  rl.on("SIGINT", () => {
+    hidden = false;
+    rl.close();
+    process.stderr.write("\n");
+    process.exit(130);
+  });
+  return {
+    ask: (question) => rl.question(question),
+    async askHidden(question) {
+      const answer = rl.question(question); // the question itself is shown
+      hidden = true;
+      try {
+        return await answer;
+      } finally {
+        hidden = false;
+        process.stderr.write("\n");
+      }
+    },
+    close: () => rl.close(),
+  };
 }
 
 async function main(argv) {
@@ -359,16 +466,13 @@ async function main(argv) {
   }
   const [folder, workspace] = positional;
   const env = (n) => process.env[n];
-  const missing = [
-    "SUPABASE_URL",
-    "SUPABASE_ANON_KEY",
-    "SUPABASE_JWT_SECRET",
-    "HIVE_AGENT_TOKEN",
-  ].filter((n) => !env(n));
+  const missing = ["SUPABASE_URL", "SUPABASE_ANON_KEY"].filter((n) => !env(n));
   if (!folder || !workspace || positional.length > 2 || missing.length) {
     console.error(
       "Usage: node --env-file=.env scripts/import-vault.mjs <folder> <workspace> " +
-        "[--include <path>]... [--exclude <path>]... [--dry-run]" +
+        "[--include <path>]... [--exclude <path>]... [--dry-run]\n" +
+        "Asks for your hive email and password, or reads HIVE_PERSON_EMAIL and " +
+        "HIVE_PERSON_PASSWORD when both are set." +
         (missing.length
           ? `\nMissing in the environment: ${missing.join(", ")}`
           : ""),
@@ -376,16 +480,22 @@ async function main(argv) {
     process.exit(2);
   }
 
-  const login = await fetch(`${env("SUPABASE_URL")}/rest/v1/rpc/agent_login`, {
-    method: "POST",
-    headers: {
-      apikey: env("SUPABASE_ANON_KEY"),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ p_token: env("HIVE_AGENT_TOKEN") }),
-  });
-  if (!login.ok) throw new Error(`Hive sign-in failed: ${await login.text()}`);
-  const [me] = await login.json();
+  const site = { url: env("SUPABASE_URL"), anonKey: env("SUPABASE_ANON_KEY") };
+  const isTTY = Boolean(process.stdin.isTTY);
+  const fromEnv = env("HIVE_PERSON_EMAIL") && env("HIVE_PERSON_PASSWORD");
+  const prompts = !fromEnv && isTTY ? terminalPrompts() : {};
+  let session;
+  try {
+    // The password lives only inside this call.
+    session = await personSession({
+      ...site,
+      ...(await personCredentials({ env: process.env, isTTY, ...prompts })),
+    });
+  } finally {
+    prompts.close?.();
+    delete process.env.HIVE_PERSON_PASSWORD;
+  }
+  const mine = await ownMembership({ ...site, ...session });
 
   const report = await importVault({
     folder,
@@ -393,13 +503,7 @@ async function main(argv) {
     include,
     exclude,
     dryRun,
-    store: restStore({
-      url: env("SUPABASE_URL"),
-      anonKey: env("SUPABASE_ANON_KEY"),
-      jwt: personJwt(me.user_id, env("SUPABASE_JWT_SECRET")),
-      memberId: me.member_id,
-      hiveId: me.hive_id,
-    }),
+    store: restStore({ ...site, jwt: session.jwt, ...mine }),
   });
 
   const n = (k) => report[k].length;
@@ -419,4 +523,9 @@ async function main(argv) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
-  await main(process.argv.slice(2));
+  try {
+    await main(process.argv.slice(2));
+  } catch (e) {
+    console.error(message(e));
+    process.exit(1);
+  }
