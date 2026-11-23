@@ -244,8 +244,10 @@ settings for the local stack.
 
 1. **Authentication → OAuth Server.**
    - [ ] Enable the OAuth server.
-   - [ ] Allow dynamic client registration. Claude and ChatGPT register themselves this way; no
-         app is added by hand.
+   - [ ] Dynamic client registration: **off**, and it stays off. With it on, any program can
+         register itself, and an app a member approves receives an ID token that Supabase Auth
+         accepts for a password change (proven 2026-11-23, gotcha 07 in `vault/decisions/`).
+         Claude and ChatGPT are registered by hand under **Authentication → OAuth Apps**.
    - [ ] Authorization path: `/oauth/consent`.
 2. **Authentication → URL Configuration.**
    - [ ] **Site URL**: `<site>`. Supabase sends a person to the Site URL plus the authorization

@@ -12,10 +12,11 @@ verify_jwt = false
 
 # Supabase Auth as the OAuth 2.1 server for the remote connector. The approval
 # window is the web app's /oauth/consent page; the address Auth sends people to
-# is the Site URL plus this path. Claude and ChatGPT register themselves, which
-# is what dynamic registration allows. The hosted project has the same three
-# switches in the dashboard (docs/hosted-db-bringup.md).
+# is the Site URL plus this path. Dynamic registration is OFF on purpose: an app
+# approved by a member receives an ID token that Supabase Auth accepts for a
+# password change (vault gotcha 07), so only apps registered by hand may exist.
+# The hosted project has the same three switches (docs/hosted-db-bringup.md).
 [auth.oauth_server]
 enabled = true
 authorization_url_path = "/oauth/consent"
-allow_dynamic_registration = true
+allow_dynamic_registration = false

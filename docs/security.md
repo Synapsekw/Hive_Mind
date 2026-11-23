@@ -289,10 +289,16 @@ it in a Hive Mind window. Setup is in
 
 **Registration and approval.**
 
-- Dynamic registration is on, so any program on the internet can register itself with the OAuth
-  server. That gains it nothing. A pass exists only after a signed-in member approves that
-  program in the window, and the pass then reaches only what that member approved: one agent in
-  one of their own workspaces.
+- **Dynamic registration is off and must stay off.** Tried live on 2026-11-23: besides the
+  pass, Supabase Auth gives an app that asks for the `openid` scope an ID token, and its account
+  endpoint accepts that token. On a throwaway account an approved app set a new password and
+  signed in as the person, with "secure password change" on. The database rules above hold, but
+  a person may change sharing, so this goes around them. Until Supabase fixes it, the only apps
+  that exist are the ones the owner registers by hand (Claude and ChatGPT), so only those two
+  vendors can hold such a token. That is an accepted risk, decided by Danijel on 2026-11-23, not
+  a closed one (gotcha 07 in `vault/decisions/`).
+- A pass exists only after a signed-in member approves the app in the window, and the pass then
+  reaches only what that member approved: one agent in one of their own workspaces.
 - Approval is `connect_app`, for a person only. It is refused for an agent identity and for an
   app's pass, and the workspace must be the caller's own. The web app passes two things: the
   app's id, read again on the server from Supabase Auth, and the workspace the member chose.
