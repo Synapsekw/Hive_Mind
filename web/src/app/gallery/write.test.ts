@@ -209,25 +209,30 @@ describe("downloadIn", () => {
     expect(t.createSignedUrl).not.toHaveBeenCalled();
   });
 
-  it("signs the path for 600 seconds as a download under the file's name", async () => {
+  it("signs the path for 600 seconds and names the download itself", async () => {
     const t = stub();
-    expect(await downloadIn(t.db, FILE)).toEqual({ url: "https://signed/one" });
+    expect(await downloadIn(t.db, FILE)).toEqual({
+      url: "https://signed/one&download=Proposal%20v2.pdf",
+    });
     expect(t.buckets).toEqual(["files"]);
-    expect(t.createSignedUrl.mock.calls[0]).toEqual([
-      PATH,
-      600,
-      { download: "Proposal v2.pdf" },
-    ]);
+    // No download option: the client library would encode the name a second time.
+    expect(t.createSignedUrl.mock.calls[0]).toEqual([PATH, 600]);
   });
 
-  it("still downloads, under a plain name, a file whose name is empty", async () => {
+  it("encodes a name with reserved characters exactly once", async () => {
+    const t = stub({ file: ok([row({ name: "R&D #3 (final) Račun.pdf" })]) });
+    const out = await downloadIn(t.db, FILE);
+    const name = out!.url.split("&download=")[1]!;
+    expect(name).not.toContain("%25");
+    expect(decodeURIComponent(name)).toBe("R&D #3 (final) Račun.pdf");
+    expect(out!.url.split("&")).toHaveLength(2);
+  });
+
+  it("still downloads, under the stored name, a file whose name is empty", async () => {
     const t = stub({ file: ok([row({ name: "" })]) });
-    expect(await downloadIn(t.db, FILE)).toEqual({ url: "https://signed/one" });
-    expect(t.createSignedUrl.mock.calls[0]).toEqual([
-      PATH,
-      600,
-      { download: true },
-    ]);
+    expect(await downloadIn(t.db, FILE)).toEqual({
+      url: "https://signed/one&download=",
+    });
   });
 
   it("answers null when signing fails", async () => {

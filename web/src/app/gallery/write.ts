@@ -55,17 +55,11 @@ async function readable(db: Db, id: string): Promise<FileRow | null> {
   };
 }
 
-/** A ten-minute link to the object; `download` adds the disposition that saves it. */
-async function sign(
-  db: Db,
-  path: string,
-  download?: string | true,
-): Promise<string | null> {
-  const bucket = db.storage.from(BUCKET);
-  const { data, error } =
-    download === undefined
-      ? await bucket.createSignedUrl(path, LINK_SECONDS)
-      : await bucket.createSignedUrl(path, LINK_SECONDS, { download });
+/** A ten-minute link to the object. */
+async function sign(db: Db, path: string): Promise<string | null> {
+  const { data, error } = await db.storage
+    .from(BUCKET)
+    .createSignedUrl(path, LINK_SECONDS);
   if (storageFailed("signing", error)) return null;
   return data?.signedUrl || null;
 }
@@ -93,9 +87,13 @@ export async function downloadIn(
   if (!isUuid(id)) return null;
   const file = await readable(db, id);
   if (!file) return null;
-  // An empty name would switch the disposition off; `true` keeps it, under the object's name.
-  const url = await sign(db, file.path, file.name || true);
-  return url ? { url } : null;
+  // The download parameter is added here, not through the client library's option, which
+  // encodes the name a second time ("R&D.pdf" would be saved as "R%26D.pdf"). The parameter is
+  // not part of what is signed. An empty value saves the file under the object's own name.
+  const url = await sign(db, file.path);
+  return url
+    ? { url: `${url}&download=${encodeURIComponent(file.name)}` }
+    : null;
 }
 
 /** The caller's member ids in their first hive, read now; null when they cannot be told. */

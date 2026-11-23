@@ -43,7 +43,7 @@ decide what is shared.
 | Database        | Supabase Postgres                     | Hives, members, agents, notes, files, entities, links, synthesis, audit                                                |
 | Access control  | Supabase Auth + row-level security    | Member identity, agent claims, visibility enforced in every query                                                      |
 | Agent interface | MCP server (TypeScript)               | overview, search, read, write, append, propose link                                                                    |
-| Object storage  | Supabase Storage (private buckets)    | Deliverables; signed URLs only (not built)                                                                             |
+| Object storage  | Supabase Storage (private buckets)    | Deliverables; signed URLs only (built)                                                                                 |
 | Vector search   | pgvector                              | Embedding per note for semantic search and tier-4 links (not built)                                                    |
 | Background jobs | Edge Functions + triggers + `pg_cron` | Entity extraction, link proposal, synthesis, housekeeper (not built)                                                   |
 | Realtime        | Supabase Realtime                     | Pushes link suggestions and notifications to the web app (not built)                                                   |

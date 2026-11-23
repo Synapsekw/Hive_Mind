@@ -28,6 +28,7 @@ export const BUCKET = "files";
 /** Signed links live ten minutes. */
 export const LINK_SECONDS = 600;
 const PAGE = 200;
+const NOTE_IDS_PER_REQUEST = 50;
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 const rows = (res: Res): Row[] => (Array.isArray(res.data) ? res.data : []);
@@ -94,16 +95,28 @@ async function notesFor(
   const ids = [...new Set(files.map((f) => text(f.note_id)).filter(Boolean))];
   const notes = new Map<string, { title: string; effective: string }>();
   if (ids.length === 0) return notes;
-  const res = (await db
-    .from("notes")
-    .select(NOTE_COLUMNS)
-    .in("id", ids)) as Res;
-  if (failed("notes query", res)) return null;
-  for (const n of rows(res))
-    notes.set(text(n.id), {
-      title: text(n.title),
-      effective: text(n.effective),
-    });
+  // In parallel requests of NOTE_IDS_PER_REQUEST: 200 ids in one request line come within a
+  // few hundred bytes of the 8 KB a gateway may refuse.
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += NOTE_IDS_PER_REQUEST)
+    chunks.push(ids.slice(i, i + NOTE_IDS_PER_REQUEST));
+  const answers = await Promise.all(
+    chunks.map(
+      (chunk) =>
+        db
+          .from("notes")
+          .select(NOTE_COLUMNS)
+          .in("id", chunk) as unknown as Promise<Res>,
+    ),
+  );
+  for (const res of answers) {
+    if (failed("notes query", res)) return null;
+    for (const n of rows(res))
+      notes.set(text(n.id), {
+        title: text(n.title),
+        effective: text(n.effective),
+      });
+  }
   return notes;
 }
 

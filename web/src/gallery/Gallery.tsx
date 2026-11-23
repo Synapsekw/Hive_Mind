@@ -36,6 +36,11 @@ export function Gallery({
   const [tab, setTab] = useState<Tab>(() => defaultTab(data.files));
   const [filter, setFilter] = useState("");
   const [open, setOpen] = useState<string | null>(null);
+  // The open file as of now, for answers that arrive from an earlier render (see `removed`).
+  const openNow = useRef<string | null>(null);
+  useEffect(() => {
+    openNow.current = open;
+  });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -76,10 +81,13 @@ export function Gallery({
   }
 
   function removed(id: string) {
+    setFiles((list) => list.filter((f) => f.id !== id));
+    // The answer can arrive after the person has moved on to another file: only when the
+    // deleted file is still the open one does its viewer or popover close and the focus move.
+    if (openNow.current !== id) return;
     const at = shown.findIndex((f) => f.id === id);
     const beside = shown[at + 1] ?? shown[at - 1];
     target.current = beside ? { card: beside.id } : { filter: true };
-    setFiles((list) => list.filter((f) => f.id !== id));
     setOpen(null);
   }
 

@@ -21,7 +21,8 @@ Spec: [`docs/superpowers/specs/2026-11-22-file-gallery-design.md`](../specs/2026
 
 - No migration, no change to `supabase/`, `mcp/` or the sharing rules. No permission logic in
   app code: the database decides which rows and objects are readable and deletable.
-- `storage_path` never reaches the browser. No service-role key; `web/` reads only the two
+- No field carries `storage_path` to the browser (a signed link necessarily contains the path;
+  corrected during the build). No service-role key; `web/` reads only the two
   `NEXT_PUBLIC_*` values.
 - Signed links live **600 seconds**. The bucket is `files` and stays private.
 - A file's declared `mime` is never trusted alone: `kind` needs the name's extension **and** the
@@ -158,7 +159,8 @@ db.storage.from("files").remove([path]);
 
 1. A row declared `application/pdf` or `image/png` whose content is HTML or SVG is never rendered
    as a page (Tasks 1, 3).
-2. `storage_path` and links to files the caller cannot read never reach the browser; an id the
+2. No field carries `storage_path`, and links to files the caller cannot read never reach the
+   browser; an id the
    caller cannot read answers `null`, the same as an id that does not exist (Task 2).
 3. `deleteFile` on a colleague's file shared with the caller is refused before any storage call
    (Task 2).

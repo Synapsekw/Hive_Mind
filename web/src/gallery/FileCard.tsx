@@ -2,7 +2,7 @@
 // line of type, size and date, the owner on a colleague's file, and who can read it. The popover
 // for a file the viewer cannot show is passed in and sits right after the button, so Tab walks
 // from the card into it.
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { kindLabel } from "./kind";
 import { SharingMark } from "./Details";
 import { viewable } from "./select";
@@ -35,6 +35,10 @@ export function FileCard({
 }) {
   const shows = viewable(file);
   const sharing = sharingText(file);
+  // A thumbnail link lives ten minutes and images load lazily, so on a page left open a link
+  // can be dead by the time its card scrolls into view: show the type tile instead.
+  const [broken, setBroken] = useState<string | null>(null);
+  const thumb = file.thumb && file.thumb !== broken ? file.thumb : null;
   return (
     <li className={s.cell} data-open={expanded || undefined}>
       <button
@@ -46,10 +50,16 @@ export function FileCard({
         onClick={onSelect}
       >
         <span className={s.tile}>
-          {file.thumb ? (
+          {thumb ? (
             // A short-lived signed link: a plain <img>, never the image optimiser.
             <img
-              src={file.thumb}
+              src={thumb}
+              onError={() => setBroken(thumb)}
+              // An image that failed before the page became interactive fired its error with
+              // nobody listening: it is complete and has no width.
+              ref={(img) => {
+                if (img?.complete && img.naturalWidth === 0) setBroken(thumb);
+              }}
               alt=""
               loading="lazy"
               decoding="async"

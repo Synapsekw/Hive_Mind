@@ -64,7 +64,7 @@ remove the files they may read.
 
 ### 1. Data the page loads
 
-`loadGallery(db, cursor?)` in `web/src/app/gallery/load-gallery.ts`, signed in as the person, in
+`loadGallery(db)` (and `loadPage(db, cursor)` for later pages) in `web/src/app/gallery/load-gallery.ts`, signed in as the person, in
 three waves like the vault:
 
 1. The caller's first hive.
@@ -191,6 +191,19 @@ Units 2 and 3 share no file and can be built at the same time.
 - An object whose row delete failed is gone while the row remains until deleted again.
 - Checked on the live project by hand only; the browser tests use the fixture, and `test:live`
   does not cover the gallery.
+
+Found by the whole-branch review (2026-11-23) and left:
+
+- `hive_save_file` declares GIF, WebP and AVIF files as `application/octet-stream`, so the
+  gallery treats them as "other": no thumbnail and no viewer. The fix is in `mcp/`, outside this
+  slice.
+- If storage ever refused to remove an object without an error, `deleteFile` would still delete
+  the row and leave the object. Today's policies do not allow that case.
+- Inside the PDF frame the browser's reader owns the keys: Escape and the arrows do nothing until
+  the focus leaves the frame. Escape while "Delete this file?" is showing closes the viewer.
+- Moving quickly through the viewer asks the server for a link per file passed, one after
+  another.
+- The viewer's check that a PDF's content starts like a PDF, and its 25 MB cut, have no test.
 
 ## Review focus
 

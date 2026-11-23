@@ -734,6 +734,32 @@ test("the keyboard reaches every control, each with a visible outline", async ({
   expect(await focused()).toMatchObject({ name: "Delete", outlined: true });
 });
 
+test("a thumbnail whose link no longer works falls back to the type tile", async ({
+  page,
+}) => {
+  await open(page, "?stale=1");
+  await tab(page, "All").click();
+  const list = page.getByRole("list", { name: "Files" });
+  // A thumbnail fails when it is asked for, and lazy ones are asked for when they come into
+  // view: the first card has turned already, the rest turn as the grid is scrolled to them.
+  await expect(
+    list.locator("li", { hasText: "site-photo-north-elevation.png" }),
+  ).not.toContainText("Loading");
+  await expect(
+    list
+      .locator("li", { hasText: "site-photo-north-elevation.png" })
+      .locator("img"),
+  ).toHaveCount(0);
+  for (let i = 0; i < 10 && (await list.locator("img").count()) > 0; i++) {
+    await list.locator("img").first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+  }
+  await expect(list.locator("img")).toHaveCount(0);
+  await expect(
+    list.locator("li", { hasText: "site-photo-north-elevation.png" }),
+  ).toContainText("PNG");
+});
+
 test("with no files the screen says where they come from", async ({ page }) => {
   await open(page, "?empty=1");
   await expect(page.getByRole("main")).toContainText(

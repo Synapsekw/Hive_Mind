@@ -331,6 +331,21 @@ describe("loadGallery: notes and sharing", () => {
     expect(args(q!, "in")).toEqual(["id", [N1, N2]]);
   });
 
+  it("asks for many notes in requests of at most 50 ids, so no request line grows too long", async () => {
+    const nid = (n: number) =>
+      `00000000-0000-4000-8000-0000000${String(10000 + n)}`;
+    const files = Array.from({ length: 120 }, (_, i) =>
+      file(i + 1, { note_id: nid(i + 1) }),
+    );
+    const t = stub(world({ files }));
+    await loaded(t);
+    const asked = table(t, "notes").map(
+      (q) => (args(q, "in") as [string, string[]])[1],
+    );
+    expect(asked.map((ids) => ids.length)).toEqual([50, 50, 20]);
+    expect(new Set(asked.flat()).size).toBe(120);
+  });
+
   it("skips the notes query when no file is attached to one", async () => {
     const t = stub(world({ files: [file(1), file(2)] }));
     await loaded(t);
