@@ -83,6 +83,8 @@ const member = (over: Row): Row => ({
   hive_id: MINE,
   user_id: ME,
   created_at: "2026-11-20T10:00:00+00:00",
+  display_name: "Danijel",
+  role: "owner",
   hive: { name: "Synapse" },
   ...over,
 });
@@ -224,5 +226,57 @@ describe("ownHive", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(await ownHive(answering({ data, error: null }).db)).toBe("error");
     expect(log).toHaveBeenCalledWith("own hive answer has an unexpected shape");
+  });
+});
+
+describe("ownHive with { profile: true }", () => {
+  it("asks for the name and role too, in the same one query", async () => {
+    const t = table([member({})]);
+    await ownHive(t.db, undefined, { profile: true });
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]!.ops[0]).toEqual([
+      "select",
+      ["id, hive_id, display_name, role, hive:hives!hive_id(name)"],
+    ]);
+  });
+
+  it("returns the hive with the person's display name and role", async () => {
+    const t = table([member({})]);
+    expect(await ownHive(t.db, undefined, { profile: true })).toEqual({
+      id: MINE,
+      name: "Synapse",
+      memberId: "00000000-0000-4000-8000-00000000c001",
+      displayName: "Danijel",
+      role: "owner",
+    });
+  });
+
+  it("leaves the default shape without them", async () => {
+    const t = table([member({})]);
+    expect(await ownHive(t.db)).toEqual({
+      id: MINE,
+      name: "Synapse",
+      memberId: "00000000-0000-4000-8000-00000000c001",
+    });
+  });
+
+  it.each([
+    ["a membership without a display name", [member({ display_name: null })]],
+    ["a membership without a role", [member({ role: 3 })]],
+  ])("is error for %s", async (_name, data) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      await ownHive(answering({ data, error: null }).db, undefined, {
+        profile: true,
+      }),
+    ).toBe("error");
+    expect(log).toHaveBeenCalledWith("own hive answer has an unexpected shape");
+  });
+
+  it("does not refuse those rows on the default path", async () => {
+    const data = [member({ display_name: null, role: 3 })];
+    expect(await ownHive(answering({ data, error: null }).db)).toMatchObject({
+      id: MINE,
+    });
   });
 });

@@ -16,10 +16,20 @@ export type OwnHive = {
   memberId: string;
 };
 
+/** The hive plus who the person is in it, for the rail. Opt in with `{ profile: true }`. */
+export type OwnHiveProfile = OwnHive & {
+  /** The person's display name in that hive. */
+  displayName: string;
+  /** The person's role in that hive, e.g. "owner" or "member". */
+  role: string;
+};
+
 type Res = { data: unknown; error: { code?: string; message: string } | null };
 
 /** The hive is named through the membership's own `hive_id`, so no other path can be meant. */
 const COLUMNS = "id, hive_id, hive:hives!hive_id(name)";
+const PROFILE_COLUMNS =
+  "id, hive_id, display_name, role, hive:hives!hive_id(name)";
 
 /**
  * The user id the session's access token names, read from the cookie with no call to the auth
@@ -54,7 +64,18 @@ export async function sessionUserId(
 export async function ownHive(
   db: Pick<SupabaseClient, "from" | "auth">,
   userId?: string,
-): Promise<OwnHive | null | "error"> {
+): Promise<OwnHive | null | "error">;
+export async function ownHive(
+  db: Pick<SupabaseClient, "from" | "auth">,
+  userId: string | undefined,
+  opts: { profile: true },
+): Promise<OwnHiveProfile | null | "error">;
+export async function ownHive(
+  db: Pick<SupabaseClient, "from" | "auth">,
+  userId?: string,
+  opts?: { profile?: boolean },
+): Promise<OwnHive | OwnHiveProfile | null | "error"> {
+  const profile = opts?.profile === true;
   const uid = userId ?? (await sessionUserId(db));
   if (!uid) {
     console.error("own hive read has no session");
@@ -62,7 +83,7 @@ export async function ownHive(
   }
   const res = (await db
     .from("members")
-    .select(COLUMNS)
+    .select(profile ? PROFILE_COLUMNS : COLUMNS)
     .eq("user_id", uid)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true })
@@ -73,7 +94,8 @@ export async function ownHive(
     return "error";
   }
   if (Array.isArray(res.data) && res.data.length === 0) return null;
-  const own = toOwnHive(Array.isArray(res.data) ? res.data[0] : undefined);
+  const row = Array.isArray(res.data) ? res.data[0] : undefined;
+  const own = profile ? toProfile(row) : toOwnHive(row);
   if (!own) console.error("own hive answer has an unexpected shape");
   return own ?? "error";
 }
@@ -86,4 +108,12 @@ function toOwnHive(v: unknown): OwnHive | null {
     return null;
   const { name } = hive as Record<string, unknown>;
   return typeof name === "string" ? { id: hive_id, name, memberId: id } : null;
+}
+
+function toProfile(v: unknown): OwnHiveProfile | null {
+  const base = toOwnHive(v);
+  if (!base) return null;
+  const { display_name, role } = v as Record<string, unknown>;
+  if (typeof display_name !== "string" || typeof role !== "string") return null;
+  return { ...base, displayName: display_name, role };
 }
