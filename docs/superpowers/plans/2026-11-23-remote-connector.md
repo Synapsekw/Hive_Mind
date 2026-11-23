@@ -151,7 +151,7 @@ dependency.
 - [ ] **Step 1:** Write `netlify.toml` at the repo root: `[build] base = ""`,
       `command = "pnpm --filter @hive-mind/web build"`, `publish = "web/.next"`,
       `[build.environment] NODE_VERSION = "22"`, and `[[plugins]] package =
-  "@netlify/plugin-nextjs"` if the CLI does not detect Next.js by itself.
+"@netlify/plugin-nextjs"` if the CLI does not detect Next.js by itself.
 - [ ] **Step 2:** Run `npx netlify-cli build --offline` from the repo root (no account needed).
       Expected: the Next.js runtime packages the app without error and reports `proxy.ts` as
       middleware/edge handler.
@@ -172,7 +172,7 @@ dependency.
 
 - [ ] **Step 1: failing tests.** Add to `tests/sharing-rules.test.mjs`, using a helper
       `const appPass = (name, client = "client-a") => ({ sub: users[name], role:
-  "authenticated", client_id: client })`:
+"authenticated", client_id: client })`:
   - "an app pass reads and writes nothing": for every table in `public` (query
     `pg_tables`), `select` returns no rows and an `insert`/`update`/`delete` attempt is
     refused or touches nothing; same for `storage.objects`.
@@ -241,7 +241,7 @@ authenticated`. `connect_app` checks `auth.uid()` not null, `jwt_agent_id()` nul
       `hive_save_file` (using the exported helpers) and the stdio transport, and calls
       `registerTools(server, db)`.
 - [ ] **Step 4:** `pnpm --filter @hive-mind/mcp build && node --test tests/mcp-tools.test.mjs
-  tests/mcp-sign-in.test.mjs`: pass. Add the SDK, `zod` and `@supabase/supabase-js` to the
+tests/mcp-sign-in.test.mjs`: pass. Add the SDK, `zod` and `@supabase/supabase-js` to the
       root `devDependencies` (same versions as `mcp/`) so files outside `mcp/` resolve them.
 - [ ] **Step 5:** No commit.
 
@@ -256,7 +256,7 @@ must stay green) plus three direct tests of `signIdentity` in
 
 - [ ] **Step 1:** Write `tests/identity.test.mjs`: `signIdentity` with a generated key yields
       a JWT that verifies with the public key, carries exactly the claim names `role, aud,
-  sub, agent_id, workspace_id, trust_tier, session_id, iat, exp, iss`, `exp = iat + 3600`,
+sub, agent_id, workspace_id, trust_tier, session_id, iat, exp, iss`, `exp = iat + 3600`,
       and two calls give different `session_id`. Run: fails.
 - [ ] **Step 2:** Move `base64url`, `base64urlJson`, `importSigningKey`, `loadKey`,
       `identityFrom`, `sign` and the claim object into `identity.ts`; `session.ts` imports
@@ -394,7 +394,7 @@ name").eq("member_id", hive.memberId).order("created_at").limit(50)`; render
       dynamic registration on, authorisation path, Site URL and redirect list, and that the
       Site URL moves from the `develop` site to the `main` site at promotion); deploying the
       function (`supabase functions deploy mcp --use-api --no-verify-jwt --project-ref
-  <ref>`); adding the connector in Claude and in ChatGPT, step by step.
+<ref>`); adding the connector in Claude and in ChatGPT, step by step.
 - [ ] **Step 3:** `docs/security.md`: the connector section (what the pass can do, the
       refusal rule, dynamic registration, the tier by return host, the open Auth-endpoint
       check, no rate limit). `docs/agent-integration.md`: the remote route is built, six
@@ -410,7 +410,7 @@ name").eq("member_id", hive.memberId).order("created_at").limit(50)`; render
       re-stamp `supabase_migrations.schema_migrations.version` to the repo's stamp. Confirm
       the hosted agent still works: `hive_overview` through this session's hive tools.
 - [ ] Deploy the function: `supabase functions deploy mcp --use-api --no-verify-jwt
-  --project-ref tokyttkztrkjvkaksdnh`; `curl` it without a header → 401.
+--project-ref tokyttkztrkjvkaksdnh`; `curl` it without a header → 401.
 - [ ] Independent review by a fresh agent given the diff and the spec (not this plan's
       conclusions), with the security questions: can a pass reach anything but
       `connector_login`; can the consent action be driven to connect another person's

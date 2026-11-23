@@ -4,6 +4,9 @@ How to take an empty Supabase project to "one hive, one owner, one agent token".
 dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
 [2026-11-22-db-bringup-design.md](superpowers/specs/2026-11-22-db-bringup-design.md).
 
+Putting the web app online and connecting Claude or ChatGPT to it is in
+[Hosting and the connector](#hosting-and-the-connector).
+
 ## Current state of the dev project
 
 - Migrations `20261120000001_schema`, `20261120000002_sharing_rules` and
@@ -191,6 +194,133 @@ publishable key. Put them in `web/.env.local` (copy `web/.env.example`) and run 
         place. Nothing in the app can check this setting; see
         [security.md](security.md#3-identity-and-tokens).
 
+## Hosting and the connector
+
+This puts the web app on the internet and lets a colleague connect Claude or ChatGPT by pasting
+one address. Do the four parts in this order. In what follows, `<site>` is the web app's address
+without a slash at the end, and `<project-ref>` is the Supabase project's short name
+(`tokyttkztrkjvkaksdnh` for the dev project).
+
+Nothing secret goes to Netlify. The signing key and the service-role key stay where they are.
+
+### 1. Netlify: host the web app
+
+1. Create a Netlify account and choose **Add new site → Import an existing project**. Pick
+   GitHub and the Hive Mind repository.
+2. Leave the build settings as Netlify fills them in. They come from `netlify.toml` in the repo:
+   base directory empty, build command `pnpm --filter @hive-mind/web build`, publish directory
+   `web/.next`, Node 22. Do not type other values over them.
+3. Add three environment variables (Site configuration → Environment variables), the same for
+   every deploy:
+
+   | Variable                        | Value                                                |
+   | ------------------------------- | ---------------------------------------------------- |
+   | `NEXT_PUBLIC_SUPABASE_URL`      | `https://<project-ref>.supabase.co`                  |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The publishable key (starts with `sb_publishable_`)  |
+   | `HIVE_CONNECTOR_URL`            | `https://<project-ref>.supabase.co/functions/v1/mcp` |
+
+   All three are public values. The two `NEXT_PUBLIC_*` ones are baked in when the app is built,
+   so start a new deploy after changing them.
+
+4. Set the branches (Site configuration → Build & deploy → Branches and deploy contexts):
+   production branch `main`, and a branch deploy for `develop`. The `develop` deploy is the
+   **test site**. Its address is `https://develop--<site-name>.netlify.app`; the `main` site is
+   `https://<site-name>.netlify.app`.
+5. Until this work has been promoted to `main`, the `main` deploy has no `netlify.toml` and may
+   fail. That is expected. Use the test site.
+6. Open `<site>/login` on the test site. The sign-in page should appear.
+
+### 2. Supabase: the dashboard switches
+
+Done once, by the project owner, in the Supabase dashboard. `supabase/config.toml` holds the same
+settings for the local stack.
+
+1. **Authentication → OAuth Server.**
+   - [ ] Enable the OAuth server.
+   - [ ] Allow dynamic client registration. Claude and ChatGPT register themselves this way; no
+         app is added by hand.
+   - [ ] Authorization path: `/oauth/consent`.
+2. **Authentication → URL Configuration.**
+   - [ ] **Site URL**: `<site>`. Supabase sends a person to the Site URL plus the authorization
+         path, so this decides which site shows the approval window. Only one site can be the
+         Site URL at a time.
+   - [ ] **Redirect URLs**: add `<site>/auth/confirm`, for the test site and for the `main` site.
+         Keep `http://localhost:3000/**` for local work. If an emailed sign-in link opens the
+         site's front page and not the approval window, the entry did not match: add `<site>/**`.
+3. **During hand testing the Site URL is the `develop` test site. At promotion to `main` it
+   moves to the `main` site**, and from then on the connector address people paste is the `main`
+   one. A connector added against the test site stops working at that point and is added again
+   with the new address.
+4. Leave **Allow new users to sign up** and **Confirm email** as they are (both on). Invitations
+   need them; see [Run the web app](#run-the-web-app).
+
+### 3. Deploy the connector function
+
+The migration `connected_apps` must be applied first (step 2 of [Steps](#steps)); the function
+calls `connector_login`, which that migration adds.
+
+```sh
+supabase functions deploy mcp --use-api --no-verify-jwt --project-ref <project-ref>
+```
+
+It needs the Supabase CLI, signed in (`supabase login`); it does not need Docker. The function
+reuses the two secrets that agent sign-in already stored, `AGENT_SIGNING_JWK` and
+`HIVE_PUBLISHABLE_KEY`. There is no new secret and no key to make, so
+[Set up agent sign-in](#set-up-agent-sign-in) must have been done once, and is not repeated.
+
+To check by hand:
+
+| Call                                                      | Expected                                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `POST <site>/mcp` with no `Authorization` header          | 401, and a `WWW-Authenticate` header that names `resource_metadata`      |
+| `GET <site>/.well-known/oauth-protected-resource`         | 200, JSON with `resource` = `<site>/mcp` and one `authorization_servers` |
+| `POST https://<project-ref>.supabase.co/functions/v1/mcp` | 401, "sign in to the hive"                                               |
+
+`HIVE_SITE_URL=<site> pnpm test:live` runs the first two and also asks Supabase Auth for its
+discovery answer. The address people use is always `<site>/mcp`; the function's own address is
+not one to hand out.
+
+### 4. Connect an app
+
+The address is the same for everyone: `https://<site>/mcp`. The person connecting must already
+be a member of the hive (invited in **Settings**).
+
+**Claude (web or desktop)**
+
+1. Open **Settings → Connectors**.
+2. Choose **Add custom connector**.
+3. Give it a name, for example `Hive Mind`, and paste `https://<site>/mcp`. Add it.
+4. Choose **Connect**. A Hive Mind window opens.
+5. Sign in with your email. If you ask for an emailed link, it opens in a new tab, and the
+   approval continues in that tab.
+6. The window names the app that is asking and the address it returns to. Pick a workspace.
+7. Click **Approve**. You are sent back to Claude, which now lists the hive tools.
+
+**ChatGPT**
+
+1. Open **Settings** and switch on **developer mode** (under the connectors settings; it needs a
+   plan that allows custom connectors).
+2. Add a connector and paste the same address, `https://<site>/mcp`.
+3. The same Hive Mind window opens: sign in, pick a workspace, **Approve**.
+
+The names of these menus change between versions of the two apps. What stays the same is the
+address and the three things you do in the window.
+
+**What the app can do.** Six tools work through the connector: `hive_overview`, `hive_search`,
+`hive_read`, `hive_write`, `hive_append` and `hive_propose_link`. `hive_save_file` works only
+with the local server (Claude Code, or Claude Desktop's local config), because it reads a file
+from the computer the agent runs on. The app reads what you can read and writes only into the
+workspace you picked. It cannot change sharing, accept a link or delete a note.
+
+**An app we do not know.** An app that returns to an address other than Claude's or ChatGPT's is
+connected as `self_hosted`: it reads shared notes only and its writes are held until you release
+them.
+
+**To disconnect.** In Hive Mind, open **Settings** and revoke the agent named after the app (its
+provider reads `Connected app`). The app's next call is refused. Approving it again in the
+window reconnects it. Removing the connector inside Claude or ChatGPT alone does not revoke
+anything.
+
 ## What is proven, and what is not
 
 - `pnpm test:live` runs its checks against the hosted project: the MCP server signs in with an
@@ -209,3 +339,8 @@ publishable key. Put them in `web/.env.local` (copy `web/.env.example`) and run 
   safe default; those checks then skip.
 - Signing in to the web app through the browser, and the map it then draws, are checked by hand.
   No automated test signs in to the hosted project through the browser.
+- With `HIVE_SITE_URL` set, `pnpm test:live` also checks the hosted site without signing in:
+  `/mcp` answers 401 and names the sign-in metadata, the metadata names `/mcp` and Supabase Auth,
+  and Supabase Auth answers at its discovery address. Without the variable those checks skip.
+- Connecting Claude and ChatGPT through the window is checked by hand. No automated test signs
+  an app in.

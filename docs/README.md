@@ -32,9 +32,11 @@ not duplicate content — it points to the canonical home of each topic.
 - **[Master design spec](superpowers/specs/2026-11-16-hive-mind-design.md)** — the engineering
   source of truth: stack, architecture, data model, sharing rules, MCP server, data flows,
   onboarding, phased build plan, guardrails.
-- [Security & trust](security.md) — threat model, identity and tokens, data handling.
-- [Agent integration](agent-integration.md) — supported agents, tool surface, guardrail layers,
-  the instruction template, the housekeeper.
+- [Security & trust](security.md) — threat model, identity and tokens, data handling, the remote
+  connector.
+- [Agent integration](agent-integration.md) — supported agents (the local server, and the remote
+  connector at `https://<site>/mcp`), tool surface, guardrail layers, the instruction template,
+  the housekeeper.
 - [UI concept](ui-concept.md) — principles, tokens, the map's six views, other pages. Prototypes
   in [`ui/`](ui/).
 
@@ -49,6 +51,11 @@ not duplicate content — it points to the canonical home of each topic.
 - [`superpowers/specs/`](superpowers/specs/) — design specs (master + per-phase).
 - [`superpowers/plans/`](superpowers/plans/) — implementation plans. Current:
   [Phase 1 — Local end to end](superpowers/plans/2026-11-21-local-end-to-end.md).
+- Remote connector, sign-in window and hosting (built):
+  [spec](superpowers/specs/2026-11-23-remote-connector-design.md),
+  [plan](superpowers/plans/2026-11-23-remote-connector.md). An app connects at
+  `https://<site>/mcp` through a Hive Mind sign-in window and gets six tools; `hive_save_file`
+  stays in the local server.
 
 ## How we build here
 
@@ -59,6 +66,7 @@ not duplicate content — it points to the canonical home of each topic.
 ## Operations & decisions
 
 - [`vault/moc/operations.md`](../vault/moc/operations.md) — Supabase, MCP, migrations.
-- [Bringing up a hosted database](hosted-db-bringup.md) — migrations, first hive, first agent token.
+- [Bringing up a hosted database](hosted-db-bringup.md) — migrations, first hive, first agent
+  token, hosting on Netlify, connecting Claude and ChatGPT.
 - [`vault/decisions/`](../vault/decisions/) — decisions and gotchas.
 - [`vault/sessions/`](../vault/sessions/) — working-session notes.

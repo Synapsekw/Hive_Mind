@@ -3,6 +3,10 @@
 // Supabase project. Run it with `pnpm test:live`. Under plain `pnpm test` and
 // in CI there is no .env, so it skips itself.
 //
+// With HIVE_SITE_URL set it also asks the hosted site for what an app needs
+// before anyone has signed in: the 401 on /mcp and the two discovery answers.
+// Those checks send no token and write nothing.
+//
 // It writes only under `_integration-test/<run id>/` in the agent's workspace.
 // Agents cannot delete notes, so the cleanup signs in as the workspace's owner
 // (HIVE_PERSON_EMAIL, HIVE_PERSON_PASSWORD). Without those, every check that
@@ -37,6 +41,13 @@ const { HIVE_PERSON_EMAIL: EMAIL, HIVE_PERSON_PASSWORD: PASSWORD } =
   process.env;
 const NO_PERSON =
   "no person credentials: set HIVE_PERSON_EMAIL and HIVE_PERSON_PASSWORD";
+
+// The hosted web app, without a trailing slash. Only the connector checks at
+// the end of this file use it.
+const SITE = (process.env.HIVE_SITE_URL ?? "").trim().replace(/\/+$/, "");
+const skipSite = SITE
+  ? false
+  : "no hosted site configured (missing HIVE_SITE_URL)";
 
 // Supabase Storage, as one identity (or signed out).
 async function storage(path, { jwt, method = "GET", body, raw } = {}) {
@@ -607,5 +618,82 @@ describe("MCP server against a live database", { skip }, () => {
     // The same request with the real token is let in.
     const real = await rest("notes?select=id&limit=1", { jwt: agentJwt });
     assert.equal(real.status, 200, "the real agent JWT was refused");
+  });
+});
+
+// What Claude or ChatGPT does before anyone has signed in: call /mcp, be told
+// where the sign-in is described, and follow that to Supabase Auth. No token
+// is sent anywhere here.
+describe("the remote connector on the hosted site", { skip: skipSite }, () => {
+  const METADATA = `${SITE}/.well-known/oauth-protected-resource`;
+  const ask = (url, init = {}) =>
+    fetch(url, { ...init, signal: AbortSignal.timeout(20_000) });
+  const metadata = async () => {
+    const res = await ask(METADATA, {
+      headers: { Accept: "application/json" },
+    });
+    assert.equal(res.status, 200, `${METADATA} answered ${res.status}`);
+    assert.match(res.headers.get("content-type") ?? "", /^application\/json/);
+    return res.json();
+  };
+
+  test("/mcp without a pass answers 401 and names the sign-in metadata", async () => {
+    const res = await ask(`${SITE}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "hive-integration-test", version: "0.0.0" },
+        },
+      }),
+    });
+    await res.text();
+    assert.equal(res.status, 401, `/mcp answered ${res.status} without a pass`);
+    const challenge = res.headers.get("www-authenticate") ?? "";
+    assert.match(challenge, /^Bearer /, "no Bearer WWW-Authenticate header");
+    assert.ok(
+      challenge.includes(`resource_metadata="${METADATA}"`),
+      `WWW-Authenticate does not name ${METADATA}: ${challenge}`,
+    );
+  });
+
+  test("the metadata names /mcp and one Supabase Auth server", async () => {
+    const json = await metadata();
+    assert.equal(json.resource, `${SITE}/mcp`, "resource");
+    assert.ok(
+      Array.isArray(json.authorization_servers),
+      "authorization_servers",
+    );
+    assert.equal(json.authorization_servers.length, 1, "one auth server");
+    assert.match(
+      String(json.authorization_servers[0]),
+      /^https:\/\/[^/]+\/auth\/v1$/,
+      "the auth server is not an https address ending in /auth/v1",
+    );
+  });
+
+  test("Supabase Auth answers at the discovery address the metadata leads to", async () => {
+    const server = new URL((await metadata()).authorization_servers[0]);
+    assert.equal(server.protocol, "https:", "the auth server is not https");
+    // <project>/auth/v1 is discovered at
+    // <project>/.well-known/oauth-authorization-server/auth/v1.
+    const discovery = `${server.origin}/.well-known/oauth-authorization-server${server.pathname}`;
+    const res = await ask(discovery, {
+      headers: { Accept: "application/json" },
+    });
+    await res.text();
+    assert.equal(
+      res.status,
+      200,
+      `${discovery} answered ${res.status} (is the OAuth server switched on?)`,
+    );
   });
 });

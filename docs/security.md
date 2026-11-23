@@ -21,19 +21,20 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 
 ## 2. Threat model
 
-| Threat                              | Example                                                           | Control                                                                                                                                                                                                                                                         | Status   |
-| ----------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| Private note leaks across members   | A bug or prompt-injected agent reads a colleague's private folder | Row-level security; agents inherit member permissions; no service-role key in the agent path                                                                                                                                                                    | built    |
-| Stolen or leaked agent token        | Lost laptop, token pasted in a public repo                        | Tokens hashed at rest, bound to one workspace, revocable per agent, last use recorded                                                                                                                                                                           | built    |
-| Over-sharing by an agent            | Agent writes client material into a shared folder by mistake      | Private by default; agents can never set sharing; writes are versioned. A note an agent writes into a folder its owner shared is shared at once, unreviewed (accepted; the vault says so whenever a folder is shared)                                           | built    |
-| Sharing by moving a note            | Agent moves a private note into a shared folder                   | Agents cannot change a note's path, and cannot change, rename or delete a folder record                                                                                                                                                                         | built    |
-| A sharing change with no trace      | Someone shares a folder and nobody can tell when or who           | A person's changes to a note's own setting or a folder rule, releases of held notes, and moves that change who can read a note write one audit row each, readable by the hive owner only. Not yet recorded: a member's default visibility, and accepting a link | built    |
-| Untrusted self-hosted agent         | Open-source agent with no vendor safety layer                     | Lower trust tier: reads shared notes only, writes are quarantined until the member releases them                                                                                                                                                                | built    |
-| Prompt injection via note content   | A shared note tells agents to exfiltrate data                     | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine                                                                                                                                                               | partly   |
-| Departing member                    | Colleague leaves with access                                      | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision                                                                                                                                                                           | designed |
-| Platform compromise                 | Project credentials exposed                                       | Service-role key only in background jobs; secrets in a vault; MFA on the owner account                                                                                                                                                                          | designed |
-| Overlap detection as a side channel | Notifications reveal what a colleague works on                    | Notification names only the entity; content never moves before double accept; mute per folder                                                                                                                                                                   | designed |
-| The map as a side channel           | Locked dots show that a colleague has notes in a folder           | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents                                                                                                                                                               | built    |
+| Threat                               | Example                                                                             | Control                                                                                                                                                                                                                                                         | Status   |
+| ------------------------------------ | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Private note leaks across members    | A bug or prompt-injected agent reads a colleague's private folder                   | Row-level security; agents inherit member permissions; no service-role key in the agent path                                                                                                                                                                    | built    |
+| Stolen or leaked agent token         | Lost laptop, token pasted in a public repo                                          | Tokens hashed at rest, bound to one workspace, revocable per agent, last use recorded                                                                                                                                                                           | built    |
+| Over-sharing by an agent             | Agent writes client material into a shared folder by mistake                        | Private by default; agents can never set sharing; writes are versioned. A note an agent writes into a folder its owner shared is shared at once, unreviewed (accepted; the vault says so whenever a folder is shared)                                           | built    |
+| Sharing by moving a note             | Agent moves a private note into a shared folder                                     | Agents cannot change a note's path, and cannot change, rename or delete a folder record                                                                                                                                                                         | built    |
+| A sharing change with no trace       | Someone shares a folder and nobody can tell when or who                             | A person's changes to a note's own setting or a folder rule, releases of held notes, and moves that change who can read a note write one audit row each, readable by the hive owner only. Not yet recorded: a member's default visibility, and accepting a link | built    |
+| A connected app acting as the person | Claude or ChatGPT holds a pass that names the member, and uses it to change sharing | The database refuses an app's pass everywhere except the one function that swaps it for a limited agent identity (section 10)                                                                                                                                   | built    |
+| Untrusted self-hosted agent          | Open-source agent with no vendor safety layer                                       | Lower trust tier: reads shared notes only, writes are quarantined until the member releases them                                                                                                                                                                | built    |
+| Prompt injection via note content    | A shared note tells agents to exfiltrate data                                       | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine                                                                                                                                                               | partly   |
+| Departing member                     | Colleague leaves with access                                                        | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision                                                                                                                                                                           | designed |
+| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs; secrets in a vault; MFA on the owner account                                                                                                                                                                          | designed |
+| Overlap detection as a side channel  | Notifications reveal what a colleague works on                                      | Notification names only the entity; content never moves before double accept; mute per folder                                                                                                                                                                   | designed |
+| The map as a side channel            | Locked dots show that a colleague has notes in a folder                             | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents                                                                                                                                                               | built    |
 
 ## 3. Identity and tokens
 
@@ -60,7 +61,8 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   that protects it is that it never leaves the function's secrets.
 - Function secrets are readable by every Edge Function of the project, not only by
   `agent-session`. Any function deployed to this project can therefore read the key, so a new
-  function is reviewed as code that holds it. `agent-session` is the only function today.
+  function is reviewed as code that holds it. There are two today: `agent-session` and the
+  connector, `mcp` (section 10). Both sign with it and neither logs it.
 - What the function itself can sign is narrow. It writes `role` and `aud` as fixed values
   (`authenticated`), and copies only validated ids from `agent_login`: the member's user id as
   `sub`, `agent_id`, `workspace_id`, and a trust tier that must be one of the two known ones.
@@ -133,6 +135,8 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - Revocation takes effect on the next sign-in; the MCP server re-signs in at least hourly. An
   identity issued before the revocation keeps working until it expires, up to one hour later.
 - Trust tiers: `vendor` (Claude, ChatGPT apps) and `self_hosted` (open-source agents).
+- An app connected through the sign-in window has no agent token. It is an agent all the same,
+  with one workspace and one trust tier, and it is revoked in the same place; see section 10.
 
 ## 4. Authorisation
 
@@ -235,6 +239,83 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - Do any customer contracts require a security review or specific data residency before their
   material is loaded?
 - Should vendor-tier agents also start in quarantine for a new member's first week?
+- Does Supabase Auth accept an app's pass on its own account endpoints? To be checked before
+  promotion to `main` (section 10).
 - When is the legacy JWT secret revoked? Agent sign-in no longer uses it (section 3); it stays
   valid until every machine has switched and the function uses `HIVE_PUBLISHABLE_KEY`.
 - Does the `agent-session` function need its own rate limit before colleagues' agents use it?
+
+## 10. The remote connector
+
+A member connects Claude or ChatGPT by pasting `https://<site>/mcp` into the app and approving
+it in a Hive Mind window. Setup is in
+[hosted-db-bringup.md](hosted-db-bringup.md#hosting-and-the-connector).
+
+**The pass.**
+
+- When a member approves an app, Supabase Auth's OAuth server gives that app a pass (an access
+  token, with a refresh token to renew it). The pass says "this is that person, through this
+  app": it carries the member's user id and the app's `client_id`.
+- The app's vendor holds it, on Anthropic's or OpenAI's servers. It is sent to us with each
+  call; the model does not see it. We never store it. The web app's `/mcp` route forwards it to
+  the connector function and keeps nothing, and neither the route nor the function logs it.
+- The web app holds no secret for this. The signing key stays in the Edge Functions' secrets and
+  is not copied to Netlify.
+
+**What the pass can do.**
+
+- One thing: `connector_login`. That function finds the agent this member approved for this
+  app, not revoked, and returns its ids. The connector then signs the usual one-hour agent
+  identity (the same claims `agent-session` writes, including the `session_id` that matches no
+  session) and runs the tool with it. From there on the rules are those of any agent: writes
+  only in its workspace, never sharing, accepting a link or deleting.
+- **The database refuses the pass everywhere else.** A pass names a person, so without this rule
+  an app could do what the person can, including change sharing. Every table in `public`, and
+  stored files, has a restrictive policy that fails for an identity carrying `client_id`, and
+  every function a signed-in caller may run refuses such a caller, except `connector_login`. A
+  test lists those functions from the database's own catalogue, so one added later cannot be
+  forgotten.
+- The connector decides nothing about permissions. It offers six tools; `hive_save_file` stays
+  in the local server, since a hosted function cannot read a member's disk.
+
+**Registration and approval.**
+
+- Dynamic registration is on, so any program on the internet can register itself with the OAuth
+  server. That gains it nothing. A pass exists only after a signed-in member approves that
+  program in the window, and the pass then reaches only what that member approved: one agent in
+  one of their own workspaces.
+- Approval is `connect_app`, for a person only. It is refused for an agent identity and for an
+  app's pass, and the workspace must be the caller's own. The app's details are read again on
+  the server from Supabase Auth, never taken from the form. If it fails, nothing is approved. It
+  writes `agent.connected` to the audit log.
+- **Trust tier follows the host the app returns to**, not what the app says it is. For the tier
+  `vendor` the return host must equal, or be a subdomain of, one of `claude.ai`, `claude.com`,
+  `chatgpt.com`, `openai.com`. Anything else, including a host that only looks similar
+  (`evil-claude.ai`, `claude.ai.evil.com`), is `self_hosted`: it reads shared notes only and its
+  writes are held for the member's review. The list is fixed in the migration.
+- **The app name in the window is self-declared.** A program picks its own name at
+  registration and could call itself "Claude". The window therefore shows the host it returns
+  to beside the name, and that host is what decides the tier. A member should read the host.
+- After sign-in the window returns only to a path on our own site, so the `next` address cannot
+  send a person elsewhere.
+
+**Disconnecting.** A connected app is an agent in Settings, named after the app, with the
+provider `Connected app`. Revoking it makes `connector_login` fail on the app's next call, since
+an identity is made for each call. An identity already made lasts up to one hour, as for any
+agent. Approving the app again in the window reconnects it.
+
+**Open items.**
+
+- **Supabase Auth's own account endpoints.** The database refuses a pass, but Supabase Auth is a
+  separate service. Whether it accepts a pass on its account endpoints (reading the account,
+  changing the email or password) has not been checked: it needs a real pass, which exists only
+  once the site is hosted. It is checked after the merge to `develop` and **before promotion to
+  `main`**. If Auth accepts it and that cannot be closed, promotion stops and the owner decides.
+- **No rate limit or lockout of our own.** `/mcp` and the function can be called by anyone. A
+  call without a valid pass is refused, but nothing counts or slows repeated attempts beyond
+  what Netlify and Supabase apply themselves.
+- **The OAuth server is a beta feature** of Supabase Auth. Its behaviour may change or differ
+  from its documentation.
+- The function is deployed without JWT verification, like `agent-session`, and can be reached
+  at its own address as well as through the site. It checks the pass itself by handing it to
+  `connector_login`, where the database verifies signature and expiry.

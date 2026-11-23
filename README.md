@@ -13,7 +13,7 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
 - Database schema, sharing rules and file storage, as Supabase migrations.
 - Tests for the sharing rules, including files, that need no Docker. They pass.
 - A scripted walkthrough (`pnpm demo`) of two people and their agents.
-- An MCP server with seven tools, proven against the live project by `pnpm test:live`.
+- An MCP server with seven tools (six of them also through the remote connector), proven against the live project by `pnpm test:live`.
 - An Edge Function, `agent-session`, that exchanges an agent token for a one-hour identity, so
   an agent's machine holds only its own token.
 - An importer for a folder of markdown notes.
@@ -217,4 +217,4 @@ links and attached files it had.
 ## Not built yet
 
 The rest of the web app (chat, settings, an audit-log screen), file storage, entity detection, automatic link discovery, synthesis
-pages, the housekeeper, semantic search, hosted sign-in, the remote MCP connector.
+pages, the housekeeper, semantic search, hosted sign-in.
