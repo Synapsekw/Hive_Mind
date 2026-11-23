@@ -11,7 +11,7 @@ import {
   nextCell,
   HIVE_MIN_RADIUS,
 } from "./hive";
-import type { MapModel } from "./types";
+import type { MapModel, MapPayload } from "./types";
 
 const NOW = Date.UTC(2026, 10, 23, 14, 0);
 const payload = fixturePayload(NOW);
@@ -30,8 +30,9 @@ describe("hiveComb", () => {
   });
 
   it("puts the index on the centre cell", () => {
-    const centre = comb.cells.find((c) => c.q === 0 && c.r === 0)!;
-    expect(centre.kind).toBe("root");
+    const centre = comb.cells.find((c) => c.q === 0 && c.r === 0);
+    expect(centre).toBeDefined();
+    expect(centre!.kind).toBe("root");
     expect(comb.pos[0]).toEqual([500, 380]);
   });
 
@@ -75,8 +76,11 @@ describe("hiveComb", () => {
   });
 
   it("marks a locked item's cell as capped", () => {
-    const locked = items(model).find((n) => n.locked)!;
-    expect(comb.cells.find((c) => c.node === locked.i)!.capped).toBe(true);
+    const locked = items(model).find((n) => n.locked);
+    expect(locked).toBeDefined();
+    const cell = comb.cells.find((c) => c.node === locked!.i);
+    expect(cell).toBeDefined();
+    expect(cell!.capped).toBe(true);
   });
 });
 
@@ -115,6 +119,8 @@ describe("agent marks", () => {
   });
 
   it("puts live and today marks on their own member's cell, idle ones at the entrance", () => {
+    expect(comb.marks.some((m) => m.state === "live")).toBe(true);
+    expect(comb.marks.some((m) => m.state !== "idle")).toBe(true);
     for (const m of comb.marks) {
       const agent = model.nodes[m.node]!;
       if (m.state === "idle") {
@@ -127,7 +133,9 @@ describe("agent marks", () => {
   });
 
   it("moves a live mark at most three cells, to its own member's item", () => {
-    const live = comb.marks.find((m) => m.state === "live")!;
+    const live = comb.marks.find((m) => m.state === "live");
+    expect(live).toBeDefined();
+    if (!live) return;
     for (const pick of [0, 0.3, 0.7, 0.99]) {
       const next = nextCell(comb, model, live, NOW, pick);
       if (next === null) continue;
@@ -142,5 +150,57 @@ describe("agent marks", () => {
         (pick) => nextCell(comb, model, live, NOW, pick) !== null,
       ),
     ).toBe(true);
+  });
+});
+
+describe("stress", () => {
+  it("places every hub, note and file once, in the box, quickly, at 5,000 items", () => {
+    const sizes = [
+      2255, 900, 500, 350, 250, 200, 120, 90, 70, 60, 50, 40, 30, 25, 20, 15,
+      10, 8, 5, 2,
+    ];
+    const total = sizes.reduce((a, b) => a + b, 0);
+    expect(total).toBe(5000);
+    const nodes: MapPayload["nodes"] = [];
+    sizes.forEach((n, t) => {
+      for (let k = 0; k < n; k++)
+        nodes.push({
+          id: `n${t}-${k}`,
+          kind: k % 7 === 0 ? "file" : "note",
+          topic: `topic-${String(t).padStart(2, "0")}`,
+          member_id: "m1",
+          updated_at: new Date(
+            NOW - ((k * 37) % 5000) * 3_600_000,
+          ).toISOString(),
+          locked: k % 11 === 0,
+          title: `T${t}-${k}`,
+          path: null,
+          workspace_id: null,
+          by_agent: false,
+          agent_id: null,
+          note_id: null,
+        });
+    });
+    const big = buildModel({
+      members: [{ id: "m1", display_name: "A", is_me: true }],
+      agents: [],
+      nodes,
+      links: [],
+      truncated: false,
+    });
+    const t0 = performance.now();
+    const c = hiveComb(big, NOW, new Map());
+    expect(performance.now() - t0).toBeLessThan(1500);
+    const placed = c.cells.filter((x) => x.node !== null && x.kind !== "root");
+    const ids = placed.map((x) => x.node);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const n of big.nodes)
+      if (n.kind !== "root" && n.kind !== "agent") expect(ids).toContain(n.i);
+    for (const [x, y] of c.pos) {
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThanOrEqual(1000);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(y).toBeLessThanOrEqual(760);
+    }
   });
 });

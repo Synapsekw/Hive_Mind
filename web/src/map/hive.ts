@@ -2,6 +2,7 @@
 // around its hub; items sit nearest the hub, most recently changed first. Agents are geometric
 // marks on their member's freshest cell (live, today) or at the entrance under the comb (idle).
 // Pure: the same model and `now` always give the same comb.
+import { CONNECTED_MS } from "./graph";
 import type { MapModel } from "./types";
 
 export type Axial = [number, number];
@@ -40,7 +41,7 @@ const CX = 500;
 const CY = 380;
 const SQ3 = Math.sqrt(3);
 const HOUR = 3_600_000;
-const LIVE_MS = 70 * 60_000; // mirrors CONNECTED_MS in graph.ts (agentStatus "connected"); not exported there
+const LIVE_MS = CONNECTED_MS; // the window agentStatus calls "connected"
 const TODAY_MS = 24 * HOUR;
 const NEIGHBOURS: Axial[] = [
   [1, 0],
@@ -50,7 +51,6 @@ const NEIGHBOURS: Axial[] = [
   [-1, 1],
   [0, 1],
 ];
-const key = (a: Axial) => `${a[0]},${a[1]}`;
 
 export function hexDist(a: Axial, b: Axial): number {
   return (
@@ -121,7 +121,14 @@ export function hiveComb(
       if (hexDist([q, r], [0, 0]) <= R) all.push([q, r]);
 
   const T = model.topics.length;
-  const owner = new Map<string, number | "root">([["0,0", "root"]]);
+  const W = 2 * R + 1;
+  const id = (c: Axial) => (c[0] + R) * W + (c[1] + R);
+  const at = (k: number): Axial => [Math.floor(k / W) - R, (k % W) - R];
+  const inGrid = (c: Axial) => hexDist(c, [0, 0]) <= R;
+  const ROOT = -1;
+  const FREE = -2;
+  const owner = new Int32Array(W * W).fill(FREE);
+  owner[id([0, 0])] = ROOT;
   const seedRing = R * 0.525; // 6.3 cells at R = 12
   const seeds: Axial[] = model.topics.map((_, i) => {
     const a = (i / Math.max(1, T)) * Math.PI * 2 - Math.PI / 2;
@@ -137,72 +144,129 @@ export function hiveComb(
       .sort((a, b) => b.updatedAt - a.updatedAt || a.i - b.i),
   );
   const quota = members.map((m) => m.length + 1);
-  const region: Axial[][] = model.topics.map(() => []);
-  seeds.forEach((c, i) => {
-    // Two seeds can round to the same cell only with many tiny topics; nudge outward.
-    let s = c;
-    while (owner.has(key(s))) s = [s[0], s[1] + 1];
-    seeds[i] = s;
-    owner.set(key(s), i);
-    region[i]!.push(s);
-    quota[i]!--;
+  const region: number[][] = model.topics.map(() => []);
+
+  /** The free in-grid cell nearest `from` (ties: lowest cell id), or null when the grid is full. */
+  const nearestFree = (from: Axial): number | null => {
+    let best = -1;
+    let bd = Infinity;
+    for (const c of all) {
+      const k = id(c);
+      if (owner[k] !== FREE) continue;
+      const d = hexDist(c, from);
+      if (d < bd) {
+        bd = d;
+        best = k;
+      }
+    }
+    return best < 0 ? null : best;
+  };
+
+  // Per-topic frontier: a binary min-heap of [score, cell id] with lazy deletion (a popped cell
+  // that has since been claimed is skipped). A cell's score depends only on the topic's seed.
+  type Entry = [number, number];
+  const less = (a: Entry, b: Entry) =>
+    a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+  const heaps: Entry[][] = model.topics.map(() => []);
+  const push = (h: Entry[], e: Entry) => {
+    h.push(e);
+    let i = h.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (!less(h[i]!, h[p]!)) break;
+      [h[i], h[p]] = [h[p]!, h[i]!];
+      i = p;
+    }
+  };
+  const pop = (h: Entry[]): Entry | undefined => {
+    const top = h[0];
+    const last = h.pop();
+    if (h.length > 0 && last) {
+      h[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < h.length && less(h[l]!, h[m]!)) m = l;
+        if (r < h.length && less(h[r]!, h[m]!)) m = r;
+        if (m === i) break;
+        [h[i], h[m]] = [h[m]!, h[i]!];
+        i = m;
+      }
+    }
+    return top;
+  };
+  const claim = (t: number, k: number) => {
+    owner[k] = t;
+    region[t]!.push(k);
+    quota[t]!--;
+    const c = at(k);
+    for (const [dq, dr] of NEIGHBOURS) {
+      const nb: Axial = [c[0] + dq, c[1] + dr];
+      if (!inGrid(nb) || owner[id(nb)] !== FREE) continue;
+      push(heaps[t]!, [
+        hexDist(nb, seeds[t]!) + hexDist(nb, [0, 0]) * 0.08,
+        id(nb),
+      ]);
+    }
+  };
+
+  seeds.forEach((c, t) => {
+    // Clamp into the grid and off taken cells: the nearest free cell to the ideal seed.
+    const k = inGrid(c) && owner[id(c)] === FREE ? id(c) : nearestFree(c);
+    if (k === null) return;
+    seeds[t] = at(k);
+    claim(t, k);
   });
 
   let grew = true;
   while (grew) {
     grew = false;
-    for (let i = 0; i < T; i++) {
-      if (quota[i]! <= 0) continue;
-      let best: Axial | null = null;
-      let bd = Infinity;
-      for (const c of region[i]!)
-        for (const [dq, dr] of NEIGHBOURS) {
-          const nb: Axial = [c[0] + dq, c[1] + dr];
-          if (hexDist(nb, [0, 0]) > R || owner.has(key(nb))) continue;
-          const d = hexDist(nb, seeds[i]!) + hexDist(nb, [0, 0]) * 0.08;
-          if (d < bd || (d === bd && best && key(nb) < key(best))) {
-            bd = d;
-            best = nb;
-          }
+    for (let t = 0; t < T; t++) {
+      if (quota[t]! <= 0) continue;
+      const h = heaps[t]!;
+      let k: number | null = null;
+      for (let e = pop(h); e; e = pop(h))
+        if (owner[e[1]] === FREE) {
+          k = e[1];
+          break;
         }
-      if (best) {
-        owner.set(key(best), i);
-        region[i]!.push(best);
-        quota[i]!--;
-        grew = true;
-      }
+      // Enclosed: contiguity is preferred, but never at the cost of dropping an item.
+      if (k === null) k = nearestFree(seeds[t]!);
+      if (k === null) continue;
+      claim(t, k);
+      grew = true;
     }
   }
 
   const pos: [number, number][] = model.nodes.map(() => [CX, CY]);
   const axial = new Map<number, Axial>([[0, [0, 0]]]);
-  const cellNode = new Map<string, number>([["0,0", 0]]);
+  const cellNode = new Map<number, number>([[id([0, 0]), 0]]);
   for (let t = 0; t < T; t++) {
-    const cs = region[t]!.slice().sort(
-      (a, b) =>
-        hexDist(a, seeds[t]!) - hexDist(b, seeds[t]!) ||
-        key(a).localeCompare(key(b)),
+    const cs = region[t]!.map(at).sort(
+      (a, b) => hexDist(a, seeds[t]!) - hexDist(b, seeds[t]!) || id(a) - id(b),
     );
     const hub = model.nodes.find((n) => n.kind === "hub" && n.topic === t);
     if (hub && cs[0]) {
       pos[hub.i] = xy(cs[0]);
       axial.set(hub.i, cs[0]);
-      cellNode.set(key(cs[0]), hub.i);
+      cellNode.set(id(cs[0]), hub.i);
     }
     members[t]!.forEach((n, j) => {
       const c = cs[j + 1];
       if (!c) return;
       pos[n.i] = xy(c);
       axial.set(n.i, c);
-      cellNode.set(key(c), n.i);
+      cellNode.set(id(c), n.i);
     });
   }
 
   const cells: Cell[] = all.map((a) => {
     const [x, y] = xy(a);
-    const o = owner.get(key(a));
-    const node = cellNode.get(key(a)) ?? null;
-    if (o === "root")
+    const o = owner[id(a)]!;
+    const node = cellNode.get(id(a)) ?? null;
+    if (o === ROOT)
       return {
         q: a[0],
         r: a[1],
@@ -214,7 +278,7 @@ export function hiveComb(
         honey: 0.12,
         capped: false,
       };
-    if (o === undefined || node === null)
+    if (o === FREE || node === null)
       return {
         q: a[0],
         r: a[1],

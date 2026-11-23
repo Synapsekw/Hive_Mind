@@ -6,7 +6,7 @@ export const BOX: { w: 1000; h: 760 } = { w: 1000, h: 760 };
 /** Hues 0..7 exist; with more than eight topics the seven largest keep theirs. */
 const HUES = 8;
 const DAY_MS = 86_400_000;
-const CONNECTED_MS = 70 * 60_000;
+export const CONNECTED_MS = 70 * 60_000;
 const MONTHS = [
   "Jan",
   "Feb",
