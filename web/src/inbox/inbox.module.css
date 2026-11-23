@@ -1,0 +1,459 @@
+/* The inbox screen in Keystone glass, in the vault's grammar (vault.module.css): the rail
+   (web/src/shell/) on the wash, then one frosted card holding the heading and one list that
+   scrolls inside it. Each row is a decision: what it is on the left, the answer on the right.
+   Colours are tokens only (themes.generated.css). */
+
+.root {
+  min-height: 100vh;
+  display: flex;
+  flex-wrap: wrap;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.root button {
+  font-family: inherit;
+}
+
+.root button:focus-visible,
+.root a:focus-visible,
+.title:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- The card ---- */
+
+.panel {
+  position: relative;
+  flex: 999 1 620px;
+  min-width: 0;
+  margin: 8px 8px 8px 4px;
+  padding: 16px 20px 0;
+  border: 1px solid var(--edge-card);
+  border-radius: 20px;
+  background: var(--glow), var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--lift);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 24px;
+  min-height: 36px;
+  padding: 0 4px;
+}
+
+.title {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 36px;
+  letter-spacing: -0.01em;
+}
+
+.titleCount,
+.count {
+  font-family: var(--font-mono), monospace;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+.titleCount {
+  font-size: 13px;
+}
+
+.lede {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- The list ---- */
+
+/* The scroll box runs to the card's edges, so the scrollbar sits on the edge and a focus
+   outline on the outermost controls is not cut off. */
+.scroller {
+  position: relative;
+  margin: 0 -20px;
+  padding: 18px 24px 24px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* A reading width: on a wide window the answer stays near the sentence it answers. */
+.section {
+  width: 100%;
+  max-width: 1040px;
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 18px;
+  padding-bottom: 10px;
+}
+
+.label {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.count {
+  font-size: 11px;
+  color: var(--fg2);
+}
+
+.note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A row: the words on the left, the decision on the right, a hairline above. */
+.item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px 28px;
+  padding: 14px 0 16px;
+  border-top: 1px solid var(--line);
+}
+
+.text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.what {
+  margin: 0;
+  max-width: 68ch;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--fg2);
+  overflow-wrap: anywhere;
+}
+
+.heldTitle {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* The person's own note: the one thing in the sentence that opens. */
+.own {
+  color: var(--fg);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--line-hi);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.18s var(--ease);
+}
+
+.own:hover {
+  text-decoration-color: var(--fg);
+}
+
+.path {
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.meta > span + span::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--quiet);
+}
+
+/* What accepting does. Accepting shares the note, so this is never hidden: it sits on the row
+   in full-strength text, led by the vault's own mark for "shared with people". */
+.effect {
+  margin: 4px 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 92ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.glyph {
+  flex: none;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--fg2);
+  border-radius: 50%;
+  background: linear-gradient(90deg, var(--fg2) 50%, transparent 50%);
+  transform: translateY(0.5px);
+}
+
+/* ---- The decision ---- */
+
+.side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ask {
+  margin: 0 6px 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.primary,
+.secondary,
+.confirm {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary {
+  border: 0;
+  background: var(--grad);
+  color: var(--on-brand);
+  transition: filter 0.18s var(--ease);
+}
+
+.primary:hover {
+  filter: brightness(1.08);
+}
+
+.secondary,
+.confirm {
+  background: none;
+  color: var(--fg);
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.secondary {
+  border: 1px solid var(--line);
+}
+
+.secondary:hover {
+  border-color: var(--line-hi);
+  background: var(--fill);
+}
+
+/* Decline, once it has asked: said in weight and a full-strength edge, not in a colour. */
+.confirm {
+  border: 1px solid var(--fg);
+  font-weight: 600;
+}
+
+.confirm:hover {
+  background: var(--fill-on);
+}
+
+/* While its action runs a control keeps its place and its focus, and does nothing: no
+   gradient, a dashed hairline and quiet text, in either mode. */
+.primary[aria-disabled="true"],
+.secondary[aria-disabled="true"],
+.confirm[aria-disabled="true"] {
+  border: 1px dashed var(--line-hi);
+  background: none;
+  color: var(--quiet);
+  font-weight: 500;
+  filter: none;
+  cursor: default;
+}
+
+/* A refusal is said in words; the bar beside it only draws the eye. */
+.refused {
+  margin: 0;
+  padding-left: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--hue-6);
+}
+
+/* ---- Nothing waiting ---- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.emptyText {
+  margin: 0;
+  max-width: 52ch;
+  color: var(--muted);
+}
+
+/* Under a list cut at the newest 100: the hairline closes the last row. */
+.more {
+  margin: 0;
+  color: var(--muted);
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
+
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .panel {
+    background: var(--glow), var(--bg);
+  }
+}
+
+/* ---- The answer beside the words ----
+   From a card wide enough for both. The column is as wide as the decline question, so asking
+   it moves nothing but the buttons. */
+
+@media (min-width: 900px) {
+  .item {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: start;
+  }
+
+  .side {
+    align-items: flex-end;
+  }
+
+  .actions {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+}
+
+/* ---- One window from 1100 x 560 ----
+   The page is exactly one window tall and the list scrolls inside the card. Narrower or very
+   short windows let the page scroll instead. */
+
+@media (min-width: 1100px) and (min-height: 560px) {
+  .root {
+    height: 100dvh;
+    min-height: 0;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .panel {
+    min-height: 0;
+  }
+
+  .scroller {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fill-on) transparent;
+  }
+
+  /* In a column that scrolls, a section keeps its own height. */
+  .section,
+  .empty {
+    flex: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .own,
+  .primary,
+  .secondary,
+  .confirm {
+    transition: none;
+  }
+}
+
+/* Forced colours: the sharing mark keeps its shape. */
+@media (forced-colors: active) {
+  .glyph {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: linear-gradient(90deg, CanvasText 50%, transparent 50%);
+  }
+}
