@@ -49,7 +49,9 @@ test("the agents card opens to one line per agent", async ({ page }) => {
   await expect(card).toHaveAttribute("aria-expanded", "false");
   await card.click();
   await expect(card).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByText("Laptop", { exact: true })).toBeVisible();
+  // The Hive view's "At the hive" panel also names the agent, so look in the rail.
+  const rail = page.getByRole("complementary", { name: "Navigation" });
+  await expect(rail.getByText("Laptop", { exact: true })).toBeVisible();
 });
 
 test("one bar marks the current destination", async ({ page }) => {

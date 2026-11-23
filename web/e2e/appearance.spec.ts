@@ -181,7 +181,9 @@ test("in light mode the popover's text is not white", async ({
 
 test("changing the theme keeps the selected dot", async ({ page }) => {
   await open(page);
-  await page.locator('[data-map-dot][aria-label^="<img src=x"]').click();
+  // The dot buttons are a visually hidden list over the canvas: select by keyboard.
+  await page.locator('[data-map-dot][aria-label^="<img src=x"]').focus();
+  await page.keyboard.press("Enter");
   const title = page
     .getByRole("complementary", { name: "Details" })
     .getByRole("heading", { level: 2 });
