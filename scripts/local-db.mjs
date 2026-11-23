@@ -9,11 +9,12 @@ const STUB = `
   create role authenticated nologin;
   create role service_role nologin bypassrls;
   create schema auth;
-  -- email_confirmed_at is set once the person has proved the address; the
+  -- email_confirmed_at is null until the person has proved the address, as in
+  -- Supabase, so a user inserted by hand is unconfirmed (fails closed); the
   -- invitation functions let nobody join a hive without it.
   create table auth.users (
     id uuid primary key default gen_random_uuid(), email text,
-    email_confirmed_at timestamptz default now());
+    email_confirmed_at timestamptz);
   create function auth.jwt() returns jsonb language sql stable as $$
     select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
   create function auth.uid() returns uuid language sql stable as $$

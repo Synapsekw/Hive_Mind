@@ -19,7 +19,8 @@ const NOW = Date.parse("2026-11-23T12:00:00Z");
 type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
 type Call = { table: string; ops: [string, unknown[]][] };
-type Table = "hives" | "members" | "workspaces" | "agents" | "invitations";
+/** `own` is the read of the person's own oldest membership, which is also from `members`. */
+type Table = "own" | "members" | "workspaces" | "agents" | "invitations";
 
 const ok = (data: unknown): Res => ({ data, error: null });
 const err = (message: string, code?: string): Res => ({
@@ -107,13 +108,19 @@ const INVITATIONS = [
   }),
 ];
 
+/** The session cookie's access token: its payload names the user. */
+const tokenOf = (sub: string) =>
+  `h.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.s`;
+
+const OWN = { id: M_DANI, hive_id: HIVE, hive: { name: "Synapse" } };
+
 /** A stand-in client: every `from(table)` chain is recorded and answers that table's result. */
 function stub(
   opts: Partial<Record<Table, Res>> & { user?: { id: string } | null } = {},
 ) {
   const calls: Call[] = [];
   const answers: Record<Table, Res> = {
-    hives: opts.hives ?? ok([{ id: HIVE, name: "Synapse" }]),
+    own: opts.own ?? ok([OWN]),
     members: opts.members ?? ok(MEMBERS),
     workspaces: opts.workspaces ?? ok(WORKSPACES),
     agents: opts.agents ?? ok(AGENTS),
@@ -125,16 +132,23 @@ function stub(
     const chain: Record<string, unknown> = {};
     for (const m of ["select", "eq", "is", "gt", "order", "limit"])
       chain[m] = (...args: unknown[]) => {
+        // The read of the person's own oldest membership is filed apart from the hive's members.
+        if (table === "members" && m === "eq" && args[0] === "user_id")
+          call.table = "own";
         call.ops.push([m, args]);
         return chain;
       };
     chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) =>
-      Promise.resolve(answers[table]).then(res, rej);
+      Promise.resolve(answers[call.table as Table]).then(res, rej);
     return chain;
   });
   const user = opts.user === undefined ? { id: U_DANI } : opts.user;
   const auth = {
     getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getSession: vi.fn(async () => ({
+      data: { session: user ? { access_token: tokenOf(user.id) } : null },
+      error: null,
+    })),
   };
   const rpc = vi.fn();
   const of = (table: Table) => calls.find((c) => c.table === table);
@@ -191,19 +205,19 @@ describe("agentStatus", () => {
 
 describe("loadSettings", () => {
   it("answers no-hive without reading anything else", async () => {
-    const t = stub({ hives: ok([]) });
+    const t = stub({ own: ok([]) });
     expect(await loadSettings(t.db, NOW)).toEqual({ state: "no-hive" });
-    expect(t.calls.map((c) => c.table)).toEqual(["hives"]);
+    expect(t.calls.map((c) => c.table)).toEqual(["own"]);
   });
 
-  it.each(["hives", "members", "workspaces", "agents", "invitations"] as const)(
+  it.each(["own", "members", "workspaces", "agents", "invitations"] as const)(
     "answers error when the %s read fails, logging code and message only",
     async (table) => {
       const log = vi.spyOn(console, "error").mockImplementation(() => {});
       const t = stub({ [table]: err("denied", "42501") });
       expect(await loadSettings(t.db, NOW)).toEqual({ state: "error" });
       expect(log).toHaveBeenCalledWith(
-        `${table} query failed`,
+        table === "own" ? "own hive query failed" : `${table} query failed`,
         "42501",
         "denied",
       );
@@ -356,19 +370,23 @@ describe("loadSettings", () => {
     );
   });
 
-  it("reads the first hive by creation, then the four lists", async () => {
+  it("reads the hive of the person's own oldest membership, then the four lists", async () => {
     const t = stub();
     await loadSettings(t.db, NOW);
     expect(t.calls.map((c) => c.table).sort()).toEqual(
-      ["agents", "hives", "invitations", "members", "workspaces"].sort(),
+      ["agents", "invitations", "members", "own", "workspaces"].sort(),
     );
-    expect(t.calls[0]!.table).toBe("hives");
-    expect(args(t.of("hives"), "select")).toEqual(["id, name"]);
-    expect(args(t.of("hives"), "order")).toEqual([
-      "created_at",
-      { ascending: true },
+    expect(t.calls[0]!.table).toBe("own");
+    expect(t.from.mock.calls[0]).toEqual(["members"]);
+    expect(t.calls[0]!.ops).toEqual([
+      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", U_DANI]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [1]],
     ]);
-    expect(args(t.of("hives"), "limit")).toEqual([1]);
+    // One call to the auth server, as before.
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
 
     expect(args(t.of("members"), "select")).toEqual([
       "id, display_name, role, user_id",
@@ -441,8 +459,8 @@ describe("loadSettings", () => {
   });
 
   it.each([
-    ["a hive without a name", { hives: ok([{ id: HIVE }]) }],
-    ["a hive id that is a number", { hives: ok([{ id: 1, name: "S" }]) }],
+    ["a hive without a name", { own: ok([{ ...OWN, hive: {} }]) }],
+    ["a hive id that is a number", { own: ok([{ ...OWN, hive_id: 1 }]) }],
     ["members that are not a list", { members: ok(null) }],
     ["a member that is not an object", { members: ok(["x"]) }],
     [

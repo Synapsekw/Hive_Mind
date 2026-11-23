@@ -9,6 +9,7 @@
 // so never an email address or a name either.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Created, Invited, Result } from "../../settings/types";
+import { ownHive } from "../own-hive";
 import { isUuid } from "../vault/validate";
 import { cleanEmail, cleanName, cleanNewAgent } from "./validate";
 
@@ -27,9 +28,14 @@ function failed(what: string, res: Res): boolean {
   return true;
 }
 
-async function signedIn(db: Db): Promise<boolean> {
+/** The id the auth server answers with, or null when nobody is signed in. */
+async function userId(db: Db): Promise<string | null> {
   const { data } = await db.auth.getUser();
-  return Boolean(data.user?.id);
+  return data.user?.id || null;
+}
+
+async function signedIn(db: Db): Promise<boolean> {
+  return (await userId(db)) !== null;
 }
 
 /** The token of the first row of `create_agent`'s answer, or null when it is not there. */
@@ -80,23 +86,15 @@ export async function inviteIn(
   const cleanedEmail = cleanEmail(email);
   const cleanedName = cleanName(name);
   if (cleanedEmail === null || cleanedName === null) return FAILED;
-  if (!(await signedIn(db))) return FAILED;
+  const uid = await userId(db);
+  if (!uid) return FAILED;
 
-  const hives = (await db
-    .from("hives")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return FAILED;
-  const hive: unknown = Array.isArray(hives.data) ? hives.data[0] : undefined;
-  const hiveId =
-    typeof hive === "object" && hive !== null
-      ? (hive as Record<string, unknown>).id
-      : undefined;
-  if (typeof hiveId !== "string") return FAILED;
+  // The hive the person uses, so the one they see on `/settings`.
+  const hive = await ownHive(db, uid);
+  if (hive === "error" || hive === null) return FAILED;
 
   const res = (await db.rpc("invite_member", {
-    p_hive: hiveId,
+    p_hive: hive.id,
     p_email: cleanedEmail,
     p_display_name: cleanedName,
   })) as Res;

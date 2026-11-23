@@ -3319,3 +3319,39 @@ test("a person invited to two hives joins both with one claim", async () => {
   assert.equal((await claim(asUser(id)))[0].n, 0);
   assert.equal((await membershipsOf(id)).length, 2);
 });
+
+test("an account with no email address joins nothing", async () => {
+  await invite(person("dani"), "invite-noemail@example.com", "No Email");
+  const before = await inviteState();
+  for (const email of [null, ""]) {
+    const id = (
+      await db.query(
+        `insert into auth.users (email, email_confirmed_at)
+         values ($1, now()) returning id`,
+        [email],
+      )
+    ).rows[0].id;
+    assert.equal((await claim(asUser(id)))[0].n, 0);
+    assert.deepEqual(await membershipsOf(id), []);
+  }
+  await unchanged(before);
+});
+
+test("adding a person closes the invitation that was waiting for them", async () => {
+  await invite(person("dani"), "invite-lapsed@example.com", "Late");
+  await db.query(
+    `update public.invitations set expires_at = now() - interval '1 second'
+      where email = 'invite-lapsed@example.com'`,
+  );
+  const id = await addUser("invite-lapsed@example.com");
+  const r = await invite(person("dani"), "invite-lapsed@example.com", "Late");
+  assert.equal(r[0].r, "added");
+
+  const rows = await invitationsFor("invite-lapsed@example.com");
+  assert.equal(rows.length, 1);
+  assert.equal(rows.filter((i) => !i.accepted_at && !i.revoked_at).length, 0);
+  // One membership, and a later claim finds nothing left to join.
+  assert.equal((await membershipsOf(id)).length, 1);
+  assert.equal((await claim(asUser(id)))[0].n, 0);
+  assert.equal((await membershipsOf(id)).length, 1);
+});

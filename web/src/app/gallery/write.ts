@@ -6,6 +6,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fileKind } from "../../gallery/kind";
 import type { Kind, Result } from "../../gallery/types";
+import { ownHive } from "../own-hive";
 import { BUCKET, LINK_SECONDS } from "./load-gallery";
 import { isUuid } from "./validate";
 
@@ -96,32 +97,13 @@ export async function downloadIn(
     : null;
 }
 
-/** The caller's member ids in their first hive, read now; null when they cannot be told. */
-async function myMembers(db: Db): Promise<Set<string> | null> {
+/** The caller's member id in their own hive, read now; null when it cannot be told. */
+async function myMember(db: Db): Promise<string | null> {
   const { data } = await db.auth.getUser();
   const uid = data.user?.id;
   if (!uid) return null;
-  const hives = (await db
-    .from("hives")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return null;
-  const hive = Array.isArray(hives.data)
-    ? (hives.data[0] as Row | undefined)
-    : undefined;
-  if (!hive) return null;
-  const members = (await db
-    .from("members")
-    .select("id, user_id")
-    .eq("hive_id", text(hive.id))) as Res;
-  if (failed("members query", members) || !Array.isArray(members.data))
-    return null;
-  return new Set(
-    (members.data as Row[])
-      .filter((m) => m.user_id === uid)
-      .map((m) => text(m.id)),
-  );
+  const hive = await ownHive(db, uid);
+  return hive === "error" || hive === null ? null : hive.memberId;
 }
 
 /**
@@ -132,10 +114,10 @@ async function myMembers(db: Db): Promise<Set<string> | null> {
  */
 export async function deleteIn(db: Db, id: unknown): Promise<Result> {
   if (!isUuid(id)) return NO;
-  const mine = await myMembers(db);
+  const mine = await myMember(db);
   if (!mine) return NO;
   const file = await readable(db, id);
-  if (!file || !mine.has(file.member_id)) return NO;
+  if (!file || file.member_id !== mine) return NO;
 
   const removed = await db.storage.from(BUCKET).remove([file.path]);
   if (storageFailed("removing the object", removed.error)) return NO;

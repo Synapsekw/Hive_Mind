@@ -22,7 +22,8 @@ const err = (message: string, code?: string): Res => ({
 function stub(
   opts: {
     rpc?: Res | (() => never);
-    hives?: Res;
+    /** The read of the person's own oldest membership. */
+    own?: Res;
     user?: { id: string } | null;
   } = {},
 ) {
@@ -37,7 +38,10 @@ function stub(
         return chain;
       };
     chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) =>
-      Promise.resolve(opts.hives ?? ok([{ id: HIVE }])).then(res, rej);
+      Promise.resolve(
+        opts.own ??
+          ok([{ id: MEMBER, hive_id: HIVE, hive: { name: "Synapse" } }]),
+      ).then(res, rej);
     return chain;
   });
   const rpc = vi.fn(async (_name: string, _args: unknown) =>
@@ -270,18 +274,24 @@ describe("inviteIn", () => {
     expect(t.rpc).not.toHaveBeenCalled();
   });
 
-  it("finds the first hive by creation, then calls invite_member with cleaned values", async () => {
+  it("finds the hive of the person's own oldest membership, then calls invite_member with cleaned values", async () => {
     const t = stub({ rpc: ok("invited") });
     expect(await inviteIn(t.db, " Ahmed@Example.com ", "  Ahmed ")).toEqual({
       ok: true,
       outcome: "invited",
     });
     expect(t.calls).toHaveLength(1);
-    const [hives] = t.calls;
-    expect(hives!.table).toBe("hives");
-    expect(args(hives!, "select")).toEqual(["id"]);
-    expect(args(hives!, "order")).toEqual(["created_at", { ascending: true }]);
-    expect(args(hives!, "limit")).toEqual([1]);
+    const [own] = t.calls;
+    expect(own!.table).toBe("members");
+    expect(own!.ops).toEqual([
+      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", "u-me"]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [1]],
+    ]);
+    // The id is the one the auth server answered with, asked for once.
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledWith("invite_member", {
       p_hive: HIVE,
@@ -325,18 +335,18 @@ describe("inviteIn", () => {
   );
 
   it("answers failed without a hive, with no call to the function", async () => {
-    const t = stub({ hives: ok([]) });
+    const t = stub({ own: ok([]) });
     expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(FAILED);
     expect(t.rpc).not.toHaveBeenCalled();
   });
 
   it("answers failed when the hive cannot be read", async () => {
     const c = consoles();
-    const t = stub({ hives: err("denied", "42501") });
+    const t = stub({ own: err("denied", "42501") });
     expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(FAILED);
     expect(t.rpc).not.toHaveBeenCalled();
     expect(c.error).toHaveBeenCalledWith(
-      "hives query failed",
+      "own hive query failed",
       "42501",
       "denied",
     );

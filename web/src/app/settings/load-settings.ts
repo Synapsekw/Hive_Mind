@@ -5,6 +5,7 @@
 // only, so a member's `user_id` and anything else the contract does not name never leave the
 // server, and a row that is not what was promised refuses the whole answer.
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ownHive } from "../own-hive";
 import type {
   Agent,
   AgentStatus,
@@ -142,20 +143,9 @@ const ERROR: SettingsLoad = { state: "error" };
  * `now`.
  */
 export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
-  const hives = (await db
-    .from("hives")
-    .select("id, name")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return ERROR;
-  const hive = Array.isArray(hives.data)
-    ? (hives.data[0] as unknown)
-    : undefined;
-  if (hive === undefined) return { state: "no-hive" };
-  if (!row(hive) || !str(hive.id) || !str(hive.name)) {
-    console.error("hives answer has an unexpected shape");
-    return ERROR;
-  }
+  const hive = await ownHive(db);
+  if (hive === "error") return ERROR;
+  if (hive === null) return { state: "no-hive" };
 
   const { data: session } = await db.auth.getUser();
   const userId = session.user?.id;

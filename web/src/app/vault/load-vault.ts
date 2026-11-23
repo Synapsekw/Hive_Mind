@@ -6,6 +6,7 @@ import type {
   VaultNote,
   Visibility,
 } from "../../vault/types";
+import { ownHive } from "../own-hive";
 import { isUuid } from "./validate";
 
 export type VaultLoad =
@@ -72,7 +73,7 @@ function failed(what: string, res: Res): boolean {
 const rows = (res: Res): Row[] => (Array.isArray(res.data) ? res.data : []);
 
 /**
- * Everything `/vault` shows, in this order: the caller's first hive; then its members, the
+ * Everything `/vault` shows, in this order: the caller's own hive; then its members, the
  * caller's workspaces in it, the caller's user and the `?note=` body in parallel; then the open
  * tab's folders and note index in parallel. Row-level security decides every row.
  */
@@ -80,15 +81,10 @@ export async function loadVault(
   db: Db,
   query: { ws?: string; tab?: string; note?: string },
 ): Promise<VaultLoad> {
-  const hives = (await db
-    .from("hives")
-    .select("id, name")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return { state: "error" };
-  const hive = rows(hives)[0];
-  if (!hive) return { state: "no-hive" };
-  const hiveId = text(hive.id);
+  const hive = await ownHive(db);
+  if (hive === "error") return { state: "error" };
+  if (hive === null) return { state: "no-hive" };
+  const hiveId = hive.id;
 
   const noteId = query.note === undefined ? null : query.note;
   const wantNote = noteId !== null && isUuid(noteId);
@@ -197,7 +193,7 @@ export async function loadVault(
   return {
     state: "ok",
     data: {
-      hive: { id: hiveId, name: text(hive.name) },
+      hive: { id: hiveId, name: hive.name },
       me: meId,
       members: memberRows.map((m) => ({
         id: text(m.id),
