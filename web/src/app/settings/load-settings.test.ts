@@ -344,7 +344,13 @@ describe("loadSettings", () => {
       "id, member_id, workspace_id, name, provider, trust_tier, expires_at, revoked_at, last_used_at, created_at",
     ]);
     expect(String(args(agents, "select")![0])).not.toContain("token");
-    expect(args(agents, "order")).toEqual(["created_at", { ascending: false }]);
+    // Active agents first, then newest: the cap can only cut off old revoked ones.
+    expect(
+      agents?.ops.filter(([m]) => m === "order").map(([, a]) => a),
+    ).toEqual([
+      ["revoked_at", { ascending: true, nullsFirst: true }],
+      ["created_at", { ascending: false }],
+    ]);
     expect(args(agents, "limit")).toEqual([200]);
   });
 

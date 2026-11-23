@@ -158,6 +158,8 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
     db
       .from("agents")
       .select(AGENT_COLUMNS)
+      // Agents still in use first, so the cap can only ever cut off old revoked ones.
+      .order("revoked_at", { ascending: true, nullsFirst: true })
       .order("created_at", { ascending: false })
       .limit(MAX_AGENTS),
   ])) as [Res, Res, Res];

@@ -5,7 +5,9 @@
 // What is listed always comes from `data`, so a refresh from the server is what changes it.
 // The forms, the revoke question and the token dialog are client state only, one open at a
 // time. A new agent's token is held in this component's state from the moment `createAgent`
-// answers until Done, is drawn only by `TokenDialog`, and is written nowhere else.
+// answers until Done, is drawn only by `TokenDialog`, and is written nowhere else. Because it
+// cannot be fetched again, the page is inert from Create until Done, leaving asks first, and
+// Back stays here while the dialog is open.
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { Shell } from "../shell/Shell";
@@ -29,6 +31,8 @@ import s from "./settings.module.css";
 const FAILED = "That didn't work. Try again.";
 /** A confirming Revoke sooner than this after the question opened is taken as a double click. */
 const CONFIRM_AFTER_MS = 500;
+/** How long Done waits for its own step back in the history before reading the list anyway. */
+const UNHOLD_MS = 1000;
 const NAME_MAX = 60;
 const EMAIL_MAX = 254;
 const TIERS: TrustTier[] = ["vendor", "self_hosted"];
@@ -87,6 +91,38 @@ export function Settings({
   const target = useRef<Target | null>(null);
   // When the revoke question was last opened.
   const askedAt = useRef(0);
+  // True while the history holds the extra entry that keeps Back on this page.
+  const held = useRef(false);
+  const creating = busy === "connect";
+  const shown = fresh !== null;
+
+  // From Create until Done the token exists only here, so a reload or a closed tab asks first.
+  useEffect(() => {
+    if (!creating && !shown) return;
+    const ask = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = true;
+    };
+    window.addEventListener("beforeunload", ask);
+    return () => window.removeEventListener("beforeunload", ask);
+  }, [creating, shown]);
+
+  // While the dialog is open, Back and swipe-back stay on this page: one extra history entry
+  // is put on top, and each time it is left it is put back. The entry carries no data of ours;
+  // the token never goes near the history.
+  useEffect(() => {
+    if (!shown) return;
+    const hold = () => window.history.pushState(null, "");
+    if (!held.current) {
+      held.current = true;
+      hold();
+    }
+    const stay = () => {
+      if (held.current) hold();
+    };
+    window.addEventListener("popstate", stay);
+    return () => window.removeEventListener("popstate", stay);
+  }, [shown]);
 
   const agents = sortAgents(
     data.agents.map((a) =>
@@ -157,6 +193,8 @@ export function Settings({
       typeof answer.token !== "string" ||
       answer.token === ""
     ) {
+      // The page was inert meanwhile and the focus left it: back into the form.
+      target.current = { form: "connect" };
       setSaid(FAILED);
       return false;
     }
@@ -170,7 +208,25 @@ export function Settings({
     setFresh(null);
     target.current = { button: "connect" };
     setSaid("Agent connected.");
-    router.refresh();
+    if (!held.current) {
+      router.refresh();
+      return;
+    }
+    // The extra history entry is taken away, so Back means what it meant before. The router
+    // answers that move itself and would drop a refresh still under way, so the list is read
+    // again only once the move has landed (or, should it never land, shortly after).
+    held.current = false;
+    let landed = false;
+    const after = () => {
+      if (landed) return;
+      landed = true;
+      window.removeEventListener("popstate", after);
+      window.clearTimeout(timer);
+      router.refresh();
+    };
+    window.addEventListener("popstate", after);
+    const timer = window.setTimeout(after, UNHOLD_MS);
+    window.history.back();
   }
 
   /** Null when the member was added, else the sentence that says why not. */
@@ -247,7 +303,9 @@ export function Settings({
 
   return (
     <div className={s.root}>
-      <div className={s.page} inert={fresh !== null || undefined}>
+      {/* Inert while the agent is being created too: a press on a rail link then would take
+          the screen away before the token arrives, and the token is answered only once. */}
+      <div className={s.page} inert={creating || shown || undefined}>
         <Shell current="settings" inbox={inbox} />
         <main ref={panel} aria-label="Settings" className={s.panel}>
           <header className={s.bar}>

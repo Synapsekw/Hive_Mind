@@ -8,6 +8,7 @@ import { DevSettings } from "./DevSettings";
 //   ?member=1               the view of a member who is not the owner
 //   ?none=1                 no agents yet
 //   ?fail=1                 every action is refused
+//   ?slow=1                 creating an agent takes over a second
 //   ?reason=no-account      adding a member answers that nobody has that email
 //   ?reason=already-member  adding a member answers that the person is already in
 const NOW = Date.UTC(2026, 10, 23, 12, 0, 0);
@@ -34,6 +35,7 @@ export default async function DevSettingsPage({
       initial={data}
       now={NOW}
       fail={one(q.fail) === "1"}
+      slow={one(q.slow) === "1"}
       reason={reasonOf(one(q.reason))}
     />
   );

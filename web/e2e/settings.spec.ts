@@ -19,11 +19,13 @@ const FAILED = "That didn't work. Try again.";
 const WARNING =
   "This token is shown once. Copy it now; it cannot be shown again.";
 
-async function open(page: Page, query = "") {
-  // Nothing on this screen may use a browser dialog (confirm, alert).
-  page.on("dialog", (d) => {
-    throw new Error(`unexpected dialog: ${d.message()}`);
-  });
+async function open(page: Page, query = "", strict = true) {
+  // Nothing on this screen may use a browser dialog (confirm, alert). Only the test of the
+  // leave-the-page question passes `strict` false and answers that dialog itself.
+  if (strict)
+    page.on("dialog", (d) => {
+      throw new Error(`unexpected dialog: ${d.message()}`);
+    });
   await page.goto(`/dev/settings${query}`, { waitUntil: "networkidle" });
   await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
 }
@@ -74,6 +76,7 @@ const stored = (page: Page) =>
       { ...localStorage },
       { ...sessionStorage },
       location.href,
+      history.state,
       document.cookie,
       (window as unknown as { __settingsCalls?: unknown }).__settingsCalls ??
         null,
@@ -242,7 +245,8 @@ test("the token dialog: shown once, not closed by Escape or a click outside; Cop
   await expect(box).toContainText(
     "Then give the agent the instruction file from docs/agent-integration.md, section 5.",
   );
-  await expect(box.getByRole("button", { name: "Copy" })).toBeFocused();
+  // The focus starts on the heading, never on a button a held Enter would press.
+  await expect(box.getByRole("heading", { level: 2 })).toBeFocused();
   // The page behind cannot be reached.
   expect(
     await page.evaluate(
@@ -346,6 +350,8 @@ test("Revoke asks first with the agent's name; Keep restores; a double click rev
 
   await revokeButton(target).click();
   // A confirming press straight after the question is taken as a double click and ignored.
+  // Keep this assertion: it is the one that exercises the 500 ms guard. The double clicks by
+  // coordinates further down land on Keep or on the question's text, never on this button.
   await target.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(target).toContainText(`Revoke ${LOCAL.name}?`);
   expect(await calls(page)).toEqual([]);
@@ -587,12 +593,17 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
 
   const box = dialog(page);
   await expect(box).toBeVisible();
-  await expect(box.getByRole("button", { name: "Copy" })).toBeFocused();
+  await expect(box.getByRole("heading", { level: 2 })).toBeFocused();
   // The whole dialog is inside the window, Done included.
   await expect(box.getByRole("button", { name: "Done" })).toBeInViewport();
   expect((await fits()).pageScrolls).toBe(false);
   const inside = () =>
     page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'));
+  // From the heading, Tab walks the token, Copy and Done, and turns round.
+  await page.keyboard.press("Tab");
+  await expect(box.getByLabel("Token")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(box.getByRole("button", { name: "Copy" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(box.getByRole("button", { name: "Done" })).toBeFocused();
   await page.keyboard.press("Tab");
@@ -624,4 +635,197 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
       ],
     },
   ]);
+});
+
+/** Counts the page's history moves from now on, so a test can wait for one to land. */
+async function countMoves(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __moves?: number };
+    w.__moves = 0;
+    window.addEventListener("popstate", () => {
+      w.__moves = (w.__moves ?? 0) + 1;
+    });
+  });
+}
+const moved = (page: Page, times: number) =>
+  page.waitForFunction(
+    (n) => ((window as unknown as { __moves?: number }).__moves ?? 0) >= n,
+    times,
+  );
+
+test("with the token dialog open, Back keeps the page, the dialog and the token; after Done one Back leaves as before", async ({
+  page,
+}) => {
+  // Somewhere to go back to.
+  await page.goto("/login", { waitUntil: "networkidle" });
+  await open(page);
+  await create(page);
+  const box = dialog(page);
+  await expect(box).toBeVisible();
+  await countMoves(page);
+
+  for (let press = 1; press <= 3; press++) {
+    await page.goBack();
+    await moved(page, press);
+    await expect(page).toHaveURL(/\/dev\/settings$/);
+    await expect(box).toBeVisible();
+    await expect(box.getByLabel("Token")).toHaveValue(TOKEN);
+  }
+  // What holds the page in place carries nothing of the token.
+  expect(await stored(page)).not.toContain("hive_devtoken");
+
+  await box.getByRole("button", { name: "Done" }).click();
+  await expect(box).toHaveCount(0);
+  // Done takes the extra history entry away again.
+  await moved(page, 4);
+  await expect(page).toHaveURL(/\/dev\/settings$/);
+  await expect(main(page)).toBeVisible();
+  await expect(rows(page, "Agents")).toHaveCount(4);
+  await expect(agentRow(page, "Desk agent")).toContainText("Never used");
+  await expect(connect(page)).toBeFocused();
+  expect(await page.content()).not.toContain("hive_devtoken");
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/login/);
+});
+
+test("with the token dialog open, a reload asks first and the token stays; after Done nothing asks", async ({
+  page,
+}) => {
+  await open(page, "", false);
+  await create(page);
+  const box = dialog(page);
+  await expect(box).toBeVisible();
+
+  const asked = page.waitForEvent("dialog", { timeout: 5000 });
+  // Staying cancels the reload, so its promise only ends by its own timeout.
+  const reload = page.reload({ timeout: 3000 }).catch(() => null);
+  const question = await asked;
+  expect(question.type()).toBe("beforeunload");
+  await question.dismiss();
+  await reload;
+  await expect(box).toBeVisible();
+  await expect(box.getByLabel("Token")).toHaveValue(TOKEN);
+
+  await countMoves(page);
+  await box.getByRole("button", { name: "Done" }).click();
+  await expect(box).toHaveCount(0);
+  await moved(page, 1);
+  let again = false;
+  page.on("dialog", (d) => {
+    again = true;
+    void d.dismiss();
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(main(page)).toBeVisible();
+  expect(again).toBe(false);
+});
+
+test("an Enter held or pressed again after submitting never copies the token; a press on Copy does", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await open(page);
+  const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
+  await page.evaluate(() => navigator.clipboard.writeText("EMPTY"));
+
+  await connect(page).click();
+  const form = connectForm(page);
+  await form.getByLabel("Workspace").selectOption({ label: DRA.name });
+  const name = form.getByLabel("Name", { exact: true });
+  await name.fill("Desk agent");
+  await name.press("Enter");
+  await page.waitForTimeout(350);
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+
+  const box = dialog(page);
+  await expect(box).toBeVisible();
+  await expect(box.getByRole("button", { name: "Copy" })).toBeVisible();
+  await expect(box.getByRole("button", { name: "Copied" })).toHaveCount(0);
+  expect(await clipboard()).toBe("EMPTY");
+
+  // A key still held when the focus reaches Copy repeats there, and copies nothing.
+  const copy = box.locator("[data-copy]");
+  await page.keyboard.down("Enter");
+  await copy.focus();
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.up("Enter");
+  await page.waitForTimeout(100);
+  await expect(copy).toHaveText("Copy");
+  expect(await clipboard()).toBe("EMPTY");
+
+  await copy.click();
+  await expect(copy).toHaveText("Copied");
+  expect(await clipboard()).toBe(TOKEN);
+  // So does one deliberate Enter on it.
+  await page.evaluate(() => navigator.clipboard.writeText("EMPTY"));
+  await copy.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(clipboard).toBe(TOKEN);
+});
+
+test("while an agent is being created the page is inert: a rail link does nothing, leaving asks first, and the dialog then appears", async ({
+  page,
+}) => {
+  const inert = () =>
+    page.evaluate(
+      () => document.querySelector("main")?.closest("[inert]") !== null,
+    );
+  const asksBeforeLeaving = () =>
+    page.evaluate(() => {
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      return leaving.defaultPrevented;
+    });
+
+  await open(page, "?slow=1");
+  expect(await inert()).toBe(false);
+  expect(await asksBeforeLeaving()).toBe(false);
+  const link = page
+    .getByRole("navigation", { name: "Main" })
+    .locator('a[href="/vault"]');
+  const at = await link.boundingBox();
+  expect(at).not.toBeNull();
+
+  await create(page);
+  expect(await inert()).toBe(true);
+  expect(await asksBeforeLeaving()).toBe(true);
+  await page.mouse.click(at!.x + at!.width / 2, at!.y + at!.height / 2);
+  await page.waitForTimeout(300);
+  await expect(page).toHaveURL(/\/dev\/settings\?slow=1$/);
+  await expect(dialog(page)).toHaveCount(0);
+
+  await expect(dialog(page)).toBeVisible();
+  await expect(dialog(page).getByLabel("Token")).toHaveValue(TOKEN);
+  await expect(page).toHaveURL(/\/dev\/settings\?slow=1$/);
+  expect(await calls(page)).toHaveLength(1);
+});
+
+test("a slow create that is refused gives the page back, with the focus in the form", async ({
+  page,
+}) => {
+  const inert = () =>
+    page.evaluate(
+      () => document.querySelector("main")?.closest("[inert]") !== null,
+    );
+  const asksBeforeLeaving = () =>
+    page.evaluate(() => {
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      return leaving.defaultPrevented;
+    });
+  await open(page, "?slow=1&fail=1");
+  await create(page);
+  expect(await inert()).toBe(true);
+  const form = connectForm(page);
+  await expect(form).toContainText(FAILED);
+  expect(await inert()).toBe(false);
+  expect(await asksBeforeLeaving()).toBe(false);
+  await expect(form.getByLabel("Name", { exact: true })).toBeFocused();
+  await expect(form.getByLabel("Name", { exact: true })).toHaveValue(
+    "Desk agent",
+  );
 });

@@ -4,7 +4,8 @@
 // The token arrives as a prop from the screen's state and is drawn here and nowhere else; this
 // file writes it to no storage, no address, no log and no attribute. The dialog cannot be lost
 // by accident: Escape and a click outside do nothing, only Done closes it, and with it the
-// screen drops the token.
+// screen drops the token. Reload, tab close and Back are held off by the screen (`Settings`),
+// which owns the token. Nothing here copies it unless Copy is pressed on purpose.
 import { useEffect, useId, useRef, useState } from "react";
 import { MCP_COMMAND, envLine } from "./text";
 import s from "./settings.module.css";
@@ -23,7 +24,7 @@ export function TokenDialog({
   onDone: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  const copyButton = useRef<HTMLButtonElement>(null);
+  const title = useRef<HTMLHeadingElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copied, setCopied] = useState(false);
   const [byHand, setByHand] = useState(false);
@@ -31,8 +32,10 @@ export function TokenDialog({
   const warningId = useId();
   const fieldId = useId();
 
+  // The focus starts on the heading, not on a button: an Enter still held, or pressed again,
+  // from submitting the form must not put the token on the clipboard unasked.
   useEffect(() => {
-    copyButton.current?.focus();
+    title.current?.focus();
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
@@ -87,7 +90,7 @@ export function TokenDialog({
         aria-describedby={warningId}
         className={s.dialog}
       >
-        <h2 id={titleId} className={s.dialogTitle}>
+        <h2 ref={title} id={titleId} tabIndex={-1} className={s.dialogTitle}>
           Token for {agentName}
         </h2>
         <p id={warningId} className={s.warning}>
@@ -110,10 +113,13 @@ export function TokenDialog({
             onFocus={(e) => e.currentTarget.select()}
           />
           <button
-            ref={copyButton}
             type="button"
             className={s.primary}
             data-copy
+            // A key that is still held repeats; only a fresh press copies.
+            onKeyDown={(e) => {
+              if (e.repeat) e.preventDefault();
+            }}
             onClick={copy}
           >
             {copied ? "Copied" : "Copy"}

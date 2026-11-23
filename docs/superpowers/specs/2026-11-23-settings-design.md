@@ -109,7 +109,8 @@ not. Heading "Settings" with the hive's name. Two sections with mono labels.
     `claude mcp add` command with a placeholder for the path to the repository; a pointer to the
     instruction template in `docs/agent-integration.md` §5.
   - **Done** closes it. Escape and a click outside do **not** close it, so it cannot be lost by
-    accident. On close the token is dropped from memory and the list is re-read.
+    accident. The focus starts on the dialog's heading, not on Copy, so a held Enter copies
+    nothing. On close the token is dropped from memory and the list is re-read.
 - **Members.** A row per member: name, "you" where it applies, role. For the owner, **Add a
   member** opens a form in place: email, display name (1 to 60 characters), with the line "They
   need an account already. Inviting someone new comes later." Outcomes: added (the row appears);
@@ -187,7 +188,12 @@ All run as the person behind the session cookie. No permission logic in the app.
 - A revoked agent keeps working until its next sign-in, up to an hour.
 - The token passes through the server action's response to the browser that asked. That is the
   one place it is ever sent.
-- Old revoked agents accumulate in the list (newest 200 shown).
+- Old revoked agents accumulate in the list (200 shown, agents still in use first).
+- While the token dialog is open, reload and tab close ask first and browser Back is held on
+  the page; the page is locked while the create call runs. Back during that short wait is not
+  held.
+- No test proves the list is re-read from the server after an action: the sample page updates
+  its own data. Tried by hand on the real page.
 
 ## Review focus
 
