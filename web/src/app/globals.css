@@ -5,6 +5,10 @@
 
 :root {
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 0.18s;
+  --dur: 0.3s;
+  --dur-slow: 0.6s;
+  --rise-delay: 0s;
 }
 
 * {
@@ -118,5 +122,30 @@ textarea {
 
   :focus-visible {
     outline-color: Highlight;
+  }
+}
+
+/* Panels and cards enter once per page load: a 10 px rise and a fade. */
+.rise {
+  animation: rise 0.7s var(--ease) both;
+  animation-delay: var(--rise-delay, 0s);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.001s !important;
+    scroll-behavior: auto !important;
   }
 }

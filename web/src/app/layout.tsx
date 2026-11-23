@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { cookies } from "next/headers";
+import { createServerSupabase } from "../lib/supabase/server";
+import { AccountProvider } from "../shell/AccountContext";
 import { LookProvider } from "../shell/LookProvider";
 import { LOOK_COOKIE, parseLook } from "../theme/look";
+import { loadAccount, type Account } from "./account";
 import "./globals.css";
 
 // Self-hosted variable fonts (latin, normal style), copied from @fontsource-variable/* with
@@ -33,6 +36,14 @@ export default async function RootLayout({
   // The cookie is not trusted: only the four checked values reach the page.
   const jar = await cookies();
   const look = parseLook(jar.get(LOOK_COOKIE)?.value);
+  // The signed-in member for the rail. /login and /dev/* have no session: null there, and a
+  // failure never breaks a page.
+  let account: Account | null = null;
+  try {
+    account = await loadAccount(await createServerSupabase());
+  } catch {
+    account = null;
+  }
   return (
     <html
       lang="en"
@@ -43,7 +54,9 @@ export default async function RootLayout({
       data-dots={look.dots}
     >
       <body>
-        <LookProvider initial={look}>{children}</LookProvider>
+        <LookProvider initial={look}>
+          <AccountProvider account={account}>{children}</AccountProvider>
+        </LookProvider>
       </body>
     </html>
   );

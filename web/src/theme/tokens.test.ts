@@ -329,3 +329,13 @@ describe("adjustments", () => {
     }
   });
 });
+
+describe("--mark", () => {
+  it("fills the mark with the brand gradient only where the seed asks for it", () => {
+    for (const t of THEMES)
+      for (const m of MODES) {
+        const mark = baseTokens(t.id, m)["--mark"];
+        expect(mark).toBe(t.id === "hive" ? "var(--grad)" : "var(--fg)");
+      }
+  });
+});

@@ -10,7 +10,7 @@
 // cannot be fetched again, the page is inert from Create until Done, leaving asks first, and
 // Back stays here while the dialog is open.
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Shell } from "../shell/Shell";
 import { shortDate } from "../vault/format";
 import { TokenDialog } from "./TokenDialog";
@@ -376,7 +376,12 @@ export function Settings({
           the screen away before the token arrives, and the token is answered only once. */}
       <div className={s.page} inert={creating || shown || undefined}>
         <Shell current="settings" inbox={inbox} />
-        <main ref={panel} aria-label="Settings" className={s.panel}>
+        <main
+          ref={panel}
+          aria-label="Settings"
+          className={`${s.panel} rise`}
+          style={{ "--rise-delay": "0.08s" } as CSSProperties}
+        >
           <header className={s.bar}>
             <h1 ref={heading} tabIndex={-1} className={s.title}>
               Settings

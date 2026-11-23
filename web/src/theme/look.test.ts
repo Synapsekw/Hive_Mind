@@ -17,9 +17,9 @@ describe("parseLook", () => {
     expect(parseLook("")).toEqual(DEFAULT_LOOK);
   });
 
-  it("is keystone, dark, tinted, theme by default", () => {
+  it("is hive, dark, tinted, theme by default", () => {
     expect(DEFAULT_LOOK).toEqual({
-      theme: "keystone",
+      theme: "hive",
       mode: "dark",
       reach: "tinted",
       dots: "theme",
@@ -28,7 +28,7 @@ describe("parseLook", () => {
   });
 
   it("reads a full valid value", () => {
-    expect(parseLook("keystone.dark.tinted.theme")).toEqual(DEFAULT_LOOK);
+    expect(parseLook("hive.dark.tinted.theme")).toEqual(DEFAULT_LOOK);
     expect(parseLook("aurora.light.vivid.classic")).toEqual({
       theme: "aurora",
       mode: "light",
@@ -39,7 +39,7 @@ describe("parseLook", () => {
 
   it("falls back part by part", () => {
     expect(parseLook("nope.light.subtle.classic")).toEqual({
-      theme: "keystone",
+      theme: "hive",
       mode: "light",
       reach: "subtle",
       dots: "classic",
@@ -49,7 +49,7 @@ describe("parseLook", () => {
       ...DEFAULT_LOOK,
       theme: "aurora",
     });
-    expect(parseLook("keystone.dark")).toEqual(DEFAULT_LOOK);
+    expect(parseLook("hive.dark")).toEqual(DEFAULT_LOOK);
     expect(parseLook("graphite.sepia.loud.rainbow")).toEqual({
       ...DEFAULT_LOOK,
       theme: "graphite",
@@ -77,15 +77,28 @@ describe("formatLook", () => {
             expect(formatLook(parseLook(value))).toBe(value);
             count++;
           }
-    expect(count).toBe(17 * 2 * 3 * 2);
+    expect(count).toBe(18 * 2 * 3 * 2);
   });
 });
 
 describe("THEMES", () => {
-  it("has the 17 themes of themes.json, in order", () => {
-    expect(THEMES).toHaveLength(17);
+  it("has the 18 themes of themes.json, in order", () => {
+    expect(THEMES).toHaveLength(18);
     expect(THEMES.map((t) => t.id)).toEqual(data.themes.map((t) => t.id));
     expect(THEMES.map((t) => t.label)).toEqual(data.themes.map((t) => t.label));
     expect(THEMES[0]!.id).toBe(data.default);
+  });
+});
+
+describe("hive default", () => {
+  it("starts on the Hive theme when nothing is stored", () => {
+    expect(DEFAULT_LOOK.theme).toBe("hive");
+    expect(parseLook(undefined).theme).toBe("hive");
+    expect(THEMES[0]).toEqual({ id: "hive", label: "Hive" });
+    expect(THEMES).toHaveLength(18);
+  });
+
+  it("keeps a stored choice", () => {
+    expect(parseLook("keystone.dark.tinted.theme").theme).toBe("keystone");
   });
 });

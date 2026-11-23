@@ -587,6 +587,10 @@ for (const look of LOOKS)
       await card(page, PHOTO).click();
       const dialog = page.getByRole("dialog", { name: PHOTO.name });
       await expect(dialog.getByRole("img", { name: PHOTO.name })).toBeVisible();
+      // The viewer opens with a short fade and scale; measure it at rest.
+      await dialog.evaluate((el) =>
+        Promise.all(el.getAnimations().map((a) => a.finished)),
+      );
       const cover = await dialog.evaluate((el) => {
         const r = el.getBoundingClientRect();
         const img = el.querySelector("img")!.getBoundingClientRect();

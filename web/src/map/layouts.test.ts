@@ -5,9 +5,8 @@ import { fixturePayload } from "./fixture";
 import type { MapNode, MapPayload, View } from "./types";
 
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
-const FLAT: Exclude<View, "orbit">[] = [
+const FLAT: Exclude<View, "orbit" | "hive">[] = [
   "rings",
-  "circle",
   "topics",
   "links",
   "timeline",

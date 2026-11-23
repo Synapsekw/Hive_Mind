@@ -140,24 +140,6 @@ function topics(model: MapModel, p: Parts): P2[] {
   return out;
 }
 
-function circle(model: MapModel, p: Parts): P2[] {
-  const out = new Array<P2>(model.nodes.length);
-  out[0] = [CX, CY];
-  const A = p.agents.length;
-  p.agents.forEach((id, t) => {
-    out[id] = polar(110, (t * TAU) / A);
-  });
-  const R = [318, 306, 330] as const;
-  p.items.forEach((list, i) => {
-    const s = p.sec[i]!;
-    list.forEach((id, j) => {
-      out[id] = polar(R[j % 3]!, s.a0 + ((j + 0.5) * s.w) / list.length);
-    });
-    out[p.hubs[i]!] = polar(268, s.mid);
-  });
-  return out;
-}
-
 const X0 = 250;
 const CW = 51;
 const ITEM_Y0 = 430;
@@ -311,7 +293,7 @@ function inBox(pos: P2[]): P2[] {
  * `forceIterations(n)` passes (bounded at the 1,500-node cost): cache it.
  */
 export function layout(
-  view: Exclude<View, "orbit">,
+  view: Exclude<View, "orbit" | "hive">,
   model: MapModel,
   now: number,
 ): [number, number][] {
@@ -319,8 +301,6 @@ export function layout(
   switch (view) {
     case "rings":
       return inBox(rings(model, p));
-    case "circle":
-      return inBox(circle(model, p));
     case "topics":
       return inBox(topics(model, p));
     case "timeline":

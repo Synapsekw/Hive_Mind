@@ -159,6 +159,41 @@
 
 /* ---- An agent: who it is on the left, Revoke on the right, a hairline above ---- */
 
+.item,
+.member {
+  position: relative;
+  isolation: isolate;
+}
+
+/* The shared row hover: a fill fades in behind the row, the hairline above it brightens. */
+.item::before,
+.member::before {
+  content: "";
+  position: absolute;
+  inset: 0 -12px;
+  z-index: -1;
+  border-radius: 12px;
+  background: var(--fill);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+  pointer-events: none;
+}
+
+.item:hover::before,
+.member:hover::before {
+  opacity: 1;
+}
+
+.item,
+.member {
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.item:hover,
+.member:hover {
+  border-top-color: var(--line-hi);
+}
+
 .item {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -285,11 +320,14 @@
   border: 0;
   background: var(--grad);
   color: var(--on-brand);
-  transition: filter 0.18s var(--ease);
+  transition:
+    filter var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 
 .primary:hover {
   filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 
 .secondary,
@@ -442,6 +480,13 @@
 @keyframes arrive {
   from {
     opacity: 0;
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
   }
 }
 
@@ -661,6 +706,8 @@
 }
 
 .dialog {
+  animation: pop var(--dur) var(--ease);
+  transform-origin: center;
   width: min(620px, 100%);
   max-height: 100%;
   overflow-y: auto;
@@ -836,6 +883,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .primary:hover {
+    transform: none;
+  }
+
+  .dialog,
+  .item::before,
+  .member::before,
+  .item,
+  .member,
   .primary,
   .secondary,
   .confirm,
@@ -848,6 +904,7 @@
 
   .form,
   .notice,
+  .dialog,
   .scrim {
     animation: none;
   }

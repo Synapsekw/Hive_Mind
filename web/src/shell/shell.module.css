@@ -27,8 +27,13 @@
   flex: none;
   width: 18px;
   height: 18px;
-  background: var(--fg);
+  background: var(--mark);
   clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%);
+  transition: transform 0.8s var(--ease);
+}
+
+.brand:hover .mark {
+  transform: rotate(60deg);
 }
 
 .brandName {
@@ -37,9 +42,10 @@
   letter-spacing: -0.01em;
 }
 
-/* ---- Rows: destinations, Appearance, sign out ---- */
+/* ---- Rows: the destinations ---- */
 
 .links {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -67,7 +73,6 @@
 }
 
 .row:hover {
-  background: var(--fill);
   color: var(--fg);
 }
 
@@ -76,16 +81,51 @@
   color: var(--fg);
 }
 
-/* The 3 px bar on the rail's outer edge marks where you are. */
-.row[aria-current="page"]::before {
+/* The hover fill grows from the left; the row's own contents sit above it. */
+.link::before {
   content: "";
   position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 8px;
+  background: var(--fill-on);
+  opacity: 0;
+  transform: scaleX(0.6);
+  transform-origin: left center;
+  transition:
+    transform 0.35s var(--ease),
+    opacity 0.35s var(--ease);
+}
+
+.link:hover::before {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.link > * {
+  position: relative;
+  z-index: 1;
+}
+
+.link .slot {
+  transition: transform 0.35s var(--ease);
+}
+
+.link:hover .slot {
+  transform: translateX(2px) scale(1.08);
+}
+
+/* One 3 px bar on the rail's outer edge marks where you are; it slides between rows. */
+.bar {
+  position: absolute;
   left: -12px;
-  top: 6px;
-  bottom: 6px;
+  top: 0;
   width: 3px;
+  height: 20px;
   border-radius: 0 3px 3px 0;
   background: var(--grad);
+  box-shadow: 0 0 12px var(--brand);
+  transition: transform 0.45s var(--ease);
 }
 
 .rail .control:focus-visible {
@@ -128,7 +168,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- Agents, Appearance and sign out, at the foot ---- */
+/* ---- The foot: agents card and account button ---- */
 
 .foot {
   margin-top: auto;
@@ -137,37 +177,101 @@
   gap: 2px;
 }
 
-.heading {
-  margin: 0 0 6px 4px;
-  font-family: var(--font-mono), monospace;
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+/* The agents card: one line of status, opening to one row per agent. */
+.agents {
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--glass2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+}
+
+.agentsHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
   color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.18s var(--ease);
+}
+
+.agentsHead:hover {
+  color: var(--fg);
+}
+
+.agentsText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agentsText b {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.dotStack {
+  display: flex;
+  gap: 2px;
+}
+
+.chevron {
+  flex: none;
+  transition: transform 0.4s var(--ease);
+}
+
+.agents[data-open] .chevron,
+.accountButton[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+.agentsBody {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.4s var(--ease);
+}
+
+.agents[data-open] .agentsBody {
+  grid-template-rows: 1fr;
 }
 
 .agentList {
-  margin: 0 0 10px;
-  padding: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0 10px;
   list-style: none;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.agent {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
-  min-height: 28px;
+.agents[data-open] .agentList {
+  padding-bottom: 8px;
 }
 
-.agent .slot {
-  height: 20px;
+.agent {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
 }
 
 .agentDot {
+  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -176,26 +280,153 @@
 
 .agentDot[data-on] {
   background: var(--grad);
+  animation: alive 2.4s ease-in-out infinite;
+}
+
+@keyframes alive {
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .agentName {
   min-width: 0;
-  padding-left: 4px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 13px;
 }
 
-.agentStatus {
-  grid-column: 2;
+.agentWhen {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---- The account button and its menu ---- */
+
+.account {
+  position: relative;
+}
+
+.accountButton {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--glass2);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s var(--ease);
+}
+
+.accountButton:hover {
+  border-color: var(--line-hi);
+}
+
+.avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--grad);
+  color: var(--on-brand);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.accountText {
+  flex: 1;
   min-width: 0;
-  padding-left: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.accountName {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.accountMeta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
   color: var(--muted);
+}
+
+/* Opens upwards from the button; data-scope="reset" gives it the solid surface and dark text. */
+.menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px var(--line);
+  color: var(--fg);
+  transform-origin: bottom center;
+  animation: menu-in 0.3s var(--ease) both;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.18s var(--ease);
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  background: var(--fill);
+}
+
+.menu .menuItem:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+}
+
+.menuLabel {
+  flex: 1;
+  min-width: 0;
 }
 
 .signOutForm {
@@ -204,12 +435,8 @@
 
 /* ---- Appearance ---- */
 
-.appearance {
-  display: flex;
-  flex-direction: column;
-}
-
 .current {
+  flex: none;
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -222,22 +449,20 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  padding-right: 6px;
   font-size: 12px;
+  color: var(--muted);
 }
 
-/* A reset scope: dark text on a light surface even inside the white light-mode rail. */
+/* The panel sits inside the menu, which is already the reset scope. */
 .popover {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin: 6px 0 4px;
-  padding: 12px;
+  margin: 4px 0;
+  padding: 10px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
+  border-radius: 10px;
+  background: var(--fill);
   color: var(--fg);
 }
 
@@ -319,7 +544,7 @@
 }
 
 /* Side by side from 1100 x 560, the page is one window tall: the rail scrolls on its own if
-   the open panel makes it run long. */
+   its contents run long. The menu is absolute and opens upwards, so it stays inside the rail. */
 @media (min-width: 1100px) and (min-height: 560px) {
   .rail {
     min-height: 0;
@@ -331,8 +556,20 @@
 
 @media (prefers-reduced-motion: reduce) {
   .row,
-  .segment {
+  .segment,
+  .link::before,
+  .link .slot,
+  .bar,
+  .mark,
+  .chevron,
+  .agentsBody,
+  .menuItem {
     transition: none;
+  }
+
+  .agentDot[data-on],
+  .menu {
+    animation: none;
   }
 }
 
@@ -361,9 +598,10 @@
     outline-offset: -1px;
   }
 
-  .row[aria-current="page"]::before {
+  .bar {
     forced-color-adjust: none;
     background: Highlight;
+    box-shadow: none;
   }
 
   .count {

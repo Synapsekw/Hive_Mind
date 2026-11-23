@@ -756,6 +756,9 @@ function resolve(theme: string, mode: Mode): Resolved {
     [s.brand2, "--grad brand-2"],
   ]);
   const onBrand = run("--on-brand", opaque(f.onBrand), grad, 4.5);
+  const markFill = (
+    data.themes.find((x) => x.id === theme) as { mark?: string }
+  ).mark;
 
   const base: Tokens = {
     "--brand": css(s.brand),
@@ -779,6 +782,7 @@ function resolve(theme: string, mode: Mode): Resolved {
     "--on-brand": css(onBrand),
     "--wash": `linear-gradient(168deg, ${css(s.wash[0]!)} 0%, ${css(s.wash[1]!)} 46%, ${css(s.wash[2]!)} 100%)`,
     "--bloom": bloomCss(blooms(s, mode)),
+    "--mark": markFill === "brand" ? "var(--grad)" : "var(--fg)",
   };
 
   // Light mode "bold frame": white text on the saturated wash (prototype line 36).

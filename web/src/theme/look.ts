@@ -15,7 +15,7 @@ export const MODES: readonly Mode[] = ["dark", "light"];
 export const REACHES: readonly Reach[] = ["subtle", "tinted", "vivid"];
 export const DOT_MODES: readonly DotMode[] = ["theme", "classic"];
 export const DEFAULT_LOOK: Look = {
-  theme: "keystone",
+  theme: data.default as string,
   mode: "dark",
   reach: "tinted",
   dots: "theme",
