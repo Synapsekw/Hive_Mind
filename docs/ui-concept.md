@@ -158,10 +158,11 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 - **Settings** — workspaces and tokens, connected agents and setup instructions, sharing defaults,
   members and roles, audit log. Built so far: your own agents (connect, token shown once,
   revoke) and the member list. Under Members the owner has an **Invite a member** form (email
-  and display name): a person with an account is added at once, anyone else is listed under
-  **Invitations** with name, email, invited and expiry dates and **Revoke**. After an invitation
-  is saved a notice stays until dismissed, with the sign-in address to pass on and **Copy
-  address**. A member who is not the owner sees neither the form nor the invitations.
+  and display name). Nobody is added at once: the server emails the address an invitation, and
+  the person joins on the `/join` page by pressing **Join**. Every invited address is listed
+  under **Invitations** with name, email, invited and expiry dates, **Send again** and
+  **Revoke**. A notice says the invitation was sent, or that it was saved but the email could
+  not be sent. A member who is not the owner sees neither the form nor the invitations.
 
 ## 5. Overlays and states
 

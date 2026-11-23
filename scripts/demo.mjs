@@ -3,7 +3,7 @@
 // runs anywhere with `pnpm demo`. Nothing is stored afterwards.
 import { openDb } from "./local-db.mjs";
 
-const { db, as, addUser } = await openDb();
+const { db, as, addUser, addMember } = await openDb();
 const say = (text = "") => console.log(text);
 const step = (text) => console.log(`\n== ${text}`);
 
@@ -54,9 +54,8 @@ const ahmed = person(await addUser("ahmed@example.com"));
 const hive = (
   await as(dani, `select public.create_hive('Demo hive', 'Dani') as id`)
 )[0].id;
-await as(dani, `select public.add_member($1, 'ahmed@example.com', 'Ahmed')`, [
-  hive,
-]);
+// In the app Ahmed would get an invitation by email and press Join.
+await addMember(hive, ahmed.sub, "Ahmed");
 const wsOf = async (who) =>
   (await as(who, `select id from public.workspaces`))[0].id;
 say("   Two members, each with their own private workspace.");

@@ -15,9 +15,12 @@ import { Shell } from "../shell/Shell";
 import { shortDate } from "../vault/format";
 import { TokenDialog } from "./TokenDialog";
 import {
+  INVITATIONS_NOTE,
   INVITE_HELP,
   inviteFailure,
   inviteNotice,
+  sendFailure,
+  sentAgain,
   sortAgents,
   statusText,
   tierHelp,
@@ -31,6 +34,7 @@ import {
   type Invited,
   type NewAgent,
   type Provider,
+  type Sent,
   type SettingsActions,
   type SettingsData,
   type TrustTier,
@@ -39,13 +43,10 @@ import {
 import s from "./settings.module.css";
 
 const FAILED = "That didn't work. Try again.";
-const ADDRESS_BY_HAND = "Select the address and copy it by hand.";
 /** A confirming Revoke sooner than this after the question opened is taken as a double click. */
 const CONFIRM_AFTER_MS = 500;
 /** How long Done waits for its own step back in the history before reading the list anyway. */
 const UNHOLD_MS = 1000;
-/** How long Copy address says "Copied". */
-const COPIED_MS = 2000;
 const NAME_MAX = 60;
 const EMAIL_MAX = 254;
 const TIERS: TrustTier[] = ["vendor", "self_hosted"];
@@ -60,12 +61,17 @@ type Target =
   | { form: "connect" | "invite" }
   | { row: string; pick?: "keep" | "revoke" };
 
-/** What the owner passes on after an invitation is saved. Kept until dismissed. */
-type Notice = { name: string; email: string; address: string };
+/** Whether a new invitation's email went out. Kept until dismissed. */
+type Notice = { name: string; email: string; sent: boolean };
 
 const withId = (set: ReadonlySet<string>, id: string) => new Set(set).add(id);
 const without = (set: ReadonlySet<string>, id: string) => {
   const next = new Set(set);
+  next.delete(id);
+  return next;
+};
+const forgetting = (map: ReadonlyMap<string, string>, id: string) => {
+  const next = new Map(map);
   next.delete(id);
   return next;
 };
@@ -98,6 +104,8 @@ export function Settings({
   const [revoked, setRevoked] = useState<ReadonlySet<string>>(new Set());
   // Invitations answered `ok` to a revoke before the refresh takes them away.
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  // Invitations whose Send again was refused, each with the sentence that says why.
+  const [unsent, setUnsent] = useState<ReadonlyMap<string, string>>(new Map());
   const [notice, setNotice] = useState<Notice | null>(null);
   // The new agent's token, from the answer until Done. Only the dialog draws it.
   const [fresh, setFresh] = useState<{ token: string; name: string } | null>(
@@ -252,7 +260,7 @@ export function Settings({
     window.history.back();
   }
 
-  /** Null when the person was added or invited, else the sentence that says why not. */
+  /** Null when the invitation was saved, else the sentence that says why not. */
   async function invite(email: string, name: string): Promise<string | null> {
     if (running.current) return null;
     running.current = true;
@@ -266,10 +274,7 @@ export function Settings({
     }
     running.current = false;
     setBusy(null);
-    if (
-      answer.ok !== true ||
-      (answer.outcome !== "added" && answer.outcome !== "invited")
-    ) {
+    if (answer.ok !== true || typeof answer.sent !== "boolean") {
       const why =
         (answer.ok === false ? inviteFailure(answer.reason) : null) ?? FAILED;
       setSaid(why);
@@ -277,9 +282,8 @@ export function Settings({
     }
     target.current = { button: "invite" };
     setOpen(null);
-    if (answer.outcome === "added") setSaid(`${name} added.`);
     // The notice says it itself: it is a status.
-    else setNotice({ name, email, address: `${window.location.origin}/login` });
+    setNotice({ name, email, sent: answer.sent });
     router.refresh();
     return null;
   }
@@ -296,6 +300,7 @@ export function Settings({
     running.current = true;
     setBusy(invitation.id);
     setFailed((set) => without(set, invitation.id));
+    setUnsent((map) => forgetting(map, invitation.id));
     setSaid("");
     let ok = false;
     try {
@@ -316,12 +321,46 @@ export function Settings({
     target.current =
       open?.kind === "invite" ? { form: "invite" } : { button: "invite" };
     setGone((set) => withId(set, invitation.id));
-    // The sentence to pass on is no longer true once its invitation is revoked.
+    // The notice is no longer true once its invitation is revoked.
     setNotice((n) =>
       n && n.email.toLowerCase() === invitation.email.toLowerCase() ? null : n,
     );
     setSaid(`Invitation for ${invitation.name} revoked.`);
     router.refresh();
+  }
+
+  /** Send again: one step, like revoking. The row and the focus stay where they are. */
+  async function resendInvitation(invitation: Invitation) {
+    if (running.current) return;
+    running.current = true;
+    setBusy(invitation.id);
+    setFailed((set) => without(set, invitation.id));
+    setUnsent((map) => forgetting(map, invitation.id));
+    setSaid("");
+    let answer: Sent = { ok: false, reason: "failed" };
+    try {
+      answer = await actions.resendInvitation(invitation.id);
+    } catch {
+      answer = { ok: false, reason: "failed" };
+    }
+    running.current = false;
+    setBusy(null);
+    if (answer.ok !== true) {
+      const why = sendFailure(answer.reason) ?? FAILED;
+      setUnsent((map) => new Map(map).set(invitation.id, why));
+      setSaid(why);
+      // It may be refused because it is already accepted or revoked: read the list again.
+      if (answer.reason !== "wait" && answer.reason !== "limit")
+        router.refresh();
+      return;
+    }
+    // A notice that says this invitation's email could not be sent is no longer true.
+    setNotice((n) =>
+      n && !n.sent && n.email.toLowerCase() === invitation.email.toLowerCase()
+        ? null
+        : n,
+    );
+    setSaid(sentAgain(invitation.name));
   }
 
   function ask(id: string) {
@@ -480,11 +519,7 @@ export function Settings({
                 />
               )}
               {data.isOwner && (
-                <InviteNotice
-                  notice={notice}
-                  onDismiss={dismiss}
-                  onSay={setSaid}
-                />
+                <InviteNotice notice={notice} onDismiss={dismiss} />
               )}
               <ul role="list" aria-label="Members" className={s.rows}>
                 {data.members.map((m) => (
@@ -511,10 +546,7 @@ export function Settings({
                       <span id="settings-invitations">Invitations</span>
                       <span className={s.count}>{invitations.length}</span>
                     </h2>
-                    <p className={s.note}>
-                      Not members yet. Each joins when they first sign in with
-                      the invited email.
-                    </p>
+                    <p className={s.note}>{INVITATIONS_NOTE}</p>
                   </div>
                 </div>
                 <ul role="list" aria-label="Invitations" className={s.rows}>
@@ -525,6 +557,8 @@ export function Settings({
                       now={now}
                       busy={busy === i.id}
                       failed={failed.has(i.id)}
+                      unsent={unsent.get(i.id) ?? null}
+                      onResend={() => void resendInvitation(i)}
                       onRevoke={() => void revokeInvitation(i)}
                     />
                   ))}
@@ -649,18 +683,25 @@ function AgentRow({
   );
 }
 
-/** An open invitation: who, where it was sent, until when, and Revoke in one step. */
+/**
+ * An open invitation: who, where it was sent, until when, and Send again and Revoke, each in
+ * one step. `unsent` is why the last Send again did not happen.
+ */
 function InvitationRow({
   invitation,
   now,
   busy,
   failed,
+  unsent,
+  onResend,
   onRevoke,
 }: {
   invitation: Invitation;
   now: number;
   busy: boolean;
   failed: boolean;
+  unsent: string | null;
+  onResend: () => void;
   onRevoke: () => void;
 }) {
   return (
@@ -682,6 +723,15 @@ function InvitationRow({
           <button
             type="button"
             className={s.secondary}
+            aria-label={`Send again to ${invitation.name}`}
+            aria-disabled={busy || undefined}
+            onClick={onResend}
+          >
+            Send again
+          </button>
+          <button
+            type="button"
+            className={s.secondary}
             aria-label={`Revoke invitation for ${invitation.name}`}
             aria-disabled={busy || undefined}
             onClick={onRevoke}
@@ -689,6 +739,7 @@ function InvitationRow({
             Revoke
           </button>
         </div>
+        {unsent && <p className={s.refused}>{unsent}</p>}
         {failed && <p className={s.refused}>{FAILED}</p>}
       </div>
     </li>
@@ -696,90 +747,28 @@ function InvitationRow({
 }
 
 /**
- * The sentence the owner passes on to the invited person. The status element is always in the
- * page, empty until there is something to say, so that what arrives in it is announced.
+ * Whether the new invitation's email went out. The status element is always in the page, empty
+ * until there is something to say, so that what arrives in it is announced.
  */
 function InviteNotice({
   notice,
   onDismiss,
-  onSay,
 }: {
   notice: Notice | null;
   onDismiss: () => void;
-  onSay: (text: string) => void;
 }) {
   return (
     <div className={notice ? s.notice : undefined}>
       <div role="status" className={notice ? s.noticeText : undefined}>
-        {notice
-          ? inviteNotice(notice.name, notice.email, notice.address)
-          : null}
+        {notice ? inviteNotice(notice.email, notice.sent) : null}
       </div>
       {notice && (
-        <NoticeActions
-          key={`${notice.email} ${notice.name}`}
-          address={notice.address}
-          onDismiss={onDismiss}
-          onSay={onSay}
-        />
+        <div className={s.noticeActions}>
+          <button type="button" className={s.secondary} onClick={onDismiss}>
+            Dismiss
+          </button>
+        </div>
       )}
-    </div>
-  );
-}
-
-function NoticeActions({
-  address,
-  onDismiss,
-  onSay,
-}: {
-  address: string;
-  onDismiss: () => void;
-  onSay: (text: string) => void;
-}) {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [byHand, setByHand] = useState(false);
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  async function copy() {
-    let ok = false;
-    try {
-      await navigator.clipboard.writeText(address);
-      ok = true;
-    } catch {
-      ok = false;
-    }
-    if (timer.current) clearTimeout(timer.current);
-    setByHand(!ok);
-    setCopied(ok);
-    onSay(ok ? "Address copied." : ADDRESS_BY_HAND);
-    if (ok) timer.current = setTimeout(() => setCopied(false), COPIED_MS);
-  }
-
-  return (
-    <div className={s.noticeActions}>
-      {byHand && <p className={s.refused}>{ADDRESS_BY_HAND}</p>}
-      <button
-        type="button"
-        className={s.secondary}
-        data-copy
-        // A key that is still held repeats; only a fresh press copies.
-        onKeyDown={(e) => {
-          if (e.repeat) e.preventDefault();
-        }}
-        onClick={() => void copy()}
-      >
-        {copied ? "Copied" : "Copy address"}
-      </button>
-      <button type="button" className={s.secondary} onClick={onDismiss}>
-        Dismiss
-      </button>
     </div>
   );
 }

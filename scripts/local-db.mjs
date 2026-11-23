@@ -86,6 +86,25 @@ export async function openDb() {
     return r.rows[0].id;
   }
 
+  // Put a person into a hive with their own Main workspace, as the database
+  // owner. People join by accepting an invitation (accept_invitation); this is
+  // for tests and the demo, where a hive with members is only the setting.
+  // Returns the member's id.
+  async function addMember(hiveId, userId, displayName) {
+    await db.exec("reset role");
+    const r = await db.query(
+      `insert into public.members (hive_id, user_id, display_name)
+       values ($1, $2, $3) returning id`,
+      [hiveId, userId, displayName],
+    );
+    await db.query(
+      `insert into public.workspaces (hive_id, member_id, name)
+       values ($1, $2, 'Main')`,
+      [hiveId, r.rows[0].id],
+    );
+    return r.rows[0].id;
+  }
+
   // An app registered at the sign-in server. `uris` is the text stored in
   // redirect_uris, exactly as given. Returns the client's id.
   async function addClient(name, uris, { deleted = false } = {}) {
@@ -111,5 +130,5 @@ export async function openDb() {
     );
   }
 
-  return { db, as, addUser, addClient, addConsent };
+  return { db, as, addUser, addMember, addClient, addConsent };
 }

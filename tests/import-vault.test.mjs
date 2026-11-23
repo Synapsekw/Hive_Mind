@@ -16,7 +16,7 @@ import {
   personSession,
 } from "../scripts/import-vault.mjs";
 
-const { db, as } = await openDb();
+const { db, as, addMember } = await openDb();
 let folder, dani, ahmed, store, hive;
 
 const put = (rel, text) => {
@@ -138,9 +138,7 @@ before(async () => {
   const d = await claims("dani@example.com");
   const a = await claims("ahmed@example.com");
   hive = (await as(d, `select public.create_hive('Hive', 'Dani') as id`))[0].id;
-  await as(d, `select public.add_member($1, 'ahmed@example.com', 'Ahmed')`, [
-    hive,
-  ]);
+  await addMember(hive, a.sub, "Ahmed");
   const member = async (c) =>
     (
       await as(c, `select id from public.members where user_id = $1`, [c.sub])

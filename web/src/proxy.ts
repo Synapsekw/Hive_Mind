@@ -12,12 +12,19 @@ const MACHINE = [/^\/mcp(\/|$)/, /^\/\.well-known(\/|$)/];
 // The approval window for a connecting app: a visitor is sent to sign in and comes back to the
 // same address, query included.
 const RETURNS = /^\/oauth\/consent(\/|$)/;
+// The Join page. A visitor with no session may see it only when the address carries an emailed
+// link's token (the page then shows one button, and spends nothing until it is pressed) or says
+// that a link has expired. Any other visit is sent to sign in and comes back to the plain page:
+// nothing of the query is carried along.
+const JOIN = /^\/join\/?$/;
+const JOIN_AFTER_SIGN_IN = `/login?next=${encodeURIComponent("/join")}`;
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   if (MACHINE.some((re) => re.test(pathname))) {
     return NextResponse.next({ request });
   }
+  const isJoin = JOIN.test(pathname);
   const isOpen = OPEN.some((re) => re.test(pathname));
   const isLogin = /^\/login(\/|$)/.test(pathname);
 
@@ -72,6 +79,12 @@ export async function proxy(request: NextRequest) {
     return res;
   };
 
+  if (!user && isJoin) {
+    const query = request.nextUrl.searchParams;
+    if (query.has("token_hash") || query.get("error") === "expired")
+      return response;
+    return redirect(JOIN_AFTER_SIGN_IN);
+  }
   if (!user && !isOpen) {
     return redirect(
       RETURNS.test(pathname)

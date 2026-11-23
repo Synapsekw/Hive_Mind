@@ -2,7 +2,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createServerSupabase } from "../../../lib/supabase/server";
 import { safeNext } from "../../../lib/safe-next";
-import { claimIn } from "../claim";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -35,10 +34,8 @@ export async function GET(request: NextRequest) {
         token_hash: tokenHash,
       }));
     }
+    // Signing in joins nothing: an invited person joins a hive by pressing Join on `/join`.
     if (error) return failed();
-    // The person is signed in: join the hives that invited this email. It answers 0 instead of
-    // throwing, so a failure here never costs the person their sign-in.
-    await claimIn(supabase);
   } catch {
     return failed();
   }
