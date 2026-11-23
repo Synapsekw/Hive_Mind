@@ -1,0 +1,123 @@
+/* The Join page's own few rules, inside the sign-in card (login.module.css carries the card, the
+   buttons and the status line). Colours are tokens only, read with var(). */
+
+.heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg2);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hive,
+.by {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.hive {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.by {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* Join sits beside the hive's name: the card's primary button, without its top margin. */
+.item .join {
+  flex: none;
+  margin-top: 0;
+  padding: 0 16px;
+}
+
+/* A link drawn as the card's quiet button. */
+.link {
+  display: grid;
+  place-items: center;
+  text-decoration: none;
+}
+
+/* Who is signed in, under the list: the hint line's type, with a way out for someone else. */
+.account {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.email {
+  color: var(--fg2);
+}
+
+.signOut {
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg2);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color 0.24s var(--ease);
+}
+
+.signOut:hover {
+  color: var(--fg);
+}
+
+.signOut:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+/* Above Continue, when somebody is signed in already: set apart by a hairline box, the
+   card's own line and text tokens. */
+.warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-hi);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* One line on the list after Continue replaced another person's session. */
+.switched {
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+}

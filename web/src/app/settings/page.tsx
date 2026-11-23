@@ -5,6 +5,7 @@ import { loadInboxCount } from "../inbox/load-inbox";
 import {
   createAgent,
   inviteMember,
+  resendInvitation,
   revokeAgent,
   revokeInvitation,
 } from "./actions";
@@ -40,7 +41,13 @@ export default async function SettingsPage() {
       data={result.data}
       now={now}
       inbox={inbox}
-      actions={{ createAgent, revokeAgent, inviteMember, revokeInvitation }}
+      actions={{
+        createAgent,
+        revokeAgent,
+        inviteMember,
+        revokeInvitation,
+        resendInvitation,
+      }}
     />
   );
 }

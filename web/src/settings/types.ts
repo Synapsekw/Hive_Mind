@@ -62,15 +62,25 @@ export type NewAgent = {
 
 export type Result = { ok: boolean };
 export type Created = { ok: true; token: string } | { ok: false };
-export type InviteReason = "already-member" | "already-invited" | "failed";
-/** `added`: the person had an account and is a member now. `invited`: they join at first sign-in. */
+export type InviteReason =
+  "already-member" | "already-invited" | "too-many" | "failed";
+/**
+ * Inviting never makes anyone a member: the person joins by pressing Join. `id` is the saved
+ * invitation; `sent` is false when it was saved but its email could not be sent.
+ */
 export type Invited =
-  | { ok: true; outcome: "added" | "invited" }
-  | { ok: false; reason: InviteReason };
+  { ok: true; id: string; sent: boolean } | { ok: false; reason: InviteReason };
+/**
+ * Sending an invitation's email again. `wait`: one went out under two minutes ago. `limit`:
+ * this invitation has had all the emails it may have.
+ */
+export type Sent =
+  { ok: true } | { ok: false; reason: "wait" | "limit" | "failed" };
 
 export type SettingsActions = {
   createAgent(input: NewAgent): Promise<Created>;
   revokeAgent(id: string): Promise<Result>;
   inviteMember(email: string, name: string): Promise<Invited>;
   revokeInvitation(id: string): Promise<Result>;
+  resendInvitation(id: string): Promise<Sent>;
 };

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  INVITATIONS_NOTE,
   INVITE_HELP,
   MCP_COMMAND,
   envLine,
   inviteFailure,
   inviteNotice,
+  sendFailure,
+  sentAgain,
   sortAgents,
   statusText,
   tierHelp,
@@ -64,33 +67,68 @@ describe("inviteFailure", () => {
   it.each([
     ["already-member", "That person is already a member."],
     ["already-invited", "That email is already invited."],
+    ["too-many", "Too many invitations today. Try again tomorrow."],
     ["failed", "That didn't work. Try again."],
   ] as const)("%s → %j", (reason, text) => {
     expect(inviteFailure(reason)).toBe(text);
   });
 });
 
+describe("sendFailure", () => {
+  it.each([
+    ["wait", "Sent a moment ago. Wait two minutes and try again."],
+    [
+      "limit",
+      "This address has had as many invitation emails as allowed. Try again tomorrow.",
+    ],
+    ["failed", "That didn't work. Try again."],
+  ] as const)("%s → %j", (reason, text) => {
+    expect(sendFailure(reason)).toBe(text);
+  });
+});
+
 describe("inviteNotice", () => {
-  it("tells the owner what the invited person has to do", () => {
-    expect(
-      inviteNotice("Lena", "lena@example.com", "https://hive.example/login"),
-    ).toBe(
-      "Invitation saved. Ask Lena to open https://hive.example/login, enter lena@example.com and choose Email me a link.",
+  it("says where the invitation was sent", () => {
+    expect(inviteNotice("lena@example.com", true)).toBe(
+      "Invitation sent to lena@example.com.",
     );
   });
 
-  it("uses the name, the email and the address it was given", () => {
-    expect(inviteNotice("Marko", "marko@example.com", "localhost:3000")).toBe(
-      "Invitation saved. Ask Marko to open localhost:3000, enter marko@example.com and choose Email me a link.",
+  it("says what to do when the email could not be sent", () => {
+    expect(inviteNotice("lena@example.com", false)).toBe(
+      "Invitation saved, but the email could not be sent. Wait two minutes, then use Send again.",
     );
   });
 });
 
-describe("INVITE_HELP", () => {
-  it("says when the invited person joins", () => {
+describe("sentAgain", () => {
+  it("says whose invitation was sent again", () => {
+    expect(sentAgain("Lena")).toBe("Invitation for Lena sent again.");
+  });
+});
+
+describe("the texts about joining", () => {
+  it("INVITE_HELP says the person gets an email and joins by pressing Join", () => {
     expect(INVITE_HELP).toBe(
-      "If they have an account they are added now. Otherwise they join when they first sign in with this email.",
+      "They get an email with a link to the invitation and become a member when they press Join.",
     );
+  });
+
+  it("INVITATIONS_NOTE says the same of the open invitations", () => {
+    expect(INVITATIONS_NOTE).toBe(
+      "Not members yet. Each has an email with a link and joins by pressing Join.",
+    );
+  });
+
+  it("no text tells the owner to pass an address on, or says anyone is added", () => {
+    const all = [
+      INVITE_HELP,
+      INVITATIONS_NOTE,
+      inviteNotice("lena@example.com", true),
+      inviteNotice("lena@example.com", false),
+      sentAgain("Lena"),
+    ].join(" ");
+    expect(all).not.toMatch(/added|Ask |\/login|first sign in/);
   });
 });
 

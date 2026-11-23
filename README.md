@@ -16,6 +16,8 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
 - An MCP server with seven tools (six of them also through the remote connector), proven against the live project by `pnpm test:live`.
 - An Edge Function, `agent-session`, that exchanges an agent token for a one-hour identity, so
   an agent's machine holds only its own token.
+- Emailed invitations: the owner invites an address, an Edge Function, `invite-email`, mails it,
+  and the person joins by pressing Join.
 - An importer for a folder of markdown notes.
 - The web app (`web/`) has sign-in, the map, the vault, where a person reads their notes,
   decides who may read them and can delete a note of their own, and the gallery, where they view, download and delete the files
@@ -53,8 +55,8 @@ key) and an agent token. No JWT secret is needed any more; remove `SUPABASE_JWT_
 older `.env`. The four `HIVE_PERSON_*` values are optional and safest left empty: `pnpm
 test:live` needs the password of the account behind the agent token, which on a hive whose
 agent belongs to the owner is the owner's own, and skips its person checks without them. The
-hosted dev project is `tokyttkztrkjvkaksdnh`; all eight migrations are applied to it and it holds
-one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
+hosted dev project is `tokyttkztrkjvkaksdnh`; it holds one hive, and which migrations are applied
+to it is listed in [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md).
 
 ### Run the web app
 
@@ -95,13 +97,19 @@ agent** creates one and shows its token once; copy it then, because it cannot be
 **Revoke** stops an agent within the hour.
 
 To bring a person into the hive, the owner chooses **Settings → Members → Invite a member** and
-enters the person's email and a display name. A person who already has an account with a
-confirmed email is added at once. Anyone else gets an invitation and joins the first time they
-sign in with that email: they open the sign-in page, enter the email and choose **Email me a
-link**. The app sends no email, so the owner passes the sign-in address on themselves; Settings
-shows it with a **Copy address** button. An invitation lasts 14 days and the owner can revoke it
-under **Invitations**. It needs the `invitations` migration on the database and two project
-settings (see [docs/security.md](docs/security.md#3-identity-and-tokens)).
+enters the person's email and a display name. The server emails that address an invitation with
+one button, **Open invitation**. It opens `/join`, where the person chooses **Continue**, is
+signed in, sees which hive invited them and chooses **Join**. Nobody becomes a member without
+pressing Join, whether or not they already have an account. An invitation lasts 14 days; under
+**Invitations** the owner can **Revoke** it or **Send again** (at most once every two minutes
+and five emails per invitation; a hive, and a person across all their hives, can make 20
+invitations a day). The link in the email
+works once and for 24 hours; after that the person signs in with **Email me a link** using the
+invited address, or the owner sends again. It needs the `emailed_invitations` migration, the
+`invite-email` Edge Function with its secrets, and mail set up on the project (see
+[docs/hosted-db-bringup.md](docs/hosted-db-bringup.md#invitation-email) and
+[docs/security.md](docs/security.md#3-identity-and-tokens)). Without them the invitation is
+saved but no email goes out.
 
 `/dev/map`, `/dev/vault`, `/dev/gallery`, `/dev/inbox` and `/dev/settings` show the screens on sample data, without an
 account; `/dev/notice` shows the failed-load notice.
@@ -216,5 +224,5 @@ links and attached files it had.
 
 ## Not built yet
 
-The rest of the web app (chat, settings, an audit-log screen), file storage, entity detection, automatic link discovery, synthesis
+The rest of the web app (chat, an audit-log screen), file storage, entity detection, automatic link discovery, synthesis
 pages, the housekeeper, semantic search, hosted sign-in.

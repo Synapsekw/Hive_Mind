@@ -15,8 +15,7 @@ const COPY = {
   linkFailed:
     "Couldn't send the link. Try again in a few minutes, or use your password.",
   linkExpired: "That link has expired. Request a new one.",
-  invited:
-    "Invited? Enter the email the invitation was sent to and choose Email me a link.",
+  invited: "Invited? Open the link in your invitation email.",
 };
 
 export function LoginForm({

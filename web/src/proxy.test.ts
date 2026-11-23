@@ -85,6 +85,60 @@ describe("proxy: the approval window", () => {
   });
 });
 
+describe("proxy: the Join page", () => {
+  it("lets a visitor with no session open an emailed link", async () => {
+    expect(passed(await visit("/join?token_hash=abc&type=invite"))).toBe(true);
+    expect(passed(await visit("/join/?token_hash=abc&type=magiclink"))).toBe(
+      true,
+    );
+  });
+
+  it("lets a visitor with no session read that a link has expired", async () => {
+    expect(passed(await visit("/join?error=expired"))).toBe(true);
+  });
+
+  it.each([
+    "/join",
+    "/join?error=other",
+    "/join?type=invite",
+    "/join?x=1",
+    "/join?switched=1",
+  ])(
+    "sends a visitor with no session and no link to sign in and back: %s",
+    async (path) => {
+      const res = await visit(path);
+      expect(to(res)).toBe(`${ORIGIN}/login?next=%2Fjoin`);
+      expect(new URL(to(res)!).searchParams.get("next")).toBe("/join");
+    },
+  );
+
+  it("lets a signed-in person through, with a link or without", async () => {
+    session({ id: "u1" });
+    expect(passed(await visit("/join"))).toBe(true);
+    expect(passed(await visit("/join?token_hash=abc&type=invite"))).toBe(true);
+  });
+
+  it("opens nothing beside the page itself", async () => {
+    expect(to(await visit("/joinx?token_hash=abc"))).toBe(`${ORIGIN}/login`);
+    expect(to(await visit("/join/more?token_hash=abc"))).toBe(
+      `${ORIGIN}/login`,
+    );
+    expect(to(await visit("/vault?token_hash=abc"))).toBe(`${ORIGIN}/login`);
+  });
+
+  it("is not open when the app is not configured", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    expect(to(await visit("/join?token_hash=abc&type=invite"))).toBe(
+      `${ORIGIN}/login`,
+    );
+  });
+
+  it("returns a person who signs in to the Join page", async () => {
+    session({ id: "u1" });
+    expect(to(await visit("/login?next=%2Fjoin"))).toBe(`${ORIGIN}/join`);
+  });
+});
+
 describe("proxy: everything else is as before", () => {
   it("sends other pages to a plain sign-in", async () => {
     expect(to(await visit("/vault?x=1"))).toBe(`${ORIGIN}/login`);

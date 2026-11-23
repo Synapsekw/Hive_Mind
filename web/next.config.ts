@@ -11,10 +11,20 @@ export const FRAME_HEADERS = [
   { key: "X-Frame-Options", value: "DENY" },
 ];
 
+/**
+ * The Join page is opened from an emailed link whose address carries a sign-in token. Nothing
+ * the page leads to, or loads, is told that address.
+ */
+export const JOIN_HEADERS = [{ key: "Referrer-Policy", value: "no-referrer" }];
+
 const nextConfig: NextConfig = {
   async headers() {
-    // `/:path*` is every path, the root included.
-    return [{ source: "/:path*", headers: FRAME_HEADERS }];
+    // `/:path*` is every path, the root included. A path that matches both rules gets both
+    // sets of headers; the second rule names no header of the first, so it undoes nothing.
+    return [
+      { source: "/:path*", headers: FRAME_HEADERS },
+      { source: "/join", headers: JOIN_HEADERS },
+    ];
   },
 };
 

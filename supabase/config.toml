@@ -10,6 +10,13 @@ verify_jwt = false
 [functions.mcp]
 verify_jwt = false
 
+# The caller's pass is the hive owner's own session, which the gateway could
+# check, but the question is not "is this a session" but "may this person send
+# for this invitation": the function hands the pass to invitation_to_email and
+# the database answers, as for the two functions above.
+[functions.invite-email]
+verify_jwt = false
+
 # Supabase Auth as the OAuth 2.1 server for the remote connector. The approval
 # window is the web app's /oauth/consent page; the address Auth sends people to
 # is the Site URL plus this path. Dynamic registration is OFF on purpose: an app

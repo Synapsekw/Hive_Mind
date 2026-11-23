@@ -1,5 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIn, inviteIn, revokeIn, revokeInvitationIn } from "./write";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createIn,
+  inviteIn,
+  resendIn,
+  revokeIn,
+  revokeInvitationIn,
+} from "./write";
 
 const HIVE = "00000000-0000-4000-8000-000000000a01";
 const W1 = "00000000-0000-4000-8000-000000000b01";
@@ -10,6 +16,11 @@ const INVITATION = "00000000-0000-4000-8000-000000000e01";
 const CLIENT = "00000000-0000-4000-8000-0000000000c1";
 // Made up for these tests; shaped like the real thing so a leak would be caught the same way.
 const TOKEN = `hive_${"ab12".repeat(16)}`;
+/** Where the project answers, its public key, and the person's session token. All made up. */
+const SUPABASE = "https://project.example";
+const ANON = "anon-key-for-tests";
+const ACCESS = "eyJhbGciOiJIUzI1NiJ9.c2Vzc2lvbi1vZi10aGUtb3duZXI.c2lnbmF0dXJl";
+const MAIL_URL = `${SUPABASE}/functions/v1/invite-email`;
 
 type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
@@ -32,6 +43,8 @@ function stub(
     /** The read of the person's agents of the same app that are still in use. */
     live?: Res;
     revokeGrant?: Res | (() => never);
+    /** What the cookie holds; a session with the person's token unless said otherwise. */
+    session?: { access_token: string } | null;
   } = {},
 ) {
   const calls: Call[] = [];
@@ -73,8 +86,14 @@ function stub(
       ? opts.revokeGrant()
       : (opts.revokeGrant ?? { data: {}, error: null });
   });
+  const session =
+    opts.session === undefined ? { access_token: ACCESS } : opts.session;
   const auth = {
     getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getSession: vi.fn(async () => {
+      steps.push("getSession");
+      return { data: { session }, error: null };
+    }),
     oauth: { revokeGrant },
   };
   return {
@@ -86,6 +105,18 @@ function stub(
     auth,
     revokeGrant,
   };
+}
+
+/**
+ * A stand-in for `fetch`: answers with the status and body given, or throws what it is given.
+ * The body is what the mail function might say; nothing of it may ever be logged.
+ */
+function fetcher(answer: number | Error = 200, body: unknown = { ok: true }) {
+  return vi.fn(async (_url: string | URL | Request, _init: RequestInit) => {
+    if (answer instanceof Error) throw answer;
+    const none = answer === 204 || answer === 302;
+    return new Response(none ? null : JSON.stringify(body), { status: answer });
+  });
 }
 
 const args = (c: Call, name: string) => c.ops.find(([m]) => m === name)?.[1];
@@ -107,8 +138,14 @@ function consoles() {
   };
 }
 
+beforeEach(() => {
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", SUPABASE);
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", ANON);
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("createIn", () => {
@@ -386,26 +423,31 @@ describe("inviteIn", () => {
     ["a name of 61 characters", "ahmed@example.com", "a".repeat(61)],
     ["a name that is null", "ahmed@example.com", null],
   ])("refuses %s with no call at all", async (_name, email, name) => {
-    const t = stub({ rpc: ok("invited") });
-    expect(await inviteIn(t.db, email, name)).toEqual(FAILED);
+    const t = stub({ rpc: ok(INVITATION) });
+    const f = fetcher();
+    expect(await inviteIn(t.db, email, name, f)).toEqual(FAILED);
     expect(t.auth.getUser).not.toHaveBeenCalled();
+    expect(t.auth.getSession).not.toHaveBeenCalled();
     expect(t.rpc).not.toHaveBeenCalled();
     expect(t.from).not.toHaveBeenCalled();
+    expect(f).not.toHaveBeenCalled();
   });
 
-  it("refuses without a session, before any query", async () => {
-    const t = stub({ rpc: ok("invited"), user: null });
-    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(FAILED);
+  it("refuses without a session, before any query and with no email", async () => {
+    const t = stub({ rpc: ok(INVITATION), user: null });
+    const f = fetcher();
+    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed", f)).toEqual(
+      FAILED,
+    );
     expect(t.from).not.toHaveBeenCalled();
     expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.auth.getSession).not.toHaveBeenCalled();
+    expect(f).not.toHaveBeenCalled();
   });
 
   it("finds the hive of the person's own oldest membership, then calls invite_member with cleaned values", async () => {
-    const t = stub({ rpc: ok("invited") });
-    expect(await inviteIn(t.db, " Ahmed@Example.com ", "  Ahmed ")).toEqual({
-      ok: true,
-      outcome: "invited",
-    });
+    const t = stub({ rpc: ok(INVITATION) });
+    await inviteIn(t.db, " Ahmed@Example.com ", "  Ahmed ", fetcher());
     expect(t.calls).toHaveLength(1);
     const [own] = t.calls;
     expect(own!.table).toBe("members");
@@ -426,50 +468,94 @@ describe("inviteIn", () => {
     });
   });
 
-  it.each(["added", "invited"] as const)(
-    "answers the outcome %s, and only ok and the outcome",
-    async (outcome) => {
+  it("saves the invitation, then asks for its email; answers ok, the id and sent", async () => {
+    const c = consoles();
+    const t = stub({ rpc: ok(INVITATION) });
+    const f = fetcher();
+    const out = await inviteIn(t.db, "ahmed@example.com", "Ahmed", f);
+    expect(out).toEqual({ ok: true, id: INVITATION, sent: true });
+    expect(Object.keys(out).sort()).toEqual(["id", "ok", "sent"]);
+    expect(t.steps).toEqual(["members", "invite_member", "getSession"]);
+    expect(f).toHaveBeenCalledTimes(1);
+    const [url, init] = f.mock.calls[0]!;
+    expect(url).toBe(MAIL_URL);
+    expect(JSON.parse(init.body as string)).toEqual({ invitation: INVITATION });
+    // The address travels in no part of the request: the function reads it from the database.
+    expect(JSON.stringify([url, init])).not.toContain("ahmed@");
+    expect(c.count()).toBe(0);
+  });
+
+  it.each([
+    ["the function answers 502", () => fetcher(502)],
+    ["the function answers 429", () => fetcher(429)],
+    ["the function answers 409", () => fetcher(409)],
+    ["the function answers 403", () => fetcher(403)],
+    ["the request throws", () => fetcher(new Error(`boom ${ACCESS}`))],
+  ])(
+    "keeps the invitation and answers sent false when %s",
+    async (_name, make) => {
       const c = consoles();
-      const t = stub({ rpc: ok(outcome) });
-      const out = await inviteIn(t.db, "ahmed@example.com", "Ahmed");
-      expect(out).toEqual({ ok: true, outcome });
-      expect(Object.keys(out).sort()).toEqual(["ok", "outcome"]);
-      expect(c.count()).toBe(0);
+      const t = stub({ rpc: ok(INVITATION) });
+      const out = await inviteIn(t.db, "ahmed@example.com", "Ahmed", make());
+      expect(out).toEqual({ ok: true, id: INVITATION, sent: false });
+      expect(c.said()).not.toContain(ACCESS);
+      expect(c.said()).not.toContain("ahmed@");
     },
   );
 
+  it("answers sent false with no request when the session has no token", async () => {
+    const t = stub({ rpc: ok(INVITATION), session: null });
+    const f = fetcher();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed", f)).toEqual({
+      ok: true,
+      id: INVITATION,
+      sent: false,
+    });
+    expect(f).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["null", null],
-    ["an unknown word", "joined"],
-    ["a member id", MEMBER],
-    ["a list", ["invited"]],
-    ["an object", { outcome: "added" }],
+    ["the old word added", "added"],
+    ["the old word invited", "invited"],
+    ["a list", [INVITATION]],
+    ["an object", { id: INVITATION }],
     ["a number", 1],
+    ["a uuid with more after it", `${INVITATION} x`],
   ])(
-    "answers failed when the function returned %s, without logging it",
+    "answers failed when the function returned %s, without logging it or sending",
     async (_name, data) => {
       const c = consoles();
       const t = stub({ rpc: ok(data) });
-      expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(
+      const f = fetcher();
+      expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed", f)).toEqual(
         FAILED,
       );
       expect(c.error).toHaveBeenCalledTimes(1);
       expect(c.error).toHaveBeenCalledWith(
         "invite_member answer has an unexpected shape",
       );
+      expect(f).not.toHaveBeenCalled();
     },
   );
 
   it("answers failed without a hive, with no call to the function", async () => {
     const t = stub({ own: ok([]) });
-    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(FAILED);
+    const f = fetcher();
+    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed", f)).toEqual(
+      FAILED,
+    );
     expect(t.rpc).not.toHaveBeenCalled();
+    expect(f).not.toHaveBeenCalled();
   });
 
   it("answers failed when the hive cannot be read", async () => {
     const c = consoles();
     const t = stub({ own: err("denied", "42501") });
-    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(FAILED);
+    expect(
+      await inviteIn(t.db, "ahmed@example.com", "Ahmed", fetcher()),
+    ).toEqual(FAILED);
     expect(t.rpc).not.toHaveBeenCalled();
     expect(c.error).toHaveBeenCalledWith(
       "own hive query failed",
@@ -478,25 +564,25 @@ describe("inviteIn", () => {
     );
   });
 
-  it("answers already-member when the database says so", async () => {
-    const c = consoles();
-    const t = stub({ rpc: err("that person is already a member", "P0001") });
-    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual({
-      ok: false,
-      reason: "already-member",
-    });
-    expect(c.said()).not.toContain("secret payload");
-  });
-
-  it("answers already-invited when the database says so", async () => {
-    const c = consoles();
-    const t = stub({ rpc: err("that email is already invited", "P0001") });
-    expect(await inviteIn(t.db, "new@example.com", "New")).toEqual({
-      ok: false,
-      reason: "already-invited",
-    });
-    expect(c.said()).not.toContain("secret payload");
-  });
+  it.each([
+    ["that person is already a member", "already-member"],
+    ["that email is already invited", "already-invited"],
+    ["too many invitations today", "too-many"],
+  ] as const)(
+    "when the database says %j it answers %s and sends nothing",
+    async (message, reason) => {
+      const c = consoles();
+      const t = stub({ rpc: err(message, "P0001") });
+      const f = fetcher();
+      expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed", f)).toEqual({
+        ok: false,
+        reason,
+      });
+      expect(f).not.toHaveBeenCalled();
+      expect(t.auth.getSession).not.toHaveBeenCalled();
+      expect(c.said()).not.toContain("secret payload");
+    },
+  );
 
   it.each([
     ["not the owner", err("only the hive owner can invite members", "P0001")],
@@ -508,7 +594,8 @@ describe("inviteIn", () => {
     async (_n, res) => {
       const c = consoles();
       const t = stub({ rpc: res });
-      expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(
+      const f = fetcher();
+      expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed", f)).toEqual(
         FAILED,
       );
       expect(c.error).toHaveBeenCalledWith(
@@ -517,28 +604,201 @@ describe("inviteIn", () => {
         res.error!.message,
       );
       expect(c.said()).not.toContain("secret payload");
+      expect(f).not.toHaveBeenCalled();
     },
   );
 
-  it("never logs the email or the name", async () => {
+  it("never logs the email, the name or the session's token", async () => {
     const c = consoles();
     for (const rpc of [
       err("that person is already a member", "P0001"),
       err("boom", "XX000"),
       ok(null),
+      ok(INVITATION),
     ]) {
       const t = stub({ rpc });
-      await inviteIn(t.db, "ahmed@example.com", "Ahmed Person");
+      await inviteIn(
+        t.db,
+        "ahmed@example.com",
+        "Ahmed Person",
+        fetcher(502, { error: "ahmed@example.com could not be reached" }),
+      );
     }
     await inviteIn(
       stub({ user: null }).db,
       "ahmed@example.com",
       "Ahmed Person",
+      fetcher(),
     );
-    await inviteIn(stub().db, "ahmed@example", 7);
+    await inviteIn(stub().db, "ahmed@example", 7, fetcher());
     expect(c.count()).toBeGreaterThan(0);
     expect(c.said()).not.toContain("ahmed@");
     expect(c.said()).not.toContain("Ahmed Person");
+    expect(c.said()).not.toContain(ACCESS);
+  });
+});
+
+describe("resendIn", () => {
+  const FAILED = { ok: false, reason: "failed" };
+
+  it.each([
+    ["a word", "not-a-uuid"],
+    ["an empty string", ""],
+    ["a number", 7],
+    ["null", null],
+    ["undefined", undefined],
+    ["an object", { id: INVITATION }],
+    ["a uuid with a path appended", `${INVITATION}/../x`],
+  ])("refuses an id that is %s with no call at all", async (_name, id) => {
+    const t = stub();
+    const f = fetcher();
+    expect(await resendIn(t.db, id, f)).toEqual(FAILED);
+    expect(t.auth.getUser).not.toHaveBeenCalled();
+    expect(t.auth.getSession).not.toHaveBeenCalled();
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.from).not.toHaveBeenCalled();
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the auth server confirms nobody, without reading the session's token", async () => {
+    const t = stub({ user: null });
+    const f = fetcher();
+    expect(await resendIn(t.db, INVITATION, f)).toEqual(FAILED);
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
+    expect(t.auth.getSession).not.toHaveBeenCalled();
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("reads the token only after the auth server confirmed the person", async () => {
+    const t = stub();
+    await resendIn(t.db, INVITATION, fetcher());
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
+    expect(t.auth.getSession).toHaveBeenCalledTimes(1);
+    expect(t.auth.getUser.mock.invocationCallOrder[0]!).toBeLessThan(
+      t.auth.getSession.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("posts the invitation's id to the mail function with the key and the person's own bearer", async () => {
+    const c = consoles();
+    const t = stub();
+    const f = fetcher();
+    const out = await resendIn(t.db, INVITATION, f);
+    expect(out).toEqual({ ok: true });
+    expect(Object.keys(out)).toEqual(["ok"]);
+    expect(f).toHaveBeenCalledTimes(1);
+    const [url, init] = f.mock.calls[0]!;
+    expect(url).toBe(MAIL_URL);
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({
+      apikey: ANON,
+      Authorization: `Bearer ${ACCESS}`,
+      "Content-Type": "application/json",
+    });
+    expect(init.body).toBe(JSON.stringify({ invitation: INVITATION }));
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    // The database is not asked anything here: the function asks it, as the person.
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.from).not.toHaveBeenCalled();
+    expect(c.count()).toBe(0);
+  });
+
+  it("gives the request eight seconds, inside the action's own ten", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    await resendIn(stub().db, INVITATION, fetcher());
+    expect(timeout).toHaveBeenCalledTimes(1);
+    expect(timeout).toHaveBeenCalledWith(8_000);
+  });
+
+  it("does not double the slash when the project's address ends in one", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", `${SUPABASE}/`);
+    const f = fetcher();
+    await resendIn(stub().db, INVITATION, f);
+    expect(f.mock.calls[0]![0]).toBe(MAIL_URL);
+  });
+
+  it("answers wait for 429", async () => {
+    const t = stub();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await resendIn(t.db, INVITATION, fetcher(429))).toEqual({
+      ok: false,
+      reason: "wait",
+    });
+  });
+
+  it("answers limit for 409", async () => {
+    const t = stub();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await resendIn(t.db, INVITATION, fetcher(409))).toEqual({
+      ok: false,
+      reason: "limit",
+    });
+  });
+
+  it.each([201, 204, 302, 400, 401, 403, 404, 500, 502, 503])(
+    "answers failed for %i, logging the status and nothing the function said",
+    async (status) => {
+      const c = consoles();
+      const f = fetcher(status, {
+        ok: true,
+        error: "lena@example.com refused",
+      });
+      expect(await resendIn(stub().db, INVITATION, f)).toEqual(FAILED);
+      expect(c.error).toHaveBeenCalledTimes(1);
+      expect(c.error).toHaveBeenCalledWith(
+        "the invitation email could not be sent",
+        status,
+      );
+      expect(c.said()).not.toContain("lena@");
+      expect(c.said()).not.toContain(ACCESS);
+    },
+  );
+
+  it("answers failed when the request throws or times out, logging one fixed phrase", async () => {
+    const c = consoles();
+    const f = fetcher(new Error(`fetch failed for Bearer ${ACCESS}`));
+    expect(await resendIn(stub().db, INVITATION, f)).toEqual(FAILED);
+    expect(c.error).toHaveBeenCalledTimes(1);
+    expect(c.error).toHaveBeenCalledWith(
+      "the invitation email could not be sent",
+    );
+    expect(c.said()).not.toContain(ACCESS);
+  });
+
+  it.each([
+    ["no session", null],
+    ["a session without a token", { access_token: "" }],
+  ])("answers failed with no request for %s", async (_name, session) => {
+    const c = consoles();
+    const f = fetcher();
+    expect(await resendIn(stub({ session }).db, INVITATION, f)).toEqual(FAILED);
+    expect(f).not.toHaveBeenCalled();
+    expect(c.error).toHaveBeenCalledWith(
+      "the invitation email could not be sent",
+    );
+  });
+
+  it.each(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"])(
+    "answers failed with no request when %s is not set",
+    async (name) => {
+      vi.stubEnv(name, "");
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const t = stub();
+      const f = fetcher();
+      expect(await resendIn(t.db, INVITATION, f)).toEqual(FAILED);
+      expect(f).not.toHaveBeenCalled();
+      expect(t.auth.getSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("answers failed when the session cannot be read, without logging what was thrown", async () => {
+    const c = consoles();
+    const t = stub();
+    t.auth.getSession.mockRejectedValueOnce(new Error(`bad ${ACCESS}`));
+    const f = fetcher();
+    expect(await resendIn(t.db, INVITATION, f)).toEqual(FAILED);
+    expect(f).not.toHaveBeenCalled();
+    expect(c.said()).not.toContain(ACCESS);
   });
 });
 
