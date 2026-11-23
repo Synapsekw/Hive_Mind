@@ -20,10 +20,22 @@ const cssVar = (page: Page, name: string) =>
 const lookCookie = async (page: Page) =>
   (await page.context().cookies()).find((c) => c.name === "hive-look")?.value;
 
-const button = (page: Page) =>
-  page.getByRole("button", { name: /^Appearance/ });
+const account = (page: Page) => page.getByRole("button", { name: /^Account/ });
 
-const panel = (page: Page) => page.locator('[data-scope="reset"]');
+const menu = (page: Page) => page.getByRole("menu", { name: "Account" });
+
+/** The Appearance row inside the account menu. */
+const button = (page: Page) =>
+  menu(page).getByRole("menuitem", { name: /^Appearance/ });
+
+/** The panel proper: the reset scope inside the menu (the menu is a reset scope itself). */
+const panel = (page: Page) => menu(page).locator('[data-scope="reset"]');
+
+/** Opens the account menu, then the Appearance panel inside it. */
+async function openPanel(page: Page) {
+  await account(page).click();
+  await button(page).click();
+}
 
 const group = (page: Page, name: string) =>
   page.getByRole("radiogroup", { name, exact: true });
@@ -80,8 +92,9 @@ test("a tampered cookie gives the default look and is not echoed", async ({
   });
 });
 
-test("the panel is closed until its button opens it", async ({ page }) => {
+test("the panel is closed until its menu item opens it", async ({ page }) => {
   await open(page);
+  await account(page).click();
   await expect(button(page)).toHaveAttribute("aria-expanded", "false");
   await expect(panel(page)).toHaveCount(0);
   await button(page).click();
@@ -97,7 +110,7 @@ test("each choice applies at once, sets the cookie and makes no request", async 
   page,
 }) => {
   await open(page);
-  await button(page).click();
+  await openPanel(page);
   const before = await cssVar(page, "--brand");
   const requests = watch(page);
 
@@ -130,11 +143,11 @@ test("each choice applies at once, sets the cookie and makes no request", async 
   });
 });
 
-test("arrow keys move within a group and Escape returns to the button", async ({
+test("arrow keys move within a group and Escape returns to the account button", async ({
   page,
 }) => {
   await open(page);
-  await button(page).click();
+  await openPanel(page);
   const themes = group(page, "Theme");
   const hive = themes.getByRole("radio", { name: "Hive" });
   await expect(hive).toHaveAttribute("aria-checked", "true");
@@ -149,9 +162,10 @@ test("arrow keys move within a group and Escape returns to the button", async ({
   await expect(hive).toBeFocused();
 
   await page.keyboard.press("Escape");
+  await expect(menu(page)).toHaveCount(0);
   await expect(panel(page)).toHaveCount(0);
-  await expect(button(page)).toBeFocused();
-  await expect(button(page)).toHaveAttribute("aria-expanded", "false");
+  await expect(account(page)).toBeFocused();
+  await expect(account(page)).toHaveAttribute("aria-expanded", "false");
 });
 
 test("in light mode the popover's text is not white", async ({
@@ -160,7 +174,7 @@ test("in light mode the popover's text is not white", async ({
 }) => {
   await setLook(context, "keystone.light.tinted.theme");
   await open(page);
-  await button(page).click();
+  await openPanel(page);
   const color = await panel(page).evaluate((el) => getComputedStyle(el).color);
   expect(color).not.toBe("rgb(255, 255, 255)");
 });
@@ -172,7 +186,7 @@ test("changing the theme keeps the selected dot", async ({ page }) => {
     .getByRole("complementary", { name: "Details" })
     .getByRole("heading", { level: 2 });
   await expect(title).toHaveText(HOSTILE_TITLE);
-  await button(page).click();
+  await openPanel(page);
   await group(page, "Theme").getByRole("radio", { name: "Sunset" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "sunset");
   await expect(title).toHaveText(HOSTILE_TITLE);
@@ -217,11 +231,11 @@ test("a tab that changed its own look still follows another tab's later change",
   const other = await context.newPage();
   await open(other);
   // This tab picks a theme itself: the attribute is set in place, outside React's render.
-  await button(page).click();
+  await openPanel(page);
   await group(page, "Theme").getByRole("radio", { name: "Aurora" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "aurora");
   // The other tab, still holding the default theme, changes the mode and rewrites the cookie.
-  await button(other).click();
+  await openPanel(other);
   await group(other, "Mode").getByRole("radio", { name: "Light" }).click();
   expect(await lookCookie(other)).toBe("hive.light.tinted.theme");
   await other.close();
@@ -247,7 +261,7 @@ test("a look changed in another tab is followed after a server refresh", async (
   // The other tab, same browser: it changes the theme and the mode, which rewrites the cookie.
   const other = await context.newPage();
   await open(other);
-  await button(other).click();
+  await openPanel(other);
   await group(other, "Theme").getByRole("radio", { name: "Aurora" }).click();
   await group(other, "Mode").getByRole("radio", { name: "Light" }).click();
   expect(await lookCookie(other)).toBe("aurora.light.tinted.theme");
@@ -262,7 +276,7 @@ test("a look changed in another tab is followed after a server refresh", async (
     ).nd.router.refresh(),
   );
   await expect(page.locator("html")).toHaveAttribute("data-theme", "aurora");
-  await button(page).click();
+  await openPanel(page);
   await expect(
     group(page, "Theme").getByRole("radio", { name: "Aurora" }),
   ).toHaveAttribute("aria-checked", "true");
@@ -288,7 +302,7 @@ test("in forced colours the swatches stay visible and the choice is outlined", a
 }) => {
   await page.emulateMedia({ forcedColors: "active" });
   await open(page);
-  await button(page).click();
+  await openPanel(page);
   const style = (name: string) =>
     group(page, "Theme")
       .getByRole("radio", { name })

@@ -1,8 +1,8 @@
 "use client";
 
-// The Appearance panel at the foot of the rail: mode, theme, dot colours and reach. Closed by
-// default; every choice applies at once through useLook (no request, no navigation).
-import { useId, useRef, useState, type KeyboardEvent } from "react";
+// The Appearance panel, shown inside the account menu: mode, theme, dot colours and reach. Every
+// choice applies at once through useLook (no request, no navigation).
+import { useId, useRef, type KeyboardEvent } from "react";
 import { THEMES, type DotMode, type Mode, type Reach } from "../theme/look";
 import { useLook } from "./LookProvider";
 import s from "./shell.module.css";
@@ -102,79 +102,55 @@ function Radios<T extends string>({
   );
 }
 
-export function Appearance() {
+/** The panel's body: mode, theme, dot colours and reach. Rendered inside the account menu. */
+export function AppearancePanel({ id }: { id?: string }) {
   const { look, setLook } = useLook();
-  const [open, setOpen] = useState(false);
-  const toggle = useRef<HTMLButtonElement>(null);
-  const id = useId();
-  const current = THEMES.find((t) => t.id === look.theme) ?? THEMES[0]!;
-
-  const close = (e: KeyboardEvent) => {
-    if (e.key !== "Escape" || !open) return;
-    e.preventDefault();
-    setOpen(false);
-    toggle.current?.focus();
-  };
-
+  const own = useId();
+  const panelId = id ?? own;
   return (
-    <div className={s.appearance} onKeyDown={close}>
-      <button
-        ref={toggle}
-        type="button"
-        className={`${s.row} ${s.control}`}
-        aria-expanded={open}
-        aria-controls={open ? `${id}-panel` : undefined}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span aria-hidden="true" className={s.slot}>
-          <span
-            className={s.current}
-            data-keep-colours=""
-            style={{ background: swatch(look.theme, look.mode) }}
-          />
+    <div id={`${panelId}-panel`} data-scope="reset" className={s.popover}>
+      <Radios
+        label="Mode"
+        options={MODE_OPTIONS}
+        value={look.mode}
+        onChange={(mode) => setLook({ mode })}
+      />
+      <Radios
+        label="Theme"
+        options={THEME_OPTIONS}
+        value={look.theme}
+        onChange={(theme) => setLook({ theme })}
+        swatches={look.mode}
+      />
+      <div className={s.field}>
+        <span id={`${panelId}-dots`} className={s.fieldLabel}>
+          Dot colours
         </span>
-        <span className={s.rowLabel}>Appearance</span>
-        <span className={s.themeName}>{current.label}</span>
-      </button>
-      {open && (
-        <div id={`${id}-panel`} data-scope="reset" className={s.popover}>
-          <Radios
-            label="Mode"
-            options={MODE_OPTIONS}
-            value={look.mode}
-            onChange={(mode) => setLook({ mode })}
-          />
-          <Radios
-            label="Theme"
-            options={THEME_OPTIONS}
-            value={look.theme}
-            onChange={(theme) => setLook({ theme })}
-            swatches={look.mode}
-          />
-          <div className={s.field}>
-            <span id={`${id}-dots`} className={s.fieldLabel}>
-              Dot colours
-            </span>
-            <Radios
-              labelledBy={`${id}-dots`}
-              options={DOT_OPTIONS}
-              value={look.dots}
-              onChange={(dots) => setLook({ dots })}
-            />
-          </div>
-          <div className={s.field}>
-            <span id={`${id}-reach`} className={s.fieldLabel}>
-              How far the colour reaches
-            </span>
-            <Radios
-              labelledBy={`${id}-reach`}
-              options={REACH_OPTIONS}
-              value={look.reach}
-              onChange={(reach) => setLook({ reach })}
-            />
-          </div>
-        </div>
-      )}
+        <Radios
+          labelledBy={`${panelId}-dots`}
+          options={DOT_OPTIONS}
+          value={look.dots}
+          onChange={(dots) => setLook({ dots })}
+        />
+      </div>
+      <div className={s.field}>
+        <span id={`${panelId}-reach`} className={s.fieldLabel}>
+          How far the colour reaches
+        </span>
+        <Radios
+          labelledBy={`${panelId}-reach`}
+          options={REACH_OPTIONS}
+          value={look.reach}
+          onChange={(reach) => setLook({ reach })}
+        />
+      </div>
     </div>
   );
+}
+
+/** The current theme's name and swatch, for the Appearance row of the account menu. */
+export function useCurrentTheme() {
+  const { look } = useLook();
+  const theme = THEMES.find((t) => t.id === look.theme) ?? THEMES[0]!;
+  return { label: theme.label, colour: swatch(look.theme, look.mode) };
 }
