@@ -16,18 +16,18 @@ pages have hover states, but they are faint and inconsistent.
 
 ## Decisions taken in brainstorming
 
-| Question       | Answer                                                                      |
-| -------------- | --------------------------------------------------------------------------- |
-| Scope          | Everything in one round: map interaction, chrome, and the look of all pages |
-| How far        | Keep Keystone glass, its 17 themes and its tokens; add depth, light, motion |
-| Dot hover      | Peek card plus neighbours lit and links firing                              |
-| Zoom           | Map-style: wheel/pinch toward the cursor, drag to pan, semantic labels      |
-| Legend         | A floating glass dock with three groups: Topics, Kind, People               |
-| Rail foot      | A collapsible agents card and one account button with a menu                |
-| Ambient motion | "Alive but calm"                                                            |
-| Build approach | DOM dots kept, a hand-rolled camera; no new dependency                      |
-| New view       | A **Hive** view (a honeycomb) replaces Circle and is the map's opening view |
-| New theme      | A **Hive** theme (honey, wax, amber light) is added and becomes the default |
+| Question       | Answer                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Scope          | Everything in one round: map interaction, chrome, and the look of all pages                                            |
+| How far        | Keep Keystone glass, its 17 themes and its tokens; add depth, light, motion                                            |
+| Dot hover      | Peek card plus neighbours lit and links firing                                                                         |
+| Zoom           | Map-style: wheel/pinch toward the cursor, drag to pan, semantic labels                                                 |
+| Legend         | A floating glass dock with three groups: Topics, Kind, People                                                          |
+| Rail foot      | A collapsible agents card and one account button with a menu                                                           |
+| Ambient motion | "Alive but calm"                                                                                                       |
+| Build approach | One canvas draws the map; hidden real buttons carry keyboard and screen readers; hand-rolled camera; no new dependency |
+| New view       | A **Hive** view (a honeycomb) replaces Circle and is the map's opening view                                            |
+| New theme      | A **Hive** theme (honey, wax, amber light) is added and becomes the default                                            |
 
 The approved reference is the interactive prototype built in the brainstorm on the real fixture
 hive (`.superpowers/brainstorm/*/content/map-prototype-hive.html`, not committed). Where this spec
@@ -86,15 +86,42 @@ section 3 is updated to match.
   neighbourhood drop to a near-empty frame.
 - **Grid size.** The radius above (12 cells, 469 cells, cell radius 15.5) is the minimum. When the
   hive has more items, the radius is the smallest one whose cell count holds every item plus 15%
-  headroom, and the cell radius shrinks so the comb still fits the box. All cells are drawn as
-  polygons in one SVG group, so at the 5,000-item cap that is about 5,800 polygons drawn once per
-  model; only their classes change on hover and filter.
+  headroom, and the cell radius shrinks so the comb still fits the box. Cells are drawn on the map
+  canvas as one batched path per topic (built once per model), so a frame is a handful of fills,
+  not thousands of shapes.
+
+### 1.01 Rendering: one canvas
+
+Measured on the real DRA vault (1,605 notes, 6,782 links, 1,951 cells): one DOM element per dot
+and per cell ran at 20 to 30 frames a second, and zooming spiked past 100 ms a frame, because every
+zoom step restyled thousands of elements and the hub, index and glow animations kept the whole
+stage repainting. The same scene drawn on one canvas held 60 frames a second idle, hovering,
+zooming and panning, with a full redraw costing well under a millisecond. So:
+
+- **The map is drawn on one `<canvas>`** (device-pixel-ratio aware): comb, guides, edges, dots,
+  shapes, labels, hover and selection rings, pulses and agent marks. Geometry that only changes
+  with the model (edges, comb cells per topic, dots per topic and kind) is built once per model as
+  batched `Path2D`s; a frame is a few dozen fills and strokes.
+- **Draw on demand.** A frame is drawn only when something changed (camera, hover, filter,
+  selection, view, a running animation). One `requestAnimationFrame` loop runs while an animation
+  is active (glide, pulses, a live mark's glow and moves, Orbit) and stops when none is; under
+  reduced motion it never runs on its own.
+- **Hit testing** through a spatial grid of box-space buckets built per layout: the nearest dot
+  within 8 screen px of the pointer.
+- **Real buttons stay.** A visually hidden list (`ul` labelled "Items on the map") holds one
+  `button[data-map-dot]` per node with today's `aria-label`, `aria-pressed`, `data-kind`,
+  `data-topic`, `data-locked` and `data-lit`, plus `data-x`/`data-y` (box coordinates). They are
+  positioned off-screen, never restyled on zoom, and cost nothing per frame. Focusing one makes
+  that dot hot (the canvas draws the focus ring at the dot, 2 px of the accent with a 2 px gap);
+  Enter or Space selects it.
+- **DOM overlays stay DOM**: the peek card, the dock, the zoom control, "At the hive", the side
+  panel. Labels are drawn on the canvas (12 px, the label pill behind them), so they cost nothing
+  in the DOM.
 
 ### 1.1 Camera (flat views)
 
-- One transform layer (`world`) wraps the SVG backdrop, the guide labels and the dots, and
-  carries `translate(tx, ty) scale(k)`. The 1000 × 760 coordinate box is unchanged; the world is
-  sized to fit the stage.
+- The camera is `translate(tx, ty) scale(k)` applied as the canvas transform. The 1000 × 760
+  coordinate box is unchanged and fitted to the stage at k = 1.
 - Zoom range `k` 0.6 to 8. The wheel zooms toward the cursor (`exp(-deltaY × 0.0025)`, or
   `× 0.01` for a trackpad pinch, which arrives as `ctrlKey`). Two-finger touch pinch does the same.
 - Dragging the stage pans. A pointer that moves 4 px or more is a drag, and a drag never counts
@@ -104,10 +131,8 @@ section 3 is updated to match.
   fits, and `/` focuses the search.
 - A zoom control in the bottom-right corner of the stage: `−`, the zoom as a percentage, `+` and
   `Fit`. Each is a real button with a label.
-- Dots and labels keep their screen size at every zoom (each counter-scales by `1 / k` through a
-  CSS variable `--k`), so zooming spreads the map out instead of making blobs. Lines use
-  `vector-effect: non-scaling-stroke`. The world layer must not carry `will-change: transform`
-  (it rasterises once and blurs when zoomed).
+- Dots, labels and line widths keep their screen size at every zoom (radii and widths are
+  divided by the scale when drawn), so zooming spreads the map out instead of making blobs.
 - The core swarm fades out above `k` 1.8.
 - Switching views glides the camera back to Fit.
 - Clicking a dot, picking a connection in the side panel or picking a single search result glides
@@ -282,6 +307,8 @@ Page by page, applying only the language above and no new layouts:
   pulses, breathing, the turning index, the orbit's turning, count-ups, rises and camera glides
   (camera moves still happen, instantly). Hover highlighting and zoom still work.
 - Everything hover reveals is also reachable by keyboard focus (dots, dock entries, panel rows).
+  Dots are reached through the hidden list of real buttons (1.01); the canvas itself is
+  `aria-hidden`.
 - The zoom control, dock entries, agents card and account menu are real buttons with names; the
   menu follows the menu-button pattern; the dock's kind and people buttons have `aria-label`s.
 - Contrast: the new eyebrows, counts and dock labels use `--quiet` or brighter, which the contrast
@@ -297,11 +324,16 @@ Page by page, applying only the language above and no new layouts:
 - **Every interaction in this spec** (hover, peek, zoom, pan, fit, view switch, dock preview and
   pin, agents card, account menu, panel changes) is **client state only: 0 server round-trips.**
   None of it changes server data. The account menu's Sign out is the existing form post.
-- **Rendering bounds:** the payload stays capped at 5,000 items. Pan and zoom change one
-  transform, not each dot. Labels are recomputed only once a pan or zoom settles, capped at 60.
-  Firing creates at most one path per link of the hot dot. The ambient pulse keeps at most three
-  paths alive. Hub breathing animates only hubs (at most 8 topics plus "Other"). The orbit's
-  `requestAnimationFrame` loop exists only while Orbit is open and the tab is visible.
+- **Rendering bounds:** the payload stays capped at 5,000 items. The map is one canvas; static
+  geometry is batched per model; frames are drawn on demand and an animation loop runs only while
+  something animates. Labels are chosen once a pan or zoom settles, capped at 60, with no
+  overlaps. Firing draws at most one pulse per link of the hot dot; the ambient pulse at most three
+  at once. Hover is a spatial-grid lookup, not a DOM event per dot. The hidden button list is
+  never restyled by zoom or hover (only its `data-lit`/`aria-pressed` change with filters and
+  selection).
+- **Frame budget:** at 5,000 items a full frame takes at most 8 ms of script on a mid-range
+  laptop, and a 1-second wheel zoom in headless Chromium keeps the 95th-percentile frame under
+  34 ms (an e2e check on a 5,000-item dev fixture).
 - No new runtime dependency.
 
 ## 6. Independent units (for the plan's DAG)
@@ -311,7 +343,8 @@ These have no shared state with one another and can be built in parallel once th
 
 - **A. Shared motion tokens and utilities** (`globals.css`, the sliding-highlight switch
   component). Everything else consumes it.
-- **B. Map camera and semantic zoom** (a `useCamera` hook, the zoom control, label rules).
+- **B. Map canvas, camera and semantic zoom** (the canvas renderer, the hidden button list, hit
+  testing, a `useCamera` hook, the zoom control, label rules).
 - **C. Hover, peek and firing** (hot state, the peek card, pulses). It consumes B's transform for
   placement.
 - **D. Map motion** (staggered glide, arrival bloom, ambient pulses, hub breathing, the
@@ -343,12 +376,18 @@ These have no shared state with one another and can be built in parallel once th
   fit; framing a set of points), the semantic-label selection (thresholds, viewport culling, the
   cap of 60), the sparkline series from `activity().days`, the short agent "last used" form, the
   stagger delay function, and the account loader's query shape.
-- **Browser (Playwright, `web/e2e`):** hovering a dot shows the peek card and lights its
+- **Unit (vitest), renderer:** the spatial-grid hit test (nearest within radius; none outside;
+  cost bounded to neighbouring buckets) and the per-model batching (one group per topic and kind).
+- **Browser, performance:** on `/dev/map?items=5000`, a 1-second wheel zoom keeps the
+  95th-percentile frame under 34 ms in headless Chromium.
+- **Browser (Playwright, `web/e2e`):** dots are driven through their hidden buttons (focus = hover,
+  Enter = select) or by pointer at the screen point computed from `data-x`/`data-y`. Lit and dim
+  are read from `data-lit`, not CSS opacity. Hovering a dot shows the peek card and lights its
   neighbours; the wheel changes the zoom percentage and Fit restores 100%; a drag pans without
   selecting; clicking a dot selects it and the panel shows it; a dock hover previews and a click
   pins (`aria-pressed`); the agents card expands; the account menu opens, Escape closes it, and
-  Sign out is inside it; with reduced motion emulated, nothing animates (no running
-  `getAnimations()` on the stage). The existing 154 browser tests are updated where markup moves
+  Sign out is inside it; with reduced motion emulated, the map's animation loop is idle (the canvas
+  exposes `data-animating` while its loop runs). The existing 154 browser tests are updated where markup moves
   (chips to dock, Appearance and Sign out into the menu) and must all pass.
 - The four gates (`pnpm typecheck && pnpm lint && pnpm test && pnpm build`) pass.
 
