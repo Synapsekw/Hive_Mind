@@ -6,7 +6,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../scripts/local-db.mjs";
 
-const { db, as, addUser } = await openDb();
+const { db, as, addUser, addClient, addConsent } = await openDb();
 const users = {};
 const members = {};
 const ws = {};
@@ -3822,26 +3822,35 @@ test("deleting a workspace, a member, an account or a hive still works", async (
 // Supabase's OAuth server gives a third-party app an access token that is the
 // person's own identity plus a `client_id` claim: an "app pass". The database
 // refuses it everywhere except connector_login(), which swaps it for the
-// limited agent identity the person approved.
+// limited agent identity the person approved. The app itself is a row the
+// sign-in server keeps (auth.oauth_clients); its id is the claim.
 
-const appPass = (name, client = "client-a") => ({
+// The apps registered in these tests, by a short name.
+const apps = {};
+const CLAUDE_URI = "https://claude.ai/api/mcp/auth_callback";
+const NOBODY = "00000000-0000-0000-0000-000000000000";
+const appPass = (name, client = apps.a) => ({
   sub: users[name],
   role: "authenticated",
   client_id: client,
 });
 const APP_REFUSED = /an app pass cannot do this/;
 const NO_APP_AGENT = /no connected agent for this app/;
+const UNKNOWN_APP = /unknown app/;
+const NOT_APPROVED = /this app is not approved/;
 
 // One statement in a transaction that is always rolled back, so a call that
 // would succeed for a person changes nothing. Answers { rows } or { error }.
-const trial = async (claims, sql, params = []) => {
+const trial = async (claims, sql, params = [], role) => {
   await db.exec("reset role");
   await db.exec("begin");
   try {
     await db.query(`select set_config('request.jwt.claims', $1, true)`, [
       JSON.stringify(claims ?? {}),
     ]);
-    await db.exec(`set local role ${claims ? "authenticated" : "anon"}`);
+    await db.exec(
+      `set local role ${role ?? (claims ? "authenticated" : "anon")}`,
+    );
     return { rows: (await db.query(sql, params)).rows };
   } catch (error) {
     return { error };
@@ -3849,13 +3858,17 @@ const trial = async (claims, sql, params = []) => {
     await db.exec("rollback");
   }
 };
-const connectApp = (who, client, name, host, workspace) =>
-  as(who, `select public.connect_app($1, $2, $3, $4) as id`, [
-    client,
-    name,
-    host,
-    workspace,
-  ]).then((r) => r[0].id);
+const connectApp = (who, client, workspace) =>
+  as(who, `select public.connect_app($1, $2) as id`, [client, workspace]).then(
+    (r) => r[0].id,
+  );
+// What the approval window does, in its order: the app is connected here,
+// then the sign-in server records the person's approval.
+const approveApp = async (name, client, workspace) => {
+  const id = await connectApp(person(name), client, workspace);
+  await addConsent(users[name], client);
+  return id;
+};
 const connectorLogin = (who) =>
   as(who, `select * from public.connector_login()`);
 const agentRow = async (id) =>
@@ -3986,13 +3999,8 @@ const caSetup = () =>
       )
     ).rows[0].j;
     // The app pass used below is a real one: its client is connected.
-    ca.appAgent = await connectApp(
-      kai,
-      "client-a",
-      "Claude",
-      "claude.ai",
-      ws.kai,
-    );
+    apps.a = await addClient("Claude", CLAUDE_URI);
+    ca.appAgent = await approveApp("kai", apps.a, ws.kai);
   })());
 
 test("an app pass reads and writes nothing", async () => {
@@ -4135,10 +4143,7 @@ test("an app pass reads and writes nothing", async () => {
     nothing(await trial(pass, sql, params), sql);
   }
   // A pass for a client nobody connected is refused just the same.
-  assert.equal(
-    await count(appPass("kai", "client-unknown"), "public.notes"),
-    0,
-  );
+  assert.equal(await count(appPass("kai", NOBODY), "public.notes"), 0);
 });
 
 test("every function refuses an app pass except connector_login", async () => {
@@ -4164,7 +4169,7 @@ test("every function refuses an app pass except connector_login", async () => {
   const pure = [
     "jwt_agent_id", // the caller's own agent_id claim
     "jwt_is_self_hosted", // the caller's own trust_tier claim
-    "jwt_oauth_client", // the caller's own client_id claim
+    "jwt_oauth_client", // the caller's own client_id and aud claims
     "note_topic", // cuts a path given as the argument
   ];
   // Signs in by the token in its argument, for anyone, as it does for anon:
@@ -4229,11 +4234,7 @@ test("every function refuses an app pass except connector_login", async () => {
       [ca.link],
       true,
     ],
-    connect_app: [
-      `select public.connect_app('client-new', 'New app', 'claude.ai', $1)`,
-      [ws.kai],
-      true,
-    ],
+    connect_app: [`select public.connect_app($1, $2)`, [apps.a, ws.kai], true],
   };
 
   const known = [...pure, ...byToken, ...forApps, ...Object.keys(calls)];
@@ -4250,6 +4251,11 @@ test("every function refuses an app pass except connector_login", async () => {
     [],
     "listed here but not executable by authenticated",
   );
+  // The functions of this migration, so none is missing from the list by a
+  // grant it should have had. oauth_client_tier is the database's own.
+  for (const name of ["connect_app", "connector_login", "jwt_oauth_client"])
+    assert.ok(names.includes(name), name);
+  assert.ok(!names.includes("oauth_client_tier"));
   for (const f of listed.filter((x) => pure.includes(x.name))) {
     assert.equal(f.definer, false, `${f.name} is security definer`);
     // With an empty search_path every table must be named with its schema.
@@ -4292,15 +4298,13 @@ test("a person connects an app to their own workspace", async () => {
   await caSetup();
   const kai = person("kai");
   const mark = await lastAudit();
-  const id = await connectApp(
-    kai,
-    "client-b",
+  const client = await addClient(
     "ChatGPT",
-    "chatgpt.com",
-    ws.kai,
+    "https://chatgpt.com/connector_platform_oauth_redirect",
   );
+  const id = await connectApp(kai, client, ws.kai);
   const made = await agentRow(id);
-  assert.equal(made.oauth_client_id, "client-b");
+  assert.equal(made.oauth_client_id, client);
   assert.equal(made.token_hash, null);
   assert.equal(made.provider, "Connected app");
   assert.equal(made.name, "ChatGPT");
@@ -4315,20 +4319,17 @@ test("a person connects an app to their own workspace", async () => {
   assert.equal(audit[0].action, "agent.connected");
   assert.equal(audit[0].hive_id, ca.hive);
   assert.equal(audit[0].member_id, members.kai);
-  assert.equal(audit[0].detail.agent, id);
-  assert.equal(audit[0].detail.trust_tier, "vendor");
+  assert.deepEqual(audit[0].detail, {
+    agent: id,
+    client_id: client,
+    workspace: ws.kai,
+    trust_tier: "vendor",
+  });
 
-  // The person sees it in their agents list; the client id is not readable.
-  const seen = await as(
-    kai,
-    `select name, provider from public.agents where id = $1`,
-    [id],
-  );
-  assert.deepEqual(seen, [{ name: "ChatGPT", provider: "Connected app" }]);
-  await assert.rejects(
-    as(kai, `select oauth_client_id from public.agents`),
-    /permission denied/,
-  );
+  // The client id is stored the one way the database writes a uuid, however
+  // the caller spelled it, so a pass's claim finds it.
+  assert.equal(await connectApp(kai, client.toUpperCase(), ws.kai), id);
+  assert.equal((await agentRow(id)).oauth_client_id, client);
 
   // An agent has exactly one of a token and a client.
   await db.exec("reset role");
@@ -4347,6 +4348,48 @@ test("a person connects an app to their own workspace", async () => {
   );
 });
 
+test("only the person reads which app an agent of theirs stands for", async () => {
+  await caSetup();
+  const kai = person("kai");
+  const mine = `select name, provider, oauth_client_id from public.agents where id = $1`;
+  assert.deepEqual(await as(kai, mine, [ca.appAgent]), [
+    { name: "Claude", provider: "Connected app", oauth_client_id: apps.a },
+  ]);
+  // An agent with a token has none.
+  assert.deepEqual(
+    await as(kai, `select oauth_client_id from public.agents where id = $1`, [
+      ca.tokenAgent,
+    ]),
+    [{ oauth_client_id: null }],
+  );
+  // A colleague in the hive, someone outside it, an app pass: no row.
+  for (const who of [person("lena"), person("omar"), appPass("kai")])
+    assert.deepEqual(await as(who, mine, [ca.appAgent]), []);
+  assert.deepEqual(
+    await as(
+      person("lena"),
+      `select id from public.agents where oauth_client_id = $1`,
+      [apps.a],
+    ),
+    [],
+  );
+  await assert.rejects(
+    as(null, `select oauth_client_id from public.agents`),
+    /permission denied/,
+  );
+  // The token hash stays unreadable, and the column cannot be written.
+  await assert.rejects(
+    as(kai, `select token_hash from public.agents`),
+    /permission denied/,
+  );
+  await assert.rejects(
+    as(kai, `update public.agents set oauth_client_id = null where id = $1`, [
+      ca.appAgent,
+    ]),
+    /permission denied/,
+  );
+});
+
 test("only a person connects an app, and only to their own workspace", async () => {
   await caSetup();
   const agents = async () =>
@@ -4355,6 +4398,7 @@ test("only a person connects an app, and only to their own workspace", async () 
     (await as(null, `select * from public.agent_login($1)`, [ca.token]))[0],
   );
   const appAgent = identityOf((await connectorLogin(appPass("kai")))[0]);
+  const client = await addClient("App", CLAUDE_URI);
   const before = await agents();
   for (const who of [
     tokenAgent,
@@ -4362,99 +4406,247 @@ test("only a person connects an app, and only to their own workspace", async () 
     { ...person("kai"), trust_tier: "self_hosted" },
   ])
     await assert.rejects(
-      connectApp(who, "client-c", "App", "claude.ai", ws.kai),
+      connectApp(who, client, ws.kai),
       /only a person can connect an app/,
     );
-  await assert.rejects(
-    connectApp(appPass("kai"), "client-c", "App", "claude.ai", ws.kai),
-    APP_REFUSED,
-  );
-  await assert.rejects(
-    connectApp(null, "client-c", "App", "claude.ai", ws.kai),
-    /permission denied/,
-  );
+  await assert.rejects(connectApp(appPass("kai"), client, ws.kai), APP_REFUSED);
+  await assert.rejects(connectApp(null, client, ws.kai), /permission denied/);
   // Someone else's workspace: a colleague's, another hive's, one that is not there.
   for (const who of ["lena", "omar"])
     await assert.rejects(
-      connectApp(person(who), "client-c", "App", "claude.ai", ws.kai),
+      connectApp(person(who), client, ws.kai),
       /that workspace is not yours/,
     );
   await assert.rejects(
-    connectApp(
-      person("kai"),
-      "client-c",
-      "App",
-      "claude.ai",
-      "00000000-0000-0000-0000-000000000000",
-    ),
+    connectApp(person("kai"), client, NOBODY),
     /that workspace is not yours/,
   );
   await assert.rejects(
-    connectApp(person("kai"), "client-c", "App", "claude.ai", null),
+    connectApp(person("kai"), client, null),
     /that workspace is not yours/,
   );
-  // The client id and the name have a size.
-  for (const [client, name] of [
-    ["", "App"],
-    [null, "App"],
-    ["c".repeat(201), "App"],
-    ["client-c", ""],
-    ["client-c", null],
-    ["client-c", "n".repeat(121)],
+  // The app is one the sign-in server knows: an id that is not a uuid, one
+  // nobody registered and one that was deleted are all refused.
+  const deleted = await addClient("Gone", CLAUDE_URI, { deleted: true });
+  for (const unknown of [
+    "",
+    null,
+    "client-a",
+    "Claude",
+    `${client}x`,
+    ` ${client}`,
+    `${client}' or '1'='1`,
+    "c".repeat(201),
+    NOBODY,
+    deleted,
   ])
     await assert.rejects(
-      connectApp(person("kai"), client, name, "claude.ai", ws.kai),
-      /client id|name/,
+      connectApp(person("kai"), unknown, ws.kai),
+      UNKNOWN_APP,
+      String(unknown),
     );
   assert.equal(await agents(), before);
 });
 
-test("an app is trusted as a vendor only from a known address", async () => {
+test("an app is a vendor only when every address it registered is a known one", async () => {
   await caSetup();
-  let n = 0;
-  const tierFor = async (host) =>
+  const tierOf = async (uris, options) => {
+    const id = await addClient("App", uris, options);
+    return (await db.query(`select public.oauth_client_tier($1) as tier`, [id]))
+      .rows[0].tier;
+  };
+  const vendor = [
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://claude.ai",
+    "https://claude.com/cb?x=1",
+    "https://x.claude.ai/cb",
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+    "https://auth.openai.com/cb",
+    "HTTPS://CLAUDE.AI/cb",
+    "https://A.B.ChatGPT.com/cb",
+    "https://claude.ai:443/cb",
+    // Several addresses: separated by commas, by spaces or lines, or a JSON array.
+    "https://claude.ai/cb,https://claude.com/cb",
+    "https://claude.ai/cb, https://chatgpt.com/cb",
+    "https://claude.ai/cb https://auth.openai.com/cb",
+    "https://claude.ai/cb\nhttps://x.chatgpt.com/cb\n",
+    '["https://claude.ai/cb"]',
+    '["https://claude.ai/cb","https://chatgpt.com/cb"]',
+    ' [ "https://a.b.openai.com/cb?x=1" ,\n "https://claude.com/cb" ] ',
+  ];
+  const selfHosted = [
+    // One address that is not known, among known ones.
+    "https://claude.ai/cb,https://evil.example/cb",
+    "https://evil.example/cb,https://claude.ai/cb",
+    "https://claude.ai/cb https://evil.example/cb",
+    '["https://claude.ai/cb","https://evil.example/cb"]',
+    "https://claude.ai/cb,http://localhost:6274/oauth/callback",
+    // Not https.
+    "http://claude.ai/cb",
+    "evilapp://claude.ai/cb",
+    "claude.ai/cb",
+    "//claude.ai/cb",
+    '["http://claude.ai/cb"]',
+    '["https://claude.ai/cb","evilapp://claude.ai/cb"]',
+    // No address at all.
+    "",
+    null,
+    "   ",
+    ",",
+    "[]",
+    // A host that only looks like a known one.
+    "https://evil-claude.ai/cb",
+    "https://claude.ai.evil.com/cb",
+    "https://notopenai.com/cb",
+    "https://claude.ai./cb",
+    "https://evil.com/.claude.ai",
+    "https://evil.com?x=.claude.ai",
+    "https://evil.com#.claude.ai",
+    "https://evil.com:443/x.claude.ai",
+    "https://localhost/cb",
+    // User info, or anything else between the host and the path.
+    "https://user@claude.ai/cb",
+    "https://user:pw@claude.ai/cb",
+    "https://claude.ai@evil.com/cb",
+    "https://claude.ai:443@evil.com/cb",
+    "https://claude.ai\\@evil.com/cb",
+    "https://claude.ai%2f@evil.com/cb",
+    "https://claude.ai:99999999/cb",
+    "https://claude.ai:/cb",
+    "https:///claude.ai/cb",
+    "https://%63laude.ai/cb",
+    // Not a list of addresses.
+    '["https://claude.ai/cb", 7]',
+    '["https://claude.ai/cb", null]',
+    '[["https://claude.ai/cb"]]',
+    '["https://claude.ai/cb"',
+    '{"a":"https://claude.ai/cb"}',
+    '"https://claude.ai/cb"',
+    "{https://claude.ai/cb}",
+    '["https://claude.ai/cb https://evil.example/cb"]',
+    '["https://claude.ai/cb\\nx"]',
+  ];
+  for (const uris of vendor)
+    assert.equal(await tierOf(uris), "vendor", String(uris));
+  for (const uris of selfHosted)
+    assert.equal(await tierOf(uris), "self_hosted", String(uris));
+  // A deleted client and one nobody registered.
+  assert.equal(await tierOf(CLAUDE_URI, { deleted: true }), "self_hosted");
+  for (const id of [NOBODY, null])
+    assert.equal(
+      (await db.query(`select public.oauth_client_tier($1) as tier`, [id]))
+        .rows[0].tier,
+      "self_hosted",
+    );
+
+  // Nobody asks for a tier through the API: the database works it out itself.
+  const fn = (
+    await db.query(
+      `select p.oid, p.prosecdef, p.proconfig from pg_proc p
+        where p.pronamespace = 'public'::regnamespace and p.proname = 'oauth_client_tier'`,
+    )
+  ).rows;
+  assert.equal(fn.length, 1);
+  assert.equal(fn[0].prosecdef, true);
+  assert.ok(fn[0].proconfig.includes('search_path=""'));
+  for (const role of ["authenticated", "anon", "public"])
+    assert.equal(
+      (
+        await db.query(
+          `select has_function_privilege($1, $2::oid, 'execute') as can`,
+          [role, fn[0].oid],
+        )
+      ).rows[0].can,
+      false,
+      role,
+    );
+  for (const who of [person("kai"), appPass("kai"), null])
+    await assert.rejects(
+      as(who, `select public.oauth_client_tier($1)`, [apps.a]),
+      /permission denied/,
+    );
+  // Nor are the sign-in server's own tables readable.
+  for (const table of ["auth.oauth_clients", "auth.oauth_consents"])
+    await assert.rejects(
+      as(person("kai"), `select * from ${table}`),
+      /permission denied/,
+    );
+});
+
+test("the trust tier follows the app's registration on every call", async () => {
+  await caSetup();
+  const kai = person("kai");
+  const setUris = (client, uris) =>
+    db.query(`update auth.oauth_clients set redirect_uris = $2 where id = $1`, [
+      client,
+      uris,
+    ]);
+  const tierAtLogin = async (client) =>
+    (await connectorLogin(appPass("kai", client)))[0].trust_tier;
+
+  // Registered with a known address and one that is not: held for review,
+  // whichever of the two the approval came back through.
+  const mixed = await addClient(
+    "Mixed",
+    `${CLAUDE_URI},https://attacker.example/cb`,
+  );
+  const mixedAgent = await approveApp("kai", mixed, ws.kai);
+  assert.equal((await agentRow(mixedAgent)).trust_tier, "self_hosted");
+  assert.equal(await tierAtLogin(mixed), "self_hosted");
+
+  // Approved while every address was known, then the registration changed:
+  // the next call is held, and Settings shows it.
+  const client = await addClient("Claude", CLAUDE_URI);
+  const id = await approveApp("kai", client, ws.kai);
+  assert.equal((await agentRow(id)).trust_tier, "vendor");
+  assert.equal(await tierAtLogin(client), "vendor");
+  await setUris(client, `${CLAUDE_URI},https://attacker.example/cb`);
+  assert.equal(await tierAtLogin(client), "self_hosted");
+  assert.equal((await agentRow(id)).trust_tier, "self_hosted");
+  // A stored tier is never the source: written back by hand, it changes nothing.
+  await db.query(
+    `update public.agents set trust_tier = 'vendor' where id = $1`,
+    [id],
+  );
+  assert.equal(await tierAtLogin(client), "self_hosted");
+  assert.equal((await agentRow(id)).trust_tier, "self_hosted");
+  // What the registration says now is what counts, in both directions.
+  await setUris(client, `["${CLAUDE_URI}"]`);
+  assert.equal(await tierAtLogin(client), "vendor");
+  assert.equal((await agentRow(id)).trust_tier, "vendor");
+  await setUris(client, "https://attacker.example/cb");
+  assert.equal(await connectApp(kai, client, ws.kai), id);
+  assert.equal((await agentRow(id)).trust_tier, "self_hosted");
+});
+
+test("an app's name is the one it registered, cleaned", async () => {
+  await caSetup();
+  const nameFor = async (registered) =>
     (
       await agentRow(
         await connectApp(
           person("lena"),
-          `client-host-${n++}`,
-          "App",
-          host,
+          await addClient(registered, CLAUDE_URI),
           ws.lena,
         ),
       )
-    ).trust_tier;
-  const vendor = [
-    "claude.ai",
-    "x.claude.ai",
-    "claude.com",
-    "chatgpt.com",
-    "auth.openai.com",
-    "CLAUDE.AI",
-    "A.B.ChatGPT.com",
-  ];
-  const selfHosted = [
-    "evil-claude.ai",
-    "claude.ai.evil.com",
-    "",
-    null,
-    "notopenai.com",
-    "openai.com.",
-    ".claude.ai.evil",
-    "claude.ai/evil.com",
-    "%.claude.ai",
-    "evil.com/.claude.ai",
-    "evil.com?x=.claude.ai",
-    "evil.com#.claude.ai",
-    "evil.com:443/x.claude.ai",
-    " claude.ai",
-    "xclaude_ai",
-    "localhost",
-  ];
-  for (const host of vendor)
-    assert.equal(await tierFor(host), "vendor", String(host));
-  for (const host of selfHosted)
-    assert.equal(await tierFor(host), "self_hosted", String(host));
+    ).name;
+  assert.equal(await nameFor("Claude"), "Claude");
+  assert.equal(await nameFor("  Claude \n"), "Claude");
+  assert.equal(await nameFor("Zoë's 助手 app"), "Zoë's 助手 app");
+  // Control characters become a space; the marks that reorder or hide text
+  // are dropped.
+  assert.equal(await nameFor("Claude\r\n(verified)"), "Claude (verified)");
+  assert.equal(await nameFor("Cl\tau\u0007d\u0085e"), "Cl au d e");
+  assert.equal(await nameFor("a b c"), "a b c");
+  assert.equal(await nameFor("‮edualc‬ ⁦x⁩‏‎؜"), "edualc x");
+  assert.equal(await nameFor("Cla​u‍de﻿­⁠"), "Claude");
+  assert.equal(await nameFor("Claude\u{E0041}\u{E007F}"), "Claude");
+  // Cut to 120 characters; never empty.
+  assert.equal(await nameFor("x".repeat(500)), "x".repeat(120));
+  assert.equal(await nameFor(`${"x".repeat(119)} y`), "x".repeat(119));
+  for (const empty of ["", null, "   ", "​‮", "\n\t"])
+    assert.equal(await nameFor(empty), "Connected app", JSON.stringify(empty));
 });
 
 test("connecting the same app again updates it and reconnects a revoked one", async () => {
@@ -4467,19 +4659,18 @@ test("connecting the same app again updates it and reconnects a revoked one", as
       [ca.hive, members.kai],
     )
   )[0].id;
-  const id = await connectApp(kai, "client-d", "First", "claude.ai", ws.kai);
+  const client = await addClient("First", CLAUDE_URI);
+  const id = await approveApp("kai", client, ws.kai);
   await as(kai, `select public.revoke_agent($1)`, [id]);
   assert.notEqual((await agentRow(id)).revoked_at, null);
-  await assert.rejects(
-    connectorLogin(appPass("kai", "client-d")),
-    NO_APP_AGENT,
-  );
+  await assert.rejects(connectorLogin(appPass("kai", client)), NO_APP_AGENT);
 
-  const mark = await lastAudit();
-  assert.equal(
-    await connectApp(kai, "client-d", "Second", "claude.ai", second),
-    id,
+  await db.query(
+    `update auth.oauth_clients set client_name = 'Second' where id = $1`,
+    [client],
   );
+  const mark = await lastAudit();
+  assert.equal(await connectApp(kai, client, second), id);
   const again = await agentRow(id);
   assert.equal(again.name, "Second");
   assert.equal(again.workspace_id, second);
@@ -4490,44 +4681,23 @@ test("connecting the same app again updates it and reconnects a revoked one", as
     ["agent.connected"],
   );
   assert.equal(
-    (await connectorLogin(appPass("kai", "client-d")))[0].workspace_id,
+    (await connectorLogin(appPass("kai", client)))[0].workspace_id,
     second,
   );
   assert.equal(
     (
       await db.query(
-        `select count(*)::int as n from public.agents where oauth_client_id = 'client-d'`,
+        `select count(*)::int as n from public.agents where oauth_client_id = $1`,
+        [client],
       )
     ).rows[0].n,
     1,
   );
-
-  // Once seen from an unknown address, an app stays held for review: a later
-  // approval from a known address does not lift it.
-  const held = await connectApp(kai, "client-e", "App", "evil.example", ws.kai);
-  assert.equal((await agentRow(held)).trust_tier, "self_hosted");
-  assert.equal(
-    await connectApp(kai, "client-e", "App", "claude.ai", ws.kai),
-    held,
-  );
-  assert.equal((await agentRow(held)).trust_tier, "self_hosted");
-  // And a trusted one seen from an unknown address is held from then on.
-  assert.equal(
-    await connectApp(kai, "client-d", "App", "evil.example", second),
-    id,
-  );
-  assert.equal((await agentRow(id)).trust_tier, "self_hosted");
 });
 
 test("connector_login gives an app pass its own agent and nobody else's", async () => {
   await caSetup();
-  const lenaAgent = await connectApp(
-    person("lena"),
-    "client-a",
-    "Claude",
-    "claude.ai",
-    ws.lena,
-  );
+  const lenaAgent = await approveApp("lena", apps.a, ws.lena);
   await db.query(`update public.agents set last_used_at = null where id = $1`, [
     ca.appAgent,
   ]);
@@ -4543,6 +4713,11 @@ test("connector_login gives an app pass its own agent and nobody else's", async 
     },
   ]);
   assert.notEqual((await agentRow(ca.appAgent)).last_used_at, null);
+  // A real pass names the audience every signed-in identity has.
+  assert.deepEqual(
+    await connectorLogin({ ...appPass("kai"), aud: "authenticated" }),
+    mine,
+  );
   // The same client id, another person: each gets their own.
   const hers = await connectorLogin(appPass("lena"));
   assert.equal(hers.length, 1);
@@ -4555,25 +4730,36 @@ test("connector_login gives an app pass its own agent and nobody else's", async 
   await assert.rejects(connectorLogin(appPass("kai", "")), notAnApp);
   await assert.rejects(connectorLogin(identityOf(mine[0])), notAnApp);
   await assert.rejects(
-    connectorLogin({ ...identityOf(mine[0]), client_id: "client-a" }),
+    connectorLogin({ ...identityOf(mine[0]), client_id: apps.a }),
     notAnApp,
   );
   await assert.rejects(
-    connectorLogin({ role: "authenticated", client_id: "client-a" }),
+    connectorLogin({ role: "authenticated", client_id: apps.a }),
     notAnApp,
   );
   await assert.rejects(connectorLogin(null), /permission denied/);
-  // An unknown client, and a client only someone else connected.
+  // A client id that is not one, a client nobody registered, and a token for
+  // another audience that names no client.
+  for (const client of ["client-none", `${apps.a}x`, NOBODY])
+    await assert.rejects(
+      connectorLogin(appPass("kai", client)),
+      UNKNOWN_APP,
+      client,
+    );
   await assert.rejects(
-    connectorLogin(appPass("kai", "client-none")),
-    NO_APP_AGENT,
+    connectorLogin({ ...person("kai"), aud: apps.a }),
+    UNKNOWN_APP,
   );
+  // An app the person never approved; one they approved at the sign-in server
+  // but never connected here; one only someone else connected.
+  await assert.rejects(connectorLogin(appPass("omar")), NOT_APPROVED);
+  await addConsent(users.omar, apps.a);
   await assert.rejects(connectorLogin(appPass("omar")), NO_APP_AGENT);
-  await connectApp(person("lena"), "client-lena", "App", "claude.ai", ws.lena);
-  await assert.rejects(
-    connectorLogin(appPass("kai", "client-lena")),
-    NO_APP_AGENT,
-  );
+  const hersOnly = await addClient("App", CLAUDE_URI);
+  await approveApp("lena", hersOnly, ws.lena);
+  await assert.rejects(connectorLogin(appPass("kai", hersOnly)), NOT_APPROVED);
+  await addConsent(users.kai, hersOnly);
+  await assert.rejects(connectorLogin(appPass("kai", hersOnly)), NO_APP_AGENT);
   // A connected app has no token to sign in with.
   await assert.rejects(as(null, `select * from public.agent_login(null)`));
 
@@ -4591,6 +4777,54 @@ test("connector_login gives an app pass its own agent and nobody else's", async 
   ]);
 });
 
+test("connector_login needs the app to exist and the person's approval to stand", async () => {
+  await caSetup();
+  const kai = person("kai");
+  const client = await addClient("Claude", CLAUDE_URI);
+  const pass = appPass("kai", client);
+  // Connected here, but the sign-in server holds no approval.
+  const id = await connectApp(kai, client, ws.kai);
+  await assert.rejects(connectorLogin(pass), NOT_APPROVED);
+  assert.equal((await agentRow(id)).last_used_at, null);
+  // Someone else's approval of the same app is not this person's.
+  await addConsent(users.lena, client);
+  await assert.rejects(connectorLogin(pass), NOT_APPROVED);
+  // Approved: it works.
+  await addConsent(users.kai, client);
+  assert.equal((await connectorLogin(pass))[0].agent_id, id);
+  // The approval is taken back at the sign-in server: refused at once, though
+  // the agent here is still live.
+  await addConsent(users.kai, client, { revoked: true });
+  await assert.rejects(connectorLogin(pass), NOT_APPROVED);
+  assert.equal((await agentRow(id)).revoked_at, null);
+  // Approved again.
+  await addConsent(users.kai, client);
+  assert.equal((await connectorLogin(pass)).length, 1);
+
+  // The app is deleted at the sign-in server: refused. It comes back with
+  // the registration.
+  await db.query(
+    `update auth.oauth_clients set deleted_at = now() where id = $1`,
+    [client],
+  );
+  await assert.rejects(connectorLogin(pass), UNKNOWN_APP);
+  await db.query(
+    `update auth.oauth_clients set deleted_at = null where id = $1`,
+    [client],
+  );
+  assert.equal((await connectorLogin(pass)).length, 1);
+
+  // Revoked in Settings, then handed a new pass without asking (the sign-in
+  // server still holds the approval): refused until the person approves in
+  // the window again.
+  await as(kai, `select public.revoke_agent($1)`, [id]);
+  await assert.rejects(connectorLogin(pass), NO_APP_AGENT);
+  await assert.rejects(
+    connectorLogin({ ...pass, aud: "authenticated" }),
+    NO_APP_AGENT,
+  );
+});
+
 test("an app approved in a second hive answers for the latest approval only", async () => {
   await caSetup();
   // Kai is a member of two hives and approves the same app in each in turn.
@@ -4603,32 +4837,24 @@ test("an app approved in a second hive answers for the latest approval only", as
       other,
     ])
   ).rows[0].id;
-  const first = await connectApp(kai, "client-f", "App", "claude.ai", ws.kai);
-  const second = await connectApp(kai, "client-f", "App", "claude.ai", space);
+  const client = await addClient("App", CLAUDE_URI);
+  const first = await approveApp("kai", client, ws.kai);
+  const second = await connectApp(kai, client, space);
   assert.notEqual(second, first);
   assert.notEqual((await agentRow(first)).revoked_at, null);
-  let login = await connectorLogin(appPass("kai", "client-f"));
+  let login = await connectorLogin(appPass("kai", client));
   assert.equal(login.length, 1);
   assert.equal(login[0].agent_id, second);
   assert.equal(login[0].hive_id, other);
 
-  assert.equal(
-    await connectApp(kai, "client-f", "App", "claude.ai", ws.kai),
-    first,
-  );
+  assert.equal(await connectApp(kai, client, ws.kai), first);
   assert.notEqual((await agentRow(second)).revoked_at, null);
-  login = await connectorLogin(appPass("kai", "client-f"));
+  login = await connectorLogin(appPass("kai", client));
   assert.equal(login.length, 1);
   assert.equal(login[0].agent_id, first);
   assert.equal(login[0].hive_id, ca.hive);
   // Lena's agent for the same client is somebody else's and stays as it is.
-  const hers = await connectApp(
-    person("lena"),
-    "client-f",
-    "App",
-    "claude.ai",
-    ws.lena,
-  );
+  const hers = await connectApp(person("lena"), client, ws.lena);
   assert.equal((await agentRow(first)).revoked_at, null);
   assert.equal((await agentRow(hers)).revoked_at, null);
 });
@@ -4636,8 +4862,9 @@ test("an app approved in a second hive answers for the latest approval only", as
 test("a connected app's agent identity behaves as any vendor agent", async () => {
   await caSetup();
   const kai = person("kai");
-  const id = await connectApp(kai, "client-g", "App", "claude.ai", ws.kai);
-  const login = (await connectorLogin(appPass("kai", "client-g")))[0];
+  const client = await addClient("App", CLAUDE_URI);
+  const id = await approveApp("kai", client, ws.kai);
+  const login = (await connectorLogin(appPass("kai", client)))[0];
   assert.equal(login.agent_id, id);
   const agent = identityOf(login);
   const n = (
@@ -4668,16 +4895,9 @@ test("a connected app's agent identity behaves as any vendor agent", async () =>
     /agents cannot revoke agents/,
   );
   // An app held for review writes held notes.
-  const heldId = await connectApp(
-    kai,
-    "client-h",
-    "Unknown app",
-    "tools.example",
-    ws.kai,
-  );
-  const held = identityOf(
-    (await connectorLogin(appPass("kai", "client-h")))[0],
-  );
+  const unknown = await addClient("Unknown app", "https://tools.example/cb");
+  const heldId = await approveApp("kai", unknown, ws.kai);
+  const held = identityOf((await connectorLogin(appPass("kai", unknown)))[0]);
   assert.equal(held.trust_tier, "self_hosted");
   const h = (
     await as(
@@ -4689,4 +4909,158 @@ test("a connected app's agent identity behaves as any vendor agent", async () =>
     )
   )[0];
   assert.deepEqual(h, { quarantined: true, written_by_agent: heldId });
+});
+
+test("a token made for another audience is refused like an app pass", async () => {
+  await caSetup();
+  const kai = person("kai");
+  const row = JSON.stringify(ca.noteRow);
+  const asRow = `jsonb_populate_record(null::public.notes, $1::jsonb)`;
+  const client = async (who) =>
+    (await as(who, `select public.jwt_oauth_client() as c`))[0].c;
+
+  // A person and an agent: no audience at all (as elsewhere in these tests)
+  // or the one Supabase gives every signed-in identity.
+  const agent = identityOf(
+    (await as(null, `select * from public.agent_login($1)`, [ca.token]))[0],
+  );
+  for (const who of [
+    kai,
+    { ...kai, aud: "authenticated" },
+    { ...kai, aud: ["authenticated"] },
+    { ...kai, aud: null },
+    agent,
+    { ...agent, aud: "authenticated" },
+  ]) {
+    assert.equal(await client(who), null, JSON.stringify(who.aud));
+    assert.ok((await titles(who)).includes("ca zeppelin"));
+    assert.ok((await as(who, `select public.my_member_ids() as id`)).length);
+  }
+
+  // Any other audience is an app, with or without a client id.
+  const others = [
+    "some-client",
+    apps.a,
+    "",
+    "Authenticated",
+    "authenticated ",
+    "anon",
+    ["some-client"],
+    ["authenticated", "some-client"],
+    [],
+    7,
+    true,
+    { a: "authenticated" },
+  ];
+  for (const aud of others) {
+    const who = { ...kai, aud };
+    const what = JSON.stringify(aud);
+    assert.equal(await client(who), "unknown-audience", what);
+    for (const table of [
+      "notes",
+      "hives",
+      "members",
+      "workspaces",
+      "agents",
+      "folders",
+      "files",
+      "links",
+      "audit_log",
+      "invitations",
+    ])
+      assert.deepEqual(
+        await as(who, `select 1 from public.${table}`),
+        [],
+        `${what} read ${table}`,
+      );
+    assert.deepEqual(await as(who, `select 1 from storage.objects`), [], what);
+    assert.deepEqual(await as(who, `select public.my_member_ids()`), [], what);
+    assert.deepEqual(await as(who, `select public.my_hive_ids()`), [], what);
+    assert.deepEqual(
+      await as(who, `select public.is_hive_owner($1) as o`, [ca.hive]),
+      [{ o: false }],
+      what,
+    );
+    assert.deepEqual(
+      await as(who, `select id from public.search_notes('zeppelin')`),
+      [],
+      what,
+    );
+    assert.deepEqual(
+      await as(who, `select public.can_read_note(${asRow}) as r`, [row]),
+      [{ r: false }],
+      what,
+    );
+    for (const [sql, params] of [
+      [`select public.map_graph($1)`, [ca.hive]],
+      [`select public.inbox($1)`, [ca.hive]],
+      [`select public.create_hive('By another audience', 'Kai')`, []],
+      [`select * from public.create_agent($1, 'x', 'other')`, [ws.kai]],
+      [`select public.revoke_agent($1)`, [ca.tokenAgent]],
+      [`select public.respond_to_link($1, true)`, [ca.link]],
+      [`select public.connect_app($1, $2)`, [apps.a, ws.kai]],
+      [`select public.note_visibility(${asRow})`, [row]],
+      [`select public.claim_invitations()`, []],
+    ])
+      await assert.rejects(as(who, sql, params), APP_REFUSED, `${what} ${sql}`);
+    const written = await trial(
+      who,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'aud.md', 'by another audience') returning id`,
+      [ca.hive, members.kai, ws.kai],
+    );
+    assert.ok(written.error, `${what} wrote a note`);
+    // It names no app, so there is nothing to swap it for.
+    await assert.rejects(connectorLogin(who), UNKNOWN_APP, what);
+  }
+  // With a client id it is that app's pass, whatever the audience says.
+  for (const aud of ["some-client", "authenticated", apps.a])
+    assert.equal(await client({ ...appPass("kai"), aud }), apps.a);
+});
+
+test("only a signed-in identity may ask who it is", async () => {
+  await caSetup();
+  for (const name of ["my_member_ids", "my_hive_ids", "is_hive_owner"]) {
+    const acl = (
+      await db.query(
+        `select has_function_privilege('anon', p.oid, 'execute') as anon,
+                has_function_privilege('public', p.oid, 'execute') as everyone,
+                has_function_privilege('authenticated', p.oid, 'execute') as signed_in
+           from pg_proc p
+          where p.pronamespace = 'public'::regnamespace and p.proname = $1`,
+        [name],
+      )
+    ).rows;
+    assert.deepEqual(
+      acl,
+      [{ anon: false, everyone: false, signed_in: true }],
+      name,
+    );
+  }
+  // A token that names a real person but carries the role of a visitor: the
+  // database runs it as anon, and it learns nothing about that person.
+  const visitor = { sub: users.kai, role: "anon" };
+  for (const [sql, params] of [
+    [`select public.my_member_ids()`, []],
+    [`select public.my_hive_ids()`, []],
+    [`select public.is_hive_owner($1)`, [ca.hive]],
+  ]) {
+    const r = await trial(visitor, sql, params, "anon");
+    assert.match(r.error?.message ?? "(answered)", /permission denied/, sql);
+    const mine = await trial(person("kai"), sql, params);
+    assert.equal(mine.error, undefined, sql);
+    assert.ok(mine.rows.length >= 1, sql);
+  }
+  for (const table of ["notes", "members", "hives", "workspaces", "agents"]) {
+    const r = await trial(
+      visitor,
+      `select count(*)::int as n from public.${table}`,
+      [],
+      "anon",
+    );
+    assert.ok(r.error || r.rows[0].n === 0, `a visitor read ${table}`);
+  }
+  // A visitor with no token still gets an empty answer from a table, not the
+  // failure of a policy that calls these functions.
+  assert.deepEqual(await titles(null), []);
 });

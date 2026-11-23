@@ -18,7 +18,7 @@ import { DevConsent } from "./DevConsent";
 //   ?state=failed   the line for a request that could not be loaded
 //   ?state=deny     where the fixture returns after Deny
 //   ?state=approved where the fixture returns after Approve (&workspace=<id>)
-//   ?app=…&host=…   another app name and return host on the form
+//   ?app=…&host=…   another app name and return host on the form (both are only shown)
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 const WORKSPACES = [

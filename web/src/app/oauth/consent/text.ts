@@ -7,7 +7,10 @@ export const TITLE = "Connect an app";
 /** The app's name is shown in bold just before this. */
 export const ASKS = "wants to connect to your hive.";
 
-/** Where the browser goes after the decision; the host is the one the app registered. */
+/**
+ * Where the browser goes after the decision. Shown for the person to read and nothing more: how
+ * far the app is trusted is worked out by the database from every address the app registered.
+ */
 export function returnsTo(host: string): string {
   return host
     ? `After you decide, you go back to ${host}.`

@@ -293,4 +293,170 @@ describe("/mcp with a pass", () => {
     expect(res.status).toBe(502);
     expect(await res.text()).not.toContain("inner-host");
   });
+
+  it("passes the connector's Allow header through", async () => {
+    fetchMock.mockResolvedValue(
+      new Response('{"error":"method not allowed"}', {
+        status: 405,
+        headers: { "content-type": "application/json", allow: "POST" },
+      }),
+    );
+    const res = await GET(request("GET", { authorization: "Bearer pass-1" }));
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("POST");
+    expect(await res.json()).toEqual({ error: "method not allowed" });
+  });
+
+  it("returns no Allow header the connector did not send", async () => {
+    const res = await POST(
+      request("POST", { authorization: "Bearer pass-1" }, BODY),
+    );
+    expect(res.headers.get("allow")).toBeNull();
+  });
+});
+
+describe("/mcp: a connector that is slow or says too much", () => {
+  const MB = 1024 * 1024;
+  const TOO_LATE = { error: "the connector took too long" };
+  const TOO_LARGE = { error: "the connector's answer was too large" };
+  const BODY = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}';
+  const post = () =>
+    POST(request("POST", { authorization: "Bearer pass-1" }, BODY));
+
+  afterEach(() => vi.useRealTimers());
+
+  it("gives the connector 30 seconds, then answers 504 with a fixed body", async () => {
+    vi.useFakeTimers();
+    // Never answers; fails the way fetch does when its signal aborts.
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal!.addEventListener("abort", () =>
+            reject(new DOMException("aborted inner-host", "AbortError")),
+          );
+        }),
+    );
+    const pending = post();
+    let settled = false;
+    void pending.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const res = await pending;
+    expect(res.status).toBe(504);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual(TOO_LATE);
+  });
+
+  it("counts the answer's body in the same 30 seconds", async () => {
+    vi.useFakeTimers();
+    let cancelled = false;
+    // Headers at once, then a body that never ends.
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"jsonrpc"'));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const pending = post();
+    await vi.advanceTimersByTimeAsync(30_000);
+    const res = await pending;
+    expect(res.status).toBe(504);
+    expect(await res.json()).toEqual(TOO_LATE);
+    expect(cancelled).toBe(true);
+  });
+
+  it("leaves no timer behind after an answer in time", async () => {
+    vi.useFakeTimers();
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("answers 502 to an answer over 8 MB, whatever length it declares", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("x".repeat(8 * MB + 1), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const res = await post();
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual(TOO_LARGE);
+  });
+
+  it("answers 502 to an answer that declares more than 8 MB, without reading it through", async () => {
+    let sent = 0;
+    let cancelled = false;
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            sent += 1024;
+            controller.enqueue(new Uint8Array(1024));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 200, headers: { "content-length": String(8 * MB + 1) } },
+      ),
+    );
+    const res = await post();
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual(TOO_LARGE);
+    expect(cancelled).toBe(true);
+    expect(sent).toBeLessThan(MB);
+  });
+
+  it("stops reading an endless answer once it passes 8 MB", async () => {
+    let sent = 0;
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            sent += MB;
+            controller.enqueue(new Uint8Array(MB));
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const res = await post();
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual(TOO_LARGE);
+    expect(sent).toBeLessThanOrEqual(10 * MB);
+  });
+
+  it("returns an answer of exactly 8 MB", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("x".repeat(8 * MB), { status: 200 }),
+    );
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect((await res.arrayBuffer()).byteLength).toBe(8 * MB);
+  });
+
+  it("answers 502 when the answer breaks off, without the error's text", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            controller.error(new Error("socket hang up inner-host"));
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const res = await post();
+    expect(res.status).toBe(502);
+    expect(await res.text()).not.toContain("inner-host");
+  });
 });

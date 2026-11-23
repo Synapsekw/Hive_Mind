@@ -25,9 +25,13 @@ tier cannot be raised by the agent.
 The remote connector is built. The address is the same for everyone, `https://<site>/mcp`, and
 there is no token to copy: the app opens a Hive Mind window, the member signs in, picks a
 workspace and clicks **Approve**. The app then appears in **Settings** as an agent named after
-it, and is revoked there. Its tier is decided by the address the app returns to: Claude's and
-ChatGPT's own hosts are `vendor`, any other program is `self_hosted`. Steps for the owner and
-for a member are in
+it, and is revoked there. Its tier is decided by the database, from every address the app
+registered with the sign-in server, and checked on every call: an app is `vendor` only when all
+of them are `https` addresses on Claude's or ChatGPT's own hosts, and `self_hosted` otherwise.
+Neither the app nor the web app can state the tier. One leftover is known: the app is recorded
+as connected just before the sign-in server confirms the approval, so an approval that fails at
+that last step can leave a connected agent in Settings that no app can use. Steps for the owner
+and for a member are in
 [hosted-db-bringup.md](hosted-db-bringup.md#hosting-and-the-connector); what protects it is in
 [security.md](security.md#10-the-remote-connector).
 

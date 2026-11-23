@@ -312,14 +312,54 @@ with the local server (Claude Code, or Claude Desktop's local config), because i
 from the computer the agent runs on. The app reads what you can read and writes only into the
 workspace you picked. It cannot change sharing, accept a link or delete a note.
 
-**An app we do not know.** An app that returns to an address other than Claude's or ChatGPT's is
-connected as `self_hosted`: it reads shared notes only and its writes are held until you release
-them.
+**An app we do not know.** The database decides how far an app is trusted from every address
+the app registered when it signed up with the sign-in server, and checks again on every call.
+An app with any address other than an `https` one on Claude's or ChatGPT's own hosts is
+`self_hosted`: it reads shared notes only and its writes are held until you release them. The
+address shown in the window is for you to read; it does not decide this.
 
 **To disconnect.** In Hive Mind, open **Settings** and revoke the agent named after the app (its
-provider reads `Connected app`). The app's next call is refused. Approving it again in the
-window reconnects it. Removing the connector inside Claude or ChatGPT alone does not revoke
-anything.
+provider reads `Connected app`). That cuts the app off at once: its next call is refused.
+Settings also ends the app's sign-in at Supabase, so the app is not handed a new pass.
+Removing the connector inside Claude or ChatGPT alone does not revoke anything.
+
+**To connect again.** A revoked app is not switched back on in Settings. Remove the connector
+inside the app, add it again with the same address, and approve in the window.
+
+### 5. Checks before promotion to `main`
+
+These need a real app signed in, so they are done by hand on the `develop` test site. Each one
+is an assumption the database or this guide rests on. Note the result in the session note; if
+one does not hold, promotion stops and the owner decides.
+
+- [ ] **Every token the sign-in hands an app, against Supabase directly.** Take the access token
+      (the pass) and, when the app asked for the `openid` scope, the ID token. Send each as
+      `Authorization: Bearer …` with the publishable key to `<project>/rest/v1/notes?select=id`
+      and to `<project>/auth/v1/user`. Expected: `/rest/v1` returns no rows or an error for
+      both; `/auth/v1/user` is refused, or answers no more than the account's own id and email
+      and refuses a change (`PUT`). Anything else is the open item in
+      [security.md](security.md#10-the-remote-connector).
+- [ ] **The audience of an ordinary session.** Decode a signed-in person's own access token and
+      confirm `aud` is `authenticated`. The database treats any other audience as an app and
+      refuses it everywhere, so a different value here would lock people out.
+- [ ] **The real format of `auth.oauth_clients.redirect_uris`.** After Claude and ChatGPT have
+      each registered, read the column in the SQL editor. The database reads a JSON array of
+      strings, or addresses separated by commas or white space. Then confirm
+      `select public.oauth_client_tier(id), client_name, redirect_uris from auth.oauth_clients`
+      gives `vendor` for both. If it gives `self_hosted`, either the format is another one or
+      the app registered an address that is not on the list; both show in the same query.
+- [ ] **The approval row.** After approving, confirm `auth.oauth_consents` has a row for the
+      user and the client with `revoked_at` empty, and that a tool call from the app works.
+      `connector_login` refuses a pass without that row.
+- [ ] **Revoke, then connect again.** Revoke the agent in Settings. Confirm the app's next call
+      is refused, that the row in `auth.oauth_consents` now has `revoked_at` set (or is gone),
+      and that removing and re-adding the connector shows the window again and works after
+      **Approve**.
+- [ ] **A second authorisation through another registered address.** Register a test client with
+      two redirect addresses, approve it through the first, then start a second authorisation
+      through the second. Note whether Supabase Auth shows the window again or approves by
+      itself. Either way the tier must not change: it is read from the registration, which has
+      both addresses.
 
 ## What is proven, and what is not
 

@@ -143,7 +143,8 @@ async function login(
       redirect: "error",
       signal: AbortSignal.timeout(DATABASE_TIMEOUT_MS),
     });
-    // 400 is the database raising "no connected agent for this app"; 401 is
+    // 400 is the database refusing the pass (no connected agent for this app,
+    // an app it does not know, an approval that was taken back); 401 is
     // PostgREST refusing the pass itself (invalid, expired). Both are the
     // app's to fix by signing in again. Any other answer (403, 404, 429,
     // 5xx) is the database refusing or failing this function, so the app is

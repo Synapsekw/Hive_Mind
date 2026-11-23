@@ -3,6 +3,12 @@
 // `invite_member` and `revoke_invitation` refuse an agent, someone else's workspace or agent,
 // and anyone but the owner.
 //
+// Revoking a connected app. `revoke_agent` is what cuts the app off: from then on the database
+// refuses its pass. After it has succeeded, the app's sign-in at the auth server is ended as
+// well (`revokeGrant`), so the auth server stops renewing the pass and asks the person again
+// next time. That second step is best effort: when it fails the revoke still stands, and one
+// fixed phrase is logged.
+//
 // The token. `create_agent` answers with the agent's token, once. It leaves `createIn` only in
 // the returned value. Nothing the function answered is ever passed to `console.*`, whether the
 // call worked or not: a log line here carries an error's code and message and nothing else,
@@ -70,7 +76,63 @@ export async function revokeIn(db: Db, id: unknown): Promise<Result> {
   if (!isUuid(id)) return NO;
   if (!(await signedIn(db))) return NO;
   const res = (await db.rpc("revoke_agent", { p_agent: id })) as Res;
-  return failed("revoke_agent", res) ? NO : YES;
+  if (failed("revoke_agent", res)) return NO;
+  await endSignIn(db, id);
+  return YES;
+}
+
+const SIGN_IN_NOT_ENDED = "the app's sign-in could not be ended";
+
+/** The `oauth_client_id` of the first row, null when there is none; undefined when unreadable. */
+function clientOf(res: Res): string | null | undefined {
+  if (res.error || !Array.isArray(res.data)) return undefined;
+  const first: unknown = res.data[0];
+  if (first === undefined) return null;
+  if (typeof first !== "object" || first === null) return undefined;
+  const { oauth_client_id } = first as Record<string, unknown>;
+  if (oauth_client_id === null) return null;
+  return isUuid(oauth_client_id) ? oauth_client_id : undefined;
+}
+
+/**
+ * After an agent was revoked: when it stood for a connected app, and the person has no other
+ * agent of that app still in use (the same app approved again in another hive), end the app's
+ * sign-in at the auth server. Row-level security answers the person's own agents only. Never
+ * throws and never changes the outcome of the revoke.
+ */
+async function endSignIn(db: Db, agentId: string): Promise<void> {
+  try {
+    const client = clientOf(
+      (await db
+        .from("agents")
+        .select("oauth_client_id")
+        .eq("id", agentId)
+        .limit(1)) as Res,
+    );
+    // An agent with a token has no sign-in to end.
+    if (client === null) return;
+    if (client === undefined) {
+      console.error(SIGN_IN_NOT_ENDED);
+      return;
+    }
+    const live = (await db
+      .from("agents")
+      .select("id")
+      .eq("oauth_client_id", client)
+      .is("revoked_at", null)
+      .limit(1)) as Res;
+    if (live.error || !Array.isArray(live.data)) {
+      console.error(SIGN_IN_NOT_ENDED);
+      return;
+    }
+    if (live.data.length > 0) return;
+    const ended = (await db.auth.oauth.revokeGrant({
+      clientId: client,
+    })) as Res;
+    if (ended.error) console.error(SIGN_IN_NOT_ENDED);
+  } catch {
+    console.error(SIGN_IN_NOT_ENDED);
+  }
 }
 
 /** Part of the message `invite_member` raises for someone who is in the hive already. */

@@ -264,17 +264,26 @@ it in a Hive Mind window. Setup is in
 
 **What the pass can do.**
 
-- One thing: `connector_login`. That function finds the agent this member approved for this
-  app, not revoked, and returns its ids. The connector then signs the usual one-hour agent
-  identity (the same claims `agent-session` writes, including the `session_id` that matches no
-  session) and runs the tool with it. From there on the rules are those of any agent: writes
-  only in its workspace, never sharing, accepting a link or deleting.
+- One thing: `connector_login`. On every call that function checks three things in the
+  database: the app is still registered with Supabase Auth (not deleted), the member's approval
+  of it there has not been revoked, and the member has an agent for this app here that is not
+  revoked. Then it returns the agent's ids and its trust tier. The connector signs the usual
+  one-hour agent identity (the same claims `agent-session` writes, including the `session_id`
+  that matches no session) and runs the tool with it. From there on the rules are those of any
+  agent: writes only in its workspace, never sharing, accepting a link or deleting.
 - **The database refuses the pass everywhere else.** A pass names a person, so without this rule
   an app could do what the person can, including change sharing. Every table in `public`, and
   stored files, has a restrictive policy that fails for an identity carrying `client_id`, and
   every function a signed-in caller may run refuses such a caller, except `connector_login`. A
   test lists those functions from the database's own catalogue, so one added later cannot be
   forgotten.
+- **A token made for another audience is refused the same way.** A person's and an agent's
+  identity name the audience `authenticated`. An identity whose `aud` is anything else is
+  treated as an app's even when it carries no `client_id`: it reads nothing, every function
+  refuses it, and `connector_login` has no app to look up for it. This covers a token the
+  sign-in hands an app besides the pass (an ID token).
+- `my_member_ids`, `my_hive_ids` and `is_hive_owner` can be run by a signed-in identity only,
+  no longer by a visitor.
 - The connector decides nothing about permissions. It offers six tools; `hive_save_file` stays
   in the local server, since a hosted function cannot read a member's disk.
 
@@ -285,31 +294,80 @@ it in a Hive Mind window. Setup is in
   program in the window, and the pass then reaches only what that member approved: one agent in
   one of their own workspaces.
 - Approval is `connect_app`, for a person only. It is refused for an agent identity and for an
-  app's pass, and the workspace must be the caller's own. The app's details are read again on
-  the server from Supabase Auth, never taken from the form. If it fails, nothing is approved. It
-  writes `agent.connected` to the audit log.
-- **Trust tier follows the host the app returns to**, not what the app says it is. For the tier
-  `vendor` the return host must equal, or be a subdomain of, one of `claude.ai`, `claude.com`,
-  `chatgpt.com`, `openai.com`. Anything else, including a host that only looks similar
-  (`evil-claude.ai`, `claude.ai.evil.com`), is `self_hosted`: it reads shared notes only and its
-  writes are held for the member's review. The list is fixed in the migration.
+  app's pass, and the workspace must be the caller's own. The web app passes two things: the
+  app's id, read again on the server from Supabase Auth, and the workspace the member chose.
+  The database looks the app up in Supabase Auth's own record of it (`auth.oauth_clients`),
+  refuses an id that is not registered or was deleted, and takes the agent's name from there,
+  with control characters and the characters that reorder or hide text removed. If it fails,
+  nothing is approved. It writes `agent.connected` to the audit log.
+- **The trust tier is decided by the database from every address the app registered, and
+  checked on every call.** Nothing the web app or the app itself sends takes part. An app is
+  `vendor` only when each redirect address in its registration is `https` on a host that
+  equals, or is a subdomain of, one of `claude.ai`, `claude.com`, `chatgpt.com`, `openai.com`.
+  One address that is anything else makes the whole app `self_hosted`: another host, a host
+  that only looks similar (`evil-claude.ai`, `claude.ai.evil.com`), another scheme
+  (`http://claude.ai/…`, `evilapp://claude.ai/…`), an address with user info, or one that does
+  not parse. So does a registration with no address. A `self_hosted` app reads shared notes
+  only and its writes are held for the member's review. The list is fixed in the migration.
+  Why every address: a pass does not say which address it was issued through, so an app that
+  registered a trusted address and one of its own could be approved through the first and
+  collect the pass through the second.
+- `connector_login` works the tier out again each time, so an app whose registration is not
+  fully trusted is never `vendor`, however and whenever it was approved. The tier stored on the
+  agent is only what Settings shows; it is written at approval and corrected at each call.
 - **The app name in the window is self-declared.** A program picks its own name at
-  registration and could call itself "Claude". The window therefore shows the host it returns
-  to beside the name, and that host is what decides the tier. A member should read the host.
+  registration and could call itself "Claude". The window shows the host this request returns
+  to beside the name, for the member to read. That host is information only: it does not
+  decide the tier.
+- **A request Supabase Auth approves by itself.** When a member has approved an app before and
+  the app asks again, Supabase Auth may answer without showing the window, and the app gets a
+  new pass. Nothing is recorded on our side in that case. The new pass can do no more than the
+  old one: `connector_login` still needs an agent the member has not revoked, and still works
+  out the tier.
 - After sign-in the window returns only to a path on our own site, so the `next` address cannot
   send a person elsewhere.
+- No page of the site can be shown inside a frame on another site (`frame-ancestors 'none'` and
+  `X-Frame-Options: DENY` on every route), so the Approve button cannot be placed under a
+  person's click by a page they do not see.
 
 **Disconnecting.** A connected app is an agent in Settings, named after the app, with the
-provider `Connected app`. Revoking it makes `connector_login` fail on the app's next call, since
-an identity is made for each call. An identity already made lasts up to one hour, as for any
-agent. Approving the app again in the window reconnects it.
+provider `Connected app`. Revoking it there does two things:
+
+1. The agent is revoked in the database. This is what cuts the app off, and it is at once:
+   `connector_login` refuses the app's next call, since an identity is made for each call. (An
+   identity the connector already made for a call in progress lasts up to one hour, as for any
+   agent; the app never holds it.)
+2. The web app then asks Supabase Auth to end the app's sign-in for this member (the approval
+   is marked revoked, the app's sessions and refresh tokens are removed). This step is best
+   effort. If it fails the agent is still revoked and the app is still cut off; a line is
+   logged.
+
+**Connecting again.** Revoking is not undone from Settings. To connect the app again the member
+removes the connector inside the app (Claude or ChatGPT), adds it again, and approves in the
+window. If step 2 above failed, Supabase Auth still holds the old approval and may hand the app
+a new pass without showing the window; that pass is refused, because there is no agent for it,
+and the member cannot reach the window to connect again until that old approval is removed in
+Supabase Auth.
 
 **Open items.**
+
+- **`connect_app` takes effect before the approval is confirmed.** The window records the app
+  first and asks Supabase Auth to approve second, so an app is never approved without being
+  recorded. If the second step fails, the connected agent stays, in Settings, though no app
+  holds a pass for it. Nothing can use it: `connector_login` needs the member's approval at
+  Supabase Auth as well. The member can revoke it in Settings or try again.
+- **What Supabase Auth stores is assumed, not yet seen.** The tier is read from
+  `auth.oauth_clients.redirect_uris`, whose exact text format is not confirmed (the database
+  reads a JSON array, or a list separated by commas or white space; anything else gives
+  `self_hosted`). `connector_login` reads the member's approval from `auth.oauth_consents`.
+  Both are checked against a real sign-in before promotion to `main`
+  ([hosted-db-bringup.md](hosted-db-bringup.md#5-checks-before-promotion-to-main)).
 
 - **Supabase Auth's own account endpoints.** The database refuses a pass, but Supabase Auth is a
   separate service. Whether it accepts a pass on its account endpoints (reading the account,
   changing the email or password) has not been checked: it needs a real pass, which exists only
-  once the site is hosted. It is checked after the merge to `develop` and **before promotion to
+  once the site is hosted. The same goes for the ID token the sign-in hands an app that asks
+  for the `openid` scope. It is checked after the merge to `develop` and **before promotion to
   `main`**. If Auth accepts it and that cannot be closed, promotion stops and the owner decides.
 - **No rate limit or lockout of our own.** `/mcp` and the function can be called by anyone. A
   call without a valid pass is refused, but nothing counts or slows repeated attempts beyond

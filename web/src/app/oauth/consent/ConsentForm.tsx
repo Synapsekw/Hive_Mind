@@ -31,7 +31,7 @@ export function ConsentForm({
   authorizationId: string;
   /** The name the app gave itself. Shown as text, never as markup. */
   appName: string;
-  /** The host the app returns to; empty when it could not be read. */
+  /** The host the app returns to; empty when it could not be read. Shown only, never sent. */
   host: string;
   workspaces: Workspace[];
   initialWorkspaceId: string;

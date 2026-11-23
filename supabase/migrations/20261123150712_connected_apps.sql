@@ -13,7 +13,9 @@
 --
 --   - The database refuses an app pass everywhere. Every table in public and
 --     storage.objects gets a restrictive policy <table>_no_app that fails when
---     the caller carries a client_id. Every function authenticated may execute
+--     the caller carries a client_id, or an audience (aud) other than
+--     'authenticated': a token made for anything else is treated as an app's
+--     too. Every function authenticated may execute
 --     refuses such a caller: the ones row-level security calls answer nothing
 --     (no rows, false), the others raise 'an app pass cannot do this'.
 --     Security definer functions bypass row-level security, which is why each
@@ -21,24 +23,39 @@
 --     latest definitions.
 --   - The one exception is connector_login(): it swaps the pass for the row of
 --     the agent the person approved, and the connector signs the usual limited
---     agent identity from it. agent_login(token) is unchanged: it answers by
---     the token alone, for anyone.
---   - agents.oauth_client_id: the app's client id, null for an agent with a
---     token. agents.token_hash becomes nullable; an agent has exactly one of
---     the two. One agent per member and client.
---   - jwt_oauth_client(): the caller's client_id claim, or null.
---   - connect_app(client, name, redirect host, workspace): a person, in the
---     approval window, connects an app to one of their own workspaces, or
---     reconnects it (same member and client: the workspace and name are
---     updated, a revoke is lifted). The trust tier is 'vendor' only when the
---     redirect host is one of a fixed list or a subdomain of one; any other
---     app is 'self_hosted', so what it writes is held for the person's review.
---     An app once seen as self_hosted stays so. A person has at most one live
---     agent per app: approving it for a workspace in another hive revokes the
---     earlier one. Writes 'agent.connected' to the audit log.
+--     agent identity from it. It answers only while the app is still
+--     registered at the sign-in server (auth.oauth_clients, not deleted), the
+--     person's approval of it there stands (auth.oauth_consents, not revoked)
+--     and the person has a live agent for it here. agent_login(token) is
+--     unchanged: it answers by the token alone, for anyone.
+--   - agents.oauth_client_id: the app's client id (a uuid, as text), null for
+--     an agent with a token. agents.token_hash becomes nullable; an agent has
+--     exactly one of the two. One agent per member and client. The person
+--     reads the column for their own agents (the agents_select policy), so
+--     Settings can end the app's sign-in when the agent is revoked.
+--   - jwt_oauth_client(): the caller's client_id claim; 'unknown-audience'
+--     for a token with no client_id and another audience; else null.
+--   - oauth_client_tier(client): how far an app is trusted, from the sign-in
+--     server's own record of it. 'vendor' only when every redirect address
+--     the app registered is https on a host of a fixed list or a subdomain of
+--     one; anything else is 'self_hosted', so what the app writes is held for
+--     the person's review. Not callable through the API. Nothing a caller
+--     sends takes part, and it is worked out again at every connector_login,
+--     so the tier follows the registration; the value kept in
+--     agents.trust_tier is only what Settings shows.
+--   - connect_app(client, workspace): a person, in the approval window,
+--     connects an app to one of their own workspaces, or reconnects it (same
+--     member and client: the workspace and name are updated, a revoke is
+--     lifted). The app must be registered; its name is the one it registered,
+--     cleaned. A person has at most one live agent per app: approving it for
+--     a workspace in another hive revokes the earlier one. Writes
+--     'agent.connected' to the audit log.
 --   - revoke_agent works as before; a revoked app fails connector_login.
+--   - my_member_ids, my_hive_ids and is_hive_owner are executable by
+--     authenticated only, no longer by anon or public.
 --
---   Nothing here widens who can read or write what.
+--   Nothing here widens who can read or write what, except that a person can
+--   read the client id of their own agents.
 
 -- ------------------------------------------------------------------ agents
 
@@ -46,17 +63,29 @@ alter table public.agents add column oauth_client_id text;
 alter table public.agents alter column token_hash drop not null;
 alter table public.agents add constraint agents_one_credential
   check (num_nonnulls(token_hash, oauth_client_id) = 1);
--- Also what connector_login reads by. The column is not granted to
--- authenticated: like the token hash, nobody reads it through the API.
+-- Also what connector_login reads by. A person reads it for their own agents
+-- only (agents_select); an app pass reads no row (agents_no_app); nobody
+-- writes it through the API.
+grant select (oauth_client_id) on public.agents to authenticated;
 create unique index agents_member_client_idx
   on public.agents (member_id, oauth_client_id)
   where oauth_client_id is not null;
 
 -- Null for a person signed in to the app and for an agent; set for an app
--- that holds a pass from the OAuth server.
+-- that holds a pass from the OAuth server. A person's and an agent's token
+-- name the audience 'authenticated' (as text or as a list of only that) or,
+-- in tests, none. A token for any other audience was made for something
+-- else: it is treated as an app's even when it names no client.
 create function public.jwt_oauth_client() returns text
 language sql stable set search_path = '' as $$
-  select nullif(auth.jwt() ->> 'client_id', '')
+  select coalesce(
+    nullif(auth.jwt() ->> 'client_id', ''),
+    case
+      when coalesce(auth.jwt() -> 'aud', 'null'::jsonb) in
+           ('null'::jsonb, '"authenticated"'::jsonb, '["authenticated"]'::jsonb)
+        then null
+      else 'unknown-audience'
+    end)
 $$;
 
 -- ---------------------------------------------------------------- policies
@@ -866,18 +895,85 @@ $$;
 
 -- ---------------------------------------------------------- connected apps
 
--- Connect an app to one of the caller's own workspaces, or reconnect it.
--- Called by the approval window as the signed-in person. Returns the agent.
-create function public.connect_app(
-  p_client_id text, p_name text, p_redirect_host text, p_workspace uuid)
-returns uuid language plpgsql security definer set search_path = '' as $$
+-- How far an app is trusted, read from the sign-in server's record of it and
+-- from nothing else. 'vendor' only when the client exists, is not deleted,
+-- has at least one redirect address, and every one of them is https on a
+-- known host. One address that is anything else (another host, another
+-- scheme, user info, something that does not parse) makes the whole client
+-- 'self_hosted': a pass does not say which address it was issued through.
+--
+-- redirect_uris is text. Read as a JSON array of strings when it starts with
+-- a bracket, otherwise as a list separated by commas or white space.
+create function public.oauth_client_tier(p_client uuid) returns public.trust_tier
+language plpgsql stable security definer set search_path = '' as $$
 declare
   v_trusted constant text[] := array['claude.ai', 'claude.com', 'chatgpt.com', 'openai.com'];
-  v_host text := lower(coalesce(p_redirect_host, ''));
+  v_space constant text := E' \t\n\r\f\v';
+  v_raw text;
+  v_uris text[];
+  v_uri text;
+  v_host text;
+begin
+  select btrim(c.redirect_uris, v_space) into v_raw
+    from auth.oauth_clients c
+   where c.id = p_client and c.deleted_at is null;
+  if v_raw is null or v_raw = '' then
+    return 'self_hosted';
+  end if;
+
+  if left(v_raw, 1) = '[' then
+    begin
+      -- A member that is not a string becomes null, and fails below.
+      select array_agg(case when jsonb_typeof(e) = 'string' then e #>> '{}' end)
+        into v_uris
+        from jsonb_array_elements(v_raw::jsonb) e;
+    exception when others then
+      return 'self_hosted';
+    end;
+  else
+    select array_agg(u) into v_uris
+      from regexp_split_to_table(v_raw, '[,[:space:]]+') u
+     where u <> '';
+  end if;
+  if v_uris is null or cardinality(v_uris) = 0 then
+    return 'self_hosted';
+  end if;
+
+  foreach v_uri in array v_uris loop
+    if v_uri is null or v_uri ~ '[[:space:][:cntrl:]]' then
+      return 'self_hosted';
+    end if;
+    -- https, then a bare host name, then an optional port, then the end or the
+    -- start of a path, query or fragment. An '@', a backslash or a percent
+    -- sign after the host does not match, so user info never passes.
+    v_host := substring(lower(v_uri) from
+      '^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?(?:[/?#].*)?$');
+    if v_host is null
+       or not exists (select 1 from unnest(v_trusted) d
+                       where v_host = d or right(v_host, length(d) + 1) = '.' || d) then
+      return 'self_hosted';
+    end if;
+  end loop;
+  return 'vendor';
+end
+$$;
+
+-- Connect an app to one of the caller's own workspaces, or reconnect it.
+-- Called by the approval window as the signed-in person, with the client id
+-- the sign-in server named and the workspace the person chose. The app's name
+-- and its trust tier are read here from the sign-in server's own record, so
+-- the caller cannot choose either. Returns the agent.
+create function public.connect_app(p_client_id text, p_workspace uuid)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  v_space constant text := E' \t\n\r\f\v';
   v_uid uuid := (select auth.uid());
+  v_client uuid;
+  v_found boolean;
+  v_name text;
   v_member uuid;
   v_hive uuid;
-  v_tier public.trust_tier := 'self_hosted';
+  v_tier public.trust_tier;
   v_agent uuid;
 begin
   if public.jwt_oauth_client() is not null then
@@ -886,12 +982,6 @@ begin
   if v_uid is null or public.jwt_agent_id() is not null or public.jwt_is_self_hosted() then
     raise exception 'only a person can connect an app';
   end if;
-  if length(coalesce(p_client_id, '')) not between 1 and 200 then
-    raise exception 'an app needs a client id of 1 to 200 characters';
-  end if;
-  if length(coalesce(p_name, '')) not between 1 and 120 then
-    raise exception 'an app needs a name of 1 to 120 characters';
-  end if;
   select m.id, m.hive_id into v_member, v_hive
     from public.workspaces w join public.members m on m.id = w.member_id
    where w.id = p_workspace and m.user_id = v_uid;
@@ -899,35 +989,48 @@ begin
     raise exception 'that workspace is not yours';
   end if;
 
-  -- Trusted only when the host is a plain host name that equals a listed
-  -- domain or ends with a dot and one. Compared without like, and anything
-  -- that is not a bare host name (a path, a port, a query) is not trusted.
-  if v_host ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'
-     and exists (select 1 from unnest(v_trusted) d
-                  where v_host = d or right(v_host, length(d) + 1) = '.' || d) then
-    v_tier := 'vendor';
+  -- The app must be one the sign-in server knows. The id is checked to be a
+  -- uuid before it is cast, so nothing else reaches the cast.
+  if coalesce(p_client_id, '') ~*
+     '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    v_client := p_client_id::uuid;
+    select true, c.client_name into v_found, v_name
+      from auth.oauth_clients c
+     where c.id = v_client and c.deleted_at is null;
   end if;
-  -- The least trust sticks: an app this person ever connected from an unknown
-  -- address is not lifted to vendor by a later approval from a known one. An
-  -- app can register several redirect addresses, and its earlier passes stay
-  -- valid.
-  if exists (select 1 from public.agents a join public.members m on m.id = a.member_id
-              where m.user_id = v_uid and a.oauth_client_id = p_client_id
-                and a.trust_tier = 'self_hosted') then
-    v_tier := 'self_hosted';
+  if v_found is not true then
+    raise exception 'unknown app';
   end if;
+
+  -- The name the app registered is the app's own choice of words, shown to
+  -- the person later. Control characters and line separators become a space;
+  -- the characters that reorder or hide text (bidi marks, zero-width and
+  -- other format characters, tags) are dropped.
+  v_name := regexp_replace(coalesce(v_name, ''),
+    '[\u0001-\u001F\u007F-\u009F  ]', ' ', 'g');
+  v_name := regexp_replace(v_name,
+    '[­؜᠎​-‏‪-‮⁠-⁯﻿￹-￻\U000E0000-\U000E007F]',
+    '', 'g');
+  v_name := regexp_replace(v_name, '[[:space:]]+', ' ', 'g');
+  v_name := btrim(left(btrim(v_name, v_space), 120), v_space);
+  if v_name = '' then
+    v_name := 'Connected app';
+  end if;
+
+  -- Kept for Settings to show. connector_login works it out again each time.
+  v_tier := public.oauth_client_tier(v_client);
 
   -- A pass names the person and the app, not a hive: the person has one live
   -- agent per app, the one approved last.
   update public.agents a set revoked_at = now()
     from public.members m
    where m.id = a.member_id and m.user_id = v_uid
-     and a.oauth_client_id = p_client_id
+     and a.oauth_client_id = v_client::text
      and a.member_id <> v_member
      and a.revoked_at is null;
 
   insert into public.agents (member_id, workspace_id, name, provider, trust_tier, oauth_client_id)
-    values (v_member, p_workspace, p_name, 'Connected app', v_tier, p_client_id)
+    values (v_member, p_workspace, v_name, 'Connected app', v_tier, v_client::text)
     on conflict (member_id, oauth_client_id) where oauth_client_id is not null
     do update set workspace_id = excluded.workspace_id,
                   name = excluded.name,
@@ -938,32 +1041,50 @@ begin
 
   insert into public.audit_log (hive_id, member_id, action, detail)
     values (v_hive, v_member, 'agent.connected',
-            jsonb_build_object('agent', v_agent, 'client_id', p_client_id,
-                               'workspace', p_workspace, 'trust_tier', v_tier,
-                               'redirect_host', left(v_host, 255)));
+            jsonb_build_object('agent', v_agent, 'client_id', v_client::text,
+                               'workspace', p_workspace, 'trust_tier', v_tier));
   return v_agent;
 end
 $$;
 
 -- The connector exchanges an app pass for the identity it should act as: the
 -- same columns as agent_login. Only for a caller that carries a client_id and
--- is a person behind it; it finds that person's own live agent for that app.
+-- is a person behind it. Three things must hold, each read at this call:
+-- the app is still registered at the sign-in server, the person's approval of
+-- it there has not been revoked, and the person has a live agent for it here.
+-- The trust tier is worked out now from the app's registration; the stored
+-- one is brought in line with it.
 create function public.connector_login()
 returns table (agent_id uuid, user_id uuid, member_id uuid, workspace_id uuid,
                hive_id uuid, trust_tier public.trust_tier)
 language plpgsql security definer set search_path = '' as $$
 declare
   v_uid uuid := (select auth.uid());
-  v_client text := public.jwt_oauth_client();
+  v_claim text := public.jwt_oauth_client();
+  v_client uuid;
   v_agent uuid;
+  v_tier public.trust_tier;
 begin
-  if v_uid is null or v_client is null or public.jwt_agent_id() is not null then
+  if v_uid is null or v_claim is null or public.jwt_agent_id() is not null then
     raise exception 'only a connected app can do this';
+  end if;
+  if v_claim ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    v_client := v_claim::uuid;
+  end if;
+  if v_client is null
+     or not exists (select 1 from auth.oauth_clients c
+                     where c.id = v_client and c.deleted_at is null) then
+    raise exception 'unknown app';
+  end if;
+  if not exists (select 1 from auth.oauth_consents c
+                  where c.user_id = v_uid and c.client_id = v_client
+                    and c.revoked_at is null) then
+    raise exception 'this app is not approved';
   end if;
   select a.id into v_agent
     from public.agents a join public.members m on m.id = a.member_id
    where m.user_id = v_uid
-     and a.oauth_client_id = v_client
+     and a.oauth_client_id = v_client::text
      and a.revoked_at is null
      and (a.expires_at is null or a.expires_at > now())
    order by a.created_at desc, a.id
@@ -971,9 +1092,11 @@ begin
   if v_agent is null then
     raise exception 'no connected agent for this app';
   end if;
-  update public.agents set last_used_at = now() where id = v_agent;
+  v_tier := public.oauth_client_tier(v_client);
+  update public.agents a set last_used_at = now(), trust_tier = v_tier
+   where a.id = v_agent;
   return query
-    select a.id, m.user_id, m.id, a.workspace_id, m.hive_id, a.trust_tier
+    select a.id, m.user_id, m.id, a.workspace_id, m.hive_id, v_tier
       from public.agents a join public.members m on m.id = a.member_id
      where a.id = v_agent;
 end
@@ -983,10 +1106,28 @@ $$;
 
 -- create or replace keeps the grants of the functions replaced above.
 revoke all on function
-  public.connect_app(text, text, text, uuid),
+  public.connect_app(text, uuid),
   public.connector_login()
 from public, anon;
 grant execute on function
-  public.connect_app(text, text, text, uuid),
+  public.connect_app(text, uuid),
   public.connector_login()
+to authenticated;
+
+-- The database's own: called by the two functions above, which run as their
+-- owner. Nobody calls it through the API.
+revoke all on function public.oauth_client_tier(uuid)
+from public, anon, authenticated, service_role;
+
+-- Who the caller is. Row-level security calls these for a signed-in identity
+-- only (every policy is for authenticated), so a visitor has no use for them.
+revoke execute on function
+  public.my_member_ids(),
+  public.my_hive_ids(),
+  public.is_hive_owner(uuid)
+from public, anon;
+grant execute on function
+  public.my_member_ids(),
+  public.my_hive_ids(),
+  public.is_hive_owner(uuid)
 to authenticated;

@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { decideIn, returnHost, safeReturn } from "./decide";
+import { decideIn, readDetails, returnHost, safeReturn } from "./decide";
 
 const USER = "00000000-0000-4000-8000-000000000001";
 const W1 = "00000000-0000-4000-8000-000000000b01";
 const AUTH = "auth_abc-123";
 const BACK = "https://claude.ai/api/mcp/auth_callback?code=c1&state=s1";
+/** An app's id at the auth server. */
+const CLIENT = "00000000-0000-4000-8000-0000000000c1";
 
 type Err = { message: string; code?: string };
 
@@ -18,7 +20,7 @@ function token(sub: string) {
 const DETAILS = {
   authorization_id: AUTH,
   redirect_uri: "https://Claude.AI/api/mcp/auth_callback",
-  client: { id: "client-a", name: "Claude", uri: "", logo_uri: "" },
+  client: { id: CLIENT, name: "Claude", uri: "", logo_uri: "" },
   user: { id: USER, email: "me@example.com" },
   scope: "openid",
 };
@@ -74,15 +76,14 @@ const approve = { authorizationId: AUTH, decision: "approve", workspaceId: W1 };
 const deny = { authorizationId: AUTH, decision: "deny", workspaceId: W1 };
 
 describe("decideIn: approve", () => {
-  it("reads the details, connects the app with their values, approves, and answers the return address", async () => {
+  it("reads the details, connects the app by its id alone, approves, and answers the return address", async () => {
     const t = stub();
     expect(await decideIn(t.db, approve)).toEqual({ ok: true, redirect: BACK });
     expect(t.steps).toEqual(["details", "connect", "approve"]);
     expect(t.oauth.getAuthorizationDetails).toHaveBeenCalledWith(AUTH);
+    expect(t.rpc).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledWith("connect_app", {
-      p_client_id: "client-a",
-      p_name: "Claude",
-      p_redirect_host: "claude.ai",
+      p_client_id: CLIENT,
       p_workspace: W1,
     });
     expect(t.oauth.approveAuthorization).toHaveBeenCalledWith(AUTH, {
@@ -103,12 +104,39 @@ describe("decideIn: approve", () => {
     };
     await decideIn(t.db, forged);
     expect(t.rpc.mock.calls[0]![1]).toEqual({
-      p_client_id: "client-a",
-      p_name: "Claude",
-      p_redirect_host: "claude.ai",
+      p_client_id: CLIENT,
       p_workspace: W1,
     });
   });
+
+  it.each([
+    ["a known host", "https://claude.ai/api/mcp/auth_callback"],
+    ["an unknown host", "https://attacker.example/cb"],
+    ["an address that does not parse", "nonsense"],
+    ["no address", undefined],
+  ])(
+    "sends the database neither a name nor a host, whatever the details say: %s",
+    async (_n, redirect_uri) => {
+      const t = stub({
+        details: {
+          data: {
+            ...DETAILS,
+            redirect_uri,
+            client: { id: CLIENT, name: "Claude (verified)" },
+          },
+          error: null,
+        },
+      });
+      expect(await decideIn(t.db, approve)).toEqual({
+        ok: true,
+        redirect: BACK,
+      });
+      expect(t.rpc.mock.calls[0]).toEqual([
+        "connect_app",
+        { p_client_id: CLIENT, p_workspace: W1 },
+      ]);
+    },
+  );
 
   it("does not approve when connecting the app fails", async () => {
     const t = stub({ rpc: { data: null, error: { message: "refused" } } });
@@ -158,38 +186,6 @@ describe("decideIn: approve", () => {
       const t = stub({ approve: approveAnswer });
       expect(await decideIn(t.db, approve)).toEqual({ ok: false });
     }
-  });
-
-  it("sends an empty host when the return address does not parse", async () => {
-    const t = stub({
-      details: { data: { ...DETAILS, redirect_uri: "nonsense" }, error: null },
-    });
-    await decideIn(t.db, approve);
-    expect(t.rpc.mock.calls[0]![1]).toMatchObject({ p_redirect_host: "" });
-  });
-
-  it("names an app that gave no name after its host, and cuts a long name", async () => {
-    const unnamed = stub({
-      details: {
-        data: { ...DETAILS, client: { id: "client-a", name: "  " } },
-        error: null,
-      },
-    });
-    await decideIn(unnamed.db, approve);
-    expect(unnamed.rpc.mock.calls[0]![1]).toMatchObject({
-      p_name: "claude.ai",
-    });
-
-    const long = stub({
-      details: {
-        data: { ...DETAILS, client: { id: "client-a", name: "x".repeat(500) } },
-        error: null,
-      },
-    });
-    await decideIn(long.db, approve);
-    expect(long.rpc.mock.calls[0]![1]).toMatchObject({
-      p_name: "x".repeat(120),
-    });
   });
 });
 
@@ -241,6 +237,44 @@ describe("decideIn: refusals before any call", () => {
     expect(await decideIn(t.db, approve)).toEqual({ ok: false });
     expect(await decideIn(t.db, deny)).toEqual({ ok: false });
     expect(t.steps).toEqual([]);
+  });
+});
+
+describe("readDetails: what the window shows", () => {
+  it("reads the app's id, its name and the host it returns to", () => {
+    expect(readDetails(DETAILS)).toEqual({
+      kind: "ask",
+      clientId: CLIENT,
+      name: "Claude",
+      host: "claude.ai",
+    });
+  });
+
+  it("names an app that gave no name after its host, and cuts a long name", () => {
+    expect(
+      readDetails({ ...DETAILS, client: { id: CLIENT, name: "  " } }),
+    ).toMatchObject({ name: "claude.ai" });
+    expect(
+      readDetails({
+        ...DETAILS,
+        client: { id: CLIENT, name: "x".repeat(500) },
+      }),
+    ).toMatchObject({ name: "x".repeat(120) });
+  });
+
+  it("shows an empty host when the return address does not parse", () => {
+    expect(readDetails({ ...DETAILS, redirect_uri: "nonsense" })).toMatchObject(
+      { host: "", name: "Claude" },
+    );
+  });
+
+  it("reads an answer with only a return address as answered before", () => {
+    expect(readDetails({ redirect_url: BACK })).toEqual({
+      kind: "answered",
+      redirect: BACK,
+    });
+    expect(readDetails({ redirect_url: "javascript:alert(1)" })).toBeNull();
+    expect(readDetails({})).toBeNull();
   });
 });
 

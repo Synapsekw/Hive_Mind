@@ -1,12 +1,19 @@
 // What the approval window's server action does, given a client signed in as the person. An app
 // (Claude, ChatGPT) asked to connect; the person approves or denies.
 //
-// Approve: the request is read again from the auth server, here, and the app is recorded with
-// what that answer says: its id, its name and the host it returns to. Nothing of that comes from
-// the browser, which sends only the request's id, the decision and the chosen workspace. The
-// database (`connect_app`) decides whether the workspace is the person's own and how far the app
-// is trusted. Only when that has succeeded is the request approved, so an app is never approved
+// Approve: the request is read again from the auth server, here, and the app is recorded by the
+// id that answer names. The browser sends only the request's id, the decision and the chosen
+// workspace. The database (`connect_app`) is given the app's id and the workspace and nothing
+// else: it looks the app up in the auth server's own record, takes its name from there, checks
+// that the workspace is the person's own, and works out how far the app is trusted from every
+// address the app registered. The name and the host this file reads are for the window to show.
+// Only when `connect_app` has succeeded is the request approved, so an app is never approved
 // without being recorded. Deny records nothing.
+//
+// A request the auth server answers with only a return address was approved before (the person
+// already approved this app, or pressed twice). The browser is sent back and nothing is recorded:
+// what the app's pass may do is decided by the database at every call, which refuses a pass whose
+// app the person has not connected here or has revoked.
 //
 // Only an error's code and message are logged, never an address that carries a code.
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -24,9 +31,12 @@ export type Details =
   | {
       kind: "ask";
       clientId: string;
-      /** The name the app gave itself, or its host when it gave none. Never empty. */
+      /** The name the app gave itself, or its host when it gave none. Never empty. Shown only. */
       name: string;
-      /** The lower-cased host the app returns to; empty when its address does not parse. */
+      /**
+       * The lower-cased host the app returns to; empty when its address does not parse. Shown
+       * only: it takes no part in how far the app is trusted.
+       */
       host: string;
     }
   | { kind: "answered"; redirect: string };
@@ -146,8 +156,6 @@ export async function decideIn(db: Db, input: unknown): Promise<Outcome> {
 
     const connected = (await db.rpc("connect_app", {
       p_client_id: details.clientId,
-      p_name: details.name,
-      p_redirect_host: details.host,
       p_workspace: workspaceId,
     })) as Res;
     if (failed("connect_app", connected)) return NO;
