@@ -8,6 +8,7 @@
   --dur-fast: 0.18s;
   --dur: 0.3s;
   --dur-slow: 0.6s;
+  --rise-delay: 0s;
 }
 
 * {
@@ -143,6 +144,7 @@ textarea {
   *::after {
     animation-duration: 0.001s !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.001s !important;
     scroll-behavior: auto !important;
   }
