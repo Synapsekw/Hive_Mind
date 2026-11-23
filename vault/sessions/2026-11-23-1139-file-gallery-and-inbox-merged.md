@@ -55,9 +55,9 @@ Inbox:
 
 ## Open threads
 
-- **The hosted database does not have `20261123071625_inbox` yet.** Apply the file unchanged
-  (Supabase CLI `db push`, or the Supabase MCP followed by the re-stamp of gotcha 04), then
-  update "Current state" in `docs/hosted-db-bringup.md`.
+- The hosted database got `20261123071625_inbox` later the same day: the history row was
+  inserted by hand first, then the file's SQL was run unchanged through the Supabase MCP.
+  Checked: both functions answer the owner with an empty inbox and refuse an anonymous caller.
 - **Two database behaviours older than this work, now reachable from a screen** (in the inbox
   spec's known gaps): a declined link can be proposed again in the reverse direction; and
   `respond_to_link(…, false)` declines a link whatever its status, so declining from a stale tab
