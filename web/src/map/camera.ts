@@ -16,6 +16,27 @@ export function zoomAt(c: Cam, factor: number, px: number, py: number): Cam {
   };
 }
 
+/**
+ * A two-finger pinch step: fingers moved from (a0, b0) to (a1, b1), in stage pixels. Zooms about
+ * the old midpoint by the change in distance, then pans by the midpoint's movement.
+ */
+export function pinchCam(
+  c: Cam,
+  a0: [number, number],
+  b0: [number, number],
+  a1: [number, number],
+  b1: [number, number],
+): Cam {
+  const d0 = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]);
+  const d1 = Math.hypot(b1[0] - a1[0], b1[1] - a1[1]);
+  const m0x = (a0[0] + b0[0]) / 2;
+  const m0y = (a0[1] + b0[1]) / 2;
+  const m1x = (a1[0] + b1[0]) / 2;
+  const m1y = (a1[1] + b1[1]) / 2;
+  const z = zoomAt(c, d0 > 0 && d1 > 0 ? d1 / d0 : 1, m0x, m0y);
+  return { k: z.k, tx: z.tx + m1x - m0x, ty: z.ty + m1y - m0y };
+}
+
 export function wheelFactor(deltaY: number, ctrlKey: boolean): number {
   return Math.exp(-deltaY * (ctrlKey ? 0.01 : 0.0025));
 }

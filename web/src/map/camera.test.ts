@@ -5,6 +5,7 @@ import {
   frame,
   K_MAX,
   K_MIN,
+  pinchCam,
   toScreen,
   wheelFactor,
   zoomAt,
@@ -49,5 +50,34 @@ describe("camera", () => {
     const [x, y] = toScreen(c, 505, 385, 1000, 760);
     expect(x).toBeCloseTo(500);
     expect(y).toBeCloseTo(380);
+  });
+});
+
+describe("pinchCam", () => {
+  it("zooms about the midpoint by the change in finger distance", () => {
+    const c = { k: 1, tx: 0, ty: 0 };
+    const z = pinchCam(c, [100, 100], [200, 100], [50, 100], [250, 100]);
+    expect(z.k).toBeCloseTo(2);
+    // The world point under the midpoint (150, 100) stays under it.
+    expect((150 - z.tx) / z.k).toBeCloseTo(150);
+    expect((100 - z.ty) / z.k).toBeCloseTo(100);
+  });
+  it("pans by the midpoint's movement when the distance is unchanged", () => {
+    const z = pinchCam(
+      { k: 2, tx: 10, ty: 20 },
+      [100, 100],
+      [200, 100],
+      [130, 140],
+      [230, 140],
+    );
+    expect(z).toEqual({ k: 2, tx: 40, ty: 60 });
+  });
+  it("clamps the zoom and ignores a zero start distance", () => {
+    expect(
+      pinchCam({ k: 7, tx: 0, ty: 0 }, [0, 0], [10, 0], [0, 0], [100, 0]).k,
+    ).toBe(K_MAX);
+    expect(
+      pinchCam({ k: 1, tx: 0, ty: 0 }, [5, 5], [5, 5], [5, 5], [50, 5]).k,
+    ).toBe(1);
   });
 });

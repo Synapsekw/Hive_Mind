@@ -48,7 +48,7 @@ const Item = memo(function Item({
   );
 });
 
-export function DotList({
+export const DotList = memo(function DotList({
   model,
   pos,
   lit,
@@ -83,4 +83,4 @@ export function DotList({
       })}
     </ul>
   );
-}
+});

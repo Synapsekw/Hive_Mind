@@ -12,7 +12,13 @@ import {
 } from "react";
 import { toScreen } from "./camera";
 import { buildHitGrid, hitTest } from "./hitGrid";
-import { drawFrame, readPalette, type Palette } from "./renderer";
+import {
+  clearTextCache,
+  dotDiameter,
+  drawFrame,
+  readPalette,
+  type Palette,
+} from "./renderer";
 import type { Scene } from "./scene";
 import type { MapModel, View } from "./types";
 import { reducedMotion, useCamera, type CameraApi } from "./useCamera";
@@ -46,6 +52,10 @@ type Props = {
 const NO_PULSES: never[] = [];
 const NO_FLARES = new Map<number, number>();
 const MOVING_MS = 120;
+/** ~12 fps for the ambient breathing and turning. */
+const AMBIENT_MS = 83;
+/** The largest hit radius any shape can have, in screen px (the hot index, x1.7). */
+const MAX_REACH = 24;
 const THEME_ATTRS = ["data-theme", "data-mode", "data-dots", "data-reach"];
 
 export function MapCanvas(props: Props): JSX.Element {
@@ -59,8 +69,17 @@ export function MapCanvas(props: Props): JSX.Element {
   const zoomSet = useRef<Set<number>>(new Set());
   const hover = useRef<number | null>(null);
 
+  const ambientTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The canvas is in the viewport and the tab is showing; otherwise nothing is drawn. */
+  const onScreen = useRef(true);
+
   const drawRef = useRef<(t: number) => void>(() => {});
   const request = useCallback(() => {
+    if (!onScreen.current || document.hidden) return;
+    if (ambientTimer.current !== null) {
+      clearTimeout(ambientTimer.current);
+      ambientTimer.current = null;
+    }
     if (raf.current === null)
       raf.current = requestAnimationFrame((t) => drawRef.current(t));
   }, []);
@@ -90,8 +109,11 @@ export function MapCanvas(props: Props): JSX.Element {
       el.height = H;
     }
     const p = latest.current;
+    // Still for MOVING_MS, even with the pointer held down: the resting layer is redrawn crisp.
+    const moving = time - lastMove.current < MOVING_MS;
+    // Zoom-driven labels were placed for the last settled camera; hide them while it moves.
     const labels =
-      zoomSet.current.size === 0
+      moving || zoomSet.current.size === 0
         ? p.labels
         : new Set([...p.labels, ...zoomSet.current]);
     const anim = drawFrame(
@@ -115,15 +137,27 @@ export function MapCanvas(props: Props): JSX.Element {
         flares: NO_FLARES,
         time,
         reducedMotion: still.current,
-        moving: dragging.current || time - lastMove.current < MOVING_MS,
+        moving,
       },
       pal.current,
     );
     el.setAttribute("data-k", cam.current.k.toFixed(2));
-    if (anim) {
+    // Real motion runs every frame; the calm breathing and turning only ~12 times a second.
+    if (anim === "motion") {
       el.setAttribute("data-animating", "");
+      el.removeAttribute("data-ambient");
       request();
-    } else el.removeAttribute("data-animating");
+    } else if (anim === "ambient") {
+      el.removeAttribute("data-animating");
+      el.setAttribute("data-ambient", "");
+      ambientTimer.current = setTimeout(() => {
+        ambientTimer.current = null;
+        request();
+      }, AMBIENT_MS);
+    } else {
+      el.removeAttribute("data-animating");
+      el.removeAttribute("data-ambient");
+    }
   };
 
   // Any prop change draws one frame.
@@ -131,13 +165,38 @@ export function MapCanvas(props: Props): JSX.Element {
     request();
   });
 
-  useEffect(
-    () => () => {
+  // Pause entirely while the canvas is off-screen or the tab is hidden; draw again on return.
+  useEffect(() => {
+    const el = canvas.current;
+    const resume = () => {
+      if (onScreen.current && !document.hidden) request();
+    };
+    document.addEventListener("visibilitychange", resume);
+    const io =
+      el && typeof IntersectionObserver !== "undefined"
+        ? new IntersectionObserver((entries) => {
+            onScreen.current = entries.some((e) => e.isIntersecting);
+            resume();
+          })
+        : null;
+    if (el) io?.observe(el);
+    // Web fonts change label widths: measure them again once they load.
+    const fonts = document.fonts;
+    const refont = () => {
+      clearTextCache();
+      request();
+    };
+    fonts?.addEventListener?.("loadingdone", refont);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      io?.disconnect();
+      fonts?.removeEventListener?.("loadingdone", refont);
       if (raf.current !== null) cancelAnimationFrame(raf.current);
       raf.current = null;
-    },
-    [],
-  );
+      if (ambientTimer.current !== null) clearTimeout(ambientTimer.current);
+      ambientTimer.current = null;
+    };
+  }, [request]);
 
   // The theme's colours: read on mount and again when the look changes.
   useEffect(() => {
@@ -247,6 +306,8 @@ export function MapCanvas(props: Props): JSX.Element {
   ]);
 
   const grid = useMemo(() => buildHitGrid(pos), [pos]);
+  // The zoom a screen reader hears: only once the camera settles, not on every frame.
+  const settledK = useMemo(() => cam.current.k, [camera.settled, cam]);
 
   const hitAt = (clientX: number, clientY: number): number | null => {
     const el = canvas.current;
@@ -258,7 +319,20 @@ export function MapCanvas(props: Props): JSX.Element {
     const bx = (clientX - r.left - c.tx) / sc;
     const by = (clientY - r.top - c.ty) / sc;
     const p = latest.current;
-    return hitTest(grid, bx, by, 8 / sc, (i) => !!p.lit[i] || p.hot === i);
+    // Within 8 px of the dot, or within its drawn radius for the larger shapes.
+    const hive = p.view === "hive";
+    const small = p.scene.combSize > 0 && p.scene.combSize < 10;
+    const reach = (i: number) => {
+      const n = p.model.nodes[i];
+      if (!n) return 8 / sc;
+      const r = (dotDiameter(n, hive, small) / 2) * (i === p.hot ? 1.7 : 1);
+      return Math.max(8, r) / sc;
+    };
+    return hitTest(grid, bx, by, MAX_REACH / sc, (i) => {
+      if (!p.lit[i] && p.hot !== i) return false;
+      const [x, y] = p.pos[i] ?? [500, 380];
+      return Math.hypot(x - bx, y - by) <= reach(i);
+    });
   };
 
   const setHover = (i: number | null, at: { x: number; y: number } | null) => {
@@ -297,12 +371,15 @@ export function MapCanvas(props: Props): JSX.Element {
         }}
         onPointerLeave={() => setHover(null, null)}
         onClick={(e) => {
-          if (dragged.current) return;
+          // A drag is not a click, and the second click of a double-click (which zooms) must
+          // not undo the first one's selection.
+          if (dragged.current || e.detail >= 2) return;
           latest.current.onPick(hitAt(e.clientX, e.clientY));
         }}
       />
       <ZoomControl
         k={cam.current.k}
+        settledK={settledK}
         onZoom={(f) => api.current.zoomBy(f)}
         onFit={() => api.current.fitView()}
       />

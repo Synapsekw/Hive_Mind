@@ -10,10 +10,12 @@ export default async function DevMapPage({
   searchParams: Promise<{ items?: string | string[] }>;
 }) {
   if (process.env.NODE_ENV === "production") notFound();
-  const raw = (await searchParams).items;
-  const n = Number(Array.isArray(raw) ? raw[0] : raw);
+  const param = (await searchParams).items;
+  const raw = (Array.isArray(param) ? param[0] : param)?.trim() ?? "";
+  const n = Math.floor(Number(raw));
+  // Empty, non-numeric, zero or negative: the plain fixture.
   const items =
-    raw !== undefined && Number.isFinite(n) ? Math.min(5000, n) : undefined;
+    raw !== "" && Number.isFinite(n) && n > 0 ? Math.min(5000, n) : undefined;
   const now = Date.now();
   return (
     <HiveMap

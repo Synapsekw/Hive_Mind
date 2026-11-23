@@ -119,19 +119,23 @@ export function HiveMap({
       });
     return m;
   }, [payload, now]);
-  const agents: AgentRow[] = model.nodes
-    .filter((n) => n.kind === "agent" && n.id !== null)
-    .map((n) => {
-      const info = agentInfo.get(n.id!);
-      const status = info?.status ?? "never used";
-      return {
-        id: n.id!,
-        // The caller's own agents carry their name; a colleague's is "<member>, <provider>".
-        name: info?.name || n.title,
-        status,
-        connected: status === "connected",
-      };
-    });
+  const agents: AgentRow[] = useMemo(
+    () =>
+      model.nodes
+        .filter((n) => n.kind === "agent" && n.id !== null)
+        .map((n) => {
+          const info = agentInfo.get(n.id!);
+          const status = info?.status ?? "never used";
+          return {
+            id: n.id!,
+            // The caller's own agents carry their name; a colleague's is "<member>, <provider>".
+            name: info?.name || n.title,
+            status,
+            connected: status === "connected",
+          };
+        }),
+    [model, agentInfo],
+  );
 
   const query = q.trim();
   const on = useMemo(
@@ -167,9 +171,11 @@ export function HiveMap({
       }))
     : [];
 
-  const items = model.nodes.filter(
-    (n) => n.kind === "note" || n.kind === "file",
-  ).length;
+  const items = useMemo(
+    () =>
+      model.nodes.filter((n) => n.kind === "note" || n.kind === "file").length,
+    [model],
+  );
   const stats = query
     ? `${hits} ${hits === 1 ? "match" : "matches"}`
     : `${items} ${items === 1 ? "item" : "items"}, ${model.linkCount} ${model.linkCount === 1 ? "link" : "links"}` +
@@ -218,14 +224,19 @@ export function HiveMap({
       setSelKey(null);
     };
 
-  // Keys when focus is not in a text field.
+  // Keys when focus is not in a text field, and only ones no other component handled (a menu,
+  // radio group or dialog keeps its own arrows and Escape).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const t = e.target;
       if (
         t instanceof HTMLElement &&
-        (t.isContentEditable || t.closest("input, textarea, select"))
+        (t.isContentEditable ||
+          t.closest(
+            'input, textarea, select, [role="menu"], [role="radiogroup"], [role="dialog"]',
+          ))
       )
         return;
       const cam = cameraRef.current;

@@ -11,7 +11,15 @@ import {
   useState,
 } from "react";
 import type { RefObject } from "react";
-import { clampK, fit, frame, wheelFactor, zoomAt, type Cam } from "./camera";
+import {
+  clampK,
+  fit,
+  frame,
+  pinchCam,
+  wheelFactor,
+  zoomAt,
+  type Cam,
+} from "./camera";
 
 export type CameraApi = {
   zoomBy(f: number): void;
@@ -177,8 +185,25 @@ export function useCamera(
       ty: number;
       id: number;
     } | null = null;
+    // Touch pointers in stage pixels. With two, the gesture is a pinch (zoom about the midpoint,
+    // pan with it); once a gesture has pinched, a remaining finger never pans on its own.
+    const touches = new Map<number, [number, number]>();
+    let pinched = false;
     const down = (e: PointerEvent) => {
-      if (e.button !== 0 || onOverlay(e)) return;
+      if (onOverlay(e)) return;
+      if (e.pointerType === "touch") {
+        const [x, y] = local(e);
+        touches.set(e.pointerId, [x, y]);
+        if (touches.size === 1) pinched = false;
+        if (touches.size >= 2) {
+          pinched = true;
+          dragged.current = true; // a pinch is never a click
+          dragging.current = false;
+          start = null;
+          stop();
+          return;
+        }
+      } else if (e.button !== 0) return;
       dragged.current = false;
       start = {
         x: e.clientX,
@@ -189,6 +214,25 @@ export function useCamera(
       };
     };
     const move = (e: PointerEvent) => {
+      if (e.pointerType === "touch" && touches.has(e.pointerId)) {
+        const [x, y] = local(e);
+        const ids = [...touches.keys()].slice(0, 2);
+        if (touches.size >= 2 && ids.includes(e.pointerId)) {
+          const [a0, b0] = ids.map((i) => touches.get(i)!) as [
+            [number, number],
+            [number, number],
+          ];
+          touches.set(e.pointerId, [x, y]);
+          const [a1, b1] = ids.map((i) => touches.get(i)!) as [
+            [number, number],
+            [number, number],
+          ];
+          set(pinchCam(cam.current, a0, b0, a1, b1));
+          return;
+        }
+        touches.set(e.pointerId, [x, y]);
+        if (pinched) return;
+      }
       if (!start || e.pointerId !== start.id) return;
       const dx = e.clientX - start.x;
       const dy = e.clientY - start.y;
@@ -206,6 +250,13 @@ export function useCamera(
       set({ k: cam.current.k, tx: start.tx + dx, ty: start.ty + dy });
     };
     const up = (e: PointerEvent) => {
+      if (touches.delete(e.pointerId) && pinched) {
+        start = null;
+        if (touches.size === 0) pinched = false;
+        change.current();
+        settle(SETTLE_MS);
+        return;
+      }
       if (!start || e.pointerId !== start.id) return;
       start = null;
       if (dragging.current) {

@@ -2,9 +2,11 @@ import { expect, test } from "@playwright/test";
 
 test("a 5,000-item map zooms smoothly", async ({ page }) => {
   await page.goto("/dev/map?items=5000", { waitUntil: "networkidle" });
-  await expect(page.locator("[data-map-dot]")).toHaveCount(
-    await page.locator("[data-map-dot]").count(),
-  );
+  await expect(
+    page.locator(
+      '[data-map-dot][data-kind="note"], [data-map-dot][data-kind="file"]',
+    ),
+  ).toHaveCount(5000);
   const box = (await page.locator("[data-map-stage]").boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.evaluate(() => {

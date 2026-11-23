@@ -4,10 +4,12 @@ import s from "./map.module.css";
 
 export function ZoomControl({
   k,
+  settledK,
   onZoom,
   onFit,
 }: {
   k: number;
+  settledK: number;
   onZoom: (f: number) => void;
   onFit: () => void;
 }) {
@@ -21,8 +23,12 @@ export function ZoomControl({
       >
         −
       </button>
-      <span className={s.zoomValue} aria-live="polite">
+      {/* The live number follows every frame; screen readers hear it once the camera settles. */}
+      <span className={s.zoomValue} aria-hidden="true">
         {Math.round(k * 100)}%
+      </span>
+      <span className={s.srOnly} aria-live="polite">
+        {Math.round(settledK * 100)}%
       </span>
       <button
         type="button"

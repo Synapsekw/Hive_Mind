@@ -66,19 +66,45 @@ test("the wheel zooms, a drag pans without selecting, and Fit returns to 100%", 
   await open(page);
   const zoom = page.getByRole("group", { name: "Zoom" });
   await expect(zoom).toContainText("100%");
-  const box = (await page.locator("[data-map-stage]").boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -400);
-  await expect(zoom).not.toContainText("100%");
-  await page.mouse.move(box.x + 40, box.y + 40);
+  // A drag that starts on a dot pans; it never selects that dot.
+  const hub = page.locator('[data-map-dot][data-kind="hub"]').first();
+  const p = await dotPoint(page, hub);
+  await page.mouse.move(p.x, p.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + 140, box.y + 90, { steps: 5 });
+  await page.mouse.move(p.x + 100, p.y + 50, { steps: 5 });
   await page.mouse.up();
   await expect(page.locator('[data-map-dot][aria-pressed="true"]')).toHaveCount(
     0,
   );
+  const box = (await page.locator("[data-map-stage]").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -400);
+  await expect(zoom).not.toContainText("100%");
   await zoom.getByRole("button", { name: "Fit" }).click();
   await expect(zoom).toContainText("100%");
+});
+
+test("a double-click on a dot zooms in and leaves it selected", async ({
+  page,
+}) => {
+  await open(page);
+  await viewButton(page, "Rings").click();
+  const hub = page.locator('[data-map-dot][data-kind="hub"]').first();
+  const p = await dotPoint(page, hub);
+  await page.mouse.dblclick(p.x, p.y);
+  await expect(hub).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "Zoom" })).not.toContainText(
+    "100%",
+  );
+});
+
+test("an idle map breathes at a calm rate, not every frame", async ({
+  page,
+}) => {
+  await open(page);
+  const canvas = page.locator("[data-map-canvas]");
+  await expect(canvas).toHaveAttribute("data-ambient", "");
+  await expect(canvas).not.toHaveAttribute("data-animating");
 });
 
 test("pointing at a dot on the canvas selects it", async ({ page }) => {
