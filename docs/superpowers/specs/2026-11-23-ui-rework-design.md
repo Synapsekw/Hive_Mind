@@ -27,6 +27,7 @@ pages have hover states, but they are faint and inconsistent.
 | Ambient motion | "Alive but calm"                                                            |
 | Build approach | DOM dots kept, a hand-rolled camera; no new dependency                      |
 | New view       | A **Hive** view (a honeycomb) replaces Circle and is the map's opening view |
+| New theme      | A **Hive** theme (honey, wax, amber light) is added and becomes the default |
 
 The approved reference is the interactive prototype built in the brainstorm on the real fixture
 hive (`.superpowers/brainstorm/*/content/map-prototype-hive.html`, not committed). Where this spec
@@ -61,10 +62,23 @@ section 3 is updated to match.
   sit on their cell centres, drawn smaller (notes and files 6 px, hubs 11 px).
 - **Links hidden at rest.** Links are not drawn until a dot is hot or selected; then its links
   draw and fire as in every view. Ambient link pulses are off in Hive (the bees replace them).
-- **Bees.** Each agent rests at one of the four corners of the box. About every 2.6 s one agent
-  flies along a curved, dotted trail (1.5 s) to a cell of its own member changed in the last 72
-  hours. That cell's honey flares and fades back, a firing pulse leaves it, and the bee flies
-  home. No flight happens while a dot is hot, while the tab is hidden or under reduced motion.
+- **Bees show who is at the hive.** In Hive the agent dots are drawn as small bees (a striped body
+  in the brand colour, two wings), always on or just under the comb, never far from it. Their
+  state comes from `agentStatus` and `last_used_at`, which the map already loads:
+  - **Live** (status "connected"): the bee perches on the edge of its member's most recently
+    changed cell, hovers in a small loop (about 2 px) and flutters its wings. About every 3.4 s
+    it hops 0.8 s to another cell of its member, changed in the last few days and at most three
+    cells away. That cell's honey flares and fades back.
+  - **Today** (used in the last 24 hours, not connected): the bee rests, still, on its member's
+    latest cell.
+  - **Asleep** (older or never used): the bee sits dimmed, wings folded, in a row inside a small
+    entrance arch drawn under the comb.
+  - Hops never happen while a dot is hot, while the tab is hidden or under reduced motion (then
+    the bees stay still, but keep their state styling).
+- **"At the hive" panel.** In Hive a small glass panel at the top right of the stage lists the
+  live and today agents (a mini bee, the name, then "live" in the brand colour or "2h ago"),
+  and one line "_n_ asleep at the entrance". Hovering a row makes that bee hot. It is a list with
+  real text, so a screen reader hears who is live.
 - **Filters and hover** dim the cells with their dots: cells outside the filter or the hot
   neighbourhood drop to a near-empty frame.
 - **Grid size.** The radius above (12 cells, 469 cells, cell radius 15.5) is the minimum. When the
@@ -178,6 +192,39 @@ size at every zoom. "Topics" is dropped, because the hubs carry their own labels
   and the connections list. Hovering a connection makes it hot on the map; clicking it selects it
   and glides the camera to it. The panel content fades and rises in on each change.
 
+## 1A. The Hive theme (new default)
+
+A new theme, **Hive**, is added to `web/src/theme/themes.json` as the first entry and becomes
+`default` (Keystone stays, as one of 18). It goes through the existing pipeline: seeds only,
+everything else derived, `pnpm themes` regenerates the CSS, and the contrast test covers it in
+both modes and every reach. Where a derived colour falls short, its lightness is adjusted and
+listed in `adjustments.generated.txt`, as for every theme.
+
+| Seed      | Dark                            | Light (the "bold frame")        |
+| --------- | ------------------------------- | ------------------------------- |
+| brand     | `#f5b544` (honey)               | `#c77a12`                       |
+| brand2    | `#ef8a3c` (orange)              | `#d0601c`                       |
+| brandMid  | null                            | null                            |
+| content   | `#1a1208`                       | `#ffffff`                       |
+| text      | `#fbf3e4`                       | `#24190c`                       |
+| textMuted | `#cfbb9c`                       | `#5e4a30`                       |
+| surface   | `#1d160c`                       | `#fffaf0`                       |
+| wash      | `#3b2811`, `#1d140a`, `#090604` | `#d98a1e`, `#c46a17`, `#8a4310` |
+
+- **Dot colours** come from the existing "Follow theme" generator (eight hues fanned 160° around
+  the honey-to-orange midpoint), not hand-picked. That lands on warm rose, coral, apricot, amber,
+  pollen, lime and mint, as in the prototype. "Classic" still gives the fixed eight.
+- **Honeycomb texture.** One new derived token, `--texture`: for Hive a faint honeycomb pattern
+  (an inline SVG data URI, the brand colour at 4.5% opacity in dark and white at 6% in light),
+  painted under the bloom on the page background. For every other theme it is `none`. It is
+  decoration only and is dropped under `prefers-contrast: more` and forced colours.
+- **The mark** (the hexagon at the top of the rail) is filled with the brand gradient in Hive.
+  In other themes it stays the text colour. This is driven by a token (`--mark`), never by the
+  theme's name.
+- **People's existing choice wins.** Someone who already picked a theme keeps it; only a browser
+  with no stored choice starts on Hive. `docs/ui-concept.md` section 2 is updated (18 themes, Hive
+  is the default), and ADR 13 gets a short addendum recording the new default.
+
 ## 2. The left rail (every page)
 
 - **Destinations:** each row's fill slides in from the left on hover, and the icon nudges 2 px
@@ -271,15 +318,23 @@ These have no shared state with one another and can be built in parallel once th
   role on every page.
 - **H. Vault, Gallery, Inbox and Settings polish.**
 - **I. Hive view**: the `hive` layout in `layouts.ts` (pure, alongside the others), the comb
-  backdrop and the bees. It replaces Circle in the view list. The layout is independent of
-  everything else; the comb and bees consume D's motion conventions.
+  backdrop, the bees and the "At the hive" panel. It replaces Circle in the view list. The layout
+  is independent of everything else; the comb and bees consume D's motion conventions.
+- **J. Hive theme**: seeds in `themes.json`, the `--texture` and `--mark` tokens in the
+  generator, the regenerated CSS and adjustments, the new default, and the Appearance tests
+  updated for it. It has no dependency on any other unit.
 
 ## 7. Testing
 
 - **Unit (vitest), Hive layout:** deterministic for a model; every note, file and hub gets its
   own cell (no two items share one); every item sits inside its own topic's territory and each
   territory is contiguous; the index is on the centre cell; the grid grows to hold 5,000 items
-  and stays inside the 1000 × 760 box; recency maps to the honey opacity formula.
+  and stays inside the 1000 × 760 box; recency maps to the honey opacity formula; each agent's
+  bee state (live, today, asleep) follows from its status and last use; a live bee's next cell
+  is its own member's and at most three cells away.
+- **Unit (vitest), Hive theme:** the existing contrast, token, lint and generated-CSS tests pass
+  with Hive included (now 18 themes, 108 combinations); `--texture` is `none` for every theme
+  but Hive; a stored choice is kept and an empty one resolves to Hive.
 - **Unit (vitest):** the camera maths (zoom toward a point keeps that point fixed; clamping;
   fit; framing a set of points), the semantic-label selection (thresholds, viewport culling, the
   cap of 60), the sparkline series from `activity().days`, the short agent "last used" form, the
