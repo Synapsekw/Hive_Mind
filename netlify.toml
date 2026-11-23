@@ -1,0 +1,11 @@
+# Netlify hosts the web app only. The connector and agent sign-in are Supabase Edge Functions.
+# `main` is production; a branch deploy of `develop` is the test site.
+[build]
+  command = "pnpm --filter @hive-mind/web build"
+  publish = "web/.next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

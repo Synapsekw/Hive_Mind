@@ -27,6 +27,7 @@
     "@commitlint/cli": "^19.6.0",
     "@commitlint/config-conventional": "^19.6.0",
     "@electric-sql/pglite": "^0.2.17",
+    "@netlify/plugin-nextjs": "^5.16.9",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.10",
     "prettier": "^3.4.2",
