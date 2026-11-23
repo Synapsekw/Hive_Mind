@@ -2455,3 +2455,146 @@ test("each inbox list is the newest 100 and the totals count everything", async 
   // The oldest bulk note fell off the list.
   assert.ok(!i.held.some((n) => n.title === "ib bulk held 1"));
 });
+
+// ---------------------------------------------------------------- settings
+// What the settings screen leans on: `add_member`, `create_agent` and
+// `revoke_agent` refuse on their own, whatever the app sends.
+
+const memberCount = async () =>
+  (
+    await as(
+      person("dani"),
+      `select count(*)::int as n from public.members where hive_id = $1`,
+      [hive],
+    )
+  )[0].n;
+const agentsOf = (name) =>
+  as(
+    person(name),
+    `select id, revoked_at from public.agents where member_id = $1`,
+    [members[name]],
+  );
+
+test("only the hive owner adds a member", async () => {
+  const before = await memberCount();
+  await assert.rejects(
+    as(
+      person("ahmed"),
+      `select public.add_member($1, 'outsider@example.com', 'Outsider')`,
+      [hive],
+    ),
+    /only the hive owner/,
+  );
+  // Someone from another hive cannot add themselves either.
+  await assert.rejects(
+    as(
+      person("outsider"),
+      `select public.add_member($1, 'outsider@example.com', 'Outsider')`,
+      [hive],
+    ),
+    /only the hive owner/,
+  );
+  assert.equal(await memberCount(), before);
+});
+
+test("a member cannot be added by an email nobody signed up with", async () => {
+  const before = await memberCount();
+  await assert.rejects(
+    as(
+      person("dani"),
+      `select public.add_member($1, 'nobody@example.com', 'Nobody')`,
+      [hive],
+    ),
+    /no user with that email/,
+  );
+  assert.equal(await memberCount(), before);
+});
+
+test("the same person cannot be added twice", async () => {
+  const before = await memberCount();
+  const spaces = async () =>
+    (
+      await as(
+        person("ahmed"),
+        `select count(*)::int as n from public.workspaces where member_id = $1`,
+        [members.ahmed],
+      )
+    )[0].n;
+  const spacesBefore = await spaces();
+  await assert.rejects(
+    as(
+      person("dani"),
+      `select public.add_member($1, 'ahmed@example.com', 'Ahmed again')`,
+      [hive],
+    ),
+    (e) => e.code === "23505",
+  );
+  // The address is matched whatever its case.
+  await assert.rejects(
+    as(
+      person("dani"),
+      `select public.add_member($1, 'AHMED@Example.com', 'Ahmed again')`,
+      [hive],
+    ),
+    (e) => e.code === "23505",
+  );
+  assert.equal(await memberCount(), before);
+  assert.equal(await spaces(), spacesBefore);
+});
+
+test("an agent cannot add a member, create an agent or revoke one", async () => {
+  // The owner's own agent: refused for being an agent, not for whose it is.
+  const agent = await agentFor("dani");
+  const before = await memberCount();
+  const agentsBefore = await agentsOf("dani");
+
+  await assert.rejects(
+    as(
+      agent,
+      `select public.add_member($1, 'outsider@example.com', 'Outsider')`,
+      [hive],
+    ),
+    /only the hive owner/,
+  );
+  assert.equal(await memberCount(), before);
+
+  await assert.rejects(
+    as(agent, `select * from public.create_agent($1, 'Spawned', 'other')`, [
+      ws.dani,
+    ]),
+    /agents cannot create agents/,
+  );
+  await assert.rejects(
+    as(agent, `select public.revoke_agent($1)`, [agent.agent_id]),
+    /agents cannot revoke agents/,
+  );
+  const other = agentsBefore.find((a) => a.id !== agent.agent_id);
+  await assert.rejects(
+    as(agent, `select public.revoke_agent($1)`, [other.id]),
+    /agents cannot revoke agents/,
+  );
+
+  assert.deepEqual(await agentsOf("dani"), agentsBefore);
+});
+
+test("a person cannot revoke a colleague's agent or connect one to a colleague's workspace", async () => {
+  const theirs = await agentFor("ahmed");
+  const daniBefore = await agentsOf("dani");
+
+  await assert.rejects(
+    as(person("dani"), `select public.revoke_agent($1)`, [theirs.agent_id]),
+    /that agent is not yours/,
+  );
+  const still = (await agentsOf("ahmed")).find((a) => a.id === theirs.agent_id);
+  assert.equal(still.revoked_at, null);
+
+  await assert.rejects(
+    as(
+      person("ahmed"),
+      `select * from public.create_agent($1, 'In your space', 'other')`,
+      [ws.dani],
+    ),
+    /that workspace is not yours/,
+  );
+  assert.deepEqual(await agentsOf("dani"), daniBefore);
+});
