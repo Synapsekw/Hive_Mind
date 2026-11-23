@@ -26,15 +26,52 @@ pages have hover states, but they are faint and inconsistent.
 | Rail foot      | A collapsible agents card and one account button with a menu                |
 | Ambient motion | "Alive but calm"                                                            |
 | Build approach | DOM dots kept, a hand-rolled camera; no new dependency                      |
+| New view       | A **Hive** view (a honeycomb) replaces Circle and is the map's opening view |
 
 The approved reference is the interactive prototype built in the brainstorm on the real fixture
-hive (`.superpowers/brainstorm/*/content/map-prototype-v3.html`, not committed). Where this spec
+hive (`.superpowers/brainstorm/*/content/map-prototype-hive.html`, not committed). Where this spec
 and the prototype differ, this spec wins.
 
 ADR 13 (Keystone glass) stands. This spec only extends its "Motion" and "Controls" rows; the
 "Hairlines brighten on hover, never thicken" rule still holds.
 
 ## 1. The map
+
+### 1.0 The Hive view (new, replaces Circle, opens by default)
+
+The views become **Hive**, Rings, Topics, Links, Timeline and Orbit, in that order, and the map
+opens on Hive. Circle is removed (its layout function and tests go with it). `docs/ui-concept.md`
+section 3 is updated to match.
+
+- **One honeycomb.** A pointy-top hex grid of radius 12 cells (469 cells) centred in the
+  1000 × 760 box, with a cell radius of 15.5 units. The hive index sits on the centre cell.
+- **A territory per topic.** Each topic's hub sits on a seed cell on a ring 6.3 cells out, at
+  evenly spaced angles in topic order. Territories grow round-robin: on each turn every topic
+  with room left takes the free neighbouring cell nearest its seed (ties lean toward the centre),
+  until it has one cell for its hub plus one per note or file. Within a territory, items are
+  placed nearest the hub first, most recently changed first. The layout is deterministic for a
+  model, so it is computed once and cached like the other flat views. Cells nobody claims stay
+  as empty frames at the edge.
+- **Honey fill shows recency.** A cell's fill is its topic colour at an opacity of
+  `max(0.06, 0.5 × e^(-hours since change / 60))`. A hub cell has a fixed 0.32 fill and a brighter
+  edge. The index cell is a faint fill of the text colour.
+- **Capped cells.** An item that is not shared with you is a capped cell: the card colour with a
+  dashed edge in its topic colour. This doubles the existing "hollow = not shared" meaning.
+- **Dots on cells.** The dot buttons stay (keyboard, labels, hover and selection unchanged) and
+  sit on their cell centres, drawn smaller (notes and files 6 px, hubs 11 px).
+- **Links hidden at rest.** Links are not drawn until a dot is hot or selected; then its links
+  draw and fire as in every view. Ambient link pulses are off in Hive (the bees replace them).
+- **Bees.** Each agent rests at one of the four corners of the box. About every 2.6 s one agent
+  flies along a curved, dotted trail (1.5 s) to a cell of its own member changed in the last 72
+  hours. That cell's honey flares and fades back, a firing pulse leaves it, and the bee flies
+  home. No flight happens while a dot is hot, while the tab is hidden or under reduced motion.
+- **Filters and hover** dim the cells with their dots: cells outside the filter or the hot
+  neighbourhood drop to a near-empty frame.
+- **Grid size.** The radius above (12 cells, 469 cells, cell radius 15.5) is the minimum. When the
+  hive has more items, the radius is the smallest one whose cell count holds every item plus 15%
+  headroom, and the cell radius shrinks so the comb still fits the box. All cells are drawn as
+  polygons in one SVG group, so at the 5,000-item cap that is about 5,800 polygons drawn once per
+  model; only their classes change on hover and filter.
 
 ### 1.1 Camera (flat views)
 
@@ -233,9 +270,16 @@ These have no shared state with one another and can be built in parallel once th
 - **G. Rail: sliding bar, agents card, account menu**, plus the loader for the member's name and
   role on every page.
 - **H. Vault, Gallery, Inbox and Settings polish.**
+- **I. Hive view**: the `hive` layout in `layouts.ts` (pure, alongside the others), the comb
+  backdrop and the bees. It replaces Circle in the view list. The layout is independent of
+  everything else; the comb and bees consume D's motion conventions.
 
 ## 7. Testing
 
+- **Unit (vitest), Hive layout:** deterministic for a model; every note, file and hub gets its
+  own cell (no two items share one); every item sits inside its own topic's territory and each
+  territory is contiguous; the index is on the centre cell; the grid grows to hold 5,000 items
+  and stays inside the 1000 × 760 box; recency maps to the honey opacity formula.
 - **Unit (vitest):** the camera maths (zoom toward a point keeps that point fixed; clamping;
   fit; framing a set of points), the semantic-label selection (thresholds, viewport culling, the
   cap of 60), the sparkline series from `activity().days`, the short agent "last used" form, the
