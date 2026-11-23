@@ -44,3 +44,4 @@ an existing file.
 - **G04** [[2026-11-22-gotcha-04-supabase-mcp-stamps-its-own-migration-version]] — re-stamp MCP-applied migrations to the repo version
 - **G05** [[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]] — resolved: the finish no longer fails at cleanup; an empty folder may remain
 - **G06** [[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]] — closed: agents sign in through the `agent-session` function; revoke the legacy JWT secret only once every machine runs a build from after that change
+- **G07** [[2026-11-23-gotcha-07-supabase-oauth-id-token-can-change-the-account]] — open: the ID token Supabase's OAuth server gives an app is accepted by its account endpoint and can set a new password; keep dynamic registration off or the OAuth server off until fixed
