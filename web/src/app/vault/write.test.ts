@@ -298,6 +298,20 @@ describe("deleteNoteIn", () => {
     expect(t.rpc).not.toHaveBeenCalled();
   });
 
+  it("asks in lower case for an id given in upper case, and answers for the row deleted", async () => {
+    const LOWER = "abcdef00-0000-4000-8000-00000001abcd";
+    const UPPER = "ABCDEF00-0000-4000-8000-00000001ABCD";
+    // The database answers the id as it writes it: in lower case.
+    const t = stub({ write: ok([{ id: LOWER }]) });
+    expect(await deleteNoteIn(t.db, UPPER)).toEqual({ ok: true });
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]!.ops).toEqual([
+      ["delete", []],
+      ["eq", ["id", LOWER]],
+      ["select", ["id"]],
+    ]);
+  });
+
   it("refuses anything that is not a uuid without a query or a session check", async () => {
     const bad: unknown[] = [
       "nope",

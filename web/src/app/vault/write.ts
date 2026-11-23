@@ -150,14 +150,17 @@ function onlyRow(res: Res, id: string): boolean {
 // else the delete matches no row. Nothing here says who may.
 export async function deleteNoteIn(db: Db, noteId: unknown): Promise<Result> {
   if (!isUuid(noteId)) return NO;
+  // The database answers a uuid in lower case, however it was asked: ask in lower case too, so
+  // the row that comes back is compared with the id as the database writes it.
+  const id = noteId.toLowerCase();
   if (!(await userId(db))) return NO;
   const res = (await db
     .from("notes")
     .delete()
-    .eq("id", noteId)
+    .eq("id", id)
     .select("id")) as Res;
   if (failed("deleteNote", res)) return NO;
-  return onlyRow(res, noteId) ? YES : NO;
+  return onlyRow(res, id) ? YES : NO;
 }
 
 export async function previewIn(

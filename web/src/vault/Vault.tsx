@@ -4,7 +4,7 @@
 // all client state that survives choosing a note. The tab and the open note come from the URL;
 // writes go through `actions`, and the database decides whether they are allowed.
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Shell } from "../shell/Shell";
 import { Folders } from "./Folders";
 import { folderMark } from "./marks";
@@ -66,13 +66,50 @@ export function Vault({
   const router = useRouter();
   // Notes deleted here. They stay out even if a refresh is slow to drop them.
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
-  // What the last delete came to, for the status line.
-  const [said, setSaid] = useState("");
+  // What the last delete came to. It is shown until the person opens another note, deletes
+  // again or dismisses it.
+  const [said, setSaid] = useState<{ text: string; failed: boolean } | null>(
+    null,
+  );
+  // The note this screen shows or is on its way to: the one last served, or the one the person
+  // last asked for. The address is not asked; it changes only once a note has arrived.
+  const servedOpen =
+    served.open && "note" in served.open ? served.open.note.id : null;
+  const wanted = useRef<string | null>(servedOpen);
+  // A note that arrives is the one shown. A note that stops being served is not the person
+  // going elsewhere: it may be the very note a delete has just removed.
+  useEffect(() => {
+    if (servedOpen) wanted.current = servedOpen;
+  }, [servedOpen]);
   // Deletes on their way, by note: a second request for the same note joins the first.
   const deleting = useRef(new Map<string, Promise<boolean>>());
   const main = useRef<HTMLElement>(null);
   // Where the focus goes once a deleted note has left the page.
   const target = useRef<{ row: HTMLElement | null } | null>(null);
+
+  // A press on a link to this screen says which note is wanted next, before it arrives.
+  function follow(e: MouseEvent<HTMLElement>) {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+      return;
+    const link = (e.target as Element).closest<HTMLAnchorElement>("a[href]");
+    if (!link || link.target === "_blank") return;
+    const to = new URL(link.href, window.location.href);
+    if (to.origin !== window.location.origin || to.pathname !== base) return;
+    const id = to.searchParams.get("note");
+    if (id && id !== wanted.current) setSaid(null);
+    wanted.current = id;
+  }
+
+  function dismiss() {
+    // The button leaves the page: the focus goes to the open note's row, else as after a delete.
+    target.current = {
+      row:
+        main.current?.querySelector<HTMLElement>(
+          'nav[aria-label="Notes"] a[aria-current="page"]',
+        ) ?? null,
+    };
+    setSaid(null);
+  }
 
   const data = useMemo<VaultData>(() => {
     if (gone.size === 0) return served;
@@ -99,11 +136,13 @@ export function Vault({
     next?.focus();
   });
 
+  // The tab on screen when Delete was pressed.
+  const shown = served.tab;
   function deleteNote(id: string): Promise<boolean> {
     const pending = deleting.current.get(id);
     if (pending) return pending;
     const run = (async () => {
-      setSaid("");
+      setSaid(null);
       let ok = false;
       try {
         ok = (await actions.deleteNote(id)).ok === true;
@@ -112,15 +151,14 @@ export function Vault({
       }
       deleting.current.delete(id);
       if (!ok) {
-        setSaid(DELETE_FAILED);
+        setSaid({ text: DELETE_FAILED, failed: true });
         // It may have been refused because the note is already gone: re-read.
         router.refresh();
         return false;
       }
-      // Asked of the address, not of this render: the person may have opened another note
-      // while the delete ran, and that one must stay open.
-      const here = new URL(window.location.href);
-      const stillOpen = here.searchParams.get("note") === id;
+      // Asked of what the person last opened, not of this render or of the address: they may
+      // have opened another note while the delete ran, and that one must stay open.
+      const stillOpen = wanted.current === id;
       const at = document.activeElement;
       const note = main.current?.querySelector('section[aria-label="Note"]');
       // The focus is moved only from the note that is leaving, or from nowhere.
@@ -138,11 +176,22 @@ export function Vault({
         };
       }
       setGone((set) => new Set(set).add(id));
-      setSaid(DELETED);
+      setSaid({ text: DELETED, failed: false });
       if (stillOpen) {
-        // Close the note: the same address without it.
-        here.searchParams.delete("note");
-        router.replace(`${here.pathname}${here.search}`, { scroll: false });
+        // Close the note: the same address without it. The note chose the tab, so the address
+        // now names that tab itself; else a bare link to the note would fall back to the first
+        // workspace.
+        wanted.current = null;
+        const q = new URLSearchParams(window.location.search);
+        q.delete("note");
+        if (shown.kind === "shared") {
+          q.delete("ws");
+          q.set("tab", "shared");
+        } else {
+          q.delete("tab");
+          q.set("ws", shown.id);
+        }
+        router.replace(`${base}?${q}`, { scroll: false });
       }
       router.refresh();
       return true;
@@ -237,7 +286,12 @@ export function Vault({
   return (
     <div className={s.root}>
       <Shell current="vault" inbox={inbox} />
-      <main ref={main} aria-label="Vault" className={s.panel}>
+      <main
+        ref={main}
+        aria-label="Vault"
+        className={s.panel}
+        onClickCapture={follow}
+      >
         <div className={s.bar}>
           <Tabs
             data={data}
@@ -257,6 +311,25 @@ export function Vault({
               }}
             />
           </label>
+        </div>
+        {/* How the last delete went. The status element is always here, so it is announced. */}
+        <div
+          className={said ? s.said : s.srOnly}
+          data-failed={said?.failed || undefined}
+        >
+          <p role="status" className={s.saidText}>
+            {said?.text ?? ""}
+          </p>
+          {said && (
+            <button
+              type="button"
+              className={s.quiet}
+              aria-label="Dismiss message"
+              onClick={dismiss}
+            >
+              Dismiss
+            </button>
+          )}
         </div>
         <div className={s.cols} data-shared={shared || undefined}>
           {!shared && (
@@ -301,9 +374,6 @@ export function Vault({
             onDelete={deleteNote}
           />
         </div>
-        <p role="status" className={s.srOnly}>
-          {said}
-        </p>
       </main>
     </div>
   );

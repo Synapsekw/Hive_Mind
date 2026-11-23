@@ -8,12 +8,15 @@ import { useRouter } from "next/navigation";
 import { longDate } from "./format";
 import { folderMark, noteMark } from "./marks";
 import { Markdown } from "./Markdown";
-import { DELETE_FAILED, DELETE_QUESTION, releaseSentence } from "./sentences";
+import { DELETE_QUESTION, releaseSentence } from "./sentences";
 import { ShareControl } from "./ShareControl";
 import type { Choice, Result, VaultData, VaultNote } from "./types";
 import s from "./vault.module.css";
 
-/** A confirming Delete sooner than this after the question opened is taken as a double click. */
+/**
+ * A confirming Delete sooner than this after the question opened, or after the press before it,
+ * is taken as part of a double click or a burst, not as an answer.
+ */
 const CONFIRM_AFTER_MS = 500;
 
 function Release({
@@ -66,16 +69,15 @@ function Release({
 /**
  * Delete, in two steps: the quiet button asks, and only a later, separate press on the
  * question's own Delete removes the note. Mounted per note, so opening another note or tab
- * drops a waiting question. What happens after the answer (the list, the status line, the
- * re-read) is the screen's; this only says whether it worked.
+ * drops a waiting question. What happens after the answer (the list, the line that says how it
+ * went, the re-read) is the screen's; this only goes back to the quiet button when it failed.
  */
 function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
   // The same as `busy`, readable at once by a second press that arrives before the render.
   const running = useRef(false);
-  // When the question was last opened.
+  // When the question was opened, or when the last press that came too soon landed.
   const askedAt = useRef(0);
   // Where the focus goes after the next render.
   const target = useRef<"keep" | "opener" | null>(null);
@@ -93,7 +95,6 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
   function ask() {
     askedAt.current = Date.now();
     target.current = "keep";
-    setFailed(false);
     setAsking(true);
   }
 
@@ -104,10 +105,14 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
   }
 
   async function confirm() {
-    // The second press of a double click lands just after the question opened: too soon to be
-    // an answer to it.
-    if (Date.now() - askedAt.current < CONFIRM_AFTER_MS) return;
     if (running.current) return;
+    // The second press of a double click lands just after the question opened: too soon to be
+    // an answer to it. It starts the wait again, so a burst of presses never answers.
+    const now = Date.now();
+    if (now - askedAt.current < CONFIRM_AFTER_MS) {
+      askedAt.current = now;
+      return;
+    }
     running.current = true;
     setBusy(true);
     let ok = false;
@@ -124,65 +129,57 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
       target.current = "opener";
     setBusy(false);
     setAsking(false);
-    setFailed(true);
   }
 
   const off = busy || undefined;
-  return (
-    <>
-      {asking ? (
-        <div
-          ref={question}
-          role="group"
-          aria-label="Delete this note"
-          aria-busy={off}
-          data-scope="reset"
-          className={`${s.release} ${s.wide}`}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              keep();
-            }
-          }}
-        >
-          <p className={s.sentence}>{DELETE_QUESTION}</p>
-          <div className={s.actions}>
-            <button
-              type="button"
-              className={s.confirm}
-              aria-label="Delete note"
-              aria-disabled={off}
-              onClick={confirm}
-            >
-              Delete
-            </button>
-            <button
-              ref={keeper}
-              type="button"
-              className={s.secondary}
-              aria-label="Keep note"
-              aria-disabled={off}
-              onClick={keep}
-            >
-              Keep
-            </button>
-          </div>
-        </div>
-      ) : (
+  return asking ? (
+    <div
+      ref={question}
+      role="group"
+      aria-label="Delete this note"
+      aria-busy={off}
+      data-scope="reset"
+      className={`${s.release} ${s.wide}`}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          keep();
+        }
+      }}
+    >
+      <p className={s.sentence}>{DELETE_QUESTION}</p>
+      <div className={s.actions}>
         <button
-          ref={opener}
           type="button"
-          className={s.quiet}
+          className={s.confirm}
           aria-label="Delete note"
-          onClick={ask}
+          aria-disabled={off}
+          onClick={confirm}
         >
           Delete
         </button>
-      )}
-      {failed && !asking && (
-        <p className={`${s.refused} ${s.wide}`}>{DELETE_FAILED}</p>
-      )}
-    </>
+        <button
+          ref={keeper}
+          type="button"
+          className={s.secondary}
+          aria-label="Keep note"
+          aria-disabled={off}
+          onClick={keep}
+        >
+          Keep
+        </button>
+      </div>
+    </div>
+  ) : (
+    <button
+      ref={opener}
+      type="button"
+      className={s.quiet}
+      aria-label="Delete note"
+      onClick={ask}
+    >
+      Delete
+    </button>
   );
 }
 

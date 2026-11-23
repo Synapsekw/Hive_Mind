@@ -3,7 +3,7 @@
 // The vault over the fixture with stand-in actions: each records its call on
 // `window.__vaultCalls` (for the browser tests) and answers as the database would. A deleted
 // note leaves this page's sample data until the page is loaded again. With `fail`, every write
-// is refused and the folder count is unavailable.
+// is refused and the folder count is unavailable; with `slow`, deleting takes over a second.
 import { useMemo, useState } from "react";
 import { fixturePreview } from "../../../vault/fixture";
 import type { VaultActions, VaultData } from "../../../vault/types";
@@ -15,6 +15,12 @@ declare global {
   }
 }
 
+/** How long `deleteNote` takes with `slow`: long enough to press something meanwhile. */
+const SLOW_WAIT = 1200;
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 function record(name: string, args: unknown[]) {
   (window.__vaultCalls ??= []).push({ name, args });
 }
@@ -23,10 +29,12 @@ export function DevVault({
   data: sample,
   now,
   fail,
+  slow,
 }: {
   data: VaultData;
   now: number;
   fail: boolean;
+  slow: boolean;
 }) {
   const [deleted, setDeleted] = useState<readonly string[]>([]);
   // The sample data without the notes deleted here; asking for one of them finds nothing.
@@ -57,8 +65,9 @@ export function DevVault({
       record("release", [noteId]);
       return answer();
     },
-    deleteNote: (noteId) => {
+    deleteNote: async (noteId) => {
       record("deleteNote", [noteId]);
+      if (slow) await wait(SLOW_WAIT);
       if (!fail) setDeleted((ids) => [...ids, noteId]);
       return answer();
     },

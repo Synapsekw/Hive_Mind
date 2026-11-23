@@ -712,8 +712,8 @@
 
 /* ---- Delete ----
    The open note's own controls share one row: sharing at its start, Delete at its end. The
-   sharing control's box dissolves into the row (display: contents), so its open panel, the
-   delete question and a refusal each take a full line under it. */
+   sharing control's box dissolves into the row (display: contents), so its open panel and the
+   delete question each take a full line under it. */
 .tools {
   align-self: stretch;
   display: grid;
@@ -791,6 +791,43 @@
   color: var(--quiet);
   font-weight: 500;
   cursor: default;
+}
+
+/* How the last delete went: one line under the tabs, there until it is dismissed. It keeps to
+   the top of the window where the page scrolls (stacked columns), so it is seen from the list. */
+.said {
+  position: sticky;
+  top: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+}
+
+.saidText {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* A failure is said in words; the bar beside it only draws the eye. */
+.said[data-failed] .saidText {
+  padding-left: 10px;
+  box-shadow: inset 2px 0 0 var(--hue-6);
+}
+
+/* A row brought into view by the focus stays clear of that line. */
+.row {
+  scroll-margin-top: 64px;
 }
 
 /* ---- Markdown ---- */
@@ -943,7 +980,8 @@
   }
 
   .control,
-  .release {
+  .release,
+  .said {
     background: var(--surface);
   }
 }
