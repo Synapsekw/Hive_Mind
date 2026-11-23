@@ -211,6 +211,10 @@ Emailed invitations; a custom domain; rate limiting and lockout on the connector
 approved apps per hive for the owner; showing connected apps differently in Settings beyond the
 wording; a production Supabase project separate from the dev one.
 
+Decided on 2026-11-23 for later: signed desktop apps for Mac and Windows that wrap this same web
+app, so a member may use either. The web app stays the base; the sign-in window and the
+connector are web addresses in both cases.
+
 ## 15. Risks
 
 - The Supabase OAuth server is in beta; its behaviour may differ from its documentation.
