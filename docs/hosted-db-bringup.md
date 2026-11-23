@@ -11,8 +11,12 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
   private `files` storage bucket.
 - Migration `20261122083415_map_graph` is applied too, through the Supabase MCP and re-stamped
   like the earlier ones. It adds `map_graph` and `note_topic` for the web app's map.
+- Migration `20261122115431_folder_rules_by_path` is applied and recorded under that version.
 - Migration `20261123071625_inbox` is applied (2026-11-23) and recorded under that version. It
   adds `inbox` and `inbox_count` for the web app's inbox.
+- Migration `20261123105237_invitations` is applied (2026-11-23) and recorded under that version.
+  It adds the `invitations` table and `invite_member`, `revoke_invitation` and
+  `claim_invitations` for inviting a member from Settings.
 - One hive (`Synapse`), one owner member (`Danijel`), one workspace (`Main`), one agent (`Claude`,
   provider `claude`, trust tier `vendor`).
 - The agent token is in the owner's local `.env` as `HIVE_AGENT_TOKEN`. Only its hash is stored in
@@ -63,7 +67,7 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
 
    The token is returned once. Put it in `.env` as `HIVE_AGENT_TOKEN` and nowhere else. This
    is for the first agent of a new project only; with the web app running, agents are created
-   and revoked, and existing users added as members, in **Settings**.
+   and revoked, and members invited, in **Settings**.
 
 5. **Verify through the public API** with the anon key from `.env`:
 
@@ -85,6 +89,13 @@ publishable key. Put them in `web/.env.local` (copy `web/.env.example`) and run 
   password never goes through an agent.
 - **Emailed links.** Add `http://localhost:3000/**` to the allowed redirect URLs (Authentication
   → URL Configuration), or the link is refused.
+- **Invitations.** Two settings under Authentication must both be on:
+  - [ ] **Allow new users to sign up**, so an invited person's first "Email me a link" creates
+        their account.
+  - [ ] **Confirm email**, so an account counts as that person only after they have proved the
+        address. With it off, someone who knows an invited address could join in that person's
+        place. Nothing in the app can check this setting; see
+        [security.md](security.md#3-identity-and-tokens).
 
 ## What is proven, and what is not
 

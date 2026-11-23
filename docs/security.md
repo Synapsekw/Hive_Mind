@@ -1,7 +1,7 @@
 ---
 type: spec
 status: active
-last-updated: 2026-11-22
+last-updated: 2026-11-23
 tags: [project/hive-mind, security]
 ---
 
@@ -45,7 +45,42 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   the token is shown in one dialog straight after the agent is created and kept nowhere: not in
   a log, a URL, browser storage or the page once the dialog is closed. Setting an expiry is not
   built yet.
-- The owner's "Add a member" form says whether an email has an account. Only the owner sees it.
+- The owner invites a person by email in Settings ("Invite a member"). A person with a confirmed
+  account is added at once; anyone else gets an invitation that lasts 14 days, can be revoked,
+  and is honoured when they first sign in with that email. The app sends no email and there is
+  no invitation link or code: whoever controls the invited mailbox joins, and nobody else can.
+- Invitations depend on two Supabase project settings (dashboard → Authentication): **"Allow new
+  users to sign up" on**, so the invited person's first "Email me a link" can create their
+  account, and **"Confirm email" on**. The design rests on the second. With it off, Supabase
+  treats a password sign-up as confirmed without proof, so someone who knows an invited address
+  could sign up with it and join in that person's place. The database only lets a confirmed
+  email join, and matches it to the invitation exactly after lower-casing. Nothing in the app
+  can check the setting, so it must stay on.
+- Only the hive owner can read invitations, including the email addresses in them; an agent
+  never can. Inviting, revoking and joining are refused for any agent identity.
+- The owner learns whether an email has an account: the form answers "added" for one that has
+  and "invited" for one that has not. Only the owner sees it.
+- Accepted gap: sign-ups stay open until invitations are emailed by the server. Until then a
+  stranger can create an account on the project. They are in no hive and see nothing of
+  anyone's, but can start a hive of their own.
+- Accepted gaps that follow from open sign-ups, all closed by emailed invitations with sign-ups
+  off (the next step) and not before:
+  - **Nobody consents to being added.** A stranger who has started a hive of their own can add
+    any confirmed account to it, or leave an invitation for an address that has no account yet.
+    They read nothing by doing so. For a person who already has a hive the app keeps showing
+    that one (it uses the person's oldest membership); a person with no hive yet would land in
+    the stranger's hive at first sign-in. The same call tells the stranger whether an email has
+    an account on the project.
+  - **A password set before the address was confirmed.** Someone who knows an invited address
+    can sign up with it and a password of their choosing. If the invited person then clicks
+    that "Confirm your signup" email instead of asking for a sign-in link, the account is
+    confirmed with the other person's password and joins. Whether a later sign-in link clears
+    such a password depends on the Supabase Auth version and has not been checked on the
+    hosted project. Until sign-ups are closed: invite only addresses you have told nobody
+    else about, tell the person to use "Email me a link" themselves, and treat an unexpected
+    "Confirm your signup" email as a warning.
+  - A person who already has a hive and signs in with a password does not pick up a waiting
+    invitation; it is honoured the next time they use an emailed link.
 - Revocation takes effect on the next sign-in; the MCP server re-signs in at least hourly.
 - Trust tiers: `vendor` (Claude, ChatGPT apps) and `self_hosted` (open-source agents).
 
@@ -113,6 +148,10 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   note id or the folder's path, and the settings before and after; never a note's text, title or
   path. Only the hive owner can read it, and there is no screen for it yet. Writes with no person
   behind them are not recorded.
+- Built: membership changes write one row each, with the action `member.added` (the owner
+  invited a person who had a confirmed account), `member.invited` (an invitation was saved),
+  `member.joined` (the invited person signed in and became a member) or
+  `member.invitation_revoked`. The detail holds the email and the invitation or member id.
 - Every MCP call logged: agent, member, tool, note, time, result.
 - Owner view: reads and writes per agent per day, failed authorisations, token last use.
 - Alerts: a burst of reads across many entities by one agent; repeated authorisation failures. A

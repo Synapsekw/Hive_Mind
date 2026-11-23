@@ -186,6 +186,20 @@ first, at most 100. For anyone but the owner the database returns none.
   nobody else can.
 - A person invited to two hives joins both at once; the app still shows only the first hive.
 
+Found in review (2026-11-23), accepted until sign-ups are closed; details in
+`docs/security.md` §3:
+
+- **No consent to being added.** With open sign-ups a stranger can start a hive and add or
+  invite anyone. Fixed in this slice: the app shows the hive of a person's _oldest membership_,
+  so a later, unwanted membership never displaces the hive they use. Not fixed: a person with no
+  hive lands in the stranger's hive; the stranger learns which emails have accounts.
+- **A password sign-up for an invited address**, confirmed by the invited person through the
+  "Confirm your signup" email, leaves the account with the other person's password. Unchecked
+  on the hosted project.
+- A person who already has a hive and signs in with a password does not claim a waiting
+  invitation.
+- The database messages are mapped by their text, as elsewhere in the app.
+
 ## Review focus
 
 - Nobody joins without a confirmed email matching the invitation exactly (after lower-casing).
