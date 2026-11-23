@@ -11,8 +11,16 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get("type") as EmailOtpType | null;
   const next = safeNext(searchParams.get("next"));
 
+  // Back to sign-in, still knowing where the person was going, so a new link returns there.
   const failed = () =>
-    NextResponse.redirect(new URL("/login?error=link", request.url));
+    NextResponse.redirect(
+      new URL(
+        next === "/"
+          ? "/login?error=link"
+          : `/login?error=link&next=${encodeURIComponent(next)}`,
+        request.url,
+      ),
+    );
 
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return failed();
 

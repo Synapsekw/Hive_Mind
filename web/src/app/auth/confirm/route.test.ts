@@ -104,6 +104,26 @@ describe("GET /auth/confirm", () => {
     expect(to(res)).toBe(`${ORIGIN}/login?error=link`);
   });
 
+  it("keeps a same-site next on the way back to sign-in, so a new link returns there", async () => {
+    client(new Error("expired"));
+    const res = await get(
+      "?code=abc&next=%2Foauth%2Fconsent%3Fauthorization_id%3Dx",
+    );
+    expect(to(res)).toBe(
+      `${ORIGIN}/login?error=link&next=%2Foauth%2Fconsent%3Fauthorization_id%3Dx`,
+    );
+    const outside = await get("?code=abc&next=https%3A%2F%2Fevil.example");
+    expect(to(outside)).toBe(`${ORIGIN}/login?error=link`);
+  });
+
+  it("returns to the approval window after an emailed link", async () => {
+    client();
+    const res = await get(
+      "?next=%2Foauth%2Fconsent%3Fauthorization_id%3Dx&code=abc",
+    );
+    expect(to(res)).toBe(`${ORIGIN}/oauth/consent?authorization_id=x`);
+  });
+
   it("does not claim when the token hash is refused", async () => {
     const t = client(new Error("expired"));
     const res = await get("?token_hash=h1&type=email");
