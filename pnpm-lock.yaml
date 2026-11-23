@@ -17,9 +17,15 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.2.17
         version: 0.2.17
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.2
+        version: 1.32.2(zod@3.25.76)
       '@netlify/plugin-nextjs':
         specifier: ^5.16.9
         version: 5.16.9
+      '@supabase/supabase-js':
+        specifier: 2.119.2
+        version: 2.119.2
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -32,6 +38,9 @@ importers:
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   mcp:
     dependencies:
