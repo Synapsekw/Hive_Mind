@@ -14,6 +14,13 @@ related:
 Fourth slice of Phase 3. A colleague connects Claude or ChatGPT to the hive in two minutes with
 nothing installed: paste one address, sign in, approve.
 
+> **Amended while planning (2026-11-23); where this note and the text below differ, the note
+> holds.** The connector offers six tools: `hive_save_file` reads the agent's own disk and stays
+> in the local server. There is no `HIVE_PUBLIC_URL` and no `setup-connector.sh`: the web route
+> writes the sign-in header and the metadata, and the function is deployed with one CLI command.
+> The check of Supabase Auth's account endpoints happens after the merge to `develop` and before
+> promotion to `main`, since it needs a real pass. Settings needs no change.
+
 ## 1. Goal and the test of success
 
 1. The owner invites a colleague in Settings (built).
