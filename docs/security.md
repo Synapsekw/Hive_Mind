@@ -45,6 +45,55 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   the token is shown in one dialog straight after the agent is created and kept nowhere: not in
   a log, a URL, browser storage or the page once the dialog is closed. Setting an expiry is not
   built yet.
+- An agent's machine holds its own token and nothing that can sign an identity. The MCP server
+  sends the token to the Edge Function `agent-session`, which asks the database who the token
+  belongs to (`agent_login`) and answers with an identity that lasts one hour.
+- The key that signs those identities is an ES256 key of our own. Its private half lives in one
+  place, the function's secrets (`AGENT_SIGNING_JWK`); it is imported into the project as a
+  standby signing key so the database accepts what the function signs. It is made by
+  `scripts/setup-agent-signing.sh`, which the owner runs in their own terminal and which never
+  prints it. It is not in the repo, a `.env`, a browser, a prompt or a log.
+- **The signing key is as powerful as the service-role key and the legacy JWT secret.** The
+  database accepts whatever role a validly signed token claims, including `service_role`, which
+  bypasses every sharing rule. So the key falls under the "server-only" invariant, exactly like
+  those two: never in a browser, a prompt, a log line, a commit or a `.env`. The only thing
+  that protects it is that it never leaves the function's secrets.
+- Function secrets are readable by every Edge Function of the project, not only by
+  `agent-session`. Any function deployed to this project can therefore read the key, so a new
+  function is reviewed as code that holds it. `agent-session` is the only function today.
+- What the function itself can sign is narrow. It writes `role` and `aud` as fixed values
+  (`authenticated`), and copies only validated ids from `agent_login`: the member's user id as
+  `sub`, `agent_id`, `workspace_id`, and a trust tier that must be one of the two known ones.
+  Every identity it makes carries `agent_id`. Nothing in the request is copied into the
+  identity, so there is no way to ask it for a person's identity, another agent's or another
+  role. It decides nothing about permissions; the database does that with the identity it is
+  given.
+- Every agent identity carries a `session_id` that matches no session. Supabase Auth looks the
+  session up and refuses the identity, so an agent cannot read or change the person's account
+  (email, password, sessions) even though the identity names that person as `sub`. A check in
+  `pnpm test:live` guards this.
+- The function calls `agent_login` with the project's publishable key, which it reads from the
+  secret `HIVE_PUBLISHABLE_KEY` (stored by the setup script). The Edge runtime's own
+  `SUPABASE_ANON_KEY` is the legacy anon key, which dies with the legacy JWT secret; the
+  function falls back to it only where the secret is not set.
+- Anyone on the internet can call the function: the caller has no identity yet, so it is
+  deployed without JWT verification. What protects it is the agent token, which has 244 random
+  bits and is checked against its hash, revocation and expiry at sign-in. It is not checked
+  again afterwards: an identity that was issued lasts up to one hour after the agent is
+  revoked. There is no lockout and no rate limit beyond what Supabase applies to functions. The
+  function never logs the token, the identity or the key.
+- The importer (`pnpm import:vault`) signs in as the person, through Supabase Auth, with their
+  email and password. It asks for them in the terminal without echoing the password, uses them
+  for that one sign-in and stores neither. An agent token cannot be exchanged for a person's
+  identity. The `HIVE_PERSON_*` values in `.env` are for the live tests and unattended imports
+  only. The live tests need the account behind `HIVE_AGENT_TOKEN`; where that agent belongs to
+  the owner, that means the owner's own password in `.env`, so leaving them out (those checks
+  then skip) is the safe default.
+- The project's legacy JWT secret can still sign an identity for any member until the owner
+  revokes it. Nothing in the repo reads it. It may be revoked once two things hold: every
+  machine runs a build from after 2026-11-23, and the function is using `HIVE_PUBLISHABLE_KEY`
+  (set by the setup script), not the legacy anon key. The legacy API keys must not be disabled
+  before that either (see [hosted-db-bringup.md](hosted-db-bringup.md#set-up-agent-sign-in)).
 - The owner invites a person by email in Settings ("Invite a member"). A person with a confirmed
   account is added at once; anyone else gets an invitation that lasts 14 days, can be revoked,
   and is honoured when they first sign in with that email. The app sends no email and there is
@@ -81,7 +130,8 @@ agent acting under a revocable identity, and humans owning every sharing decisio
     "Confirm your signup" email as a warning.
   - A person who already has a hive and signs in with a password does not pick up a waiting
     invitation; it is honoured the next time they use an emailed link.
-- Revocation takes effect on the next sign-in; the MCP server re-signs in at least hourly.
+- Revocation takes effect on the next sign-in; the MCP server re-signs in at least hourly. An
+  identity issued before the revocation keeps working until it expires, up to one hour later.
 - Trust tiers: `vendor` (Claude, ChatGPT apps) and `self_hosted` (open-source agents).
 
 ## 4. Authorisation
@@ -169,4 +219,6 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - Do any customer contracts require a security review or specific data residency before their
   material is loaded?
 - Should vendor-tier agents also start in quarantine for a new member's first week?
-- Agent sign-in currently signs a JWT with the project's secret. What replaces it when hosted?
+- When is the legacy JWT secret revoked? Agent sign-in no longer uses it (section 3); it stays
+  valid until every machine has switched and the function uses `HIVE_PUBLISHABLE_KEY`.
+- Does the `agent-session` function need its own rate limit before colleagues' agents use it?

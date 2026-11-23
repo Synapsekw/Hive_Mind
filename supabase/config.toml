@@ -1,1 +1,5 @@
 project_id = "hive-mind"
+
+# The caller has no JWT yet: the agent token in the body is the credential.
+[functions.agent-session]
+verify_jwt = false
