@@ -45,12 +45,16 @@ describe("zoomLabels", () => {
     expect([...got].sort()).toEqual([1, 3]);
   });
   it("caps at 60, nearest the centre first", () => {
-    const many = Array.from({ length: 100 }, (_, i) =>
-      dot(i, 5, 500 + (i % 10) * 90, 100 + Math.floor(i / 10) * 30, true, 60),
+    // 12 columns x 10 rows = 120 lit, on-stage, non-overlapping dots: columns 75 px apart from
+    // x = 40 (max 865), rows 30 px apart from y = 100 (max 370), label width 60.
+    const many = Array.from({ length: 120 }, (_, i) =>
+      dot(i, 5, 40 + (i % 12) * 75, 100 + Math.floor(i / 12) * 30, true, 60),
     );
     const got = zoomLabels(many, 3, stage, id);
     expect(got.size).toBe(60);
-    expect(got.has(0)).toBe(true);
-    expect(got.has(99)).toBe(false);
+    // Nearest the centre (500, 380): column 6 (x 490), row 9 (y 370), i = 114.
+    expect(got.has(114)).toBe(true);
+    // Farthest from the centre: column 0 (x 40), row 0 (y 100), i = 0.
+    expect(got.has(0)).toBe(false);
   });
 });

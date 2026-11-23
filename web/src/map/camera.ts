@@ -41,12 +41,19 @@ export function frame(
   sw: number,
   sh: number,
 ): Cam {
-  const xs = points.map((p) => (p[0] / 1000) * w);
-  const ys = points.map((p) => (p[1] / 760) * h);
-  const x0 = Math.min(...xs);
-  const x1 = Math.max(...xs);
-  const y0 = Math.min(...ys);
-  const y1 = Math.max(...ys);
+  if (points.length === 0) return fit(w, h, sw, sh);
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  for (const [px, py] of points) {
+    const x = (px / 1000) * w;
+    const y = (py / 760) * h;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
   const k = Math.max(
     1,
     Math.min(3, sw / (x1 - x0 + 120), sh / (y1 - y0 + 120)),

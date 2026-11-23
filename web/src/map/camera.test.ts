@@ -31,6 +31,9 @@ describe("camera", () => {
   it("fits the world centred at 100%", () => {
     expect(fit(800, 608, 1000, 700)).toEqual({ k: 1, tx: 100, ty: 46 });
   });
+  it("frames no points as a plain fit", () => {
+    expect(frame([], 800, 608, 1000, 700)).toEqual(fit(800, 608, 1000, 700));
+  });
   it("frames points inside the stage, never closer than 3x", () => {
     const c = frame(
       [
