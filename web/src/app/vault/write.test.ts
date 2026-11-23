@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  deleteNoteIn,
   previewIn,
   releaseIn,
   saveFolderIn,
@@ -45,7 +46,15 @@ function stub(
     const call: Call = { table, ops: [] };
     calls.push(call);
     const chain: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "order", "limit", "update", "upsert"])
+    for (const m of [
+      "select",
+      "eq",
+      "order",
+      "limit",
+      "update",
+      "upsert",
+      "delete",
+    ])
       chain[m] = (...args: unknown[]) => {
         // The read of the person's own oldest membership is filed apart from the hive's members.
         if (table === "members" && m === "eq" && args[0] === "user_id")
@@ -269,6 +278,100 @@ describe("releaseIn", () => {
     expect(await releaseIn(stub({ write: ok([]) }).db, NOTE)).toEqual({
       ok: false,
     });
+  });
+});
+
+describe("deleteNoteIn", () => {
+  const OTHER = "00000000-0000-4000-8000-000000010002";
+
+  it("deletes the note by id, as the person, and asks for the id back", async () => {
+    const t = stub();
+    expect(await deleteNoteIn(t.db, NOTE)).toEqual({ ok: true });
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]!.table).toBe("notes");
+    expect(t.calls[0]!.ops).toEqual([
+      ["delete", []],
+      ["eq", ["id", NOTE]],
+      ["select", ["id"]],
+    ]);
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses anything that is not a uuid without a query or a session check", async () => {
+    const bad: unknown[] = [
+      "nope",
+      "1 or 1=1",
+      "",
+      `${NOTE} `,
+      undefined,
+      null,
+      42,
+      [NOTE],
+      { id: NOTE },
+    ];
+    for (const id of bad) {
+      const t = stub();
+      expect(await deleteNoteIn(t.db, id)).toEqual({ ok: false });
+      expect(t.from).not.toHaveBeenCalled();
+      expect(t.rpc).not.toHaveBeenCalled();
+      expect(t.auth.getUser).not.toHaveBeenCalled();
+    }
+  });
+
+  it("is not ok without a session, and sends no query", async () => {
+    const t = stub({ user: null });
+    expect(await deleteNoteIn(t.db, NOTE)).toEqual({ ok: false });
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it("is not ok when no row was deleted: not the person's, or already gone", async () => {
+    expect(await deleteNoteIn(stub({ write: ok([]) }).db, NOTE)).toEqual({
+      ok: false,
+    });
+  });
+
+  it("is not ok unless the answer is exactly the one row asked for", async () => {
+    const answers: unknown[] = [
+      null,
+      undefined,
+      { id: NOTE },
+      "deleted",
+      [{ id: NOTE }, { id: OTHER }],
+      [{ id: NOTE }, { id: NOTE }],
+      [{ id: OTHER }],
+      [{}],
+      [null],
+      [NOTE],
+    ];
+    for (const data of answers)
+      expect(await deleteNoteIn(stub({ write: ok(data) }).db, NOTE)).toEqual({
+        ok: false,
+      });
+  });
+
+  it("is not ok when the database refuses, logging only code and message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      write: {
+        // A row beside an error is still a failure.
+        data: [{ id: NOTE }],
+        error: {
+          message: "agents cannot delete notes",
+          code: "P0001",
+          details: "Secret",
+        },
+      },
+    });
+    expect(await deleteNoteIn(t.db, NOTE)).toEqual({ ok: false });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(
+      "deleteNote failed",
+      "P0001",
+      "agents cannot delete notes",
+    );
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    spy.mockRestore();
   });
 });
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DELETE_FAILED,
+  DELETE_QUESTION,
+  DELETED,
   folderSentence,
   noteSentence,
   people,
@@ -229,5 +232,17 @@ describe("releaseSentence", () => {
     ).toBe(
       "This note was written by a self-hosted agent. Releasing it makes it follow its sharing setting: Everyone.",
     );
+  });
+});
+
+describe("deleting a note", () => {
+  it("asks in words that say what goes and what stays", () => {
+    expect(DELETE_QUESTION).toBe(
+      "Delete this note? It is gone for good, with its history and its links. Files attached to it stay in the gallery.",
+    );
+  });
+  it("says what happened", () => {
+    expect(DELETED).toBe("Note deleted.");
+    expect(DELETE_FAILED).toBe("That didn't work. Try again.");
   });
 });

@@ -5,7 +5,13 @@ import {
   GROUP_FOLDER,
   HOSTILE_NOTE_ID,
 } from "../src/vault/fixture";
-import { folderSentence, noteSentence } from "../src/vault/sentences";
+import {
+  DELETE_FAILED,
+  DELETE_QUESTION,
+  DELETED,
+  folderSentence,
+  noteSentence,
+} from "../src/vault/sentences";
 import { setLook } from "./look";
 
 // The fixture's content does not depend on `now`, only its dates do.
@@ -459,3 +465,215 @@ test("an unknown note says it isn't available", async ({ page }) => {
     "That note isn't available.",
   );
 });
+
+// ------- deleting a note
+
+const preview = (page: Page) => page.getByRole("region", { name: "Note" });
+const deleteButton = (page: Page) =>
+  preview(page).getByRole("button", { name: "Delete note" });
+const keepButton = (page: Page) =>
+  preview(page).getByRole("button", { name: "Keep note" });
+const status = (page: Page) =>
+  page.getByRole("main", { name: "Vault" }).getByRole("status");
+const openTitle = (page: Page, name: string) =>
+  preview(page).getByRole("heading", { name, level: 2 });
+
+test("your own note has Delete, a held one too; a colleague's has none", async ({
+  page,
+}) => {
+  await open(page, `?note=${README}`);
+  await expect(deleteButton(page)).toBeVisible();
+  await expect(deleteButton(page)).toHaveText("Delete");
+  await expect(preview(page)).not.toContainText(DELETE_QUESTION);
+
+  await open(page, `?note=${HELD}`);
+  await expect(
+    preview(page).getByRole("button", { name: "Release" }),
+  ).toBeVisible();
+  await expect(deleteButton(page)).toBeVisible();
+
+  await open(page, "?tab=shared");
+  for (const title of ["Pricing options", "Site visit"]) {
+    await noteLinks(page).filter({ hasText: title }).click();
+    await expect(openTitle(page, title)).toBeVisible();
+    await expect(preview(page).getByRole("button")).toHaveCount(0);
+  }
+});
+
+test("Delete asks first; Keep puts everything back", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await deleteButton(page).click();
+  await expect(preview(page)).toContainText(DELETE_QUESTION);
+  await expect(deleteButton(page)).toHaveCount(1);
+  await expect(deleteButton(page)).toHaveText("Delete");
+  await expect(keepButton(page)).toHaveText("Keep");
+  // The safe answer holds the focus.
+  await expect(keepButton(page)).toBeFocused();
+
+  await keepButton(page).click();
+  await expect(preview(page)).not.toContainText(DELETE_QUESTION);
+  await expect(keepButton(page)).toHaveCount(0);
+  await expect(deleteButton(page)).toBeFocused();
+  await expect(page.getByRole("button", { name: /^Sharing: / })).toBeVisible();
+  await expect(noteLinks(page)).toHaveCount(DATA.notes.length);
+  expect(await calls(page)).toEqual([]);
+});
+
+for (const width of [390, 700, 1600]) {
+  test(`a double click on Delete deletes nothing at ${width} wide`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await open(page, `?note=${README}`);
+    const box = await deleteButton(page).boundingBox();
+    expect(box).not.toBeNull();
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(120);
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(300);
+    expect(await calls(page)).toEqual([]);
+    await expect(openTitle(page, "Readme")).toBeVisible();
+
+    // Straight after the question, on the confirming button itself: still too soon.
+    await page.goto(`/dev/vault?note=${README}`, { waitUntil: "networkidle" });
+    await deleteButton(page).click();
+    await expect(preview(page)).toContainText(DELETE_QUESTION);
+    await deleteButton(page).click();
+    await page.waitForTimeout(300);
+    await expect(preview(page)).toContainText(DELETE_QUESTION);
+    expect(await calls(page)).toEqual([]);
+    await expect(openTitle(page, "Readme")).toBeVisible();
+  });
+}
+
+test("a second, deliberate Delete removes the note", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await deleteButton(page).click();
+  await expect(preview(page)).toContainText(DELETE_QUESTION);
+  // Past the double-click guard.
+  await page.waitForTimeout(600);
+  // Two activations in one go: the second finds the delete already running.
+  await deleteButton(page).evaluate((el: HTMLElement) => {
+    el.click();
+    el.click();
+  });
+  await expect(status(page)).toHaveText(DELETED);
+  expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
+  // The note is closed and out of the list.
+  await expect(page).not.toHaveURL(/note=/);
+  await expect(preview(page)).toContainText("Choose a note to read it.");
+  await expect(noteLinks(page)).toHaveCount(DATA.notes.length - 1);
+  await expect(noteLinks(page).filter({ hasText: "Readme" })).toHaveCount(0);
+  const inList = () =>
+    page.evaluate(
+      () =>
+        document.activeElement?.tagName === "A" &&
+        !!document.activeElement.closest('nav[aria-label="Notes"]'),
+    );
+  expect(await inList()).toBe(true);
+  // It stays so once the page has re-read itself.
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(300);
+  await expect(page).not.toHaveURL(/note=/);
+  await expect(noteLinks(page)).toHaveCount(DATA.notes.length - 1);
+  expect(await inList()).toBe(true);
+  await expect(status(page)).toHaveText(DELETED);
+  expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
+});
+
+test("a refused delete says so, keeps the note and closes the question", async ({
+  page,
+}) => {
+  await open(page, `?fail=1&note=${README}`);
+  await deleteButton(page).click();
+  await page.waitForTimeout(600);
+  await deleteButton(page).click();
+  await expect(status(page)).toHaveText(DELETE_FAILED);
+  await expect(preview(page)).toContainText(DELETE_FAILED);
+  await expect(preview(page)).not.toContainText(DELETE_QUESTION);
+  await expect(keepButton(page)).toHaveCount(0);
+  await expect(deleteButton(page)).toBeFocused();
+  await expect(openTitle(page, "Readme")).toBeVisible();
+  await expect(page).toHaveURL(/note=/);
+  await expect(noteLinks(page)).toHaveCount(DATA.notes.length);
+  expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
+});
+
+test("by keyboard: Delete follows the sharing control; Escape answers Keep", async ({
+  page,
+}) => {
+  await open(page, `?note=${README}`);
+  await page.getByRole("button", { name: /^Sharing: / }).focus();
+  await page.keyboard.press("Tab");
+  await expect(deleteButton(page)).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(preview(page)).toContainText(DELETE_QUESTION);
+  await expect(keepButton(page)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(preview(page)).not.toContainText(DELETE_QUESTION);
+  await expect(deleteButton(page)).toBeFocused();
+
+  // Delete comes before Keep; Enter on it after the guard deletes.
+  await page.keyboard.press("Enter");
+  await expect(keepButton(page)).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(deleteButton(page)).toBeFocused();
+  await page.waitForTimeout(600);
+  await page.keyboard.press("Enter");
+  await expect(status(page)).toHaveText(DELETED);
+  expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
+});
+
+test("opening another note closes a pending question", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await deleteButton(page).click();
+  await expect(preview(page)).toContainText(DELETE_QUESTION);
+  await noteLinks(page).filter({ hasText: "Client list" }).click();
+  await expect(openTitle(page, "Client list")).toBeVisible();
+  await expect(preview(page)).not.toContainText(DELETE_QUESTION);
+  await expect(deleteButton(page)).toBeVisible();
+  // And it is not waiting when the first note is opened again.
+  await noteLinks(page).filter({ hasText: "Readme" }).click();
+  await expect(openTitle(page, "Readme")).toBeVisible();
+  await expect(preview(page)).not.toContainText(DELETE_QUESTION);
+  expect(await calls(page)).toEqual([]);
+});
+
+for (const look of LOOKS)
+  for (const size of [
+    { width: 1100, height: 560 },
+    { width: 390, height: 800 },
+  ])
+    test(`at ${size.width} x ${size.height} the delete question keeps both answers reachable${named(look)}`, async ({
+      page,
+      context,
+    }) => {
+      if (look) await setLook(context, look);
+      await page.setViewportSize(size);
+      // A held note: the tallest header, with the release box under the question.
+      await open(page, `?note=${HELD}`);
+      await deleteButton(page).click();
+      await expect(preview(page)).toContainText(DELETE_QUESTION);
+      const inView = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        const x = r.left + r.width / 2;
+        const y = r.top + r.height / 2;
+        if (r.height === 0 || y < 0 || y > window.innerHeight) return false;
+        if (r.left < 0 || r.right > window.innerWidth) return false;
+        const hit = document.elementFromPoint(x, y);
+        return !!hit && (hit === el || el.contains(hit));
+      };
+      for (const button of [deleteButton(page), keepButton(page)]) {
+        await button.scrollIntoViewIfNeeded();
+        expect(await button.evaluate(inView)).toBe(true);
+      }
+      const scrolls = await page.evaluate(() => ({
+        down: document.documentElement.scrollHeight > window.innerHeight,
+        across: document.documentElement.scrollWidth > window.innerWidth,
+      }));
+      expect(scrolls.across).toBe(false);
+      // Side by side the page is one window tall; stacked, it scrolls down only.
+      if (size.width >= 1100) expect(scrolls.down).toBe(false);
+    });

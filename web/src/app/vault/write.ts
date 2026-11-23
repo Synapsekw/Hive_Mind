@@ -134,6 +134,32 @@ export async function releaseIn(db: Db, noteId: unknown): Promise<Result> {
   return changed(res) ? YES : NO;
 }
 
+/** True when the answer is the one row asked for and nothing else. */
+function onlyRow(res: Res, id: string): boolean {
+  if (res.error || !Array.isArray(res.data) || res.data.length !== 1)
+    return false;
+  const row: unknown = res.data[0];
+  return (
+    typeof row === "object" &&
+    row !== null &&
+    (row as { id?: unknown }).id === id
+  );
+}
+
+// Row-level security lets only the note's owner, signed in as a person, delete it; for anyone
+// else the delete matches no row. Nothing here says who may.
+export async function deleteNoteIn(db: Db, noteId: unknown): Promise<Result> {
+  if (!isUuid(noteId)) return NO;
+  if (!(await userId(db))) return NO;
+  const res = (await db
+    .from("notes")
+    .delete()
+    .eq("id", noteId)
+    .select("id")) as Res;
+  if (failed("deleteNote", res)) return NO;
+  return onlyRow(res, noteId) ? YES : NO;
+}
+
 export async function previewIn(
   db: Db,
   workspaceId: unknown,
