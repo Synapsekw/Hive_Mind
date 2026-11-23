@@ -297,6 +297,9 @@ it in a Hive Mind window. Setup is in
   that exist are the ones the owner registers by hand (Claude and ChatGPT), so only those two
   vendors can hold such a token. That is an accepted risk, decided by Danijel on 2026-11-23, not
   a closed one (gotcha 07 in `vault/decisions/`).
+- An app receives an ID token only when it asks for the `openid` scope. ChatGPT lets the person
+  choose its scopes, and the runbook has it ask for `email` and `offline_access` only, so no ID
+  token is issued to it. Claude asks for every scope and cannot be told otherwise.
 - A pass exists only after a signed-in member approves the app in the window, and the pass then
   reaches only what that member approved: one agent in one of their own workspaces.
 - Approval is `connect_app`, for a person only. It is refused for an agent identity and for an

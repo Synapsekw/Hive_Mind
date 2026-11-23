@@ -298,13 +298,18 @@ Apps do not register themselves (see the switches above), so the owner registers
 app once under **Authentication → OAuth Apps** and hands its **client ID** to colleagues with the
 address. A client ID is not a secret.
 
-| App    | Client type | Redirect URI                              | Client ID on the dev project           |
-| ------ | ----------- | ----------------------------------------- | -------------------------------------- |
-| Claude | Public      | `https://claude.ai/api/mcp/auth_callback` | `c5b56322-1148-4076-bee7-5f918cd44656` |
+| App     | Client type | Redirect URI                                          | Client ID on the dev project           |
+| ------- | ----------- | ----------------------------------------------------- | -------------------------------------- |
+| Claude  | Public      | `https://claude.ai/api/mcp/auth_callback`             | `c5b56322-1148-4076-bee7-5f918cd44656` |
+| ChatGPT | Public      | the **Callback URL** ChatGPT's form shows (see below) | `6cfa3723-978c-4a2c-8398-8a91dc610584` |
 
-Proven by hand on 2026-11-23 with Claude: a public client, no secret, is rated `vendor`. ChatGPT
-is not registered or tried yet: it needs its own entry with ChatGPT's redirect address, and it
-works only if ChatGPT lets a client ID be typed in.
+Both proven by hand on 2026-11-23: public clients, no secret, rated `vendor`.
+
+ChatGPT's callback address is not the same for everyone. Supabase Auth does not offer issuer
+identification, so ChatGPT uses an address of the form `https://chatgpt.com/connector/oauth/<id>`
+that belongs to one ChatGPT account. The owner adds each colleague's address to the ChatGPT
+entry's redirect URIs. The one registered so far is the owner's own. An address that is not
+registered is refused with `invalid redirect_uri`.
 
 **Claude (web or desktop)**
 
@@ -322,11 +327,18 @@ works only if ChatGPT lets a client ID be typed in.
 
 **ChatGPT**
 
-1. Open **Settings** and switch on **developer mode** (under the connectors settings; it needs a
-   plan that allows custom connectors).
-2. Add a connector and paste the same address, `https://<site>/mcp`, with the client ID of the
-   ChatGPT entry (not tried yet, see above).
-3. The same Hive Mind window opens: sign in, pick a workspace, **Approve**.
+1. Open **Plugins**, then **Add → Add custom MCP server** (it needs developer mode and a plan
+   that allows custom servers).
+2. Name `Hive Mind`, server URL `https://<site>/mcp`, authentication **OAuth**.
+3. Open **Advanced OAuth settings**. Registration method **User-Defined OAuth Client**. Send the
+   owner the **Callback URL** shown there, and wait until it is registered.
+4. Paste the ChatGPT client ID into **OAuth client ID**. Type it after the form has finished
+   "Discovering OAuth settings", or the form clears it. Leave the secret empty; token endpoint
+   auth method `none`.
+5. Under **Default scopes** leave only `email` and `offline_access` ticked, and switch **OIDC
+   enabled** off. ChatGPT then asks for no ID token, the token gotcha 07 is about.
+6. Tick the notice, **Create as a plugin**, then **Continue to Hive Mind**: sign in, pick a
+   workspace, **Approve**.
 
 The names of these menus change between versions of the two apps. What stays the same is the
 address and the three things you do in the window.
