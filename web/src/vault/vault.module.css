@@ -1141,6 +1141,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .primary:hover:not(:disabled) {
+    transform: none;
+  }
+
   .caret,
   .tab,
   .search,

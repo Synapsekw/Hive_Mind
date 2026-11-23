@@ -64,6 +64,15 @@ export function Inbox({
   const [said, setSaid] = useState("");
   // The same as `busy`, readable at once by a second press that arrives before the render.
   const running = useRef(new Set<string>());
+  // The collapse timers, cleared on unmount so nothing refreshes after the page is left.
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const all = timers.current;
+    return () => {
+      for (const t of all) clearTimeout(t);
+      all.clear();
+    };
+  }, []);
   const heading = useRef<HTMLHeadingElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const target = useRef<Target | null>(null);
@@ -116,10 +125,10 @@ export function Inbox({
     } catch {
       ok = false;
     }
-    running.current.delete(id);
-    setBusy((set) => without(set, id));
     setAsking((open) => (open === id ? null : open));
     if (!ok) {
+      running.current.delete(id);
+      setBusy((set) => without(set, id));
       if (holdsFocus(id)) target.current = { row: id };
       setFailed((set) => withId(set, id));
       setSaid(FAILED);
@@ -142,14 +151,22 @@ export function Inbox({
     }
     setSaid(done);
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // An answered row stays `running` and `busy` until it is gone, so a second press cannot
+    // answer it again while it collapses.
     const leave = () => {
+      running.current.delete(id);
+      setBusy((set) => without(set, id));
       setGone((set) => withId(set, id));
       setLeaving((set) => without(set, id));
       router.refresh();
     };
     if (still) return leave();
     setLeaving((set) => withId(set, id));
-    setTimeout(leave, LEAVE_MS);
+    const timer = setTimeout(() => {
+      timers.current.delete(timer);
+      leave();
+    }, LEAVE_MS);
+    timers.current.add(timer);
   }
 
   function ask(id: string) {
@@ -334,6 +351,7 @@ function LinkRow({
     <li
       data-row={item.id}
       data-leaving={leaving || undefined}
+      inert={leaving || undefined}
       className={s.cell}
       aria-busy={off}
       onKeyDown={(e) => {
@@ -440,6 +458,7 @@ function HeldRow({
     <li
       data-row={item.id}
       data-leaving={leaving || undefined}
+      inert={leaving || undefined}
       className={s.cell}
       aria-busy={busy || undefined}
     >

@@ -163,12 +163,16 @@
 .cell[data-leaving] {
   grid-template-rows: 0fr;
   opacity: 0;
-  overflow: hidden;
   pointer-events: none;
 }
 
 .cell > .item {
   min-height: 0;
+}
+
+/* Clip only while collapsing, so the at-rest hover fill is never cut off. */
+.cell[data-leaving] > .item {
+  overflow: hidden;
 }
 
 /* A row: the words on the left, the decision on the right, a hairline above. It lifts on hover
