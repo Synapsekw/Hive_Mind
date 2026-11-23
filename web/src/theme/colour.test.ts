@@ -55,8 +55,8 @@ describe("contrast", () => {
 describe("oklch", () => {
   const brands = data.themes.flatMap((t) => [t.dark.brand, t.light.brand]);
 
-  it("round-trips the 34 brand seeds within 1/255", () => {
-    expect(brands).toHaveLength(34);
+  it("round-trips the 36 brand seeds within 1/255", () => {
+    expect(brands).toHaveLength(36);
     for (const hex of brands) {
       const c = fromHex(hex);
       const o = toOklch(c);

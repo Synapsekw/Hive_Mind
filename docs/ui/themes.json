@@ -1,7 +1,40 @@
 {
-  "default": "keystone",
+  "default": "hive",
   "note": "Seed values per theme and mode. brandMid null means the midpoint of brand and brand2. wash is the three stops of the 168deg background gradient. Everything else is derived; see docs/ui-concept.md section 2.",
   "themes": [
+    {
+      "id": "hive",
+      "label": "Hive",
+      "mark": "brand",
+      "dark": {
+        "brand": "#f5b544",
+        "brand2": "#ef8a3c",
+        "brandMid": null,
+        "content": "#1a1208",
+        "text": "#fbf3e4",
+        "textMuted": "#cfbb9c",
+        "surface": "#1d160c",
+        "wash": [
+          "#3b2811",
+          "#1d140a",
+          "#090604"
+        ]
+      },
+      "light": {
+        "brand": "#a05a0c",
+        "brand2": "#ab4a12",
+        "brandMid": null,
+        "content": "#ffffff",
+        "text": "#24190c",
+        "textMuted": "#5e4a30",
+        "surface": "#fffaf0",
+        "wash": [
+          "#844a0b",
+          "#733e0d",
+          "#52260a"
+        ]
+      }
+    },
     {
       "id": "keystone",
       "label": "Keystone",

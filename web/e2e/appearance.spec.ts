@@ -38,7 +38,7 @@ function watch(page: Page) {
 test("with no cookie the page has the default look", async ({ page }) => {
   await open(page);
   expect(await attrs(page)).toMatchObject({
-    theme: "keystone",
+    theme: "hive",
     mode: "dark",
     reach: "tinted",
     dots: "theme",
@@ -73,7 +73,7 @@ test("a tampered cookie gives the default look and is not echoed", async ({
   expect(html).not.toContain("alert(1)");
   expect(html).not.toContain("<script>alert");
   expect(await attrs(page)).toMatchObject({
-    theme: "keystone",
+    theme: "hive",
     mode: "dark",
     reach: "tinted",
     dots: "theme",
@@ -136,17 +136,17 @@ test("arrow keys move within a group and Escape returns to the button", async ({
   await open(page);
   await button(page).click();
   const themes = group(page, "Theme");
-  const keystone = themes.getByRole("radio", { name: "Keystone" });
-  await expect(keystone).toHaveAttribute("aria-checked", "true");
-  await expect(keystone).toHaveAttribute("tabindex", "0");
-  await keystone.focus();
+  const hive = themes.getByRole("radio", { name: "Hive" });
+  await expect(hive).toHaveAttribute("aria-checked", "true");
+  await expect(hive).toHaveAttribute("tabindex", "0");
+  await hive.focus();
   await page.keyboard.press("ArrowRight");
-  const graphite = themes.getByRole("radio", { name: "Graphite" });
-  await expect(graphite).toBeFocused();
-  await expect(graphite).toHaveAttribute("aria-checked", "true");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "graphite");
-  await page.keyboard.press("ArrowLeft");
+  const keystone = themes.getByRole("radio", { name: "Keystone" });
   await expect(keystone).toBeFocused();
+  await expect(keystone).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "keystone");
+  await page.keyboard.press("ArrowLeft");
+  await expect(hive).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(panel(page)).toHaveCount(0);
@@ -223,7 +223,7 @@ test("a tab that changed its own look still follows another tab's later change",
   // The other tab, still holding the default theme, changes the mode and rewrites the cookie.
   await button(other).click();
   await group(other, "Mode").getByRole("radio", { name: "Light" }).click();
-  expect(await lookCookie(other)).toBe("keystone.light.tinted.theme");
+  expect(await lookCookie(other)).toBe("hive.light.tinted.theme");
   await other.close();
 
   await page.evaluate(() =>
@@ -233,9 +233,9 @@ test("a tab that changed its own look still follows another tab's later change",
   );
   // The page, the panel and the cookie agree again: every attribute follows the cookie.
   await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "keystone");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "hive");
   await expect(
-    group(page, "Theme").getByRole("radio", { name: "Keystone" }),
+    group(page, "Theme").getByRole("radio", { name: "Hive" }),
   ).toHaveAttribute("aria-checked", "true");
 });
 
@@ -300,7 +300,7 @@ test("in forced colours the swatches stay visible and the choice is outlined", a
           image: cs.backgroundImage,
         };
       });
-  const chosen = await style("Keystone");
+  const chosen = await style("Hive");
   expect(chosen.outline).not.toBe("none");
   expect(chosen.width).toBeGreaterThan(0);
   expect(chosen.image).toContain("gradient");
