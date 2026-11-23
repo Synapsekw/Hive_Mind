@@ -8,18 +8,28 @@ const HIVE = "00000000-0000-4000-8000-000000000a01";
 type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
 
+const LINK_USER = "00000000-0000-4000-8000-0000000000b2";
+
+/** A browser with no session; a link that is not refused signs LINK_USER in. */
 function stub(opts: { verify?: Res | (() => never); rpc?: Res } = {}) {
-  const verifyOtp = vi.fn(async (_args: unknown) =>
-    typeof opts.verify === "function"
-      ? opts.verify()
-      : (opts.verify ?? { data: {}, error: null }),
-  );
+  let now: string | null = null;
+  const verifyOtp = vi.fn(async (_args: unknown) => {
+    if (typeof opts.verify === "function") return opts.verify();
+    if (opts.verify) return opts.verify;
+    now = LINK_USER;
+    return { data: { user: { id: LINK_USER } }, error: null };
+  });
+  const getUser = vi.fn(async () => ({
+    data: { user: now ? { id: now } : null },
+    error: null,
+  }));
+  const signOut = vi.fn(async (_o?: unknown) => ({ error: null }));
   const rpc = vi.fn(
     async (_name: string, _args?: unknown) =>
       opts.rpc ?? { data: [], error: null },
   );
-  const db = { auth: { verifyOtp }, rpc } as never;
-  return { db, verifyOtp, rpc };
+  const db = { auth: { verifyOtp, getUser, signOut }, rpc } as never;
+  return { db, verifyOtp, getUser, signOut, rpc };
 }
 
 const row = (over: Record<string, unknown> = {}) => ({
@@ -375,12 +385,17 @@ describe("continueIn: a link opened by someone who is already signed in", () => 
   const A = "00000000-0000-4000-8000-0000000000a1";
   const B = "00000000-0000-4000-8000-0000000000b2";
 
-  /** `before` is who the browser holds; `after` is who the link signs in. */
+  /**
+   * `before` is who the browser holds and `link` is who the link belongs to. `lands` is who the
+   * auth server says is signed in after the link was spent: the link's person, unless the new
+   * session did not take the old one's place.
+   */
   function two(opts: {
     before: string | null;
-    after: string | null;
-    verifyNames?: boolean;
+    link: string | null;
+    lands?: string | null;
     refuse?: boolean;
+    signOutThrows?: boolean;
   }) {
     const steps: string[] = [];
     let now = opts.before;
@@ -392,57 +407,109 @@ describe("continueIn: a link opened by someone who is already signed in", () => 
       steps.push("verify");
       if (opts.refuse)
         return { data: { user: null }, error: { message: "expired" } };
-      now = opts.after;
+      now = opts.lands === undefined ? opts.link : opts.lands;
       return {
-        data: { user: opts.verifyNames === false ? null : { id: opts.after } },
+        data: { user: opts.link ? { id: opts.link } : null },
         error: null,
       };
     });
-    return { db: { auth: { getUser, verifyOtp } } as never, steps, getUser };
+    const signOut = vi.fn(async (_o?: unknown) => {
+      steps.push("out");
+      if (opts.signOutThrows) throw new Error("network");
+      now = null;
+      return { error: null };
+    });
+    const db = { auth: { getUser, verifyOtp, signOut } } as never;
+    return { db, steps, getUser, verifyOtp, signOut };
   }
 
   it("says switched when the link signs in a different person", async () => {
-    const t = two({ before: A, after: B });
+    const t = two({ before: A, link: B });
     expect(await continueIn(t.db, TOKEN, "invite")).toBe("switched");
-    // Who is signed in is read before the link is spent.
-    expect(t.steps.slice(0, 2)).toEqual(["who", "verify"]);
+    // Who is signed in is read, this browser is signed out, the link is spent over clean
+    // cookies, and who is signed in is read again.
+    expect(t.steps).toEqual(["who", "out", "verify", "who"]);
+    // This browser only; the person's other devices stay signed in.
+    expect(t.signOut).toHaveBeenCalledTimes(1);
+    expect(t.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
 
-  it("asks who is signed in afterwards when the answer to the link does not say", async () => {
-    const t = two({ before: A, after: B, verifyNames: false });
-    expect(await continueIn(t.db, TOKEN, "magiclink")).toBe("switched");
-    expect(t.steps).toEqual(["who", "verify", "who"]);
+  it("is plain ok for the same person: nothing switched", async () => {
+    const t = two({ before: A, link: A });
+    expect(await continueIn(t.db, TOKEN, "magiclink")).toBe("ok");
+    expect(t.steps).toEqual(["who", "out", "verify", "who"]);
   });
 
-  it("is plain ok for the same person, and for a browser that held no session", async () => {
-    expect(
-      await continueIn(two({ before: A, after: A }).db, TOKEN, "invite"),
-    ).toBe("ok");
-    expect(
-      await continueIn(two({ before: null, after: B }).db, TOKEN, "invite"),
-    ).toBe("ok");
-  });
-
-  it("is plain ok when nobody can be named afterwards", async () => {
-    const t = two({ before: A, after: null, verifyNames: false });
+  it("is plain ok for a browser that held no session, over cookies cleared the same way", async () => {
+    const t = two({ before: null, link: B });
     expect(await continueIn(t.db, TOKEN, "invite")).toBe("ok");
+    expect(t.steps).toEqual(["who", "out", "verify", "who"]);
   });
 
-  it("is expired, not switched, when the link is refused", async () => {
+  it("leaves nobody signed in when the link is refused: the button said sign out", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const t = two({ before: A, after: B, refuse: true });
+    const t = two({ before: A, link: B, refuse: true });
+    expect(await continueIn(t.db, TOKEN, "invite")).toBe("expired");
+    expect(t.steps).toEqual(["who", "out", "verify"]);
+    expect((await t.getUser()).data.user).toBeNull();
+  });
+
+  it("is expired when the client throws while verifying", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = two({ before: A, link: B });
+    t.verifyOtp.mockRejectedValue(new TypeError("fetch failed"));
+    expect(await continueIn(t.db, TOKEN, "invite")).toBe("expired");
+  });
+
+  it("still spends the link when the sign-out beforehand fails", async () => {
+    const t = two({ before: A, link: B, signOutThrows: true });
+    expect(await continueIn(t.db, TOKEN, "invite")).toBe("switched");
+  });
+
+  it.each([
+    ["the old person is the one signed in", { lands: A }],
+    [
+      "some third person is signed in",
+      { lands: "00000000-0000-4000-8000-0000000000c3" },
+    ],
+    ["nobody is signed in afterwards", { lands: null }],
+  ])(
+    "fails and signs this browser out again when, after the link, %s",
+    async (_n, more) => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const t = two({ before: A, link: B, ...more });
+      expect(await continueIn(t.db, TOKEN, "invite")).toBe("expired");
+      expect(t.steps).toEqual(["who", "out", "verify", "who", "out"]);
+      expect(t.signOut).toHaveBeenLastCalledWith({ scope: "local" });
+      expect(log).toHaveBeenCalledWith(
+        "invitation link did not sign its own person in",
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
+    },
+  );
+
+  it("fails and signs out when the answer to the link names nobody", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = two({ before: A, link: null, lands: B });
+    expect(await continueIn(t.db, TOKEN, "invite")).toBe("expired");
+    expect(t.signOut).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks the same for a browser that held no session", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = two({ before: null, link: B, lands: null });
     expect(await continueIn(t.db, TOKEN, "invite")).toBe("expired");
   });
 
   it("does not ask who is signed in for a link it will not spend", async () => {
-    const t = two({ before: A, after: B });
+    const t = two({ before: A, link: B });
     expect(await continueIn(t.db, "x", "invite")).toBe("expired");
     expect(await continueIn(t.db, TOKEN, "recovery")).toBe("expired");
     expect(t.steps).toEqual([]);
   });
 
   it("still spends the link when the session cannot be read first", async () => {
-    const t = two({ before: A, after: B });
+    const t = two({ before: A, link: B });
     t.getUser.mockRejectedValueOnce(new Error("network"));
     expect(await continueIn(t.db, TOKEN, "invite")).toBe("ok");
   });

@@ -133,14 +133,49 @@ agent acting under a revocable identity, and humans owning every sharing decisio
     someone else registered for the invited address beforehand stops working at that moment.
     The password of a person whose account is confirmed is never touched.
   - Opening the link shows a **Continue** button and spends nothing, so a mail scanner that
-    opens links ahead of the person cannot use the link up. Continue signs the person in. If someone is already signed in on
-    that browser, the Continue screen warns that the link will sign them in as someone else,
-    and the list that follows says that the account changed. The
-    page then lists the invitations waiting for their address (`my_invitations`: hive name, who
+    opens links ahead of the person cannot use the link up. Continue signs the person in.
+  - If someone is already signed in on that browser, the Continue screen says so before
+    anything happens: who is signed in, that continuing signs this browser out of that account,
+    and that the invited address is signed in instead. The button then reads "Sign out and
+    continue", and a link "Stay signed in as &lt;email&gt;" leaves the invitation link unused.
+    Pressing it reads who is signed in, signs this browser out (this browser only: the
+    person's other devices stay signed in, and that one session is ended at the auth server),
+    and only then verifies the link, over cookies that hold nothing of the old session. A link
+    that turns out to have expired therefore leaves nobody signed in, as the button's label
+    says. The server then asks the auth server who is signed in and requires it to be the
+    person the link belongs to; if it is anyone else, the browser is signed out again and the
+    page says the link has expired. When the account did change, the list that follows says
+    so; when the link was for the account already signed in, it says nothing.
+  - The proxy does not read or refresh the session on requests that change it themselves:
+    Continue's request, `/auth/confirm` and `/auth/signout`. Otherwise two parts of the app
+    write the session cookies on one response, and on the host the proxy's cookies come last:
+    a person signed in as A who pressed Continue on B's link stayed signed in as A (found by
+    hand on the test site, fixed, and pinned by tests).
+  - The page then lists the invitations waiting for their address (`my_invitations`: hive name, who
     invited them) with **Join** beside each, and shows "Signed in as &lt;email&gt;" with a
     sign-out link, so a person on a shared computer or with two addresses can see which account
     is about to join. Join is `accept_invitation`: it creates the member
     and its `Main` workspace and marks the invitation accepted.
+  - **Optional password, for a new person only.** A person who came in through a first
+    invitation link (`invite`, the kind mailed to an address with no confirmed account) is
+    offered one more page after Join, `/join/password`: "Choose a password", with **Save
+    password** and **Skip for now**. Without it they could only ever sign in by emailed link.
+    - It is offered only right after such a link. Continue leaves a cookie (`hm_new`: one
+      hour, `HttpOnly`, `SameSite=Lax`, `Secure` in production, sent to `/join` paths only),
+      and the page and its action do nothing without it. A sign-in link for an existing
+      account removes it. Saving or skipping removes it. The cookie carries no secret and
+      grants nothing: a signed-in person can change their own password through the auth
+      server in any case.
+    - The page is closed to a visitor with no session, is never cached, and sends no referrer.
+    - Rules, checked in the browser and again on the server: at least 10 characters, at most
+      72 bytes (what the auth server's hash reads), both fields the same. The auth server may
+      still refuse a password (too weak or known from a leak, as the project is configured);
+      the page then says "That password was not accepted. Try a different one." and never
+      shows the auth server's own words.
+    - The password is sent once, to the auth server, with the person's own session (never a
+      secret key). The app never stores it and never logs it, the form or the auth server's
+      answer; a refusal is logged as one fixed phrase with the error's code and status. It is
+      never sent back to the page, and the fields are emptied after a refusal.
   - The link lasts as long as the project's email link lifetime, set to 24 hours, and works
     once. After that the page says the link has expired; the person signs in with "Email me a
     link" using the invited address and is led back to `/join`, or the owner uses Send again.

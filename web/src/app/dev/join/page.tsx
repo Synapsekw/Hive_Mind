@@ -6,6 +6,7 @@ import {
 } from "../../../join/fixture";
 import type { JoinView } from "../../../join/types";
 import { DevJoin } from "./DevJoin";
+import { DevPassword } from "./DevPassword";
 
 // A development page: the Join page over fixtures, with no database and no auth server. Never
 // served in production.
@@ -15,12 +16,20 @@ import { DevJoin } from "./DevJoin";
 //   ?state=continue  an emailed link was opened: the Continue button
 //   ?state=failed    the invitations could not be read
 //   ?state=joined    where the fixture goes after Join
+//   ?state=password  the optional password step after a new person joins
+//     &reason=…      Save is answered with that reason (refused, failed, short, long, different)
+//   ?new=1           Join leads on to ?state=password, as for a first invitation link
 //   ?fail=1          Join is refused; Continue ends on the expired line
 //   ?hive=…&by=…     another hive name and inviter on the first invitation (both are only shown)
 //   ?email=…         another signed-in address (only shown); empty for none. On
 //                    ?state=continue nobody is signed in unless this is given
 //   ?switched=1      the list after Continue replaced another person's session
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+
+const REASONS = ["short", "long", "different", "refused", "failed"] as const;
+type Reason = (typeof REASONS)[number];
+const reasonOf = (v: string | undefined): Reason | null =>
+  REASONS.find((r) => r === v) ?? null;
 
 export default async function DevJoinPage({
   searchParams,
@@ -34,6 +43,9 @@ export default async function DevJoinPage({
   const email = one(q.email) ?? FIXTURE_EMAIL;
 
   const switched = one(q.switched) === "1";
+
+  if (state === "password")
+    return <DevPassword email={email} reason={reasonOf(one(q.reason))} />;
 
   let view: JoinView;
   if (state === "expired") view = { kind: "expired" };
@@ -63,5 +75,11 @@ export default async function DevJoinPage({
       ],
     };
   }
-  return <DevJoin view={view} fail={one(q.fail) === "1"} />;
+  return (
+    <DevJoin
+      view={view}
+      fail={one(q.fail) === "1"}
+      isNew={one(q.new) === "1"}
+    />
+  );
 }

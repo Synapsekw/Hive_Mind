@@ -25,12 +25,18 @@ export const EXPIRED_NEXT =
 export const TO_SIGN_IN = "Sign in";
 
 /**
- * Above Continue when somebody is already signed in: their address goes between the two, then
- * a full stop. The link signs in whoever it was sent to, in place of them.
+ * Above the button when somebody is already signed in. Three facts, in this order: who is
+ * signed in (their address goes between the first two), that this browser will be signed out
+ * of that account, and that the invited address is signed in instead.
  */
 export const SIGNED_IN_NOW = "You are signed in as";
+export const IN_THIS_BROWSER = "in this browser.";
 export const SWITCH_WARNING =
-  "This link signs you in as the person it was sent to. If you did not expect an invitation, do not continue.";
+  "Continuing signs this browser out of that account and signs in the address this invitation was sent to. If you did not expect an invitation, do not continue.";
+/** The button's label in that case, in place of Continue: it says what pressing it does. */
+export const SIGN_OUT_AND_CONTINUE = "Sign out and continue";
+/** The way to leave the link unused; the signed-in address follows. */
+export const STAY_AS = "Stay signed in as";
 /** On the list, after Continue replaced another person's session. */
 export const SWITCHED = "You are now signed in with a different account.";
 
@@ -59,4 +65,37 @@ const DAY = new Intl.DateTimeFormat("en-GB", {
 export function openUntil(expiresAt: string): string {
   const at = Date.parse(expiresAt);
   return Number.isNaN(at) ? "" : `Open until ${DAY.format(at)}`;
+}
+
+// The optional step after a new person joins: choosing a password.
+
+/** The page's name for assistive technology, and its heading. */
+export const PASSWORD_TITLE = "Choose a password";
+export const PASSWORD_OPTIONAL =
+  "Optional. You can always sign in with a link sent to your email instead.";
+export const PASSWORD = "Password";
+export const REPEAT_PASSWORD = "Repeat password";
+export const SAVE_PASSWORD = "Save password";
+export const SKIP = "Skip for now";
+
+export const PASSWORD_SHORT = "Use at least 10 characters.";
+export const PASSWORD_LONG = "That password is too long.";
+export const PASSWORD_DIFFERENT = "The two passwords are not the same.";
+/** The auth server said no (too weak, or known from a leak). Its own words are never shown. */
+export const PASSWORD_REFUSED =
+  "That password was not accepted. Try a different one.";
+export const PASSWORD_FAILED =
+  "Couldn't save the password. Try again, or skip for now.";
+
+/** The sentence for each reason a password was not saved. */
+export function passwordMessage(
+  reason: "short" | "long" | "different" | "refused" | "failed",
+): string {
+  return {
+    short: PASSWORD_SHORT,
+    long: PASSWORD_LONG,
+    different: PASSWORD_DIFFERENT,
+    refused: PASSWORD_REFUSED,
+    failed: PASSWORD_FAILED,
+  }[reason];
 }

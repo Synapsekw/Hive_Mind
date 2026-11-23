@@ -13,7 +13,16 @@ declare global {
 
 const WAIT = 150;
 
-export function DevJoin({ view, fail }: { view: JoinView; fail: boolean }) {
+export function DevJoin({
+  view,
+  fail,
+  isNew,
+}: {
+  view: JoinView;
+  fail: boolean;
+  /** As if the browser carried the new-person cookie: Join leads on to the password page. */
+  isNew: boolean;
+}) {
   async function continueWithLink(formData: FormData) {
     (window.__joinCalls ??= []).push({
       what: "continue",
@@ -26,7 +35,8 @@ export function DevJoin({ view, fail }: { view: JoinView; fail: boolean }) {
   async function join(id: string): Promise<Joined> {
     (window.__joinCalls ??= []).push({ what: "join", args: [id] });
     await new Promise<void>((resolve) => setTimeout(resolve, WAIT));
-    return { ok: !fail };
+    if (fail) return { ok: false };
+    return { ok: true, next: isNew ? "/join/password" : "/" };
   }
 
   return (
@@ -35,6 +45,7 @@ export function DevJoin({ view, fail }: { view: JoinView; fail: boolean }) {
       continueWithLink={continueWithLink}
       join={join}
       after="/dev/join?state=joined"
+      afterNew="/dev/join?state=password"
     />
   );
 }
