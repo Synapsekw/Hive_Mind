@@ -33,8 +33,8 @@ function stub(
   opts: {
     file?: Res;
     gone?: Res;
-    hives?: Res;
-    members?: Res;
+    /** The read of the person's own oldest membership. */
+    own?: Res;
     sign?: unknown;
     remove?: unknown;
     user?: { id: string } | null;
@@ -44,14 +44,9 @@ function stub(
   const log: string[] = [];
   const isDelete = (c: Call) => c.ops.some(([m]) => m === "delete");
   const answer = (c: Call): Res => {
-    if (c.table === "hives") return opts.hives ?? ok([{ id: HIVE }]);
     if (c.table === "members")
       return (
-        opts.members ??
-        ok([
-          { id: ME, user_id: "u-me" },
-          { id: AHMED, user_id: "u-ahmed" },
-        ])
+        opts.own ?? ok([{ id: ME, hive_id: HIVE, hive: { name: "Synapse" } }])
       );
     if (isDelete(c)) return opts.gone ?? ok([{ id: FILE }]);
     return opts.file ?? ok([row()]);
@@ -95,6 +90,7 @@ function stub(
   return {
     db: { from, auth, storage } as never,
     calls,
+    getUser: auth.getUser,
     log,
     from,
     storage,
@@ -276,15 +272,9 @@ describe("deleteIn", () => {
     expect(t.log).not.toContain("delete files");
   });
 
-  it("refuses when the caller's members cannot be read", async () => {
+  it("refuses when the caller's membership cannot be read", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    for (const opts of [
-      { hives: boom },
-      { hives: ok([]) },
-      { members: boom },
-      { members: ok([]) },
-      { file: boom },
-    ]) {
+    for (const opts of [{ own: boom }, { own: ok([]) }, { file: boom }]) {
       const t = stub(opts);
       expect(await deleteIn(t.db, FILE)).toEqual({ ok: false });
       expect(t.remove).not.toHaveBeenCalled();
@@ -292,11 +282,29 @@ describe("deleteIn", () => {
     }
   });
 
-  it("reads the caller's members from their first hive", async () => {
+  it("reads the caller's member id from their own oldest membership, in one read", async () => {
     const t = stub();
     await deleteIn(t.db, FILE);
+    expect(table(t, "hives")).toHaveLength(0);
+    expect(table(t, "members")).toHaveLength(1);
     const [m] = table(t, "members");
-    expect(op(m!, "eq").map(([, a]) => a)).toEqual([["hive_id", HIVE]]);
+    expect(m!.ops).toEqual([
+      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", "u-me"]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [1]],
+    ]);
+    // The id is the one the auth server answered with, asked for once.
+    expect(t.getUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses the caller's own file from a hive that is not the one they use", async () => {
+    const elsewhere = "00000000-0000-4000-8000-0000000000e9";
+    const t = stub({ file: ok([row({ member_id: elsewhere })]) });
+    expect(await deleteIn(t.db, FILE)).toEqual({ ok: false });
+    expect(t.remove).not.toHaveBeenCalled();
+    expect(t.log).not.toContain("delete files");
   });
 
   it("removes the stored object first, then the row, by id only", async () => {

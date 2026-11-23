@@ -6,6 +6,8 @@ const W1 = "00000000-0000-4000-8000-000000000b01";
 const LINK = "00000000-0000-4000-8000-000000020001";
 const NOTE = "00000000-0000-4000-8000-000000010001";
 const HELD = "00000000-0000-4000-8000-000000010002";
+const MEMBER = "00000000-0000-4000-8000-000000000c01";
+const USER = "11111111-1111-4111-8111-111111111101";
 
 type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
@@ -57,11 +59,21 @@ function answer(over: Record<string, unknown> = {}) {
   };
 }
 
-/** A stand-in client: `from(table)` chains and `rpc` calls are recorded. */
+/** The session cookie's access token: its payload names the user. */
+const tokenOf = (sub: string) =>
+  `h.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.s`;
+
+const OWN = { id: MEMBER, hive_id: HIVE, hive: { name: "Synapse" } };
+
+/**
+ * A stand-in client: `from(table)` chains and `rpc` calls are recorded. `own` answers the read
+ * of the person's own oldest membership.
+ */
 function stub(
   opts: {
-    hives?: Res;
+    own?: Res;
     rpc?: Res | (() => never);
+    user?: { id: string } | null;
   } = {},
 ) {
   const calls: Call[] = [];
@@ -75,13 +87,21 @@ function stub(
         return chain;
       };
     chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) =>
-      Promise.resolve(opts.hives ?? ok([{ id: HIVE }])).then(res, rej);
+      Promise.resolve(opts.own ?? ok([OWN])).then(res, rej);
     return chain;
   });
   const rpc = vi.fn(async (_name: string, _args: unknown) =>
     typeof opts.rpc === "function" ? opts.rpc() : (opts.rpc ?? ok(answer())),
   );
-  return { db: { from, rpc } as never, calls, from, rpc };
+  const user = opts.user === undefined ? { id: USER } : opts.user;
+  const auth = {
+    getUser: vi.fn(),
+    getSession: vi.fn(async () => ({
+      data: { session: user ? { access_token: tokenOf(user.id) } : null },
+      error: null,
+    })),
+  };
+  return { db: { from, rpc, auth } as never, calls, from, rpc, auth };
 }
 
 const args = (c: Call, name: string) => c.ops.find(([m]) => m === name)?.[1];
@@ -247,17 +267,21 @@ describe("toData", () => {
 
 describe("loadInbox", () => {
   it("answers no-hive without asking for the inbox", async () => {
-    const t = stub({ hives: ok([]) });
+    const t = stub({ own: ok([]) });
     expect(await loadInbox(t.db)).toEqual({ state: "no-hive" });
     expect(t.rpc).not.toHaveBeenCalled();
   });
 
   it("answers error when the hive cannot be read, logging code and message only", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const t = stub({ hives: err("denied", "42501") });
+    const t = stub({ own: err("denied", "42501") });
     expect(await loadInbox(t.db)).toEqual({ state: "error" });
     expect(t.rpc).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith("hives query failed", "42501", "denied");
+    expect(log).toHaveBeenCalledWith(
+      "own hive query failed",
+      "42501",
+      "denied",
+    );
     expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
   });
 
@@ -286,22 +310,36 @@ describe("loadInbox", () => {
     });
   });
 
-  it("asks for the inbox of the first hive by creation", async () => {
+  it("asks for the inbox of the hive of the person's own oldest membership", async () => {
     const t = stub();
     await loadInbox(t.db);
     expect(t.calls).toHaveLength(1);
-    const [hives] = t.calls;
-    expect(hives!.table).toBe("hives");
-    expect(args(hives!, "select")).toEqual(["id"]);
-    expect(args(hives!, "order")).toEqual(["created_at", { ascending: true }]);
-    expect(args(hives!, "limit")).toEqual([1]);
+    const [own] = t.calls;
+    expect(own!.table).toBe("members");
+    expect(own!.ops).toEqual([
+      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", USER]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [1]],
+    ]);
     expect(t.rpc).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledWith("inbox", { p_hive: HIVE });
+    // The id comes from the session's token: no call to the auth server is added.
+    expect(t.auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it("answers error without a session, with no query at all", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({ user: null });
+    expect(await loadInbox(t.db)).toEqual({ state: "error" });
+    expect(t.from).not.toHaveBeenCalled();
+    expect(t.rpc).not.toHaveBeenCalled();
   });
 });
 
 describe("loadInboxCount", () => {
-  it("passes the number through, asked of the first hive", async () => {
+  it("passes the number through, asked of the person's own hive", async () => {
     const t = stub({ rpc: ok(7) });
     expect(await loadInboxCount(t.db)).toBe(7);
     expect(t.rpc).toHaveBeenCalledWith("inbox_count", { p_hive: HIVE });
@@ -333,15 +371,32 @@ describe("loadInboxCount", () => {
     expect(await loadInboxCount(stub({ rpc: ok(data) }).db)).toBe(0);
   });
 
+  it("counts in the hive of the person's own oldest membership", async () => {
+    const t = stub({ rpc: ok(7) });
+    expect(await loadInboxCount(t.db)).toBe(7);
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]!.table).toBe("members");
+    expect(args(t.calls[0]!, "eq")).toEqual(["user_id", USER]);
+    expect(t.rpc).toHaveBeenCalledWith("inbox_count", { p_hive: HIVE });
+    expect(t.auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it("is 0 without a session", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({ user: null });
+    expect(await loadInboxCount(t.db)).toBe(0);
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
   it("is 0 without a hive, with no call to the function", async () => {
-    const t = stub({ hives: ok([]) });
+    const t = stub({ own: ok([]) });
     expect(await loadInboxCount(t.db)).toBe(0);
     expect(t.rpc).not.toHaveBeenCalled();
   });
 
   it("is 0 when the hive cannot be read", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const t = stub({ hives: err("denied", "42501") });
+    const t = stub({ own: err("denied", "42501") });
     expect(await loadInboxCount(t.db)).toBe(0);
     expect(t.rpc).not.toHaveBeenCalled();
   });

@@ -9,6 +9,7 @@ import type {
   GalleryFile,
   GalleryPage,
 } from "../../gallery/types";
+import { ownHive } from "../own-hive";
 
 export type GalleryLoad =
   | { state: "ok"; data: GalleryData }
@@ -149,20 +150,15 @@ async function thumbsFor(db: Db, files: Row[]): Promise<Context["thumbs"]> {
 }
 
 /**
- * A page of the caller's first hive, newest first, in three waves: the hive; then its members,
+ * A page of the caller's own hive, newest first, in three waves: the hive; then its members,
  * the caller's user and up to 201 files in parallel (the 201st only says that more exist); then
  * the attached notes and the thumbnail links in parallel.
  */
 async function page(db: Db, cursor: Cursor | null): Promise<GalleryLoad> {
-  const hives = (await db
-    .from("hives")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return { state: "error" };
-  const hive = rows(hives)[0];
-  if (!hive) return { state: "no-hive" };
-  const hiveId = text(hive.id);
+  const hive = await ownHive(db);
+  if (hive === "error") return { state: "error" };
+  if (hive === null) return { state: "no-hive" };
+  const hiveId = hive.id;
 
   let index = db.from("files").select(FILE_COLUMNS).eq("hive_id", hiveId);
   // Keyset: strictly after the last file shown, in the same (created_at, id) order.

@@ -1,12 +1,15 @@
 // What the settings server actions do, given a client signed in as the person. Each checks its
-// arguments before any call and lets the database decide: `create_agent`, `revoke_agent` and
-// `add_member` refuse an agent, someone else's workspace or agent, and anyone but the owner.
+// arguments before any call and lets the database decide: `create_agent`, `revoke_agent`,
+// `invite_member` and `revoke_invitation` refuse an agent, someone else's workspace or agent,
+// and anyone but the owner.
 //
 // The token. `create_agent` answers with the agent's token, once. It leaves `createIn` only in
 // the returned value. Nothing the function answered is ever passed to `console.*`, whether the
-// call worked or not: a log line here carries an error's code and message and nothing else.
+// call worked or not: a log line here carries an error's code and message and nothing else,
+// so never an email address or a name either.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Added, Created, Result } from "../../settings/types";
+import type { Created, Invited, Result } from "../../settings/types";
+import { ownHive } from "../own-hive";
 import { isUuid } from "../vault/validate";
 import { cleanEmail, cleanName, cleanNewAgent } from "./validate";
 
@@ -16,7 +19,7 @@ type Res = { data: unknown; error: { code?: string; message: string } | null };
 const NO: Result = { ok: false };
 const YES: Result = { ok: true };
 const NOT_CREATED: Created = { ok: false };
-const FAILED: Added = { ok: false, reason: "failed" };
+const FAILED: Invited = { ok: false, reason: "failed" };
 
 /** Only the error's code and message, never the answer beside it. */
 function failed(what: string, res: Res): boolean {
@@ -25,9 +28,14 @@ function failed(what: string, res: Res): boolean {
   return true;
 }
 
-async function signedIn(db: Db): Promise<boolean> {
+/** The id the auth server answers with, or null when nobody is signed in. */
+async function userId(db: Db): Promise<string | null> {
   const { data } = await db.auth.getUser();
-  return Boolean(data.user?.id);
+  return data.user?.id || null;
+}
+
+async function signedIn(db: Db): Promise<boolean> {
+  return (await userId(db)) !== null;
 }
 
 /** The token of the first row of `create_agent`'s answer, or null when it is not there. */
@@ -65,44 +73,48 @@ export async function revokeIn(db: Db, id: unknown): Promise<Result> {
   return failed("revoke_agent", res) ? NO : YES;
 }
 
-/** The message `add_member` raises for an email nobody has signed up with. */
-const NO_ACCOUNT = "no user with that email";
-/** Postgres' unique violation: that person already has a member row in the hive. */
-const UNIQUE_VIOLATION = "23505";
+/** Part of the message `invite_member` raises for someone who is in the hive already. */
+const ALREADY_MEMBER = "already a member";
+/** Part of the message it raises for an email with an invitation that is still open. */
+const ALREADY_INVITED = "already invited";
 
-export async function addMemberIn(
+export async function inviteIn(
   db: Db,
   email: unknown,
   name: unknown,
-): Promise<Added> {
+): Promise<Invited> {
   const cleanedEmail = cleanEmail(email);
   const cleanedName = cleanName(name);
   if (cleanedEmail === null || cleanedName === null) return FAILED;
-  if (!(await signedIn(db))) return FAILED;
+  const uid = await userId(db);
+  if (!uid) return FAILED;
 
-  const hives = (await db
-    .from("hives")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return FAILED;
-  const hive: unknown = Array.isArray(hives.data) ? hives.data[0] : undefined;
-  const hiveId =
-    typeof hive === "object" && hive !== null
-      ? (hive as Record<string, unknown>).id
-      : undefined;
-  if (typeof hiveId !== "string") return FAILED;
+  // The hive the person uses, so the one they see on `/settings`.
+  const hive = await ownHive(db, uid);
+  if (hive === "error" || hive === null) return FAILED;
 
-  const res = (await db.rpc("add_member", {
-    p_hive: hiveId,
+  const res = (await db.rpc("invite_member", {
+    p_hive: hive.id,
     p_email: cleanedEmail,
     p_display_name: cleanedName,
   })) as Res;
-  if (!res.error) return { ok: true };
-  failed("add_member", res);
-  if (res.error.message.includes(NO_ACCOUNT))
-    return { ok: false, reason: "no-account" };
-  if (res.error.code === UNIQUE_VIOLATION)
-    return { ok: false, reason: "already-member" };
+  if (res.error) {
+    failed("invite_member", res);
+    if (res.error.message.includes(ALREADY_MEMBER))
+      return { ok: false, reason: "already-member" };
+    if (res.error.message.includes(ALREADY_INVITED))
+      return { ok: false, reason: "already-invited" };
+    return FAILED;
+  }
+  if (res.data === "added" || res.data === "invited")
+    return { ok: true, outcome: res.data };
+  console.error("invite_member answer has an unexpected shape");
   return FAILED;
+}
+
+export async function revokeInvitationIn(db: Db, id: unknown): Promise<Result> {
+  if (!isUuid(id)) return NO;
+  if (!(await signedIn(db))) return NO;
+  const res = (await db.rpc("revoke_invitation", { p_invitation: id })) as Res;
+  return failed("revoke_invitation", res) ? NO : YES;
 }

@@ -5,6 +5,7 @@ import { loadGallery, loadPage } from "./load-gallery";
 const HIVE = "00000000-0000-4000-8000-000000000a01";
 const ME = "00000000-0000-4000-8000-000000000001";
 const AHMED = "00000000-0000-4000-8000-000000000002";
+const U_ME = "11111111-1111-4111-8111-111111111101";
 const GONE = "00000000-0000-4000-8000-0000000000ee";
 const W1 = "00000000-0000-4000-8000-000000000b01";
 const N1 = "00000000-0000-4000-8000-000000010001";
@@ -47,6 +48,10 @@ const image = (n: number, over: Record<string, unknown> = {}) =>
     ...over,
   });
 
+/** The session cookie's access token: its payload names the user. */
+const tokenOf = (sub: string) =>
+  `h.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.s`;
+
 /**
  * A stand-in client: every `from(table)` chain is recorded and resolves to what `answer`
  * returns for it; `storage.from(bucket).createSignedUrls` is recorded and answers `sign`.
@@ -65,6 +70,9 @@ function stub(
     const chain: Record<string, unknown> = {};
     for (const m of ["select", "eq", "neq", "order", "limit", "in", "or"])
       chain[m] = (...args: unknown[]) => {
+        // The read of the person's own oldest membership is filed apart from the hive's members.
+        if (table === "members" && m === "eq" && args[0] === "user_id")
+          call.table = "own";
         call.ops.push([m, args]);
         return chain;
       };
@@ -72,9 +80,13 @@ function stub(
       Promise.resolve(answer(call) ?? ok([])).then(res, rej);
     return chain;
   });
-  const user = opts.user === undefined ? { id: "u-me" } : opts.user;
+  const user = opts.user === undefined ? { id: U_ME } : opts.user;
   const auth = {
     getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getSession: vi.fn(async () => ({
+      data: { session: user ? { access_token: tokenOf(user.id) } : null },
+      error: null,
+    })),
   };
   const buckets: string[] = [];
   const createSignedUrls = vi.fn(async (paths: string[], _ttl: number) =>
@@ -98,6 +110,8 @@ function stub(
   return {
     db: { from, auth, storage } as never,
     calls,
+    from,
+    getUser: auth.getUser,
     createSignedUrls,
     buckets,
   };
@@ -113,7 +127,8 @@ function world(
   opts: {
     files?: unknown[];
     notes?: unknown[];
-    hives?: unknown[];
+    /** The read of the person's own oldest membership. */
+    own?: unknown[];
     members?: unknown[];
     fail?: string;
   } = {},
@@ -124,11 +139,14 @@ function world(
         data: null,
         error: { message: "boom", code: "XX000", details: "Secret name" },
       };
-    if (c.table === "hives") return ok(opts.hives ?? [{ id: HIVE }]);
+    if (c.table === "own")
+      return ok(
+        opts.own ?? [{ id: ME, hive_id: HIVE, hive: { name: "Synapse" } }],
+      );
     if (c.table === "members")
       return ok(
         opts.members ?? [
-          { id: ME, display_name: "Danijel", user_id: "u-me" },
+          { id: ME, display_name: "Danijel", user_id: U_ME },
           { id: AHMED, display_name: "Ahmed", user_id: "u-ahmed" },
         ],
       );
@@ -148,12 +166,12 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("loadGallery: states", () => {
   it("answers no-hive when the caller is in none", async () => {
-    const t = stub(world({ hives: [] }));
+    const t = stub(world({ own: [] }));
     expect(await loadGallery(t.db)).toEqual({ state: "no-hive" });
     expect(table(t, "files")).toHaveLength(0);
   });
 
-  it.each(["hives", "members", "files", "notes"])(
+  it.each(["own", "members", "files", "notes"])(
     "answers error when the %s query fails, logging only code and message",
     async (failing) => {
       const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -206,6 +224,24 @@ describe("loadGallery: the files query", () => {
     ]);
     expect(args(q!, "limit")).toEqual([201]);
     expect(op(q!, "or")).toHaveLength(0);
+  });
+
+  it("reads the hive of the person's own oldest membership, once", async () => {
+    const t = stub(world({ files: [file(1)] }));
+    await loaded(t);
+    expect(table(t, "own")).toHaveLength(1);
+    expect(t.calls[0]!.table).toBe("own");
+    expect(t.from.mock.calls[0]).toEqual(["members"]);
+    expect(t.calls[0]!.ops).toEqual([
+      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", U_ME]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [1]],
+    ]);
+    expect(args(table(t, "files")[0]!, "eq")).toEqual(["hive_id", HIVE]);
+    // One call to the auth server, as before.
+    expect(t.getUser).toHaveBeenCalledTimes(1);
   });
 
   it("reads the members of the hive with their names and users", async () => {
@@ -498,14 +534,14 @@ describe("loadPage", () => {
 
   it("answers null on any failure", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    for (const fail of ["hives", "members", "files", "notes"])
+    for (const fail of ["own", "members", "files", "notes"])
       expect(
         await loadPage(
           stub(world({ fail, files: [file(1, { note_id: N1 })] })).db,
           cursor,
         ),
       ).toBeNull();
-    expect(await loadPage(stub(world({ hives: [] })).db, cursor)).toBeNull();
+    expect(await loadPage(stub(world({ own: [] })).db, cursor)).toBeNull();
     expect(await loadPage(stub(world(), { user: null }).db, cursor)).toBeNull();
   });
 });

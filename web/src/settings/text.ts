@@ -1,6 +1,6 @@
 // The sentences and labels of the settings screen, and the order of its agents. Plain functions,
 // so the screen and the tests read the same words.
-import type { AddReason, Agent, AgentStatus, TrustTier } from "./types";
+import type { Agent, AgentStatus, InviteReason, TrustTier } from "./types";
 
 const TIERS: Record<TrustTier, string> = {
   vendor: "Vendor-hosted",
@@ -20,9 +20,9 @@ const STATUSES: Record<AgentStatus, string | null> = {
   expired: "Expired",
 };
 
-const ADD_FAILURES: Record<AddReason, string> = {
-  "no-account": "Nobody with that email has an account yet.",
+const INVITE_FAILURES: Record<InviteReason, string> = {
   "already-member": "That person is already a member.",
+  "already-invited": "That email is already invited.",
   failed: "That didn't work. Try again.",
 };
 
@@ -40,10 +40,23 @@ export function statusText(s: AgentStatus): string | null {
   return STATUSES[s];
 }
 
-/** Why adding a member did not happen. */
-export function addFailure(r: AddReason): string {
-  return ADD_FAILURES[r];
+/** Why inviting a member did not happen. */
+export function inviteFailure(r: InviteReason): string {
+  return INVITE_FAILURES[r];
 }
+
+/** What the owner passes on after an invitation is saved; `address` is where the person signs in. */
+export function inviteNotice(
+  name: string,
+  email: string,
+  address: string,
+): string {
+  return `Invitation saved. Ask ${name} to open ${address}, enter ${email} and choose Email me a link.`;
+}
+
+/** The line under the invite form. */
+export const INVITE_HELP: string =
+  "If they have an account they are added now. Otherwise they join when they first sign in with this email.";
 
 /** Active agents first, then the rest; the newest first inside each group. A new array. */
 export function sortAgents(agents: Agent[]): Agent[] {

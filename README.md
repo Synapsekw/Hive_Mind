@@ -46,7 +46,7 @@ pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 
 `supabase status` then prints the local URL and keys. Copy `.env.example` to `.env` and fill it
-in. The hosted dev project is `tokyttkztrkjvkaksdnh`; all five migrations are applied to it and it holds
+in. The hosted dev project is `tokyttkztrkjvkaksdnh`; all seven migrations are applied to it and it holds
 one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
 
 ### Run the web app
@@ -80,7 +80,16 @@ accepted; a declined link cannot be accepted afterwards. It needs the `inbox` mi
 
 Settings (**Settings** in the left rail) lists your agents and the hive's members. **Connect an
 agent** creates one and shows its token once; copy it then, because it cannot be shown again.
-**Revoke** stops an agent within the hour. The owner can add a member who already has an account.
+**Revoke** stops an agent within the hour.
+
+To bring a person into the hive, the owner chooses **Settings → Members → Invite a member** and
+enters the person's email and a display name. A person who already has an account with a
+confirmed email is added at once. Anyone else gets an invitation and joins the first time they
+sign in with that email: they open the sign-in page, enter the email and choose **Email me a
+link**. The app sends no email, so the owner passes the sign-in address on themselves; Settings
+shows it with a **Copy address** button. An invitation lasts 14 days and the owner can revoke it
+under **Invitations**. It needs the `invitations` migration on the database and two project
+settings (see [docs/security.md](docs/security.md#3-identity-and-tokens)).
 
 `/dev/map`, `/dev/vault`, `/dev/gallery`, `/dev/inbox` and `/dev/settings` show the screens on sample data, without an
 account; `/dev/notice` shows the failed-load notice.

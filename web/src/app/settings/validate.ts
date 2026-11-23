@@ -1,13 +1,13 @@
 // Argument checks for the settings server actions, which are public endpoints: every value from
 // the browser passes through here before any query. Pure, no I/O. These only reject malformed
-// input; whether a person may create an agent or add a member is the database's answer.
+// input; whether a person may create an agent or invite a member is the database's answer.
 import { PROVIDERS } from "../../settings/types";
 import type { NewAgent, Provider, TrustTier } from "../../settings/types";
 import { isUuid } from "../vault/validate";
 
 const TIERS: readonly TrustTier[] = ["vendor", "self_hosted"];
 
-/** An agent's name or a member's display name: trimmed, 1..60 characters. */
+/** An agent's name or an invited person's display name: trimmed, 1..60 characters. */
 export function cleanName(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const name = v.trim();
