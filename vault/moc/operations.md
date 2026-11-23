@@ -20,8 +20,14 @@ related: ["[[00-north-star]]"]
 
 ## Environment & secrets
 
-- `.env` (gitignored) — `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`,
-  `HIVE_AGENT_TOKEN`. The JWT secret and any service-role key are **server-only**.
+- `.env` (gitignored) — `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `HIVE_AGENT_TOKEN`. That is all an
+  agent's machine holds. The optional `HIVE_PERSON_*` values are for `pnpm test:live` and
+  unattended imports only.
+- The key that signs agent identities is the secret `AGENT_SIGNING_JWK` of the `agent-session`
+  Edge Function, set by `scripts/setup-agent-signing.sh <project-ref>` (the owner runs it in
+  their own terminal, never through an assistant). That key, the legacy JWT secret and any
+  service-role key are **server-only**. Nothing in the repo reads the legacy JWT secret any more
+  ([[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]], closed).
 - `.env.example` — the template (committed, blank values).
 
 ## Supabase + MCP

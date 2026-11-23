@@ -45,6 +45,34 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   the token is shown in one dialog straight after the agent is created and kept nowhere: not in
   a log, a URL, browser storage or the page once the dialog is closed. Setting an expiry is not
   built yet.
+- An agent's machine holds its own token and nothing that can sign an identity. The MCP server
+  sends the token to the Edge Function `agent-session`, which asks the database who the token
+  belongs to (`agent_login`) and answers with an identity that lasts one hour.
+- The key that signs those identities is an ES256 key of our own. Its private half lives in one
+  place, the function's secrets (`AGENT_SIGNING_JWK`); it is imported into the project as a
+  standby signing key so the database accepts what the function signs. It is made by
+  `scripts/setup-agent-signing.sh`, which the owner runs in their own terminal and which never
+  prints it. It is not in the repo, a `.env`, a browser, a prompt or a log.
+- The function signs only what `agent_login` returned, and always as an agent: every identity
+  it makes carries `agent_id`, the workspace and the trust tier from the database. Nothing in
+  the request is copied into the identity, so there is no way to ask it for a person's identity
+  or for another agent's. It decides nothing about permissions; the database does that with the
+  identity it is given.
+- Anyone on the internet can call the function: the caller has no identity yet, so it is
+  deployed without JWT verification. What protects it is the agent token, which has 244 random
+  bits and is checked against its hash, revocation and expiry on every call. There is no
+  lockout and no rate limit beyond what Supabase applies to functions. The function never logs
+  the token, the identity or the key.
+- Accepted: the key itself could sign as any member's agent or as a person. That is why it stays
+  in the function's secrets only, and why the function has no input that reaches the claims.
+- The importer (`pnpm import:vault`) signs in as the person, through Supabase Auth, with their
+  email and password. It asks for them in the terminal without echoing the password, uses them
+  for that one sign-in and stores neither. An agent token cannot be exchanged for a person's
+  identity. The `HIVE_PERSON_*` values in `.env` are for the live tests and unattended imports
+  only, with a test account.
+- The project's legacy JWT secret can still sign an identity for any member until the owner
+  revokes it. Nothing in the repo reads it; it may be revoked once every machine runs a build
+  from after 2026-11-23 (see [hosted-db-bringup.md](hosted-db-bringup.md#set-up-agent-sign-in)).
 - The owner invites a person by email in Settings ("Invite a member"). A person with a confirmed
   account is added at once; anyone else gets an invitation that lasts 14 days, can be revoked,
   and is honoured when they first sign in with that email. The app sends no email and there is
@@ -169,4 +197,6 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - Do any customer contracts require a security review or specific data residency before their
   material is loaded?
 - Should vendor-tier agents also start in quarantine for a new member's first week?
-- Agent sign-in currently signs a JWT with the project's secret. What replaces it when hosted?
+- When is the legacy JWT secret revoked? Agent sign-in no longer uses it (section 3); it stays
+  valid until every machine has switched.
+- Does the `agent-session` function need its own rate limit before colleagues' agents use it?

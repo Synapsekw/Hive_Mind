@@ -14,6 +14,8 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
 - Tests for the sharing rules, including files, that need no Docker. They pass.
 - A scripted walkthrough (`pnpm demo`) of two people and their agents.
 - An MCP server with seven tools, proven against the live project by `pnpm test:live`.
+- An Edge Function, `agent-session`, that exchanges an agent token for a one-hour identity, so
+  an agent's machine holds only its own token.
 - An importer for a folder of markdown notes.
 - The web app (`web/`) has sign-in, the map, the vault, where a person reads their notes and
   decides who may read them, and the gallery, where they view, download and delete the files
@@ -46,7 +48,8 @@ pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 
 `supabase status` then prints the local URL and keys. Copy `.env.example` to `.env` and fill it
-in. The hosted dev project is `tokyttkztrkjvkaksdnh`; all seven migrations are applied to it and it holds
+in: the project URL, the publishable key and an agent token. No JWT secret is needed any more;
+remove `SUPABASE_JWT_SECRET` from an older `.env`. The hosted dev project is `tokyttkztrkjvkaksdnh`; all seven migrations are applied to it and it holds
 one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
 
 ### Run the web app
@@ -113,6 +116,13 @@ select * from public.create_agent(
 web app runs, create further agents in **Settings** instead: the token then never appears in a
 query result.
 
+The token alone does not sign an agent in. The server sends it to the project's `agent-session`
+Edge Function, which answers with an identity that lasts one hour. The project owner sets that
+function up once per project with `scripts/setup-agent-signing.sh <project-ref>`, in their own
+terminal; see
+[docs/hosted-db-bringup.md](docs/hosted-db-bringup.md#set-up-agent-sign-in). If the server
+reports that `agent-session` is missing, that step has not been done on the project in `.env`.
+
 3. Build the server and register it with Claude Code. The server reads its settings from the
    repo's `.env`, so no secret is copied into a client config:
 
@@ -137,8 +147,14 @@ pnpm import:vault "<folder of markdown>" <workspace> --include Decisions --exclu
 ```
 
 One hive note per `.md` file, at its relative path, private, in the named workspace (created if
-missing). Re-running updates only the notes whose file changed and never deletes. It signs in as
-the person behind the agent token in `.env`. Other file types wait for file storage.
+missing). Re-running updates only the notes whose file changed and never deletes. Other file
+types wait for file storage.
+
+The importer signs in as you, not as an agent. It asks for your email and password in the
+terminal (the password is not shown and not stored) and imports into the hive you belong to;
+`--dry-run` signs in too, because it reads the hive. It needs `SUPABASE_URL` and
+`SUPABASE_ANON_KEY` in `.env` and no agent token. For an unattended run, set `HIVE_PERSON_EMAIL`
+and `HIVE_PERSON_PASSWORD` in the environment and it does not ask.
 
 ## Working in this repo
 
@@ -186,6 +202,4 @@ text, title or path.
 ## Not built yet
 
 The rest of the web app (chat, settings, an audit-log screen), file storage, entity detection, automatic link discovery, synthesis
-pages, the housekeeper, semantic search, hosted sign-in. Agent sign-in currently
-relies on the project's JWT secret, which fits the local stack and will be
-revisited before hosting.
+pages, the housekeeper, semantic search, hosted sign-in, the remote MCP connector.
