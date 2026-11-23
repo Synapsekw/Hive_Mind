@@ -1,8 +1,14 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Request,
+} from "@playwright/test";
 import { fixturePayload, HOSTILE_TITLE } from "../src/map/fixture";
 import { setLook } from "./look";
 
-const VIEWS = ["Rings", "Circle", "Topics", "Links", "Timeline", "Orbit"];
+const VIEWS = ["Hive", "Rings", "Topics", "Links", "Timeline", "Orbit"];
 
 async function open(page: Page) {
   page.on("dialog", (d) => {
@@ -19,6 +25,70 @@ const viewButton = (page: Page, name: string) =>
 
 const rail = (page: Page) =>
   page.getByRole("complementary", { name: "Details" });
+
+/** Selects a dot the way a keyboard user does: focus its hidden button, press Enter. */
+async function pick(page: Page, dot: Locator) {
+  await dot.focus();
+  await page.keyboard.press("Enter");
+}
+
+/** A dot's point on screen, from its box coordinates, with the camera at Fit. */
+async function dotPoint(page: Page, dot: Locator) {
+  const canvas = (await page.locator("[data-map-canvas]").boundingBox())!;
+  const x = Number(await dot.getAttribute("data-x"));
+  const y = Number(await dot.getAttribute("data-y"));
+  // At fit (k = 1) the 1000 x 760 box is centred in the canvas.
+  const s = Math.min(canvas.width / 1000, canvas.height / 760);
+  return {
+    x: canvas.x + (canvas.width - 1000 * s) / 2 + x * s,
+    y: canvas.y + (canvas.height - 760 * s) / 2 + y * s,
+  };
+}
+
+test("the map opens on the hive", async ({ page }) => {
+  await open(page);
+  await expect(viewButton(page, "Hive")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    page.getByRole("button", { name: "Circle", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator("[data-map-canvas]")).toHaveAttribute(
+    "data-view",
+    "hive",
+  );
+});
+
+test("the wheel zooms, a drag pans without selecting, and Fit returns to 100%", async ({
+  page,
+}) => {
+  await open(page);
+  const zoom = page.getByRole("group", { name: "Zoom" });
+  await expect(zoom).toContainText("100%");
+  const box = (await page.locator("[data-map-stage]").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -400);
+  await expect(zoom).not.toContainText("100%");
+  await page.mouse.move(box.x + 40, box.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 140, box.y + 90, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.locator('[data-map-dot][aria-pressed="true"]')).toHaveCount(
+    0,
+  );
+  await zoom.getByRole("button", { name: "Fit" }).click();
+  await expect(zoom).toContainText("100%");
+});
+
+test("pointing at a dot on the canvas selects it", async ({ page }) => {
+  await open(page);
+  await viewButton(page, "Rings").click();
+  const hub = page.locator('[data-map-dot][data-kind="hub"]').first();
+  const p = await dotPoint(page, hub);
+  await page.mouse.click(p.x, p.y);
+  await expect(hub).toHaveAttribute("aria-pressed", "true");
+});
 
 test("the six views switch in the browser without a request", async ({
   page,
@@ -66,17 +136,14 @@ test("a topic chip leaves its dots lit and dims the rest", async ({ page }) => {
   const adnoc = page.locator(
     '[data-map-dot][data-kind="note"][data-topic="1"]',
   );
-  await expect(dmt.first()).toHaveCSS("opacity", "1");
-  await expect(adnoc.first()).toHaveCSS("opacity", "0.1");
+  await expect(dmt.first()).toHaveAttribute("data-lit", "");
+  await expect(adnoc.first()).not.toHaveAttribute("data-lit");
 });
 
 test("a locked dot shows only that it is private", async ({ page }) => {
   await open(page);
   const locked = page.locator('[data-map-dot][data-kind="note"][data-locked]');
-  // Rings packs neighbouring dots closer than their 3 px hit padding; pick by keyboard so the
-  // test does not depend on which neighbour sits on top at this window size.
-  await locked.first().focus();
-  await page.keyboard.press("Enter");
+  await pick(page, locked.first());
   await expect(rail(page)).toContainText("Private note");
   await expect(rail(page)).toContainText("has not shared this");
 
@@ -96,16 +163,15 @@ test("a readable note links to the vault and a locked one does not", async ({
   const note = fixturePayload(Date.now()).nodes.find(
     (n) => n.title === HOSTILE_TITLE,
   )!;
-  await page.locator('[data-map-dot][aria-label^="<img src=x"]').click();
+  await pick(page, page.locator('[data-map-dot][aria-label^="<img src=x"]'));
   await expect(
     rail(page).getByRole("link", { name: "Open in vault" }),
   ).toHaveAttribute("href", `/vault?note=${note.id}`);
 
-  await page
-    .locator('[data-map-dot][data-kind="note"][data-locked]')
-    .first()
-    .focus();
-  await page.keyboard.press("Enter");
+  await pick(
+    page,
+    page.locator('[data-map-dot][data-kind="note"][data-locked]').first(),
+  );
   await expect(rail(page)).toContainText("has not shared this");
   await expect(
     rail(page).getByRole("link", { name: "Open in vault" }),
@@ -116,7 +182,7 @@ test("a hostile title is shown as text", async ({ page }) => {
   await open(page);
   const dot = page.locator('[data-map-dot][aria-label^="<img src=x"]');
   await expect(dot).toHaveCount(1);
-  await dot.click();
+  await pick(page, dot);
   await expect(rail(page).getByRole("heading", { level: 2 })).toHaveText(
     HOSTILE_TITLE,
   );
@@ -165,7 +231,7 @@ test("the map sits on frosted glass", async ({ page }) => {
 test("no control on the map is a pill", async ({ page }) => {
   await open(page);
   // Select something so the detail panel's buttons and the selected ring are drawn too.
-  await page.locator('[data-map-dot][aria-label^="<img src=x"]').click();
+  await pick(page, page.locator('[data-map-dot][aria-label^="<img src=x"]'));
   const pills = await page.evaluate(() =>
     [...document.querySelectorAll("main *, main, aside *")]
       .filter((e) =>
@@ -176,19 +242,37 @@ test("no control on the map is a pill", async ({ page }) => {
   expect(pills).toEqual([]);
 });
 
-/** A topic-0 dot's colour and the computed --hue-1, both as the browser writes rgb(). */
-async function dotAndHue(page: Page) {
-  return page.evaluate(() => {
-    const shape = document.querySelector(
-      '[data-map-dot][data-kind="note"][data-topic="0"]:not([data-locked]) > span',
-    )!;
+/**
+ * The canvas pixel at the centre of topic 0's hub (drawn solid in its topic colour) and the
+ * computed --hue-1, both as [r, g, b].
+ */
+async function hubAndHue(page: Page) {
+  await viewButton(page, "Rings").click();
+  const hub = page.locator('[data-map-dot][data-kind="hub"][data-topic="0"]');
+  const p = await dotPoint(page, hub);
+  await page.waitForTimeout(300);
+  return page.evaluate(({ x, y }) => {
+    const canvas =
+      document.querySelector<HTMLCanvasElement>("[data-map-canvas]")!;
+    const r = canvas.getBoundingClientRect();
+    const dpr = canvas.width / r.width;
+    const px = canvas
+      .getContext("2d")!
+      .getImageData(
+        Math.round((x - r.left) * dpr),
+        Math.round((y - r.top) * dpr),
+        1,
+        1,
+      ).data;
     const probe = document.createElement("span");
-    probe.style.backgroundColor = "var(--hue-1)";
+    probe.style.color = "var(--hue-1)";
     document.body.append(probe);
-    const hue = getComputedStyle(probe).backgroundColor;
+    const hue = (getComputedStyle(probe).color.match(/[\d.]+/g) ?? []).map(
+      Number,
+    );
     probe.remove();
-    return { dot: getComputedStyle(shape).backgroundColor, hue };
-  });
+    return { dot: [px[0], px[1], px[2]], hue: hue.slice(0, 3) };
+  }, p);
 }
 
 test("a topic dot takes the theme's first topic colour", async ({
@@ -197,14 +281,14 @@ test("a topic dot takes the theme's first topic colour", async ({
 }) => {
   await setLook(context, "aurora.dark.tinted.theme");
   await open(page);
-  const theme = await dotAndHue(page);
-  expect(theme.dot).toBe(theme.hue);
+  const theme = await hubAndHue(page);
+  expect(theme.dot).toEqual(theme.hue);
 
   await setLook(context, "aurora.dark.tinted.classic");
   await open(page);
-  const classic = await dotAndHue(page);
-  expect(classic.dot).toBe(classic.hue);
-  expect(classic.dot).not.toBe(theme.dot);
+  const classic = await hubAndHue(page);
+  expect(classic.dot).toEqual(classic.hue);
+  expect(classic.dot).not.toEqual(theme.dot);
 });
 
 for (const look of [undefined, "aurora.light.vivid.classic"])

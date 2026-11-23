@@ -34,8 +34,7 @@ export type MapNode = {
   note_id: string | null;
 };
 
-export type View =
-  "rings" | "circle" | "topics" | "links" | "timeline" | "orbit";
+export type View = "hive" | "rings" | "topics" | "links" | "timeline" | "orbit";
 export type NodeKind = "root" | "hub" | "note" | "file" | "agent";
 
 export type ModelNode = {

@@ -1,12 +1,14 @@
 // The controls around the stage: stats line, view switch, labels toggle and search on top;
 // topic, kind and person chips below. Picking a chip dims everything else; nothing is hidden.
-import type { CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
 import type { MapModel, NodeKind, View } from "./types";
+import { useSlidingPill } from "../shell/useSlidingPill";
+import pill from "../shell/SlidingPill.module.css";
 import s from "./map.module.css";
 
 export const VIEWS: [View, string][] = [
+  ["hive", "Hive"],
   ["rings", "Rings"],
-  ["circle", "Circle"],
   ["topics", "Topics"],
   ["links", "Links"],
   ["timeline", "Timeline"],
@@ -37,12 +39,15 @@ export function TopBar({
   q: string;
   onQ: (q: string) => void;
 }) {
+  const group = useRef<HTMLDivElement>(null);
+  const pillStyle = useSlidingPill(group, '[aria-pressed="true"]', view);
   return (
     <div className={s.bar}>
       <p className={s.stats} aria-live="polite">
         {stats}
       </p>
-      <div role="group" aria-label="View" className={s.switch}>
+      <div ref={group} role="group" aria-label="View" className={s.switch}>
+        <span aria-hidden="true" className={pill.pill} style={pillStyle} />
         {VIEWS.map(([v, name]) => (
           <button
             key={v}

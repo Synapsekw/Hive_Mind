@@ -1,0 +1,249 @@
+"use client";
+// The map's camera as a hook: the transform lives in a ref (the canvas reads it every frame, so
+// it is not React state). `version` is state only for the zoom percentage and for settling.
+// Wheel zooms toward the cursor, a drag of 4 px or more pans, double-click zooms x2, and glides
+// tween the camera over 650 ms (instant under reduced motion). Maths: camera.ts.
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import type { RefObject } from "react";
+import { clampK, fit, frame, wheelFactor, zoomAt, type Cam } from "./camera";
+
+export type CameraApi = {
+  zoomBy(f: number): void;
+  fitView(): void;
+  frameOn(points: [number, number][]): void;
+  panBy(dx: number, dy: number): void;
+  k(): number;
+};
+
+export type Size = {
+  sw: number; // stage, css px
+  sh: number;
+  w: number; // the 1000 x 760 box fitted at k = 1
+  h: number;
+};
+
+const GLIDE_MS = 650;
+const DRAG_PX = 4;
+const SETTLE_MS = 60;
+
+/**
+ * `--ease` is cubic-bezier(0.16, 1, 0.3, 1); `1 - (1 - t)^4` is its close equivalent (the same
+ * fast start and long settle) and needs no solver.
+ */
+const ease = (t: number) => 1 - (1 - t) ** 4;
+
+export function reducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+  );
+}
+
+export function useCamera(
+  stage: RefObject<HTMLElement | null>,
+  onChange: () => void,
+) {
+  const cam = useRef<Cam>({ k: 1, tx: 0, ty: 0 });
+  const size = useRef<Size>({ sw: 0, sh: 0, w: 0, h: 0 });
+  /** True from the moment a pointer-down moves 4 px until the next pointer-down. */
+  const dragged = useRef(false);
+  const dragging = useRef(false);
+  const [version, setVersion] = useState(0);
+  const [settled, setSettled] = useState(0);
+  const glide = useRef<number | null>(null);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const change = useRef(onChange);
+  change.current = onChange;
+
+  const settle = useCallback((ms: number) => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => setSettled((v) => v + 1), ms);
+  }, []);
+
+  const set = useCallback((c: Cam) => {
+    cam.current = c;
+    setVersion((v) => v + 1);
+    change.current();
+  }, []);
+
+  const stop = useCallback(() => {
+    if (glide.current !== null) cancelAnimationFrame(glide.current);
+    glide.current = null;
+  }, []);
+
+  const jump = useCallback(
+    (c: Cam) => {
+      stop();
+      set(c);
+      settle(SETTLE_MS);
+    },
+    [set, settle, stop],
+  );
+
+  const glideTo = useCallback(
+    (to: Cam) => {
+      stop();
+      if (reducedMotion()) return jump(to);
+      const from = cam.current;
+      const t0 = performance.now();
+      const step = (now: number) => {
+        const p = Math.min(1, (now - t0) / GLIDE_MS);
+        const e = ease(p);
+        set(
+          p >= 1
+            ? to
+            : {
+                k: from.k + (to.k - from.k) * e,
+                tx: from.tx + (to.tx - from.tx) * e,
+                ty: from.ty + (to.ty - from.ty) * e,
+              },
+        );
+        glide.current = p < 1 ? requestAnimationFrame(step) : null;
+      };
+      glide.current = requestAnimationFrame(step);
+      settle(GLIDE_MS);
+    },
+    [jump, set, settle, stop],
+  );
+
+  const api = useRef<CameraApi>(null as unknown as CameraApi);
+  api.current = {
+    zoomBy(f) {
+      const { sw, sh } = size.current;
+      jump(zoomAt(cam.current, f, sw / 2, sh / 2));
+    },
+    fitView() {
+      const { w, h, sw, sh } = size.current;
+      glideTo(fit(w, h, sw, sh));
+    },
+    frameOn(points) {
+      const { w, h, sw, sh } = size.current;
+      glideTo(frame(points, w, h, sw, sh));
+    },
+    panBy(dx, dy) {
+      const c = cam.current;
+      jump({ k: c.k, tx: c.tx + dx, ty: c.ty + dy });
+    },
+    k: () => cam.current.k,
+  };
+
+  // Size: the box fitted to the stage; a resize refits.
+  useLayoutEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      const sw = r.width;
+      const sh = r.height;
+      const s0 = Math.min(sw / 1000, sh / 760);
+      size.current = { sw, sh, w: 1000 * s0, h: 760 * s0 };
+      stop();
+      set(fit(1000 * s0, 760 * s0, sw, sh));
+      settle(SETTLE_MS);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [stage, set, settle, stop]);
+
+  // Wheel, drag and double-click on the stage. Overlays (`data-map-overlay`) are left alone.
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const local = (e: { clientX: number; clientY: number }) => {
+      const r = el.getBoundingClientRect();
+      return [e.clientX - r.left, e.clientY - r.top] as const;
+    };
+    const onOverlay = (e: Event) =>
+      e.target instanceof Element && !!e.target.closest("[data-map-overlay]");
+
+    const wheel = (e: WheelEvent) => {
+      if (onOverlay(e)) return;
+      e.preventDefault();
+      const [x, y] = local(e);
+      jump(zoomAt(cam.current, wheelFactor(e.deltaY, e.ctrlKey), x, y));
+    };
+    let start: {
+      x: number;
+      y: number;
+      tx: number;
+      ty: number;
+      id: number;
+    } | null = null;
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0 || onOverlay(e)) return;
+      dragged.current = false;
+      start = {
+        x: e.clientX,
+        y: e.clientY,
+        tx: cam.current.tx,
+        ty: cam.current.ty,
+        id: e.pointerId,
+      };
+    };
+    const move = (e: PointerEvent) => {
+      if (!start || e.pointerId !== start.id) return;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      if (!dragging.current && Math.hypot(dx, dy) < DRAG_PX) return;
+      if (!dragging.current) {
+        dragging.current = true;
+        dragged.current = true;
+        stop();
+        try {
+          el.setPointerCapture(e.pointerId);
+        } catch {
+          // The pointer may already be gone.
+        }
+      }
+      set({ k: cam.current.k, tx: start.tx + dx, ty: start.ty + dy });
+    };
+    const up = (e: PointerEvent) => {
+      if (!start || e.pointerId !== start.id) return;
+      start = null;
+      if (dragging.current) {
+        dragging.current = false;
+        change.current();
+        settle(SETTLE_MS);
+      }
+    };
+    const dbl = (e: MouseEvent) => {
+      if (onOverlay(e)) return;
+      const [x, y] = local(e);
+      const to = zoomAt(cam.current, 2, x, y);
+      to.k = clampK(to.k);
+      glideTo(to);
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    el.addEventListener("dblclick", dbl);
+    return () => {
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      el.removeEventListener("dblclick", dbl);
+    };
+  }, [stage, jump, glideTo, set, settle, stop]);
+
+  useEffect(
+    () => () => {
+      stop();
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+    },
+    [stop],
+  );
+
+  return { cam, size, api, version, settled, dragged, dragging };
+}

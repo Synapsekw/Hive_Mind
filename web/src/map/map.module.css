@@ -69,6 +69,7 @@
 
 /* The view switch: one segmented control, a 10 px hairline track with 7 px segments. */
 .switch {
+  position: relative;
   display: flex;
   padding: 3px;
   border: 1px solid var(--line);
@@ -76,6 +77,8 @@
 }
 
 .tab {
+  position: relative;
+  z-index: 1;
   height: 30px;
   padding: 0 14px;
   border: 0;
@@ -93,8 +96,8 @@
   color: var(--fg);
 }
 
+/* The highlight is the sliding pill under the group (shell/SlidingPill.module.css). */
 .tab[aria-pressed="true"] {
-  background: var(--fill-on);
   color: var(--fg);
   font-weight: 500;
 }
@@ -154,13 +157,19 @@
   color: var(--muted);
 }
 
-/* ---- The stage: a 1000 x 760 box ---- */
+/* ---- The stage: one canvas, fitted to the room the card has ---- */
 
-.stage {
+/* The camera owns every gesture on the stage (touch-action: none). Stacked (narrow) layouts give
+   it the box's aspect ratio; the fit-the-screen layout below lets it take the remaining height. */
+.stageFit {
   position: relative;
-  width: 100%;
+  flex: 1;
+  min-height: 0;
   aspect-ratio: 1000 / 760;
-  container-type: inline-size;
+  overflow: hidden;
+  touch-action: none;
+  container-type: size;
+  border-radius: 12px;
   background: radial-gradient(
     ellipse 36% 44% at 50% 50%,
     color-mix(in srgb, var(--brand) 8%, transparent),
@@ -168,88 +177,107 @@
   );
 }
 
-.svg {
+.canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  cursor: grab;
 }
 
-.guides {
-  stroke: var(--line);
-}
-
-.edgeBase {
-  stroke: var(--edge);
-}
-
-.edgeHi {
-  stroke: var(--fg);
-}
-
-.ticks {
-  stroke: var(--quiet);
-}
-
-.edges {
-  animation: edges-in 1.1s ease both;
-}
-
-@keyframes edges-in {
-  0%,
-  55% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-.core {
-  stroke: var(--brand);
-  animation: breathe 4s ease-in-out infinite;
-}
-
-@keyframes breathe {
-  0%,
-  100% {
-    opacity: 0.75;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-/* Ring and axis names: a few small frosted tags, the only blur inside the card. */
-.guideLabel {
-  position: absolute;
-  z-index: 1;
-  padding: 0 8px;
-  border-radius: 6px;
-  white-space: nowrap;
-  background: color-mix(in srgb, var(--bg) 50%, transparent);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-  font-size: 12px;
-  color: var(--muted);
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-}
-
-.guideLabel[data-left] {
-  transform: translate(0, -50%);
-}
-
-.flat {
+/* Orbit still draws DOM dots, in a 1000 x 760 box centred in the stage. */
+.stage {
   position: absolute;
   inset: 0;
+  margin: auto;
+  width: min(100cqw, calc(100cqh * 1000 / 760));
+  aspect-ratio: 1000 / 760;
+  container-type: inline-size;
 }
 
-.flat[hidden] {
-  display: none;
+/* The hidden list of dot buttons: there for the keyboard and screen readers, drawn by the
+   canvas. Every item sits on one 1 px spot, so the list never adds height or scroll. */
+.srList {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-/* ---- Dots ---- */
+.srList li,
+.srList button {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
+
+/* The zoom control: a small glass bar in the stage's bottom-right corner. */
+.zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  color: var(--fg2);
+  font-size: 12px;
+}
+
+.zoomButton,
+.zoomFit {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.zoomFit {
+  font-size: 12px;
+}
+
+.zoomButton:hover,
+.zoomFit:hover {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.zoomValue {
+  min-width: 42px;
+  text-align: center;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---- Orbit dots and the detail rail's marks (the flat views draw on the canvas) ---- */
 
 .dot {
   position: absolute;
@@ -763,8 +791,8 @@
     background: var(--panel-solid);
   }
 
-  .guideLabel {
-    background: color-mix(in srgb, var(--bg) 84%, transparent);
+  .zoom {
+    background: var(--surface);
   }
 }
 
@@ -796,15 +824,7 @@
   .stageFit {
     flex: 1 1 0;
     min-height: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    container-type: size;
-  }
-
-  .stageFit > .stage {
-    flex: none;
-    width: min(100cqw, calc(100cqh * 1000 / 760));
+    aspect-ratio: auto;
   }
 }
 
@@ -815,12 +835,12 @@
   .toggle,
   .search,
   .chip,
+  .zoomButton,
+  .zoomFit,
   .clear,
   .primaryLink {
     transition: none;
   }
-  .edges,
-  .core,
   .spin,
   .billboard {
     animation: none;

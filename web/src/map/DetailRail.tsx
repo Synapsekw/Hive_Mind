@@ -2,7 +2,7 @@
 // it and what it connects to. Every title is rendered as a text node.
 import Link from "next/link";
 import type { Activity, MapModel, ModelNode } from "./types";
-import { Shape } from "./Dots";
+import { Shape } from "./Shape";
 import s from "./map.module.css";
 
 const MONTHS = [
