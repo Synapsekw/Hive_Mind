@@ -8,8 +8,8 @@
 // what was thrown, never its message or the answer.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabase } from "../../lib/supabase/server";
-import type { Added, Created, NewAgent, Result } from "../../settings/types";
-import { addMemberIn, createIn, revokeIn } from "./write";
+import type { Created, Invited, NewAgent, Result } from "../../settings/types";
+import { createIn, inviteIn, revokeIn, revokeInvitationIn } from "./write";
 
 async function withSession<T>(
   run: (db: SupabaseClient) => Promise<T>,
@@ -31,9 +31,16 @@ export async function revokeAgent(id: string): Promise<Result> {
   return withSession<Result>((db) => revokeIn(db, id), { ok: false });
 }
 
-export async function addMember(email: string, name: string): Promise<Added> {
-  return withSession<Added>((db) => addMemberIn(db, email, name), {
+export async function inviteMember(
+  email: string,
+  name: string,
+): Promise<Invited> {
+  return withSession<Invited>((db) => inviteIn(db, email, name), {
     ok: false,
     reason: "failed",
   });
+}
+
+export async function revokeInvitation(id: string): Promise<Result> {
+  return withSession<Result>((db) => revokeInvitationIn(db, id), { ok: false });
 }

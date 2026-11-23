@@ -2,7 +2,12 @@ import { createServerSupabase } from "../../lib/supabase/server";
 import { Settings } from "../../settings/Settings";
 import { Notice } from "../../shell/Notice";
 import { loadInboxCount } from "../inbox/load-inbox";
-import { addMember, createAgent, revokeAgent } from "./actions";
+import {
+  createAgent,
+  inviteMember,
+  revokeAgent,
+  revokeInvitation,
+} from "./actions";
 import { loadSettings } from "./load-settings";
 
 // Reads the session cookie, so never prerendered.
@@ -35,7 +40,7 @@ export default async function SettingsPage() {
       data={result.data}
       now={now}
       inbox={inbox}
-      actions={{ createAgent, revokeAgent, addMember }}
+      actions={{ createAgent, revokeAgent, inviteMember, revokeInvitation }}
     />
   );
 }

@@ -1,10 +1,11 @@
 "use client";
 
-// The settings screen: the person's own agents and the hive's members. The screen decides
-// nothing about who may create, revoke or add: it calls `actions` and the database answers.
-// What is listed always comes from `data`, so a refresh from the server is what changes it.
-// The forms, the revoke question and the token dialog are client state only, one open at a
-// time. A new agent's token is held in this component's state from the moment `createAgent`
+// The settings screen: the person's own agents, the hive's members and, for the owner, the
+// invitations still open. The screen decides nothing about who may create, revoke or invite: it
+// calls `actions` and the database answers. What is listed always comes from `data`, so a
+// refresh from the server is what changes it. The forms, the revoke question, the invitation
+// notice and the token dialog are client state only; one form or question is open at a time.
+// A new agent's token is held in this component's state from the moment `createAgent`
 // answers until Done, is drawn only by `TokenDialog`, and is written nowhere else. Because it
 // cannot be fetched again, the page is inert from Create until Done, leaving asks first, and
 // Back stays here while the dialog is open.
@@ -13,12 +14,21 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Shell } from "../shell/Shell";
 import { shortDate } from "../vault/format";
 import { TokenDialog } from "./TokenDialog";
-import { addFailure, sortAgents, statusText, tierHelp, tierText } from "./text";
+import {
+  INVITE_HELP,
+  inviteFailure,
+  inviteNotice,
+  sortAgents,
+  statusText,
+  tierHelp,
+  tierText,
+} from "./text";
 import {
   PROVIDERS,
-  type Added,
   type Agent,
   type Created,
+  type Invitation,
+  type Invited,
   type NewAgent,
   type Provider,
   type SettingsActions,
@@ -29,23 +39,29 @@ import {
 import s from "./settings.module.css";
 
 const FAILED = "That didn't work. Try again.";
+const ADDRESS_BY_HAND = "Select the address and copy it by hand.";
 /** A confirming Revoke sooner than this after the question opened is taken as a double click. */
 const CONFIRM_AFTER_MS = 500;
 /** How long Done waits for its own step back in the history before reading the list anyway. */
 const UNHOLD_MS = 1000;
+/** How long Copy address says "Copied". */
+const COPIED_MS = 2000;
 const NAME_MAX = 60;
 const EMAIL_MAX = 254;
 const TIERS: TrustTier[] = ["vendor", "self_hosted"];
 
 /** What is open: a form, or the revoke question of one agent. Never two. */
 type Open =
-  { kind: "connect" } | { kind: "add" } | { kind: "revoke"; id: string };
+  { kind: "connect" } | { kind: "invite" } | { kind: "revoke"; id: string };
 
 /** Where the focus goes after the next render. */
 type Target =
-  | { button: "connect" | "add" }
-  | { form: "connect" | "add" }
+  | { button: "connect" | "invite" }
+  | { form: "connect" | "invite" }
   | { row: string; pick?: "keep" | "revoke" };
+
+/** What the owner passes on after an invitation is saved. Kept until dismissed. */
+type Notice = { name: string; email: string; address: string };
 
 const withId = (set: ReadonlySet<string>, id: string) => new Set(set).add(id);
 const without = (set: ReadonlySet<string>, id: string) => {
@@ -76,9 +92,13 @@ export function Settings({
   const [open, setOpen] = useState<Open | null>(null);
   // What is running: a form's key or an agent's id.
   const [busy, setBusy] = useState<string | null>(null);
-  // Agents whose revoke was refused, and those answered `ok` before the refresh brings them.
+  // Agents and invitations whose revoke was refused, and the agents answered `ok` before the
+  // refresh brings them.
   const [failed, setFailed] = useState<ReadonlySet<string>>(new Set());
   const [revoked, setRevoked] = useState<ReadonlySet<string>>(new Set());
+  // Invitations answered `ok` to a revoke before the refresh takes them away.
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  const [notice, setNotice] = useState<Notice | null>(null);
   // The new agent's token, from the answer until Done. Only the dialog draws it.
   const [fresh, setFresh] = useState<{ token: string; name: string } | null>(
     null,
@@ -133,6 +153,9 @@ export function Settings({
   );
   const workspaceName = (id: string) =>
     data.workspaces.find((w) => w.id === id)?.name ?? null;
+  const invitations = data.isOwner
+    ? data.invitations.filter((i) => !gone.has(i.id))
+    : [];
 
   // Runs after every render, once what was asked for is in the page and the page is no
   // longer inert.
@@ -161,14 +184,14 @@ export function Settings({
       to?.closest("form")?.scrollIntoView({ block: "nearest" });
   });
 
-  function show(kind: "connect" | "add") {
+  function show(kind: "connect" | "invite") {
     if (running.current) return;
     target.current = { form: kind };
     setSaid("");
     setOpen({ kind });
   }
 
-  function cancel(kind: "connect" | "add") {
+  function cancel(kind: "connect" | "invite") {
     if (running.current) return;
     target.current = { button: kind };
     setOpen(null);
@@ -229,30 +252,76 @@ export function Settings({
     window.history.back();
   }
 
-  /** Null when the member was added, else the sentence that says why not. */
-  async function add(email: string, name: string): Promise<string | null> {
+  /** Null when the person was added or invited, else the sentence that says why not. */
+  async function invite(email: string, name: string): Promise<string | null> {
     if (running.current) return null;
     running.current = true;
-    setBusy("add");
+    setBusy("invite");
     setSaid("");
-    let answer: Added = { ok: false, reason: "failed" };
+    let answer: Invited = { ok: false, reason: "failed" };
     try {
-      answer = await actions.addMember(email, name);
+      answer = await actions.inviteMember(email, name);
     } catch {
       answer = { ok: false, reason: "failed" };
     }
     running.current = false;
     setBusy(null);
-    if (answer.ok !== true) {
-      const why = addFailure(answer.reason) ?? FAILED;
+    if (
+      answer.ok !== true ||
+      (answer.outcome !== "added" && answer.outcome !== "invited")
+    ) {
+      const why =
+        (answer.ok === false ? inviteFailure(answer.reason) : null) ?? FAILED;
       setSaid(why);
       return why;
     }
-    target.current = { button: "add" };
+    target.current = { button: "invite" };
     setOpen(null);
-    setSaid(`${name} added.`);
+    if (answer.outcome === "added") setSaid(`${name} added.`);
+    // The notice says it itself: it is a status.
+    else setNotice({ name, email, address: `${window.location.origin}/login` });
     router.refresh();
     return null;
+  }
+
+  function dismiss() {
+    target.current =
+      open?.kind === "invite" ? { form: "invite" } : { button: "invite" };
+    setNotice(null);
+  }
+
+  /** One step, no question: a revoked invitation can be made again. */
+  async function revokeInvitation(invitation: Invitation) {
+    if (running.current) return;
+    running.current = true;
+    setBusy(invitation.id);
+    setFailed((set) => without(set, invitation.id));
+    setSaid("");
+    let ok = false;
+    try {
+      ok = (await actions.revokeInvitation(invitation.id)).ok === true;
+    } catch {
+      ok = false;
+    }
+    running.current = false;
+    setBusy(null);
+    if (!ok) {
+      setFailed((set) => withId(set, invitation.id));
+      setSaid(FAILED);
+      // It may be refused because it is already accepted or revoked: read the list again.
+      router.refresh();
+      return;
+    }
+    // The row and its button go; the focus moves to where the next invitation starts.
+    target.current =
+      open?.kind === "invite" ? { form: "invite" } : { button: "invite" };
+    setGone((set) => withId(set, invitation.id));
+    // The sentence to pass on is no longer true once its invitation is revoked.
+    setNotice((n) =>
+      n && n.email.toLowerCase() === invitation.email.toLowerCase() ? null : n,
+    );
+    setSaid(`Invitation for ${invitation.name} revoked.`);
+    router.refresh();
   }
 
   function ask(id: string) {
@@ -386,22 +455,29 @@ export function Settings({
                     until they share them.
                   </p>
                 </div>
-                {data.isOwner && open?.kind !== "add" && (
+                {data.isOwner && open?.kind !== "invite" && (
                   <button
                     type="button"
-                    data-open="add"
+                    data-open="invite"
                     className={s.secondary}
-                    onClick={() => show("add")}
+                    onClick={() => show("invite")}
                   >
-                    Add a member
+                    Invite a member
                   </button>
                 )}
               </div>
-              {data.isOwner && open?.kind === "add" && (
-                <AddForm
-                  busy={busy === "add"}
-                  onAdd={add}
-                  onCancel={() => cancel("add")}
+              {data.isOwner && open?.kind === "invite" && (
+                <InviteForm
+                  busy={busy === "invite"}
+                  onInvite={invite}
+                  onCancel={() => cancel("invite")}
+                  onSay={setSaid}
+                />
+              )}
+              {data.isOwner && (
+                <InviteNotice
+                  notice={notice}
+                  onDismiss={dismiss}
                   onSay={setSaid}
                 />
               )}
@@ -419,6 +495,37 @@ export function Settings({
                 ))}
               </ul>
             </section>
+            {invitations.length > 0 && (
+              <section
+                aria-labelledby="settings-invitations"
+                className={s.section}
+              >
+                <div className={s.sectionHead}>
+                  <div className={s.headText}>
+                    <h2 className={s.label}>
+                      <span id="settings-invitations">Invitations</span>
+                      <span className={s.count}>{invitations.length}</span>
+                    </h2>
+                    <p className={s.note}>
+                      Not members yet. Each joins when they first sign in with
+                      the invited email.
+                    </p>
+                  </div>
+                </div>
+                <ul role="list" aria-label="Invitations" className={s.rows}>
+                  {invitations.map((i) => (
+                    <InvitationRow
+                      key={i.id}
+                      invitation={i}
+                      now={now}
+                      busy={busy === i.id}
+                      failed={failed.has(i.id)}
+                      onRevoke={() => void revokeInvitation(i)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            )}
           </div>
           <p aria-live="polite" className={s.srOnly}>
             {said}
@@ -534,6 +641,141 @@ function AgentRow({
         </div>
       )}
     </li>
+  );
+}
+
+/** An open invitation: who, where it was sent, until when, and Revoke in one step. */
+function InvitationRow({
+  invitation,
+  now,
+  busy,
+  failed,
+  onRevoke,
+}: {
+  invitation: Invitation;
+  now: number;
+  busy: boolean;
+  failed: boolean;
+  onRevoke: () => void;
+}) {
+  return (
+    <li className={s.item} aria-busy={busy || undefined}>
+      <div className={s.text}>
+        <p className={s.what}>
+          <span className={s.name}>{invitation.name}</span>
+        </p>
+        <p className={s.meta}>
+          <span className={s.address}>{invitation.email}</span>
+        </p>
+        <p className={s.meta}>
+          <span>Invited {shortDate(invitation.createdAt, now)}</span>
+          <span>Expires {shortDate(invitation.expiresAt, now)}</span>
+        </p>
+      </div>
+      <div className={s.side}>
+        <div className={s.actions}>
+          <button
+            type="button"
+            className={s.secondary}
+            aria-label={`Revoke invitation for ${invitation.name}`}
+            aria-disabled={busy || undefined}
+            onClick={onRevoke}
+          >
+            Revoke
+          </button>
+        </div>
+        {failed && <p className={s.refused}>{FAILED}</p>}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * The sentence the owner passes on to the invited person. The status element is always in the
+ * page, empty until there is something to say, so that what arrives in it is announced.
+ */
+function InviteNotice({
+  notice,
+  onDismiss,
+  onSay,
+}: {
+  notice: Notice | null;
+  onDismiss: () => void;
+  onSay: (text: string) => void;
+}) {
+  return (
+    <div className={notice ? s.notice : undefined}>
+      <div role="status" className={notice ? s.noticeText : undefined}>
+        {notice
+          ? inviteNotice(notice.name, notice.email, notice.address)
+          : null}
+      </div>
+      {notice && (
+        <NoticeActions
+          key={`${notice.email} ${notice.name}`}
+          address={notice.address}
+          onDismiss={onDismiss}
+          onSay={onSay}
+        />
+      )}
+    </div>
+  );
+}
+
+function NoticeActions({
+  address,
+  onDismiss,
+  onSay,
+}: {
+  address: string;
+  onDismiss: () => void;
+  onSay: (text: string) => void;
+}) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [byHand, setByHand] = useState(false);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  async function copy() {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(address);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    if (timer.current) clearTimeout(timer.current);
+    setByHand(!ok);
+    setCopied(ok);
+    onSay(ok ? "Address copied." : ADDRESS_BY_HAND);
+    if (ok) timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+  }
+
+  return (
+    <div className={s.noticeActions}>
+      {byHand && <p className={s.refused}>{ADDRESS_BY_HAND}</p>}
+      <button
+        type="button"
+        className={s.secondary}
+        data-copy
+        // A key that is still held repeats; only a fresh press copies.
+        onKeyDown={(e) => {
+          if (e.repeat) e.preventDefault();
+        }}
+        onClick={() => void copy()}
+      >
+        {copied ? "Copied" : "Copy address"}
+      </button>
+      <button type="button" className={s.secondary} onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
   );
 }
 
@@ -719,14 +961,14 @@ function ConnectForm({
   );
 }
 
-function AddForm({
+function InviteForm({
   busy,
-  onAdd,
+  onInvite,
   onCancel,
   onSay,
 }: {
   busy: boolean;
-  onAdd: (email: string, name: string) => Promise<string | null>;
+  onInvite: (email: string, name: string) => Promise<string | null>;
   onCancel: () => void;
   onSay: (text: string) => void;
 }) {
@@ -757,13 +999,13 @@ function AddForm({
         nameField.current,
       );
     setProblem(null);
-    setProblem(await onAdd(cleanEmail, cleanName));
+    setProblem(await onInvite(cleanEmail, cleanName));
   }
 
   return (
     <form
-      aria-label="Add a member"
-      data-form="add"
+      aria-label="Invite a member"
+      data-form="invite"
       className={s.form}
       noValidate
       aria-busy={busy || undefined}
@@ -813,16 +1055,14 @@ function AddForm({
           />
         </div>
       </div>
-      <p className={s.hint}>
-        They need an account already. Inviting someone new comes later.
-      </p>
+      <p className={s.hint}>{INVITE_HELP}</p>
       <div className={s.formFoot}>
         <button
           type="submit"
           className={s.primary}
           aria-disabled={busy || undefined}
         >
-          Add
+          Invite
         </button>
         <button
           type="button"
