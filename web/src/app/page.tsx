@@ -1,6 +1,7 @@
 import { HiveMap } from "../map/Map";
 import { Notice } from "../shell/Notice";
 import { createServerSupabase } from "../lib/supabase/server";
+import { loadInboxCount } from "./inbox/load-inbox";
 import { loadMap } from "./load-map";
 import { Refresher } from "./Refresher";
 
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const db = await createServerSupabase();
-  const result = await loadMap(db);
+  const [result, inbox] = await Promise.all([loadMap(db), loadInboxCount(db)]);
 
   if (result.state === "no-hive") {
     return (
@@ -24,7 +25,7 @@ export default async function Home() {
   return (
     <>
       <Refresher />
-      <HiveMap payload={result.payload} now={Date.now()} />
+      <HiveMap payload={result.payload} now={Date.now()} inbox={inbox} />
     </>
   );
 }

@@ -1,6 +1,7 @@
 import { Notice } from "../../shell/Notice";
 import { createServerSupabase } from "../../lib/supabase/server";
 import { Vault } from "../../vault/Vault";
+import { loadInboxCount } from "../inbox/load-inbox";
 import { preview, release, saveFolder, saveNote } from "./actions";
 import { loadVault } from "./load-vault";
 
@@ -16,11 +17,14 @@ export default async function VaultPage({
 }) {
   const q = await searchParams;
   const db = await createServerSupabase();
-  const result = await loadVault(db, {
-    ws: one(q.ws),
-    tab: one(q.tab),
-    note: one(q.note),
-  });
+  const [result, inbox] = await Promise.all([
+    loadVault(db, {
+      ws: one(q.ws),
+      tab: one(q.tab),
+      note: one(q.note),
+    }),
+    loadInboxCount(db),
+  ]);
 
   if (result.state === "no-hive") {
     return (
@@ -41,6 +45,7 @@ export default async function VaultPage({
       data={result.data}
       now={Date.now()}
       actions={{ saveNote, saveFolder, release, preview }}
+      inbox={inbox}
     />
   );
 }

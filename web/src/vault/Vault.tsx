@@ -53,10 +53,13 @@ export function Vault({
   data,
   now,
   actions,
+  inbox,
 }: {
   data: VaultData;
   now: number;
   actions: VaultActions;
+  /** How much waits in the inbox, for the rail. */
+  inbox?: number;
 }) {
   const base = usePathname();
   const tabKey = data.tab.kind === "shared" ? "shared" : data.tab.id;
@@ -144,7 +147,7 @@ export function Vault({
 
   return (
     <div className={s.root}>
-      <Shell current="vault" />
+      <Shell current="vault" inbox={inbox} />
       <main aria-label="Vault" className={s.panel}>
         <div className={s.bar}>
           <Tabs

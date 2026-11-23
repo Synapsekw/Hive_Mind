@@ -20,9 +20,12 @@ type Flat = Exclude<View, "orbit">;
 export function HiveMap({
   payload,
   now,
+  inbox,
 }: {
   payload: MapPayload;
   now: number;
+  /** How much waits in the inbox, for the rail. */
+  inbox?: number;
 }) {
   const [view, setView] = useState<View>("rings");
   // The topic filter and the selection are kept by name and by key, not by index, so they
@@ -156,7 +159,7 @@ export function HiveMap({
 
   return (
     <div className={s.root}>
-      <Shell current="map" agents={agents} />
+      <Shell current="map" agents={agents} inbox={inbox} />
       <main aria-label="Hive map" className={s.panel}>
         <TopBar
           stats={stats}
