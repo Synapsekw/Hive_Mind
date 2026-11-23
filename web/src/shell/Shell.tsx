@@ -1,7 +1,9 @@
-// The left rail, shared by the map, the vault and the gallery: the mark, the destinations (Map,
-// Vault, Gallery), the agents when given, the Appearance panel and sign out. It sits straight on
-// the wash, so it is the "chrome" scope (white text in light mode).
+// The left rail, shared by the map, the vault, the gallery and the inbox: the mark, the
+// destinations (Map, Vault, Gallery, Inbox with the number waiting), the agents when given, the
+// Appearance panel and sign out. It sits straight on the wash, so it is the "chrome" scope
+// (white text in light mode).
 import Link from "next/link";
+import { badge } from "../inbox/text";
 import { Appearance } from "./Appearance";
 import s from "./shell.module.css";
 
@@ -61,15 +63,31 @@ const DESTINATIONS = [
       </svg>
     ),
   },
+  {
+    key: "inbox",
+    href: "/inbox",
+    name: "Inbox",
+    icon: (
+      <svg aria-hidden="true" {...ICON}>
+        <path d="M2 9.5 4 3h8l2 6.5v3.5H2z" />
+        <path d="M2 9.5h3.5l1 1.5h3l1-1.5H14" />
+      </svg>
+    ),
+  },
 ] as const;
 
 export function Shell({
   current,
   agents = [],
+  inbox,
 }: {
-  current: "map" | "vault" | "gallery";
+  current: "map" | "vault" | "gallery" | "inbox";
   agents?: AgentRow[];
+  /** How many links and held notes wait for the person; shown on the Inbox row. */
+  inbox?: number;
 }) {
+  const waiting = inbox ?? 0;
+  const count = badge(waiting);
   return (
     <aside aria-label="Navigation" data-scope="chrome" className={s.rail}>
       <div className={s.brand}>
@@ -82,10 +100,20 @@ export function Shell({
             key={d.key}
             href={d.href}
             aria-current={d.key === current ? "page" : undefined}
+            aria-label={
+              d.key === "inbox" && count !== null
+                ? `Inbox, ${waiting} waiting`
+                : undefined
+            }
             className={`${s.row} ${s.control}`}
           >
             <span className={s.slot}>{d.icon}</span>
             <span className={s.rowLabel}>{d.name}</span>
+            {d.key === "inbox" && count !== null && (
+              <span aria-hidden="true" className={s.count}>
+                {count}
+              </span>
+            )}
           </Link>
         ))}
       </nav>
