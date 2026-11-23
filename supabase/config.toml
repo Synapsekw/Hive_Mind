@@ -3,3 +3,19 @@ project_id = "hive-mind"
 # The caller has no JWT yet: the agent token in the body is the credential.
 [functions.agent-session]
 verify_jwt = false
+
+# The caller's pass is an app's, issued by the OAuth server below, not a session
+# the gateway can check: the function hands it to connector_login and the
+# database verifies it.
+[functions.mcp]
+verify_jwt = false
+
+# Supabase Auth as the OAuth 2.1 server for the remote connector. The approval
+# window is the web app's /oauth/consent page; the address Auth sends people to
+# is the Site URL plus this path. Claude and ChatGPT register themselves, which
+# is what dynamic registration allows. The hosted project has the same three
+# switches in the dashboard (docs/hosted-db-bringup.md).
+[auth.oauth_server]
+enabled = true
+authorization_url_path = "/oauth/consent"
+allow_dynamic_registration = true
