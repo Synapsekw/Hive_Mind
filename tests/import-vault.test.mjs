@@ -359,6 +359,8 @@ test("personSession posts the password grant and returns the session", async () 
   assert.equal(init.headers["Content-Type"], "application/json");
   assert.equal(init.headers.Authorization, undefined);
   assert.deepEqual(JSON.parse(init.body), who);
+  assert.equal(init.redirect, "error");
+  assert.ok(init.signal instanceof AbortSignal, "no timeout on the sign-in");
 });
 
 test("a refused sign-in says so without the email or the password", async () => {
@@ -389,26 +391,43 @@ test("a refused sign-in says so without the email or the password", async () => 
     });
 });
 
-test("ownMembership reads the person's own oldest member row", async () => {
+test("ownMembership reads the person's member row and the hive's name", async () => {
   const { calls, fetchFn } = recording(200, [
-    { id: "member-1", hive_id: "hive-1" },
+    { id: "member-1", hive_id: "hive-1", hive: { name: "Synapse" } },
   ]);
   const mine = await ownMembership(
     { ...site, jwt: "session-jwt", userId: "user-1" },
     fetchFn,
   );
-  assert.deepEqual(mine, { memberId: "member-1", hiveId: "hive-1" });
+  assert.deepEqual(mine, {
+    memberId: "member-1",
+    hiveId: "hive-1",
+    hiveName: "Synapse",
+  });
 
   assert.equal(calls.length, 1);
   const [{ url, init }] = calls;
   assert.equal(
     url,
-    "https://hive.example/rest/v1/members?user_id=eq.user-1&order=created_at,id&limit=1&select=id,hive_id",
+    "https://hive.example/rest/v1/members?user_id=eq.user-1&order=created_at,id&limit=2&select=id,hive_id,hive:hives!hive_id(name)",
   );
   assert.equal(init.method ?? "GET", "GET");
   assert.equal(init.headers.apikey, "publishable-key");
   assert.equal(init.headers.Authorization, "Bearer session-jwt");
   assert.equal(init.body, undefined);
+  assert.equal(init.redirect, "error");
+  assert.ok(init.signal instanceof AbortSignal, "no timeout on the read");
+});
+
+test("ownMembership does not choose between two hives", async () => {
+  const { fetchFn } = recording(200, [
+    { id: "member-1", hive_id: "hive-1", hive: { name: "Synapse" } },
+    { id: "member-2", hive_id: "hive-2", hive: { name: "Other" } },
+  ]);
+  await assert.rejects(
+    ownMembership({ ...site, jwt: "session-jwt", userId: "user-1" }, fetchFn),
+    { message: "You are in more than one hive; the importer cannot choose" },
+  );
 });
 
 test("ownMembership refuses a person who is in no hive, or an answer it cannot use", async () => {
@@ -421,6 +440,20 @@ test("ownMembership refuses a person who is in no hive, or an answer it cannot u
     (e) => {
       assert.match(e.message, /401/);
       assert.ok(!e.message.includes("session-jwt"));
+      return true;
+    },
+  );
+  // No answer at all: the cause, which may quote the request, is dropped.
+  await assert.rejects(
+    ownMembership(args, async () => {
+      throw new Error("could not send Bearer session-jwt");
+    }),
+    (e) => {
+      assert.equal(
+        e.message,
+        "Could not read your membership: the hive is not reachable",
+      );
+      assert.ok(!`${e.stack}${String(e.cause ?? "")}`.includes("session-jwt"));
       return true;
     },
   );

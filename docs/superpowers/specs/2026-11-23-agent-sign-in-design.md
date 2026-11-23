@@ -34,7 +34,7 @@ Decided in the design (say so if any is wrong):
   as a standby signing key (Supabase's documented way to mint one's own JWTs). The private half
   lives only in the function's secrets.
 - **Revoking the legacy secret is not part of this slice.** It becomes possible; the owner does
-  it when every machine has switched.
+  it when every machine has switched and the function uses `HIVE_PUBLISHABLE_KEY`.
 - **The live tests sign in as real people** with test credentials from `.env`; parts that need
   a person skip without them.
 
@@ -80,11 +80,21 @@ the agent token is the credential.
 
 1. Refuse anything but POST with a JSON body holding one string `token` of 20 to 200
    characters (400). Bodies over 2 kB are refused (413).
-2. Call `agent_login` as `anon` with the publishable key. Unknown, expired or revoked → 401
-   `{ "error": "unknown, expired or revoked token" }`. The database unreachable → 502.
+2. Call `agent_login` as `anon` with the project's publishable key, read from the secret
+   `HIVE_PUBLISHABLE_KEY`. The Edge runtime's own `SUPABASE_ANON_KEY` is the legacy anon key,
+   which dies with the legacy JWT secret; it is only the fallback for a project where the
+   secret is not set. The status
+   mapping: only a 400 from `agent_login` (its "unknown, expired or revoked" refusal), or an
+   answer with no row, is a 401 `{ "error": "unknown, expired or revoked token" }`. Every other
+   refusal (a 401 or 403 for the key, a 404, a 5xx, a malformed row, no answer) is a 502: the
+   token was not judged, so the caller must not be told it is bad.
 3. Sign an ES256 JWT with the private key from the secret `AGENT_SIGNING_JWK`, header `kid` =
-   the key's id: `role`, `aud`, `sub`, `agent_id`, `workspace_id`, `trust_tier`, `iat`,
-   `exp = iat + 3600`, `iss = {SUPABASE_URL}/auth/v1`.
+   the id stored with the key, which must be the id the project shows for the standby key.
+   `role` and `aud` are fixed values (`authenticated`); `sub`, `agent_id`, `workspace_id` and
+   `trust_tier` are copied from `agent_login` after validation (uuids, a known tier); then
+   `iat`, `exp = iat + 3600`, `iss = {SUPABASE_URL}/auth/v1`, and a `session_id` that matches
+   no session. Supabase Auth looks the session up and refuses the identity, so an agent cannot
+   read or change the person's account although `sub` names that person.
 4. Answer 200 `{ access_token, expires_at, agent_id, user_id, member_id, workspace_id, hive_id,
 trust_tier }` with `Cache-Control: no-store`.
 
@@ -114,20 +124,28 @@ session (own oldest membership, as the web app does). `personJwt` is deleted.
 
 Agent identities come from the function. Person identities come from password sign-in with
 `HIVE_PERSON_EMAIL`, `HIVE_PERSON_PASSWORD` (and `_2` for the second member). Checks that need a
-person are skipped, with the reason printed, when those are absent. One new check: a token
-signed with a wrong key is refused by the database.
+person are skipped, with the reason printed, when those are absent. They must be the accounts
+behind the two agent tokens; where an agent belongs to the owner that is the owner's own
+password in `.env`, so leaving them out is the safe default. Two new checks: a token signed
+with a wrong key is refused by the database, and Supabase Auth refuses an agent's identity
+(the `session_id` claim).
 
 ### 5. Setting up the key
 
 `scripts/setup-agent-signing.sh <project-ref>`, run by the owner in their own terminal:
 
-1. Generates an ES256 key with `supabase gen signing-key` into a file only the owner can read.
-2. Stores the private key as the function secret `AGENT_SIGNING_JWK` (read from the file, never
-   printed).
+1. Takes the project's publishable key from `SUPABASE_ANON_KEY` in the environment, or asks
+   for it. It must start with `sb_publishable_`; a legacy anon key (`eyJ…`) is accepted only
+   after a warning and a yes.
+2. Generates an ES256 key with `supabase gen signing-key` into a file only the owner can read.
 3. Tells the owner to import that file's key in the dashboard (Project Settings → JWT Keys →
-   create standby key → import) and waits for Enter.
-4. Deploys the function (`supabase functions deploy agent-session --use-api --no-verify-jwt`).
-5. Deletes the file.
+   create standby key → import), waits for Enter, and asks which key id the dashboard shows.
+   A different id replaces the key's `kid` in what is stored.
+4. Only then stores the two function secrets in one call, read from a file and never printed:
+   `AGENT_SIGNING_JWK` and `HIVE_PUBLISHABLE_KEY`. Nothing in the project changes before this
+   step, and on a re-run the function signs with the old key until the new one is imported.
+5. Deploys the function (`supabase functions deploy agent-session --use-api --no-verify-jwt`).
+6. Deletes the file.
 
 ### 6. Docs
 
@@ -154,16 +172,27 @@ hour per MCP process, in place of one. The function does one indexed lookup (`to
 ## Known gaps (accepted)
 
 - Until the legacy secret is revoked it can still sign identities; this slice only removes our
-  need for it.
+  need for it. It may be revoked, and the legacy API keys disabled, only once every machine
+  runs a build from after this slice **and** the function is using `HIVE_PUBLISHABLE_KEY` (set
+  by the script), not the legacy anon key.
 - Anyone can call the function; a guess must hit a token with 244 random bits. No lockout.
+- The agent token is checked at sign-in, not on every call. An identity that was issued lasts
+  up to one hour after the agent is revoked.
 - The owner's password is typed into the importer; it is used once and not stored.
-- The function's key can sign as any member's agent or as a person. It lives only in the
-  function's secrets, and the function only ever signs what `agent_login` returned.
-- The second member's person checks need a password for the test account.
+- **The signing key is as powerful as the service-role key and the legacy secret.** The
+  database accepts whatever role a validly signed token claims, including `service_role`. The
+  key falls under the "server-only" invariant, and the only protection is that it never leaves
+  the function's secrets. Function secrets are readable by every Edge Function of the project,
+  so any function added later holds the key too. The function itself writes `role` and `aud`
+  as fixed values and copies only validated ids from `agent_login`.
+- The person checks in the live tests need the password of the account behind each agent
+  token. Where the agent belongs to the owner that is the owner's own password in `.env`;
+  leaving the four variables out, so that those checks skip, is the safe default.
 
 ## Review focus
 
 - No path from an agent token to an identity without `agent_id`.
 - The token, the JWT and the key appear in no log line and no error message.
-- The function adds no claim it did not get from `agent_login`.
+- The function adds no claim it did not get from `agent_login`, apart from the fixed `role`,
+  `aud`, `iss`, the times and the `session_id` that matches no session.
 - Nothing in the repo reads `SUPABASE_JWT_SECRET`.

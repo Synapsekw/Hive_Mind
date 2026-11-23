@@ -64,6 +64,8 @@ export async function signIn(
         method: "POST",
         headers: { apikey: anonKey, "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
+        // The agent token goes to this address and nowhere it points to.
+        redirect: "error",
         signal: AbortSignal.timeout(15_000),
       },
     );

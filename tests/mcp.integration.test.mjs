@@ -130,6 +130,20 @@ async function personSignIn(email, password) {
   return { jwt: json.access_token, userId: json.user?.id };
 }
 
+// The environment without any person's credentials, for a server child.
+const withoutPeople = (env) => {
+  const rest = { ...env };
+  for (const n of [
+    "HIVE_PERSON_EMAIL",
+    "HIVE_PERSON_PASSWORD",
+    "HIVE_PERSON_EMAIL_2",
+    "HIVE_PERSON_PASSWORD_2",
+  ])
+    delete rest[n];
+  return rest;
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const b64url = (v) => Buffer.from(JSON.stringify(v)).toString("base64url");
 const decode = (part) => JSON.parse(Buffer.from(part, "base64url").toString());
 
@@ -162,14 +176,8 @@ describe("MCP server against a live database", { skip }, () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [SERVER],
-      // The server gets the agent token only, never a person's password.
-      env: {
-        ...process.env,
-        HIVE_PERSON_EMAIL: "",
-        HIVE_PERSON_PASSWORD: "",
-        HIVE_FILES_ROOT: work,
-        ...env,
-      },
+      // The server gets the agent token only, never a person's email or password.
+      env: { ...withoutPeople(process.env), HIVE_FILES_ROOT: work, ...env },
       stderr: "pipe",
     });
     const c = new Client({ name: "hive-integration-test", version: "0.0.0" });
@@ -498,18 +506,79 @@ describe("MCP server against a live database", { skip }, () => {
     const none = await agentSession({});
     assert.equal(none.status, 400, "a body without a token was not a 400");
     assert.deepEqual(Object.keys(none.json ?? {}), ["error"]);
+
+    // The body is the token and nothing else: no caller picks its own claims.
+    const extra = await agentSession({
+      token: `hive_${"0".repeat(64)}`,
+      role: "service_role",
+    });
+    assert.equal(extra.status, 400, "a body with an extra key was not a 400");
+    assert.deepEqual(Object.keys(extra.json ?? {}), ["error"]);
   });
 
   test("an agent JWT from agent-session names the agent and lasts an hour", () => {
     const [header, payload] = agentJwt.split(".");
     assert.equal(decode(header).alg, "ES256", "alg");
+    assert.equal(typeof decode(header).kid, "string", "kid");
+    assert.ok(decode(header).kid, "kid");
     const claims = decode(payload);
+    assert.deepEqual(
+      Object.keys(claims).sort(),
+      [
+        "role",
+        "aud",
+        "sub",
+        "agent_id",
+        "workspace_id",
+        "trust_tier",
+        "session_id",
+        "iat",
+        "exp",
+        "iss",
+      ].sort(),
+      "the claim names",
+    );
     assert.equal(claims.agent_id, me.agent_id, "agent_id");
     assert.equal(claims.sub, me.user_id, "sub");
     assert.equal(claims.workspace_id, me.workspace_id, "workspace_id");
     assert.equal(claims.trust_tier, me.trust_tier, "trust_tier");
+    assert.equal(claims.aud, "authenticated", "aud");
     assert.equal(claims.role, "authenticated", "role");
+    assert.match(String(claims.session_id), UUID, "session_id");
     assert.equal(claims.exp - claims.iat, 3600, "exp - iat");
+  });
+
+  // The function gives every agent identity a session_id that matches no
+  // session, so an agent can never read or change the person's account. If this
+  // check fails, agents can take over their person's account and the build
+  // must stop.
+  test("Auth refuses an agent identity", async () => {
+    const res = await fetch(`${URL_}/auth/v1/user`, {
+      headers: { apikey: ANON, Authorization: `Bearer ${agentJwt}` },
+    });
+    const body = await res.text();
+    assert.notEqual(res.status, 200, "Auth let an agent read the account");
+    assert.ok(
+      res.status === 401 || res.status === 403,
+      `Auth answered ${res.status} to an agent identity, not 401 or 403`,
+    );
+    // The body is not quoted in a failure: it would be the person's account.
+    if (EMAIL)
+      assert.ok(
+        !body.toLowerCase().includes(EMAIL.toLowerCase()),
+        "the answer carries the person's email",
+      );
+    let json = null;
+    try {
+      json = JSON.parse(body);
+    } catch {
+      // Not JSON; the text check below still applies.
+    }
+    assert.notEqual(json?.id, me.user_id, "the answer carries the user id");
+    assert.ok(
+      !new RegExp(`"id"\\s*:\\s*"${me.user_id}"`).test(body),
+      "the answer carries the user id",
+    );
   });
 
   test("the database refuses a JWT with the right claims signed by another key", async () => {

@@ -32,31 +32,49 @@ const HIVE_AGENT_TOKEN = env("HIVE_AGENT_TOKEN");
 let session: Session | undefined;
 let client: SupabaseClient | undefined;
 let expiresAt = 0;
+let signingIn: Promise<{ db: SupabaseClient; me: Session }> | undefined;
 
 // Sign in again when the hour-long identity is close to running out. This also
 // picks up a revoked token within the hour. The identity comes from the
 // agent-session function; this machine holds the agent token and nothing else.
-async function db(): Promise<{ db: SupabaseClient; me: Session }> {
+// Calls that arrive while a sign-in is under way share it.
+function db(): Promise<{ db: SupabaseClient; me: Session }> {
   if (client && session && Date.now() < expiresAt - 60_000)
-    return { db: client, me: session };
+    return Promise.resolve({ db: client, me: session });
 
-  const {
-    accessToken,
-    expiresAt: expiresAtSeconds,
-    me,
-  } = await signIn({
+  signingIn ??= signIn({
     url: SUPABASE_URL,
     anonKey: SUPABASE_ANON_KEY,
     token: HIVE_AGENT_TOKEN,
-  });
-
-  client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  });
-  session = me;
-  expiresAt = expiresAtSeconds * 1000;
-  return { db: client, me };
+  })
+    .then(({ accessToken, expiresAt: expiresAtSeconds, me }) => {
+      const fresh: SupabaseClient = createClient(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+        {
+          auth: { persistSession: false, autoRefreshToken: false },
+          global: {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            // A 401 means the identity is no longer accepted (expired early,
+            // signing key rotated). That call fails; the next one signs in
+            // again instead of failing until a restart.
+            fetch: async (input, init) => {
+              const res = await fetch(input, init);
+              if (res.status === 401 && client === fresh) expiresAt = 0;
+              return res;
+            },
+          },
+        },
+      );
+      client = fresh;
+      session = me;
+      expiresAt = expiresAtSeconds * 1000;
+      return { db: fresh, me };
+    })
+    .finally(() => {
+      signingIn = undefined;
+    });
+  return signingIn;
 }
 
 // Everything read from the hive was written by other people and agents.

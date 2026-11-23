@@ -350,6 +350,9 @@ export async function personSession(
       method: "POST",
       headers: { apikey: anonKey, "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
+      // The password goes to this address and nowhere it points to.
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
     });
   } catch {
     throw new Error("Sign-in failed: the hive is not reachable");
@@ -373,17 +376,29 @@ export async function personSession(
   return { jwt, userId };
 }
 
-// The person's own oldest membership, read with their session: the member row
-// and hive the notes go under. The database decides what they may see.
+// The person's own membership, read with their session: the member row and
+// hive the notes go under. The database decides what they may see. Someone in
+// more than one hive is refused: nothing here guesses where notes belong.
 export async function ownMembership(
   { url, anonKey, jwt, userId },
   fetchFn = fetch,
 ) {
-  const res = await fetchFn(
-    `${url}/rest/v1/members?user_id=eq.${encodeURIComponent(userId)}` +
-      "&order=created_at,id&limit=1&select=id,hive_id",
-    { headers: { apikey: anonKey, Authorization: `Bearer ${jwt}` } },
-  );
+  let res;
+  try {
+    res = await fetchFn(
+      `${url}/rest/v1/members?user_id=eq.${encodeURIComponent(userId)}` +
+        "&order=created_at,id&limit=2&select=id,hive_id,hive:hives!hive_id(name)",
+      {
+        headers: { apikey: anonKey, Authorization: `Bearer ${jwt}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+  } catch {
+    throw new Error(
+      "Could not read your membership: the hive is not reachable",
+    );
+  }
   const text = await res.text();
   if (!res.ok) {
     let detail = text;
@@ -394,9 +409,18 @@ export async function ownMembership(
     }
     throw new Error(`Could not read your membership: ${res.status} ${detail}`);
   }
-  const [row] = JSON.parse(text);
+  const rows = JSON.parse(text);
+  if (rows.length > 1)
+    throw new Error(
+      "You are in more than one hive; the importer cannot choose",
+    );
+  const [row] = rows;
   if (!row) throw new Error("You are not in a hive");
-  return { memberId: row.id, hiveId: row.hive_id };
+  return {
+    memberId: row.id,
+    hiveId: row.hive_id,
+    hiveName: row.hive?.name ?? null,
+  };
 }
 
 // Email and password: from the environment when both are there, otherwise
@@ -480,22 +504,30 @@ async function main(argv) {
     process.exit(2);
   }
 
-  const site = { url: env("SUPABASE_URL"), anonKey: env("SUPABASE_ANON_KEY") };
+  const site = {
+    url: env("SUPABASE_URL").replace(/\/+$/, ""),
+    anonKey: env("SUPABASE_ANON_KEY"),
+  };
   const isTTY = Boolean(process.stdin.isTTY);
   const fromEnv = env("HIVE_PERSON_EMAIL") && env("HIVE_PERSON_PASSWORD");
   const prompts = !fromEnv && isTTY ? terminalPrompts() : {};
-  let session;
+  let session, email;
   try {
-    // The password lives only inside this call.
-    session = await personSession({
-      ...site,
-      ...(await personCredentials({ env: process.env, isTTY, ...prompts })),
+    // The password lives only inside this block.
+    const who = await personCredentials({
+      env: process.env,
+      isTTY,
+      ...prompts,
     });
+    email = who.email;
+    session = await personSession({ ...site, ...who });
   } finally {
     prompts.close?.();
     delete process.env.HIVE_PERSON_PASSWORD;
   }
-  const mine = await ownMembership({ ...site, ...session });
+  const { hiveName, ...mine } = await ownMembership({ ...site, ...session });
+  // Said before anything is written, and on a dry run too.
+  console.error(`Importing into hive "${hiveName}" as ${email}`);
 
   const report = await importVault({
     folder,

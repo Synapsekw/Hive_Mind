@@ -48,8 +48,12 @@ pnpm db:start         # local Supabase in Docker; applies the migrations
 ```
 
 `supabase status` then prints the local URL and keys. Copy `.env.example` to `.env` and fill it
-in: the project URL, the publishable key and an agent token. No JWT secret is needed any more;
-remove `SUPABASE_JWT_SECRET` from an older `.env`. The hosted dev project is `tokyttkztrkjvkaksdnh`; all seven migrations are applied to it and it holds
+in: the project URL, the publishable key (it starts with `sb_publishable_`; not the legacy anon
+key) and an agent token. No JWT secret is needed any more; remove `SUPABASE_JWT_SECRET` from an
+older `.env`. The four `HIVE_PERSON_*` values are optional and safest left empty: `pnpm
+test:live` needs the password of the account behind the agent token, which on a hive whose
+agent belongs to the owner is the owner's own, and skips its person checks without them. The
+hosted dev project is `tokyttkztrkjvkaksdnh`; all seven migrations are applied to it and it holds
 one hive (see [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md)).
 
 ### Run the web app
@@ -122,6 +126,11 @@ function up once per project with `scripts/setup-agent-signing.sh <project-ref>`
 terminal; see
 [docs/hosted-db-bringup.md](docs/hosted-db-bringup.md#set-up-agent-sign-in). If the server
 reports that `agent-session` is missing, that step has not been done on the project in `.env`.
+On the dev project it is done. The key the function signs with is as powerful as the
+service-role key and lives only in the function's secrets
+([docs/security.md](docs/security.md#3-identity-and-tokens)). The project's legacy JWT secret
+may be revoked, and its legacy API keys disabled, only once every machine runs a build from
+after 2026-11-23 and the function uses the secret `HIVE_PUBLISHABLE_KEY` that the script stores.
 
 3. Build the server and register it with Claude Code. The server reads its settings from the
    repo's `.env`, so no secret is copied into a client config:

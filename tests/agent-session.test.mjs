@@ -73,6 +73,9 @@ function stub(answer = () => Response.json([ROW])) {
 
 const now = () => NOW_MS;
 
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 // Everything the function prints lands here instead of in the test output.
 const logged = [];
 for (const name of ["log", "info", "warn", "error", "debug", "trace"]) {
@@ -143,7 +146,9 @@ test("1. a good token gets a one-hour ES256 identity", async () => {
     typ: "JWT",
     kid: "test-kid-1",
   });
-  assert.deepEqual(b64urlToJson(parts[1]), {
+  const { session_id, ...claims } = b64urlToJson(parts[1]);
+  assert.match(session_id, UUID_V4);
+  assert.deepEqual(claims, {
     role: "authenticated",
     aud: "authenticated",
     sub: ROW.user_id,
@@ -154,6 +159,79 @@ test("1. a good token gets a one-hour ES256 identity", async () => {
     exp: NOW_S + 3600,
     iss: `${URL_}/auth/v1`,
   });
+});
+
+test("1c. every token carries a fresh session_id that is no id from the database", async () => {
+  const key = await makeKey();
+  const env = envWith(JSON.stringify(key.jwk));
+  const claimsOf = async (answer) => {
+    const res = await handle(good(), env, stub(answer).fn, now);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.session_id, undefined);
+    return b64urlToJson(body.access_token.split(".")[1]);
+  };
+
+  const first = await claimsOf();
+  const second = await claimsOf();
+  for (const claims of [first, second]) {
+    assert.match(claims.session_id, UUID_V4);
+    for (const field of Object.keys(ROW)) {
+      assert.notEqual(claims.session_id, ROW[field], field);
+    }
+    assert.deepEqual(Object.keys(claims), [
+      "role",
+      "aud",
+      "sub",
+      "agent_id",
+      "workspace_id",
+      "trust_tier",
+      "session_id",
+      "iat",
+      "exp",
+      "iss",
+    ]);
+  }
+  assert.notEqual(first.session_id, second.session_id);
+
+  // A session_id column in the row is not what gets signed.
+  const fromRow = "66666666-6666-4666-8666-666666666666";
+  const third = await claimsOf(() =>
+    Response.json([{ ...ROW, session_id: fromRow }]),
+  );
+  assert.match(third.session_id, UUID_V4);
+  assert.notEqual(third.session_id, fromRow);
+});
+
+test("1d. the signing key is imported once per key string", async () => {
+  const one = JSON.stringify((await makeKey("cache-one")).jwk);
+  const two = JSON.stringify((await makeKey("cache-two")).jwk);
+  const kidOf = async (signingJwk) => {
+    const res = await handle(good(), envWith(signingJwk), stub().fn, now);
+    assert.equal(res.status, 200);
+    const jwt = (await res.json()).access_token;
+    return b64urlToJson(jwt.split(".")[0]).kid;
+  };
+
+  const importKey = mock.method(crypto.subtle, "importKey");
+  try {
+    assert.equal(await kidOf(one), "cache-one");
+    assert.equal(await kidOf(one), "cache-one");
+    assert.equal(await kidOf(one), "cache-one");
+    assert.equal(importKey.mock.callCount(), 1);
+
+    // Another string is another key: it is imported, and it is the one used.
+    assert.equal(await kidOf(two), "cache-two");
+    assert.equal(importKey.mock.callCount(), 2);
+    assert.equal(await kidOf(two), "cache-two");
+    assert.equal(importKey.mock.callCount(), 2);
+
+    assert.equal(await kidOf(one), "cache-one");
+    assert.equal(await kidOf(`${one} `), "cache-one");
+    assert.equal(importKey.mock.callCount(), 4);
+  } finally {
+    importKey.mock.restore();
+  }
 });
 
 test("1b. the key may be an array (the first is used) or a bare JWK without the extras", async () => {
@@ -222,9 +300,8 @@ test("3. a token the database refuses is a 401 and nothing is signed", async () 
         },
         { status: 400 },
       ),
+    () => new Response("not json", { status: 400 }),
     () => Response.json([]),
-    () => Response.json({ message: "no" }, { status: 404 }),
-    () => new Response("not json", { status: 401 }),
   ];
   for (const answer of refusals) {
     const sign = mock.method(crypto.subtle, "sign");
@@ -237,6 +314,35 @@ test("3. a token the database refuses is a 401 and nothing is signed", async () 
         now,
       );
       await expectError(res, 401, "unknown, expired or revoked token");
+      assert.equal(db.calls.length, 1);
+      assert.equal(sign.mock.callCount(), 0);
+    } finally {
+      sign.mock.restore();
+    }
+  }
+});
+
+test("3b. a database that refuses the function itself is a 502, not a bad token", async () => {
+  const key = await makeKey();
+  for (const status of [401, 403, 404, 405, 406, 409, 422, 429, 499]) {
+    const sign = mock.method(crypto.subtle, "sign");
+    try {
+      const db = stub(() =>
+        Response.json({ message: "Invalid API key" }, { status }),
+      );
+      let res;
+      const lines = await withConsoleSpy(async () => {
+        res = await handle(
+          good(),
+          envWith(JSON.stringify(key.jwk)),
+          db.fn,
+          now,
+        );
+      });
+      await expectError(res, 502, "the hive is not reachable");
+      assert.deepEqual(lines, [
+        `agent-session: agent_login refused the function (${status})`,
+      ]);
       assert.equal(db.calls.length, 1);
       assert.equal(sign.mock.callCount(), 0);
     } finally {
@@ -492,6 +598,9 @@ test("8. no answer and no log line carries the token, the JWT or the key", async
     await run(good(), env, () =>
       Response.json({ message: `leak ${TOKEN}` }, { status: 500 }),
     );
+    await run(good(), env, () =>
+      Response.json({ message: `Invalid API key ${ANON}` }, { status: 401 }),
+    );
     await run(good(), env, () => Response.json([{ ...ROW, agent_id: TOKEN }]));
     await run(post(JSON.stringify({ token: TOKEN, agent_id: "x" })), env);
     await run(post(`{"token":"${TOKEN}"`), env);
@@ -512,11 +621,11 @@ test("8. no answer and no log line carries the token, the JWT or the key", async
 
   // Every failure says why, in a line of its own.
   const failures = answers.filter((a) => a.status !== 200);
-  assert.equal(failures.length, 14);
+  assert.equal(failures.length, 15);
   assert.equal(lines.length, failures.length);
 
   for (const line of lines) {
-    assert.match(line, /^agent-session: [a-z0-9 _-]+$/i);
+    assert.match(line, /^agent-session: [a-z0-9 _()-]+$/i);
     assert.ok(line.length < 120);
     assert.ok(!line.includes(jwt));
     for (const secret of secrets) assert.ok(!line.includes(secret));

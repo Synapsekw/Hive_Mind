@@ -142,8 +142,7 @@ function tokenFrom(text: string): string | null {
 // writes it: one JWK, or a list whose first entry is used. Only the fields
 // that are the key itself are imported; `use`, `key_ops`, `alg` and `ext`
 // describe it and can make importKey refuse a perfectly good key.
-async function loadKey(raw: string | undefined): Promise<SigningKey | null> {
-  if (!raw) return null;
+async function importSigningKey(raw: string): Promise<SigningKey | null> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -169,6 +168,20 @@ async function loadKey(raw: string | undefined): Promise<SigningKey | null> {
   } catch {
     return null;
   }
+}
+
+// The imported key of this function instance, kept with the exact secret text
+// it came from, so the JWK is parsed and imported once and not per request. A
+// different text is a different key and is imported afresh; a key that could
+// not be imported is not remembered.
+let imported: { raw: string; signing: SigningKey } | null = null;
+
+async function loadKey(raw: string | undefined): Promise<SigningKey | null> {
+  if (!raw) return null;
+  if (imported !== null && imported.raw === raw) return imported.signing;
+  const signing = await importSigningKey(raw);
+  if (signing !== null) imported = { raw, signing };
+  return signing;
 }
 
 // Exactly one row with exactly the types `agent_login` declares; anything
@@ -256,9 +269,22 @@ export async function handle(
       redirect: "error",
       signal: AbortSignal.timeout(DATABASE_TIMEOUT_MS),
     });
-    if (res.status >= 400 && res.status < 500) {
+    // Only 400 is the database raising "unknown, expired or revoked". Any
+    // other 4xx (401, 403, 404, 429, ...) is the database refusing this
+    // function, not the token: a wrong or revoked key, a missing grant, a
+    // rate limit. That is ours to fix, so the agent is not told its token
+    // is bad.
+    if (res.status === 400) {
       await res.body?.cancel().catch(() => {});
-      return fail(401, REFUSED, `agent_login answered ${res.status}`);
+      return fail(401, REFUSED, "agent_login answered 400");
+    }
+    if (res.status > 400 && res.status < 500) {
+      await res.body?.cancel().catch(() => {});
+      return fail(
+        502,
+        UNREACHABLE,
+        `agent_login refused the function (${res.status})`,
+      );
     }
     if (res.status !== 200) {
       await res.body?.cancel().catch(() => {});
@@ -288,6 +314,14 @@ export async function handle(
       agent_id: identity.agent_id,
       workspace_id: identity.workspace_id,
       trust_tier: identity.trust_tier,
+      // Makes the token useless at Supabase Auth. `sub` is the member's own
+      // user id, so without this an agent could call /auth/v1/user and
+      // change the person's password. Auth refuses a token whose session_id
+      // matches no session; PostgREST and Storage ignore the claim. Fresh
+      // and random on every token, never an id from the database. Guarded
+      // live by tests/mcp.integration.test.mjs, "Auth refuses an agent
+      // identity".
+      session_id: crypto.randomUUID(),
       iat,
       exp,
       iss: `${base}/auth/v1`,

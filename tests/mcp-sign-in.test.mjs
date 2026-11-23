@@ -69,6 +69,12 @@ test("posts the token to the agent-session function", async () => {
   assert.deepEqual(JSON.parse(init.body), { token: TOKEN });
 });
 
+test("the request does not follow a redirect", async () => {
+  const { calls, fetchFn } = stub(json(200, good()));
+  await signIn(args, fetchFn);
+  assert.equal(calls[0].init.redirect, "error");
+});
+
 test("a trailing slash on the url does not double up", async () => {
   const { calls, fetchFn } = stub(json(200, good()));
   await signIn({ ...args, url: `${URL_}/` }, fetchFn);

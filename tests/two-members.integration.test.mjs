@@ -442,7 +442,18 @@ describe("two members and their agents on a live database", { skip }, () => {
           title: "forged",
         },
       });
-      assert.ok(r.status >= 400, `a forged note was accepted: ${r.text}`);
+      if (r.status < 400) {
+        // Only a person can delete it; say where it is when none is signed in.
+        if (other.person) await cleanUp(other);
+        assert.fail(
+          `a forged note was accepted (${r.status}). ` +
+            (other.person
+              ? "It was deleted again."
+              : `It is still there: a person must delete the note at ` +
+                `${DIR}forged.md in workspace ${other.me.workspace_id}; ` +
+                `set ${other.names.join(" and ")} to have the test do it.`),
+        );
+      }
     }
   });
 
