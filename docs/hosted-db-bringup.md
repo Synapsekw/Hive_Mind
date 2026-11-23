@@ -11,6 +11,8 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
   private `files` storage bucket.
 - Migration `20261122083415_map_graph` is applied too, through the Supabase MCP and re-stamped
   like the earlier ones. It adds `map_graph` and `note_topic` for the web app's map.
+- Migration `20261123071625_inbox` is **not applied yet**. It adds `inbox` and `inbox_count` for
+  the web app's inbox; until it is applied `/inbox` cannot load and the rail shows no count.
 - One hive (`Synapse`), one owner member (`Danijel`), one workspace (`Main`), one agent (`Claude`,
   provider `claude`, trust tier `vendor`).
 - The agent token is in the owner's local `.env` as `HIVE_AGENT_TOKEN`. Only its hash is stored in

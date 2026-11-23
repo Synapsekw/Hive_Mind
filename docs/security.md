@@ -70,6 +70,11 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   Only people draw the map.
 - Through it, members see colleagues' agents by provider, trust tier and last sign-in, never by
   name. An agent's name is returned only to its own member.
+- The inbox is read through `inbox` and `inbox_count`, for people only. About a colleague's note
+  on the other side of a proposed link they return what the map returns for a locked dot: the
+  owner's name and the note's topic, and the title only when the member may already read the
+  note. A link with a held note on either side is left out. The link's own row, with the two
+  note ids, was already readable to both owners.
 
 ## 5. Data handling
 

@@ -229,6 +229,8 @@ and message are logged.
 - **The hosted database needs the migration** before `/inbox` works against it. Until then the
   page says it could not load and the rail shows no count. Applying it is a step for Danijel
   (runbook: `docs/hosted-db-bringup.md`; re-stamp if applied through the Supabase MCP).
+- The link's own row (with both note ids) is readable to both owners under `links_select`, as
+  before this slice. `inbox` itself returns no id of the other note.
 - Accepting or declining a link is not written to the audit log (already listed in the
   north-star); not fixed here.
 - A link to or from a held note stays out of the inbox until the note is released.

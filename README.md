@@ -73,7 +73,12 @@ The gallery (**Gallery** in the left rail) shows the files you may read as cards
 PDFs open in a full-window viewer; every file downloads; your own files can be deleted. A file is
 shared exactly as the note it is attached to, so sharing is changed on the note, in the vault.
 
-`/dev/map`, `/dev/vault` and `/dev/gallery` show the three screens on sample data, without an
+The inbox (**Inbox** in the left rail, with the number waiting) lists what needs your own
+decision: links an agent proposed between one of your notes and a colleague's, and notes held
+from a self-hosted agent. Accepting a link lets each owner read the other's linked note once both
+have accepted; declining is final. It needs the `inbox` migration on the database.
+
+`/dev/map`, `/dev/vault`, `/dev/gallery` and `/dev/inbox` show the screens on sample data, without an
 account; `/dev/notice` shows the failed-load notice.
 `pnpm --filter @hive-mind/web test:e2e` runs the browser tests; run
 `pnpm --filter @hive-mind/web exec playwright install chromium` once first. The browser tests are
