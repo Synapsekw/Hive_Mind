@@ -18,7 +18,7 @@ export function tierReason(tier: Tier): string {
 export function theirNote(item: LinkItem): string {
   const { memberName, topic, title } = item.theirs;
   return title === null
-    ? `a private note of ${memberName} in ${topic}`
+    ? `a note of ${memberName} in ${topic}, not shared with you`
     : `${memberName}'s note "${title}" in ${topic}`;
 }
 

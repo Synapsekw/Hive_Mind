@@ -58,7 +58,7 @@ count on the rail so the person knows without opening it.
 ## Constraints found in the project
 
 - `respond_to_link(p_link, p_accept)` is for people only. Accepting sets the caller's side; both
-  sides accepted makes the link `accepted`. Declining by either side is final.
+  sides accepted makes the link `accepted`. A declined link cannot be accepted afterwards.
 - **An accepted link opens the two notes to each other** (`can_read_note`, last clause). Accepting
   is therefore a sharing decision, and the screen must say so in plain words.
 - Two notes of the same owner are linked without a handshake, so a proposed link always has two
@@ -152,15 +152,17 @@ shown only when it has items:
 
 - **Links to decide.** One row per link:
   - What: "Link your note **{my title}** with a note of {name}" plus the topic, and the title
-    when it is readable ("a private note in Clients/Acme" otherwise).
+    when it is readable ("a note of {name} in Clients/Acme, not shared with you" otherwise).
   - Who: "Proposed by your agent" or "Proposed from {name}'s side".
   - Why: the tier in words — 1 "Same client or project", 2 "One note refers to the other",
     3 "Shared topic", 4 "Similar text".
   - Effect, always visible: "Accepting lets {name} read this note and lets you read theirs."
     then "It takes effect when {name} accepts too." or "{name} has accepted, so it takes effect
     at once."
-  - Actions: **Accept** (primary) and **Decline**. Decline asks once in place ("Decline for
-    good?" with **Decline** and **Keep**), because it cannot be undone.
+  - Actions: **Accept** (primary) and **Decline**. Decline asks once in place ("Decline this
+    link?" with **Decline** and **Keep**), because a declined link cannot be accepted
+    afterwards. A confirming press within half a second of the question is ignored, so a double
+    click declines nothing.
   - The person's own note title links to the note in the vault.
 - **Held notes.** One row per note: title, path, "Written by {agent}" and the date; **Release**
   (primary) and **Open in vault**. One line under the section label says what release does:
@@ -207,9 +209,9 @@ and message are logged.
   100 rows and read through the two partial indexes; no body is fetched.
 - **Each decision:** one write (`respond_to_link` or the note update), then one refresh of the
   page (the same two reads). Opening the decline question is client state: 0 round trips.
-- **Every other page:** one extra `inbox_count` call, started in parallel with the page's own
-  load, so it adds no step to the chain. It reads the same two partial indexes and returns one
-  integer.
+- **Every other page:** two small extra reads (the hive lookup, then `inbox_count`), started in
+  parallel with the page's own load, so they add no step to the chain. The count reads the same
+  two partial indexes and returns one integer.
 - No tabs, filters or sorts on this screen.
 
 ## Independent units (for the plan)
@@ -235,8 +237,15 @@ and message are logged.
   north-star); not fixed here.
 - A link to or from a held note stays out of the inbox until the note is released.
 - The count on other pages is as old as the page load; it does not update live.
-- A declined link cannot be proposed again (`unique (from_note, to_note)`); decline is final by
-  design of the database, and the screen says so.
+- **Decline is not fully final in the database** (found in review; behaviour older than this
+  slice). The same pair cannot be proposed again in the same direction
+  (`unique (from_note, to_note)`), but the reverse direction can, and it then waits in both
+  inboxes again. Both directions proposed at once show as two rows.
+- **`respond_to_link(…, false)` declines whatever the link's status**, so declining from a stale
+  tab after the link was accepted closes the two notes to each other again. Whether an owner
+  should be able to undo an accepted link this way is a product decision; a fix either way is a
+  new migration with a test.
+- A failed answer re-reads the page, so a row answered elsewhere leaves instead of failing again.
 
 ## Review focus
 

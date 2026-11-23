@@ -77,7 +77,9 @@ test("both sections show with their counts; a private note has no title; the eff
 
   // A note the person may not read: the owner and the topic, never a title.
   const own = linkRow(page, OWN.mine.title);
-  await expect(own).toContainText("a private note of Ahmed in clients");
+  await expect(own).toContainText(
+    "a note of Ahmed in clients, not shared with you",
+  );
   await expect(own).toContainText(theirNote(OWN));
   await expect(own).not.toContainText('note "');
   await expect(own).toContainText("Proposed by your agent");
@@ -137,14 +139,14 @@ test("Decline asks first; Keep restores the two buttons; the second Decline remo
   await open(page);
   const target = linkRow(page, READABLE.mine.title);
   await target.getByRole("button", { name: "Decline" }).click();
-  await expect(target).toContainText("Decline for good?");
+  await expect(target).toContainText("Decline this link?");
   await expect(target.getByRole("button", { name: "Accept" })).toHaveCount(0);
   // The safe answer has the focus.
   await expect(target.getByRole("button", { name: "Keep" })).toBeFocused();
   expect(await calls(page)).toEqual([]);
 
   await target.getByRole("button", { name: "Keep" }).click();
-  await expect(target).not.toContainText("Decline for good?");
+  await expect(target).not.toContainText("Decline this link?");
   await expect(target.getByRole("button", { name: "Accept" })).toBeVisible();
   await expect(target.getByRole("button", { name: "Decline" })).toBeFocused();
   await expect(target.getByRole("button", { name: "Keep" })).toHaveCount(0);
@@ -152,7 +154,12 @@ test("Decline asks first; Keep restores the two buttons; the second Decline remo
   await expect(rows(page, "Links to decide")).toHaveCount(3);
 
   await target.getByRole("button", { name: "Decline" }).click();
-  await expect(target).toContainText("Decline for good?");
+  await expect(target).toContainText("Decline this link?");
+  // A confirming press straight after the question is taken as a double click and ignored.
+  await target.getByRole("button", { name: "Decline" }).click();
+  await expect(target).toContainText("Decline this link?");
+  expect(await calls(page)).toEqual([]);
+  await page.waitForTimeout(600);
   await target.getByRole("button", { name: "Decline" }).click();
   await expect(target).toHaveCount(0);
   await expect(rows(page, "Links to decide")).toHaveCount(2);
@@ -203,6 +210,8 @@ test("a failed action keeps the row and says so", async ({ page }) => {
   // A refused decline and a refused release keep their rows as well.
   const other = linkRow(page, READABLE.mine.title);
   await other.getByRole("button", { name: "Decline" }).click();
+  // Past the double-click guard.
+  await page.waitForTimeout(600);
   await other.getByRole("button", { name: "Decline" }).click();
   await expect(other).toContainText(FAILED);
   const held = heldRow(page, HELD.title);
@@ -315,3 +324,25 @@ test("keyboard: Tab reaches Accept, Enter activates it, focus lands on the next 
   await expect(main(page)).toContainText("Nothing needs you.");
   await expect(heading(page)).toBeFocused();
 });
+
+for (const width of [390, 700, 1600]) {
+  test(`a double click on Decline declines nothing at ${width} wide`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await open(page);
+    const target = linkRow(page, READABLE.mine.title);
+    const box = await target
+      .getByRole("button", { name: "Decline" })
+      .boundingBox();
+    expect(box).not.toBeNull();
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(120);
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(300);
+    expect(await calls(page)).toEqual([]);
+    await expect(rows(page, "Links to decide")).toHaveCount(3);
+  });
+}

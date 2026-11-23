@@ -74,9 +74,9 @@ PDFs open in a full-window viewer; every file downloads; your own files can be d
 shared exactly as the note it is attached to, so sharing is changed on the note, in the vault.
 
 The inbox (**Inbox** in the left rail, with the number waiting) lists what needs your own
-decision: links an agent proposed between one of your notes and a colleague's, and notes held
-from a self-hosted agent. Accepting a link lets each owner read the other's linked note once both
-have accepted; declining is final. It needs the `inbox` migration on the database.
+decision: links proposed between one of your notes and a colleague's, and notes held from a
+self-hosted agent. Accepting a link lets each owner read the other's linked note once both have
+accepted; a declined link cannot be accepted afterwards. It needs the `inbox` migration on the database.
 
 `/dev/map`, `/dev/vault`, `/dev/gallery` and `/dev/inbox` show the screens on sample data, without an
 account; `/dev/notice` shows the failed-load notice.

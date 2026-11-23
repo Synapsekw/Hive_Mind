@@ -28,6 +28,8 @@ import type {
 import s from "./inbox.module.css";
 
 const FAILED = "That didn't work. Try again.";
+/** A confirming Decline sooner than this after the question opened is taken as a double click. */
+const CONFIRM_AFTER_MS = 500;
 
 /** Where the focus goes after the next render: a control of a row, or the heading. */
 type Target = { row: string; pick?: "keep" | "decline" } | { heading: true };
@@ -61,6 +63,8 @@ export function Inbox({
   const heading = useRef<HTMLHeadingElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const target = useRef<Target | null>(null);
+  // When the decline question was last opened.
+  const askedAt = useRef(0);
 
   const links = data.links.filter((l) => !gone.has(l.id));
   const held = data.held.filter((h) => !gone.has(h.id));
@@ -115,6 +119,9 @@ export function Inbox({
       if (holdsFocus(id)) target.current = { row: id };
       setFailed((set) => withId(set, id));
       setSaid(FAILED);
+      // The row may be refused because it is no longer waiting (answered elsewhere): re-read,
+      // so a row the server no longer lists leaves instead of failing for ever.
+      router.refresh();
       return;
     }
     if (holdsFocus(id)) {
@@ -135,6 +142,7 @@ export function Inbox({
   }
 
   function ask(id: string) {
+    askedAt.current = Date.now();
     target.current = { row: id, pick: "keep" };
     setFailed((set) => without(set, id));
     setAsking(id);
@@ -195,13 +203,17 @@ export function Inbox({
                     }
                     onAsk={() => ask(l.id)}
                     onKeep={() => keep(l.id)}
-                    onDecline={() =>
-                      act(
+                    onDecline={() => {
+                      // The second press of a double click lands where the question has just
+                      // put this button: too soon to be an answer to it.
+                      if (Date.now() - askedAt.current < CONFIRM_AFTER_MS)
+                        return;
+                      void act(
                         l.id,
                         () => actions.respondToLink(l.id, false),
                         "Link declined.",
-                      )
-                    }
+                      );
+                    }}
                   />
                 ))}
               </ul>
@@ -338,7 +350,7 @@ function LinkRow({
         >
           {asking ? (
             <>
-              <p className={s.ask}>Decline for good?</p>
+              <p className={s.ask}>Decline this link?</p>
               <button
                 type="button"
                 data-pick="decline"

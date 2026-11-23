@@ -55,7 +55,9 @@ describe("theirNote", () => {
   });
 
   it("says only whose and where when the title is not known", () => {
-    expect(theirNote(link())).toBe("a private note of Ahmed in clients");
+    expect(theirNote(link())).toBe(
+      "a note of Ahmed in clients, not shared with you",
+    );
   });
 });
 
