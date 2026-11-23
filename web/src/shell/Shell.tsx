@@ -5,7 +5,7 @@
 "use client";
 
 import Link from "next/link";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { badge } from "../inbox/text";
 import { AccountMenu } from "./AccountMenu";
 import { AgentsCard } from "./AgentsCard";
@@ -98,18 +98,24 @@ export function Shell({
   current,
   agents = [],
   inbox,
+  now: nowProp,
 }: {
   current: "map" | "vault" | "gallery" | "inbox" | "settings";
   agents?: AgentRow[];
   /** How many links and held notes wait for the person; shown on the Inbox row. */
   inbox?: number;
+  /** The page's own clock (the map passes its `now`); otherwise read once after mount. */
+  now?: number;
 }) {
   const waiting = inbox ?? 0;
   const count = badge(waiting);
   const nav = useRef<HTMLElement>(null);
   const [barY, setBarY] = useState<number | null>(null);
-  // Read once on mount, so the agents' "5h" does not change between renders.
-  const [now] = useState(() => Date.now());
+  // Never read during render (server and client would differ): the page's clock, else one read
+  // after mount.
+  const [mounted, setMounted] = useState<number | null>(null);
+  useEffect(() => setMounted(Date.now()), []);
+  const now = nowProp ?? mounted;
 
   // One bar slides to the current row: its offset is measured, never guessed.
   useLayoutEffect(() => {
@@ -160,7 +166,9 @@ export function Shell({
         ))}
       </nav>
       <section className={s.foot}>
-        {agents.length > 0 && <AgentsCard agents={agents} now={now} />}
+        {agents.length > 0 && now !== null && (
+          <AgentsCard agents={agents} now={now} />
+        )}
         <AccountMenu />
       </section>
     </aside>

@@ -23,7 +23,7 @@ const KIND: Record<ModelNode["kind"], string> = {
   root: "Index",
 };
 
-/** `just now`, `{n} h ago`, `{n} days ago`. */
+/** When an item changed, as a sentence (`just now`, `2 h ago`); agents use agentShort. */
 export function changed(t: number, now: number): string {
   const h = Math.floor((now - t) / HOUR);
   if (h < 1) return "just now";

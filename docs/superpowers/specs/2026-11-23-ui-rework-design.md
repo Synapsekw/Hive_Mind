@@ -106,6 +106,9 @@ zooming and panning, with a full redraw costing well under a millisecond. So:
   selection, view, a running animation). One `requestAnimationFrame` loop runs while an animation
   is active (glide, pulses, a live mark's glow and moves, Orbit) and stops when none is; under
   reduced motion it never runs on its own.
+- **Ambient-only motion is throttled.** Motion that is only ambient (hub breathing, the index's
+  turn, a live mark's glow) draws at about 12 fps; full frame rate is for real motion (glide,
+  camera, hover, firing). The loop pauses while the canvas is off-screen or the tab is hidden.
 - **Hit testing** through a spatial grid of box-space buckets built per layout: the nearest dot
   within 8 screen px of the pointer.
 - **Real buttons stay.** A visually hidden list (`ul` labelled "Items on the map") holds one
@@ -185,7 +188,8 @@ Labels are worked out again after a pan or zoom settles (debounced 60 ms), not o
   (up to 450 ms), so a change sweeps outward in a wave.
 - When the map first opens, dots bloom out from the core to their places with the same stagger.
 - The view switch gets a sliding highlight that moves under the chosen view (0.45 s).
-- Dots that are new in a refreshed payload bloom in. Dots that are gone fade out.
+- Dots that are new in a refreshed payload bloom in. Dots that are gone fade out. (Known gap as
+  shipped: removed dots currently vanish without a fade-out.)
 
 ### 1.6 Ambient motion ("alive but calm")
 
@@ -257,8 +261,9 @@ listed in `adjustments.generated.txt`, as for every theme.
 ## 2. The left rail (every page)
 
 - **Destinations:** each row's fill slides in from the left on hover, and the icon nudges 2 px
-  and scales ×1.08. The 3 px gradient bar of the current row becomes one element that slides
-  between rows when the current page changes.
+  and scales ×1.08. The 3 px gradient bar marks the current row. Each page renders its own rail,
+  so the bar does not slide between pages as shipped; a persistent rail across pages is a
+  follow-up.
 - **Mark:** turns 60° on hover.
 - **Agents card** (only where agents are given, today the map): a compact glass card with a stack
   of status dots and "_n_ of _m_ agents connected". It is a disclosure button
@@ -266,9 +271,10 @@ listed in `adjustments.generated.txt`, as for every theme.
   name in `title`) and the last use in short form (`now`, `2h`, `3d`, `never`). It is closed by
   default.
 - **Account button** at the very bottom: an initials avatar, the member's display name and
-  "_hive_ · _role_". It opens a menu upwards (`aria-haspopup="menu"`, Escape and an outside click
-  close it, focus returns to the button) holding **Appearance** (opens today's Appearance panel
-  unchanged, inside the menu), **Settings** and **Sign out** (the existing form post). The
+  "_hive_ · _role_". It opens a disclosure popover upwards (a labelled "Account" group, `aria-expanded` and
+  `aria-controls` on the button, no menu roles; Escape and an outside press close it and return
+  focus to the button, and so does focus leaving it) holding **Appearance** (a disclosure button
+  that reveals today's Appearance panel unchanged), **Settings** and **Sign out** (the existing form post). The
   separate Appearance row and Sign out row leave the rail.
 - The account button needs the member's own display name, role and hive name (see section 5).
 
@@ -309,8 +315,8 @@ Page by page, applying only the language above and no new layouts:
 - Everything hover reveals is also reachable by keyboard focus (dots, dock entries, panel rows).
   Dots are reached through the hidden list of real buttons (1.01); the canvas itself is
   `aria-hidden`.
-- The zoom control, dock entries, agents card and account menu are real buttons with names; the
-  menu follows the menu-button pattern; the dock's kind and people buttons have `aria-label`s.
+- The zoom control, dock entries, agents card and account button are real buttons with names; the
+  account popover is a disclosure (plain Tab order, no menu roles); the dock's kind and people buttons have `aria-label`s.
 - Contrast: the new eyebrows, counts and dock labels use `--quiet` or brighter, which the contrast
   test already holds at 3:1 or more in every theme. The soft dim (32%) is decoration, never the
   only signal. The existing contrast test runs unchanged.

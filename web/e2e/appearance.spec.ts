@@ -22,16 +22,16 @@ const lookCookie = async (page: Page) =>
 
 const account = (page: Page) => page.getByRole("button", { name: /^Account/ });
 
-const menu = (page: Page) => page.getByRole("menu", { name: "Account" });
+const menu = (page: Page) => page.getByRole("group", { name: "Account" });
 
-/** The Appearance row inside the account menu. */
+/** The Appearance row inside the account popover. */
 const button = (page: Page) =>
-  menu(page).getByRole("menuitem", { name: /^Appearance/ });
+  menu(page).getByRole("button", { name: /^Appearance/ });
 
 /** The panel proper: the reset scope inside the menu (the menu is a reset scope itself). */
 const panel = (page: Page) => menu(page).locator('[data-scope="reset"]');
 
-/** Opens the account menu, then the Appearance panel inside it. */
+/** Opens the account popover, then the Appearance panel inside it. */
 async function openPanel(page: Page) {
   await account(page).click();
   await button(page).click();
@@ -92,7 +92,7 @@ test("a tampered cookie gives the default look and is not echoed", async ({
   });
 });
 
-test("the panel is closed until its menu item opens it", async ({ page }) => {
+test("the panel is closed until its button opens it", async ({ page }) => {
   await open(page);
   await account(page).click();
   await expect(button(page)).toHaveAttribute("aria-expanded", "false");

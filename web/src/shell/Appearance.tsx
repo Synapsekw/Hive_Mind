@@ -1,6 +1,6 @@
 "use client";
 
-// The Appearance panel, shown inside the account menu: mode, theme, dot colours and reach. Every
+// The Appearance panel, shown inside the account popover: mode, theme, dot colours and reach. Every
 // choice applies at once through useLook (no request, no navigation).
 import { useId, useRef, type KeyboardEvent } from "react";
 import { THEMES, type DotMode, type Mode, type Reach } from "../theme/look";
@@ -102,7 +102,7 @@ function Radios<T extends string>({
   );
 }
 
-/** The panel's body: mode, theme, dot colours and reach. Rendered inside the account menu. */
+/** The panel's body: mode, theme, dot colours and reach. Rendered inside the account popover. */
 export function AppearancePanel({ id }: { id?: string }) {
   const { look, setLook } = useLook();
   const own = useId();
@@ -148,7 +148,7 @@ export function AppearancePanel({ id }: { id?: string }) {
   );
 }
 
-/** The current theme's name and swatch, for the Appearance row of the account menu. */
+/** The current theme's name and swatch, for the Appearance row of the account popover. */
 export function useCurrentTheme() {
   const { look } = useLook();
   const theme = THEMES.find((t) => t.id === look.theme) ?? THEMES[0]!;

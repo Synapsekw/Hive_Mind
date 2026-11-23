@@ -1,44 +1,50 @@
 import { expect, test } from "@playwright/test";
 
-test("the account menu holds appearance, settings and sign out", async ({
+test("the account popover holds appearance, settings and sign out", async ({
   page,
 }) => {
   await page.goto("/dev/map", { waitUntil: "networkidle" });
   const account = page.getByRole("button", { name: /^Account/ });
+  await expect(account).toHaveAttribute("aria-expanded", "false");
   await account.click();
-  const menu = page.getByRole("menu", { name: "Account" });
+  await expect(account).toHaveAttribute("aria-expanded", "true");
+  const popover = page.getByRole("group", { name: "Account" });
   await expect(
-    menu.getByRole("menuitem", { name: "Appearance" }),
+    popover.getByRole("button", { name: /^Appearance/ }),
   ).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: "Settings" })).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+  await expect(popover.getByRole("link", { name: "Settings" })).toBeVisible();
+  await expect(popover.getByRole("button", { name: "Sign out" })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(menu).toBeHidden();
+  await expect(popover).toBeHidden();
   await expect(account).toBeFocused();
 });
 
-test("an outside press closes the account menu", async ({ page }) => {
+test("an outside press closes the account popover", async ({ page }) => {
   await page.goto("/dev/map", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /^Account/ }).click();
-  const menu = page.getByRole("menu", { name: "Account" });
-  await expect(menu).toBeVisible();
+  const popover = page.getByRole("group", { name: "Account" });
+  await expect(popover).toBeVisible();
   await page
     .getByRole("main", { name: "Hive map" })
     .click({ position: { x: 5, y: 5 } });
-  await expect(menu).toBeHidden();
+  await expect(popover).toBeHidden();
 });
 
-test("arrow keys move between the menu items", async ({ page }) => {
+test("tabbing out of the account popover closes it", async ({ page }) => {
   await page.goto("/dev/map", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: /^Account/ }).click();
-  const menu = page.getByRole("menu", { name: "Account" });
-  await expect(
-    menu.getByRole("menuitem", { name: /^Appearance/ }),
-  ).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(menu.getByRole("menuitem", { name: "Settings" })).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(menu.getByRole("menuitem", { name: "Sign out" })).toBeFocused();
+  const account = page.getByRole("button", { name: /^Account/ });
+  await account.click();
+  const popover = page.getByRole("group", { name: "Account" });
+  await expect(popover).toBeVisible();
+  await popover.getByRole("button", { name: /^Appearance/ }).focus();
+  await page.keyboard.press("Tab"); // Settings
+  await page.keyboard.press("Tab"); // Sign out
+  await expect(popover.getByRole("button", { name: "Sign out" })).toBeFocused();
+  await page.keyboard.press("Tab"); // the account button: still inside
+  await expect(account).toBeFocused();
+  await expect(popover).toBeVisible();
+  await page.keyboard.press("Tab"); // out of the account area
+  await expect(popover).toBeHidden();
 });
 
 test("the agents card opens to one line per agent", async ({ page }) => {

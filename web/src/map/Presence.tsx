@@ -1,19 +1,12 @@
 "use client";
 // "At the hive": a small glass panel at the top right of the Hive's stage, naming the live and
-// today agents (their mark, the name, then "live" or "2h ago") and how many wait idle at the
+// today agents (their mark, the name, then "live" or "2h", as in the rail) and how many wait idle at the
 // entrance. Real text, so a screen reader hears who is live. Hovering a row makes that agent's
 // mark hot. Spec 1.0.
 import type { CSSProperties } from "react";
+import { agentShort } from "../shell/agentShort";
 import type { AgentMark } from "./hive";
 import s from "./map.module.css";
-
-const HOUR = 3_600_000;
-
-function ago(lastUsedAt: string | null, now: number): string {
-  const t = lastUsedAt ? Date.parse(lastUsedAt) : NaN;
-  if (!Number.isFinite(t)) return "";
-  return `${Math.max(1, Math.floor((now - t) / HOUR))}h ago`;
-}
 
 /** The agent's mark, as on the canvas: a hexagon outline with a centre by state. */
 function Mark({ state }: { state: AgentMark["state"] }) {
@@ -80,7 +73,7 @@ export function Presence({
                   <span className={s.presenceLive}>live</span>
                 ) : (
                   <span className={s.presenceAgo}>
-                    {ago(info?.lastUsedAt ?? null, now)}
+                    {agentShort(info?.lastUsedAt ?? null, now)}
                   </span>
                 )}
               </li>

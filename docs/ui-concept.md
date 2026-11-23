@@ -51,8 +51,8 @@ map was built with.
 
 ### Themes, mode and reach
 
-Appearance is four independent choices (theme, mode, reach and dot colours), kept per browser, changed in an Appearance panel (bottom of the
-left rail in the prototype; it can move to Settings).
+Appearance is four independent choices (theme, mode, reach and dot colours), kept per browser, changed in an Appearance panel inside the account popover at
+the bottom of the left rail.
 
 - **Theme (18):** Hive (default; honey and amber, colour only, no texture), Keystone, Graphite, Aurora, Sunset, Nebula, Lagoon, Tropic, Orchid,
   Peach, Glacier, Dusk, Berry, Candy, Citrus, Prism, Mocha, Neon. Keystone and Graphite have one
@@ -104,10 +104,11 @@ real buttons carries keyboard and screen-reader access. The same dots are shown 
 
 - **Hive view:** each territory is a block of cells. Honey fill shows recency and fades over two
   weeks; a capped cell is an item not shared with you. Agents are geometric hexagon marks: live
-  (writing now), today, or idle. The side panel's "At the hive" lists them.
+  (writing now), today, or idle. "At the hive", a panel at the top right of the map stage in the
+  Hive view, lists them.
 - **Zoom and pan:** wheel or pinch toward the cursor, drag to pan, double-click to zoom in, a
-  - − Fit control, and keys. Orbit turns by dragging. Labels are chosen once motion settles, never
-    overlap, and are capped at 60.
+  zoom control (+, −, Fit), and keys. Orbit turns by dragging. Labels are chosen once motion
+  settles; zoom-driven labels are capped at 60 and never overlap (rule labels are not capped).
 - **Hover peek:** a small card with the title, topic and owner; links fire a pulse along their
   length.
 - **Legend dock:** Topics, Kinds and People. Hover previews the isolation; click pins it.
@@ -119,12 +120,15 @@ real buttons carries keyboard and screen-reader access. The same dots are shown 
   it and what it connects to. An unshared note shows only "Private note" and its topic.
 - **Search:** matching dots stay lit and get labels when there are few enough.
 
-Layout: a left rail on the wash (mark, hive switcher, five destinations with icons, agents
-summary, Appearance), the map on the glass card with the view switch as one segmented control,
+Layout: a left rail on the wash (mark, five destinations with icons, agents
+summary, account button), the map on the glass card with the view switch as one segmented control,
 and a glass side panel. It shows Today until something is selected (a count-up of today's writes,
 a 14-day sparkline of agent writes, By person, and Needs you), then Selected. The housekeeper's last
-run sits below. The rail's active bar slides, the agents card collapses, and an account menu holds
-Appearance, Settings and Sign out; the member's name, role and hive load in the root layout.
+run sits below. The rail's active bar marks the current page (each page renders its own rail, so the bar does
+not slide between pages), the agents card collapses, and an account popover holds Appearance,
+Settings and Sign out; the member's name, role and hive load in the root layout.
+
+Known follow-ups: make the rail persistent across pages so the bar slides.
 
 Rejected and not to be reopened: the entity-level "neural map", the per-topic cluster options and
 the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).

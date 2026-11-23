@@ -27,7 +27,6 @@ import { MapCanvas, type CameraApi, type Preview } from "./MapCanvas";
 import { Peek } from "./Peek";
 import { Presence } from "./Presence";
 import { useMarks } from "./useMarks";
-import { reducedMotion } from "./useCamera";
 import { Shell, type AgentRow } from "../shell/Shell";
 import s from "./map.module.css";
 
@@ -355,7 +354,7 @@ export function HiveMap({
       setSelKey(null);
     };
 
-  // Keys when focus is not in a text field, and only ones no other component handled (a menu,
+  // Keys when focus is not in a text field, and only ones no other component handled (a popover,
   // radio group or dialog keeps its own arrows and Escape).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -366,7 +365,7 @@ export function HiveMap({
         t instanceof HTMLElement &&
         (t.isContentEditable ||
           t.closest(
-            'input, textarea, select, [role="menu"], [role="radiogroup"], [role="dialog"]',
+            'input, textarea, select, [data-popover], [role="radiogroup"], [role="dialog"]',
           ))
       )
         return;
@@ -412,7 +411,7 @@ export function HiveMap({
 
   return (
     <div className={s.root}>
-      <Shell current="map" agents={agents} inbox={inbox} />
+      <Shell current="map" agents={agents} inbox={inbox} now={now} />
       <main aria-label="Hive map" className={s.panel}>
         <TopBar
           stats={stats}

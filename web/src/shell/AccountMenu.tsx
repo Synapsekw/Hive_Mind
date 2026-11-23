@@ -1,9 +1,17 @@
 "use client";
 
-// The account button at the foot of the rail and the menu it opens upwards: Appearance (an inline
-// panel), Settings and Sign out. On dev pages there is no session, so the button is plain.
+// The account button at the foot of the rail and the disclosure popover it opens upwards:
+// Appearance (an inline panel), Settings and Sign out. Plain Tab order; Escape, an outside press
+// and focus leaving all close it. On dev pages there is no session, so the button is plain.
 import Link from "next/link";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+} from "react";
 import { AppearancePanel, useCurrentTheme } from "./Appearance";
 import { useAccount } from "./AccountContext";
 import s from "./shell.module.css";
@@ -32,7 +40,6 @@ export function AccountMenu() {
   const [look, setLook] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
   const id = useId();
 
   const close = (refocus: boolean) => {
@@ -41,7 +48,7 @@ export function AccountMenu() {
     if (refocus) button.current?.focus();
   };
 
-  // An outside press closes the menu; focus stays wherever the press put it.
+  // An outside press closes the popover; focus stays wherever the press put it.
   useEffect(() => {
     if (!open) return;
     const down = (e: PointerEvent) => {
@@ -51,47 +58,33 @@ export function AccountMenu() {
     return () => document.removeEventListener("pointerdown", down);
   }, [open]);
 
-  useEffect(() => {
-    if (open)
-      menu.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
-  }, [open]);
-
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape") {
+    if (e.key === "Escape" && open) {
       e.preventDefault();
       close(true);
-      return;
     }
-    const target = e.target as HTMLElement;
-    if (target.getAttribute("role") !== "menuitem") return;
-    const items = Array.from(
-      menu.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [],
-    );
-    const at = items.indexOf(target);
-    let to: number | null = null;
-    if (e.key === "ArrowDown") to = (at + 1) % items.length;
-    else if (e.key === "ArrowUp") to = (at - 1 + items.length) % items.length;
-    else if (e.key === "Home") to = 0;
-    else if (e.key === "End") to = items.length - 1;
-    if (to === null) return;
-    e.preventDefault();
-    items[to]?.focus();
   };
 
-  const first = account?.name.trim().split(/\s+/)[0] ?? "";
+  // Focus moving to something outside the button and the popover closes it. A null target (a
+  // press on a non-focusable spot inside) is left to the outside-press handler.
+  const onBlur = (e: FocusEvent<HTMLDivElement>) => {
+    const to = e.relatedTarget as Node | null;
+    if (open && to && !root.current?.contains(to)) close(false);
+  };
+
   return (
-    <div ref={root} className={s.account} onKeyDown={onKeyDown}>
+    <div ref={root} className={s.account} onKeyDown={onKeyDown} onBlur={onBlur}>
       {open && (
         <div
-          ref={menu}
-          role="menu"
+          id={`${id}-popover`}
+          role="group"
           aria-label="Account"
+          data-popover=""
           className={s.menu}
           data-scope="reset"
         >
           <button
             type="button"
-            role="menuitem"
             className={s.menuItem}
             aria-expanded={look}
             aria-controls={look ? `${id}-panel` : undefined}
@@ -109,14 +102,13 @@ export function AccountMenu() {
           {look && <AppearancePanel id={id} />}
           <Link
             href="/settings"
-            role="menuitem"
             className={s.menuItem}
             onClick={() => close(false)}
           >
             <span className={s.menuLabel}>Settings</span>
           </Link>
           <form method="post" action="/auth/signout" className={s.signOutForm}>
-            <button type="submit" role="menuitem" className={s.menuItem}>
+            <button type="submit" className={s.menuItem}>
               <span className={s.menuLabel}>Sign out</span>
             </button>
           </form>
@@ -126,9 +118,9 @@ export function AccountMenu() {
         ref={button}
         type="button"
         className={`${s.accountButton} ${s.control}`}
-        aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={account ? `Account, ${first}` : "Account"}
+        aria-controls={open ? `${id}-popover` : undefined}
+        aria-label={account ? `Account, ${account.name}` : "Account"}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
         {account ? (

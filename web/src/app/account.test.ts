@@ -24,6 +24,10 @@ function db(rows: unknown, token: string | null = jwt(UID)) {
 }
 
 describe("initials", () => {
+  it("does not split an astral first character", () => {
+    expect(initials("𝓐lex 𝓑ob")).toBe("𝓐𝓑");
+    expect(initials("𝓐𝓑c")).toBe("𝓐𝓑");
+  });
   it("takes the first letter of the first two words", () => {
     expect(initials("Danijel Jovanovic")).toBe("DJ");
   });

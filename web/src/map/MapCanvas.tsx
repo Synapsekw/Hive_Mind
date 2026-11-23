@@ -131,6 +131,12 @@ export function MapCanvas(props: Props): JSX.Element {
   const pal = useRef<Palette | null>(null);
   const still = useRef(false);
   const zoomSet = useRef<Set<number>>(new Set());
+  /** The rule labels and the zoom labels merged, rebuilt only when either set changes. */
+  const merged = useRef<{
+    rule: Set<number> | null;
+    zoom: Set<number> | null;
+    set: Set<number>;
+  }>({ rule: null, zoom: null, set: new Set() });
   const hover = useRef<number | null>(null);
   /** The last pointer position over the canvas (client px), to hover again once a glide ends. */
   const pointer = useRef<{ x: number; y: number } | null>(null);
@@ -436,10 +442,16 @@ export function MapCanvas(props: Props): JSX.Element {
     // Still for MOVING_MS, even with the pointer held down: the resting layer is redrawn crisp.
     const moving = time - lastMove.current < MOVING_MS;
     // Zoom-driven labels were placed for the last settled camera; hide them while it moves.
-    const labels =
-      moving || zoomSet.current.size === 0 || p.view === "orbit"
-        ? p.labels
-        : new Set([...p.labels, ...zoomSet.current]);
+    let labels = p.labels;
+    if (!moving && zoomSet.current.size > 0 && p.view !== "orbit") {
+      const m = merged.current;
+      if (m.rule !== p.labels || m.zoom !== zoomSet.current) {
+        m.rule = p.labels;
+        m.zoom = zoomSet.current;
+        m.set = new Set([...p.labels, ...zoomSet.current]);
+      }
+      labels = m.set;
+    }
     const anim = drawFrame(
       ctx,
       dpr,
@@ -823,6 +835,8 @@ export function MapCanvas(props: Props): JSX.Element {
           // A drag is not a click, and the second click of a double-click (which zooms) must
           // not undo the first one's selection.
           if (dragged.current || e.detail >= 2) return;
+          // Hit-testing runs against where the dots land: wait for a view glide to finish.
+          if (tween.current?.glide) return;
           latest.current.onPick(hitAt(e.clientX, e.clientY));
         }}
       />
