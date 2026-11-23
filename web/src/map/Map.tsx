@@ -19,7 +19,8 @@ import { layout, orbit } from "./layouts";
 import { lit, nodeIndex, nodeKey, topicIndexOf } from "./select";
 import { buildScene } from "./scene";
 import type { MapPayload, NodeKind, View } from "./types";
-import { Chips, TopBar } from "./Controls";
+import { TopBar } from "./Controls";
+import { Dock } from "./Dock";
 import { DetailRail } from "./DetailRail";
 import { DotList } from "./DotList";
 import { MapCanvas, type CameraApi, type Preview } from "./MapCanvas";
@@ -58,7 +59,7 @@ export function HiveMap({
   const [hot, setHotNow] = useState<number | null>(null);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const [focusDot, setFocusDot] = useState<number | null>(null);
-  // What the legend dock points at (Task 9's dock calls setPreview); null = nothing.
+  // What the legend dock points at (the dock calls setPreview); null = nothing.
   const [preview, setPreview] = useState<Preview | null>(null);
   const [fire, setFire] = useState<{ from: number; at: number } | null>(null);
   const cameraRef = useRef<CameraApi | null>(null);
@@ -463,6 +464,18 @@ export function HiveMap({
               onHot={setHot}
             />
           )}
+          <Dock
+            model={model}
+            topic={topic}
+            onTopic={filter((t: number | null) =>
+              setTopicName(t === null ? null : (model.topics[t]?.name ?? null)),
+            )}
+            kind={kind}
+            onKind={filter(setKind)}
+            member={member}
+            onMember={filter(setMemberId)}
+            onPreview={setPreview}
+          />
         </div>
         {hotNode && anchor && (
           <Peek
@@ -475,17 +488,6 @@ export function HiveMap({
             anchor={anchor}
           />
         )}
-        <Chips
-          model={model}
-          topic={topic}
-          onTopic={filter((t: number | null) =>
-            setTopicName(t === null ? null : (model.topics[t]?.name ?? null)),
-          )}
-          kind={kind}
-          onKind={filter(setKind)}
-          member={member}
-          onMember={filter(setMemberId)}
-        />
       </main>
       <DetailRail
         model={model}
@@ -493,7 +495,10 @@ export function HiveMap({
         sel={sel}
         agentInfo={agentInfo}
         now={now}
-        onPick={(i) => setSelKey(nodeKey(model, i))}
+        inbox={inbox}
+        onPick={pick}
+        onHot={setHot}
+        onPreview={setPreview}
         onClear={() => setSelKey(null)}
       />
     </div>

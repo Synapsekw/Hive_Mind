@@ -506,3 +506,38 @@ for (const look of [undefined, "aurora.light.vivid.classic"])
       expect(dots.outside).toBe(0);
     });
   }
+
+test("hovering a dock topic previews it and a click pins it", async ({
+  page,
+}) => {
+  await open(page);
+  await viewButton(page, "Rings").click();
+  const dmt = page
+    .getByRole("group", { name: "Topics" })
+    .getByRole("button", { name: /^DMT/ });
+  await dmt.hover();
+  await expect(page.locator("[data-map-canvas]")).toHaveAttribute(
+    "data-preview",
+    "topic:0",
+  );
+  await dmt.click();
+  await expect(dmt).toHaveAttribute("aria-pressed", "true");
+  await page.mouse.move(5, 5);
+  await expect(page.locator("[data-map-canvas]")).toHaveAttribute(
+    "data-preview",
+    "",
+  );
+  await expect(
+    page.locator('[data-map-dot][data-kind="note"][data-topic="1"]').first(),
+  ).not.toHaveAttribute("data-lit");
+});
+
+test("the side panel shows today, the 14-day line and what needs you", async ({
+  page,
+}) => {
+  await open(page);
+  const panel = rail(page);
+  await expect(panel).toContainText("Today");
+  await expect(panel.locator("svg[data-spark]")).toBeVisible();
+  await expect(panel).toContainText("By person");
+});
