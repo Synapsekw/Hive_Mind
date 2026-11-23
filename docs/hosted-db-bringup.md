@@ -23,6 +23,13 @@ Putting the web app online and connecting Claude or ChatGPT to it is in
 - Migration `20261123123845_note_delete_audit` is applied (2026-11-23) and recorded under that
   version. It adds the `notes_deleted_audit` trigger, which writes a deleted note to the audit
   log.
+- Migration `20261123150712_connected_apps` is applied (2026-11-23) and recorded under that
+  version. It adds connected apps (`connect_app`, `connector_login`) and makes the database
+  refuse an app's pass everywhere else. It was applied with
+  `supabase db query --linked -f <file>` in one transaction, so the file ran byte for byte.
+- The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
+  the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
+  still the build from before its signing code moved to `_shared/`; behaviour is the same.
 - One hive (`Synapse`), one owner member (`Danijel`), one workspace (`Main`), one agent (`Claude`,
   provider `claude`, trust tier `vendor`).
 - The agent token is in the owner's local `.env` as `HIVE_AGENT_TOKEN`. Only its hash is stored in
