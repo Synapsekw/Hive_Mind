@@ -77,7 +77,9 @@ three waves like the vault:
 
 The result per file (`GalleryFile`): `id`, `name`, `kind`, `size`, `created_at`, `owner` (display
 name), `mine`, `note` (`{ id, title }` or null), `sharing`, `thumb` (a signed link or null).
-`storage_path` never leaves the server.
+No field carries `storage_path`. A signed link necessarily contains the path (corrected during
+the build: the first wording said the path never leaves the server); a link is only made for a
+file the caller may read.
 
 - **`kind`** is decided on the server from the **file name's extension and the declared type
   together**: `image` (png, jpg, jpeg, gif, webp, avif with a matching `image/*` type), `pdf`
@@ -131,7 +133,9 @@ in as the person; arguments checked before any query; only `{ ok }` or a value c
 error's code and message are logged):
 
 - `openFile(id)` → `{ url, kind } | null`: reads the row (row-level security decides), signs its
-  path for 10 minutes.
+  path for 10 minutes. Only for an image or a PDF; any other kind answers `null`, so a file the
+  viewer cannot show never gets a link without the download disposition (added during the
+  build).
 - `downloadFile(id)` → `{ url } | null`: the same with the download disposition and the file's
   name.
 - `deleteFile(id)` → `{ ok }`: reads the row; refuses unless its member is one of the caller's;
@@ -192,8 +196,8 @@ Units 2 and 3 share no file and can be built at the same time.
 
 1. A row whose declared type is `application/pdf` or `image/png` but whose content is HTML or SVG
    is never rendered as a page.
-2. `storage_path`, signed links of files the caller cannot read, and the service key never reach
-   the browser; an id of a file the caller cannot read gives `null`, not an error that tells them
+2. Signed links of files the caller cannot read and the service key never reach the browser, and
+   no field carries `storage_path`; an id of a file the caller cannot read gives `null`, not an error that tells them
    it exists.
 3. `deleteFile` on a colleague's file that is shared with the caller is refused before any
    storage call.

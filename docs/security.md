@@ -74,7 +74,13 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 ## 5. Data handling
 
 - Notes and files encrypted at rest and in transit (Supabase defaults).
-- Storage buckets private; files served by short-lived signed URLs only.
+- Storage buckets private; files served by short-lived signed URLs only. The gallery makes each
+  link on the server, for the signed-in member, valid for 10 minutes; the database decides which
+  files that member may read. A link contains the file's storage path, so it is only ever given
+  to someone who may read that file.
+- A file's declared type is not trusted. Only images (in an image element) and PDFs (after the
+  browser has checked the content is a PDF) are shown in the app; anything else, including HTML
+  and SVG, can only be downloaded.
 - Full version history on notes; deletions soft for 30 days, then purged.
 - Region: chosen for the customer material members will load; decide whether any class of
   document must stay in the UAE.

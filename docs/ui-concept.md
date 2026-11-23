@@ -124,7 +124,9 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 - **Vault** — folder tree, note list, note preview. Visibility shown inline and changed in place;
   quarantine is a folder with a release action.
 - **Gallery** — previews of generated documents; mine, shared with me, whole hive; a full-screen
-  viewer for PDF, PPTX, XLSX and images.
+  viewer for PDF, PPTX, XLSX and images. Built so far: a card grid with image thumbnails, the
+  viewer for images and PDFs, download for every file and delete for your own; PPTX and XLSX
+  download only.
 - **Chat** — conversations on the left, the thread in the centre panel with source chips under
   each answer, agent activity and artifacts on the right. The line under the composer always says
   which workspace is written to and whose subscription is paying.
