@@ -525,10 +525,22 @@ read. Note the result in the session note.
       "Invitation sent". The email arrives from the sender set above, names no hive and no
       person, and has one button, "Open invitation". It opens `<site>/join` with a **Continue**
       button. Continue signs the person in, shows "Signed in as" with their address and a
-      sign-out link, and lists the invitation with the hive's name and who invited them. **Join** opens the map, and the person is listed under Members.
+      sign-out link, and lists the invitation with the hive's name and who invited them.
+      **Join** then offers "Choose a password" (new accounts only). Try a 9-character password
+      ("Use at least 10 characters."), then save a real one: the map opens, and the person is
+      listed under Members. Sign out and sign in with the address and that password. Repeat
+      with another fresh address and choose **Skip for now**: the map opens the same way, and
+      opening `<site>/join/password` afterwards leads straight to the map.
+- [ ] **A link opened while someone else is signed in.** Signed in as the owner, open a fresh
+      address's invitation link in the same browser. The page names the owner's address, says
+      this browser will be signed out of it, and the button reads "Sign out and continue".
+      "Stay signed in as …" leads to the map as the owner, and the link still works
+      afterwards. Continuing lists the invitation under the invited address, with "You are
+      now signed in with a different account."
 - [ ] **An address that has an account.** The same, for an address that already has a confirmed
       account. Settings answers the same "Invitation sent", the email reads the same, and the
-      person is not a member until they press Join.
+      person is not a member until they press Join. Join opens the map directly: no password
+      is offered to an account that already exists.
 - [ ] **An expired link.** Open an invitation link more than 24 hours old, or one already used,
       and press Continue. The page says the link has expired and points to "Email me a link".
       Signing in that way with the invited address leads back to `/join`, where an invitation

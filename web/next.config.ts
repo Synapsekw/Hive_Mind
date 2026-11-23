@@ -13,7 +13,8 @@ export const FRAME_HEADERS = [
 
 /**
  * The Join page is opened from an emailed link whose address carries a sign-in token. Nothing
- * the page leads to, or loads, is told that address.
+ * the page leads to, or loads, is told that address. The password page under it gets the same
+ * rule: nothing it leads to is told a person was just there.
  */
 export const JOIN_HEADERS = [{ key: "Referrer-Policy", value: "no-referrer" }];
 
@@ -24,6 +25,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/:path*", headers: FRAME_HEADERS },
       { source: "/join", headers: JOIN_HEADERS },
+      { source: "/join/password", headers: JOIN_HEADERS },
     ];
   },
 };

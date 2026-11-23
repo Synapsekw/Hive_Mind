@@ -18,6 +18,7 @@ import {
   EXPIRED,
   EXPIRED_NEXT,
   FAILED,
+  IN_THIS_BROWSER,
   JOIN,
   NONE,
   NOT_YOU,
@@ -25,6 +26,8 @@ import {
   SIGNED_IN_AS,
   SIGNED_IN_NOW,
   SIGN_OUT,
+  SIGN_OUT_AND_CONTINUE,
+  STAY_AS,
   SWITCHED,
   SWITCH_WARNING,
   TITLE,
@@ -47,6 +50,7 @@ export function Join({
   continueWithLink,
   join,
   after = "/",
+  afterNew = "/join/password",
 }: {
   view: JoinView;
   /** Spends the emailed link. The form posts it, so it works before any script has loaded. */
@@ -55,6 +59,8 @@ export function Join({
   join: (id: string) => Promise<Joined>;
   /** Where the browser goes once joined: the map. A fixed address, never one from the data. */
   after?: string;
+  /** Where a new person goes once joined: the optional password page. Fixed, as above. */
+  afterNew?: string;
 }) {
   return (
     <main className={card.page} aria-label={TITLE}>
@@ -73,11 +79,23 @@ export function Join({
                 {SIGNED_IN_NOW}{" "}
                 <span className={s.email} data-testid="signed-in-now">
                   {view.email}
-                </span>
-                . {SWITCH_WARNING}
+                </span>{" "}
+                {IN_THIS_BROWSER} {SWITCH_WARNING}
               </p>
             )}
-            <ContinueButton />
+            <ContinueButton
+              label={view.email ? SIGN_OUT_AND_CONTINUE : CONTINUE}
+            />
+            {view.email && (
+              // Leaves the link unused: a plain visit to the map, as the person signed in now.
+              <a
+                className={`${card.quiet} ${s.stay}`}
+                href="/"
+                data-testid="stay"
+              >
+                {`${STAY_AS} ${view.email}`}
+              </a>
+            )}
             <p className={card.hint}>{CONTINUE_HINT}</p>
           </form>
         )}
@@ -110,6 +128,7 @@ export function Join({
             switched={view.switched}
             join={join}
             after={after}
+            afterNew={afterNew}
           />
         )}
       </div>
@@ -167,11 +186,11 @@ function Account({ email, switched }: { email: string; switched: boolean }) {
   );
 }
 
-function ContinueButton() {
+function ContinueButton({ label }: { label: string }) {
   const { pending } = useFormStatus();
   return (
     <button className={card.primary} type="submit" disabled={pending}>
-      {CONTINUE}
+      {label}
     </button>
   );
 }
@@ -182,12 +201,14 @@ function Waiting({
   switched,
   join,
   after,
+  afterNew,
 }: {
   waiting: Extract<JoinView, { kind: "list" }>["waiting"];
   email: string;
   switched: boolean;
   join: (id: string) => Promise<Joined>;
   after: string;
+  afterNew: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -203,8 +224,11 @@ function Waiting({
       joined = { ok: false };
     }
     if (joined.ok) {
-      // Stays busy: the browser is leaving for the map, which is read again from the database.
-      window.location.assign(after);
+      // Stays busy: the browser is leaving for the map, which is read again from the database,
+      // or first for the password page. Only ever one of these two fixed addresses.
+      window.location.assign(
+        joined.next === "/join/password" ? afterNew : after,
+      );
       return;
     }
     setMessage(FAILED);

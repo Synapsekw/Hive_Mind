@@ -31,5 +31,20 @@ export type JoinView =
   /** Signed in, but the invitations could not be read. */
   | { kind: "error" };
 
-/** Whether Join worked. Nothing else comes back: the map is read again from the database. */
-export type Joined = { ok: boolean };
+/**
+ * Whether Join worked, and where to go when it did: the map, or first the optional password
+ * page for a person who has just opened a first invitation. Decided on the server.
+ */
+export type Joined = { ok: true; next: "/" | "/join/password" } | { ok: false };
+
+/**
+ * Whether the chosen password was saved. A reason is one of a fixed few: the three rules, a
+ * refusal by the auth server, or anything else. It never carries the password or the auth
+ * server's own words.
+ */
+export type PasswordSaved =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "short" | "long" | "different" | "refused" | "failed";
+    };

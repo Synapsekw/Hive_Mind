@@ -19,6 +19,8 @@ function session(user: { id: string } | null) {
 
 const visit = (path: string, headers: Record<string, string> = {}) =>
   proxy(new NextRequest(`${ORIGIN}${path}`, { headers }));
+const post = (path: string, headers: Record<string, string> = {}) =>
+  proxy(new NextRequest(`${ORIGIN}${path}`, { method: "POST", headers }));
 const to = (res: Response) => res.headers.get("location");
 /** True when the answer lets the request through. */
 const passed = (res: Response) =>
@@ -55,6 +57,50 @@ describe("proxy: the connector's addresses", () => {
   it("does not open a path that only begins the same way", async () => {
     expect(to(await visit("/mcpx"))).toBe(`${ORIGIN}/login`);
     expect(to(await visit("/.well-knownx"))).toBe(`${ORIGIN}/login`);
+  });
+});
+
+describe("proxy: requests that change who is signed in", () => {
+  // Regression: signed in as A, Continue on B's invitation link, and the browser stayed A.
+  // The proxy refreshed A's session on the same request and its cookies landed after the
+  // action's. It must be no writer of session cookies there at all.
+  const COOKIE = { cookie: "sb-x-auth-token.0=a; sb-x-auth-token.1=b" };
+
+  it("lets the Continue button's request through without reading or refreshing the session", async () => {
+    const res = await post("/join?token_hash=abc&type=invite", COOKIE);
+    expect(passed(res)).toBe(true);
+    expect(mocks.createServerClient).not.toHaveBeenCalled();
+    expect(res.headers.has("set-cookie")).toBe(false);
+    expect(res.headers.has("x-middleware-set-cookie")).toBe(false);
+  });
+
+  it.each([
+    ["GET", "/auth/confirm?code=abc"],
+    ["GET", "/auth/confirm?token_hash=abc&type=email"],
+    ["POST", "/auth/signout"],
+    ["POST", "/auth/signout?next=%2Fjoin"],
+  ])("does the same for %s %s", async (method, path) => {
+    const res = await (method === "POST" ? post : visit)(path, COOKIE);
+    expect(passed(res)).toBe(true);
+    expect(mocks.createServerClient).not.toHaveBeenCalled();
+    expect(res.headers.has("set-cookie")).toBe(false);
+  });
+
+  it("still handles the session for every other request to the Join pages", async () => {
+    session({ id: "u1" });
+    // Opening the link (a GET) and pressing Join or saving a password (POSTs with no token).
+    await visit("/join?token_hash=abc&type=invite");
+    await post("/join");
+    await post("/join/password");
+    expect(mocks.createServerClient).toHaveBeenCalledTimes(3);
+  });
+
+  it("still closes the Join pages' other POSTs to a visitor with no session", async () => {
+    expect(to(await post("/join"))).toBe(`${ORIGIN}/login?next=%2Fjoin`);
+    expect(to(await post("/join/password?token_hash=abc"))).toBe(
+      `${ORIGIN}/login`,
+    );
+    expect(to(await post("/vault?token_hash=abc"))).toBe(`${ORIGIN}/login`);
   });
 });
 
@@ -124,6 +170,20 @@ describe("proxy: the Join page", () => {
       `${ORIGIN}/login`,
     );
     expect(to(await visit("/vault?token_hash=abc"))).toBe(`${ORIGIN}/login`);
+  });
+
+  it("keeps the password page closed to a visitor with no session, whatever the query", async () => {
+    for (const path of [
+      "/join/password",
+      "/join/password?token_hash=abc&type=invite",
+      "/join/password?error=expired",
+      "/join/password/",
+    ])
+      expect(to(await visit(path, { cookie: "hm_new=1" }))).toBe(
+        `${ORIGIN}/login`,
+      );
+    session({ id: "u1" });
+    expect(passed(await visit("/join/password"))).toBe(true);
   });
 
   it("is not open when the app is not configured", async () => {

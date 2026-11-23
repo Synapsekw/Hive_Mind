@@ -19,9 +19,31 @@ const RETURNS = /^\/oauth\/consent(\/|$)/;
 const JOIN = /^\/join\/?$/;
 const JOIN_AFTER_SIGN_IN = `/login?next=${encodeURIComponent("/join")}`;
 
+// Requests that change who is signed in by themselves: the sign-in link and sign-out routes,
+// and the Join page's Continue button (a POST to `/join` that carries the emailed link's
+// token). All are open to a visitor with no session, so there is nothing here to check, and
+// the session cookies are not read or refreshed for them.
+//
+// This is not an optimisation. Refreshing here would make the proxy a second writer of the
+// session cookies on a response whose route already writes them, and a host may put the
+// proxy's Set-Cookie headers after the route's (Netlify's runtime appends them last). The
+// browser then keeps the refreshed OLD session: a person signed in as A who pressed Continue
+// on B's invitation link stayed signed in as A, and a sign-out could be undone the same way.
+const SESSION_CHANGING = /^\/auth(\/|$)/;
+
+function changesTheSession(request: NextRequest): boolean {
+  const { pathname, searchParams } = request.nextUrl;
+  if (SESSION_CHANGING.test(pathname)) return true;
+  return (
+    JOIN.test(pathname) &&
+    request.method === "POST" &&
+    searchParams.has("token_hash")
+  );
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-  if (MACHINE.some((re) => re.test(pathname))) {
+  if (MACHINE.some((re) => re.test(pathname)) || changesTheSession(request)) {
     return NextResponse.next({ request });
   }
   const isJoin = JOIN.test(pathname);

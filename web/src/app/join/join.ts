@@ -69,14 +69,39 @@ async function userIdIn(
   }
 }
 
+/** Signs this browser out and nothing more; a failure is left for the caller's answer to carry. */
+async function signOutIn(db: Pick<SupabaseClient, "auth">): Promise<void> {
+  try {
+    await db.auth.signOut({ scope: "local" });
+  } catch {
+    // Nothing more can be done from here.
+  }
+}
+
 /**
- * Spends the emailed link and signs its holder in, replacing any session the browser held.
+ * Spends the emailed link and signs its holder in, in place of any session the browser held.
  * Anything but an invitation's own two link types and a well-formed token is expired, and the
  * auth server is not asked.
  *
- * A link can be sent to a person who is signed in as someone else (by mistake, or crafted to
- * move them into another account). Who is signed in is read before and after; "switched" says
- * the two differ, so the next page can tell the person.
+ * A link can be opened by a person who is signed in as someone else (by mistake, or crafted
+ * to move them into another account), so which account ends up signed in must never be in
+ * doubt. In order:
+ *   1. Who is signed in is read, to be able to say afterwards whether the account changed.
+ *   2. This browser is signed out (this browser only: the person's other devices stay signed
+ *      in). The link is then verified over a clean set of cookies, so no piece of the old
+ *      session can survive beside the new one. The button that leads here says "Sign out and
+ *      continue" whenever somebody is signed in. A link that turns out to have expired
+ *      therefore leaves nobody signed in, and the page says the link has expired.
+ *   3. The link is verified, which signs its own person in.
+ *   4. The auth server is asked who is signed in. It must be the person the link's answer
+ *      named. If it is anyone else, or nobody, the browser is signed out again and the answer
+ *      is "expired": better no session than an unexpected one.
+ * "switched" says the person signed in now is not the one signed in before, so the next page
+ * can tell them. The same person is plain "ok".
+ *
+ * The proxy must not write session cookies on the request that runs this (it does not: see
+ * `proxy.ts`). Two writers of the same cookies in one response is how the old account once
+ * stayed signed in after a link was spent.
  */
 export async function continueIn(
   db: Pick<SupabaseClient, "auth">,
@@ -86,6 +111,9 @@ export async function continueIn(
   if (!isToken(tokenHash) || !isLinkType(type)) return "expired";
   try {
     const before = await userIdIn(db);
+    // Always, not only when somebody could be named: cookies of a session that can no longer
+    // be read are cleared the same way.
+    await signOutIn(db);
     const { data, error } = await db.auth.verifyOtp({
       type,
       token_hash: tokenHash,
@@ -94,11 +122,14 @@ export async function continueIn(
       console.error("invitation link refused", error.code, error.message);
       return "expired";
     }
-    if (!before) return "ok";
     const named: unknown = data?.user?.id;
-    const after =
-      typeof named === "string" && named ? named : await userIdIn(db);
-    return after && after !== before ? "switched" : "ok";
+    const now = await userIdIn(db);
+    if (typeof named !== "string" || !named || now !== named) {
+      console.error("invitation link did not sign its own person in");
+      await signOutIn(db);
+      return "expired";
+    }
+    return before && before !== named ? "switched" : "ok";
   } catch (e) {
     console.error("invitation link failed", e instanceof Error ? e.name : "");
     return "expired";
