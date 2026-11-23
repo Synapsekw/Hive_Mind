@@ -294,11 +294,26 @@ not one to hand out.
 The address is the same for everyone: `https://<site>/mcp`. The person connecting must already
 be a member of the hive (invited in **Settings**).
 
+Apps do not register themselves (see the switches above), so the owner registers each kind of
+app once under **Authentication → OAuth Apps** and hands its **client ID** to colleagues with the
+address. A client ID is not a secret.
+
+| App    | Client type | Redirect URI                              | Client ID on the dev project           |
+| ------ | ----------- | ----------------------------------------- | -------------------------------------- |
+| Claude | Public      | `https://claude.ai/api/mcp/auth_callback` | `c5b56322-1148-4076-bee7-5f918cd44656` |
+
+Proven by hand on 2026-11-23 with Claude: a public client, no secret, is rated `vendor`. ChatGPT
+is not registered or tried yet: it needs its own entry with ChatGPT's redirect address, and it
+works only if ChatGPT lets a client ID be typed in.
+
 **Claude (web or desktop)**
 
 1. Open **Settings → Connectors**.
 2. Choose **Add custom connector**.
-3. Give it a name, for example `Hive Mind`, and paste `https://<site>/mcp`. Add it.
+3. Give it a name, for example `Hive Mind`, and paste `https://<site>/mcp`. Open **Advanced
+   settings** and paste the Claude client ID into **OAuth Client ID**; leave the secret empty.
+   Add it. Without the client ID Claude answers "Automatic client registration isn't
+   supported".
 4. Choose **Connect**. A Hive Mind window opens.
 5. Sign in with your email. If you ask for an emailed link, it opens in a new tab, and the
    approval continues in that tab.
@@ -309,7 +324,8 @@ be a member of the hive (invited in **Settings**).
 
 1. Open **Settings** and switch on **developer mode** (under the connectors settings; it needs a
    plan that allows custom connectors).
-2. Add a connector and paste the same address, `https://<site>/mcp`.
+2. Add a connector and paste the same address, `https://<site>/mcp`, with the client ID of the
+   ChatGPT entry (not tried yet, see above).
 3. The same Hive Mind window opens: sign in, pick a workspace, **Approve**.
 
 The names of these menus change between versions of the two apps. What stays the same is the
@@ -333,7 +349,10 @@ Settings also ends the app's sign-in at Supabase, so the app is not handed a new
 Removing the connector inside Claude or ChatGPT alone does not revoke anything.
 
 **To connect again.** A revoked app is not switched back on in Settings. Remove the connector
-inside the app, add it again with the same address, and approve in the window.
+inside the app, add it again with the same address and client ID, and approve in the window.
+
+**Deleting an entry under OAuth Apps** cuts off everyone who connected through it: the database
+refuses a deleted app. Their agents stay listed in Settings until each person revokes them.
 
 ### 5. Checks before promotion to `main`
 
