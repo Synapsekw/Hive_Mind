@@ -54,7 +54,7 @@ section 3 is updated to match.
   model, so it is computed once and cached like the other flat views. Cells nobody claims stay
   as empty frames at the edge.
 - **Honey fill shows recency.** A cell's fill is its topic colour at an opacity of
-  `max(0.06, 0.5 × e^(-hours since change / 60))`. A hub cell has a fixed 0.32 fill and a brighter
+  `max(0.06, 0.5 × e^(-hours since change / 336))` (a two-week fade: on the real DRA vault the median note was last changed 90 days ago, and a 60-hour fade left almost every cell empty). A hub cell has a fixed 0.32 fill and a brighter
   edge. The index cell is a faint fill of the text colour.
 - **Capped cells.** An item that is not shared with you is a capped cell: the card colour with a
   dashed edge in its topic colour. This doubles the existing "hollow = not shared" meaning.
@@ -121,7 +121,10 @@ is on and the view is not Orbit:
 
 - at `k` ≥ 1.8, lit dots with three or more links that are inside the visible stage get a label;
 - at `k` ≥ 3, every lit dot inside the visible stage does;
-- at most 60 zoom-driven labels show at once (the ones nearest the centre of the stage win).
+- at most 60 zoom-driven labels show at once (the ones nearest the centre of the stage win);
+- a zoom-driven label is skipped when its box (the title at 12 px, up to 220 px wide, 20 px tall,
+  to the right of the dot) would overlap a label already placed. On the real DRA vault, labels at
+  7× zoom otherwise ran into each other along every row of the comb.
 
 Labels are worked out again after a pan or zoom settles (debounced 60 ms), not on every frame.
 
