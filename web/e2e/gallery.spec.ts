@@ -750,9 +750,12 @@ test("a thumbnail whose link no longer works falls back to the type tile", async
       .locator("li", { hasText: "site-photo-north-elevation.png" })
       .locator("img"),
   ).toHaveCount(0);
-  for (let i = 0; i < 10 && (await list.locator("img").count()) > 0; i++) {
-    await list.locator("img").first().scrollIntoViewIfNeeded();
-    await page.waitForTimeout(200);
+  // The cards are scrolled to, not the images: an image leaves the page the moment it fails, and
+  // scrolling to one that has just left fails the step.
+  const items = list.locator("li");
+  for (let i = 0; i < (await items.count()); i++) {
+    await items.nth(i).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(100);
   }
   await expect(list.locator("img")).toHaveCount(0);
   await expect(

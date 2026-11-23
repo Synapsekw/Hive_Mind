@@ -298,6 +298,31 @@ describe("two members and their agents on a live database", { skip }, () => {
       );
     };
 
+    // The proposal waits in the other person's inbox, without the proposer's title or body.
+    const inbox = (jwt) =>
+      rest("rpc/inbox", {
+        jwt,
+        method: "POST",
+        body: { p_hive: a.me.hive_id },
+      });
+    const waiting = await inbox(b.person);
+    const item = waiting.json.links.find((l) => l.id === link.id);
+    assert.ok(item, waiting.text);
+    assert.equal(item.proposed_by, "theirs");
+    assert.equal(item.theirs.title, null);
+    assert.ok(
+      !waiting.text.includes(`a-private ${WORD}`),
+      "a body in the inbox",
+    );
+    assert.ok(
+      !waiting.text.includes(`${DIR}a-private.md`),
+      "a path in the inbox",
+    );
+    // An agent cannot read the inbox.
+    const byAgent = await inbox(b.agent);
+    assert.equal(byAgent.status, 400, byAgent.text);
+    assert.match(byAgent.text, /inbox is for people/);
+
     // Proposing is not accepting, and no agent can accept.
     await closed();
     for (const agent of [a.agent, b.agent]) {

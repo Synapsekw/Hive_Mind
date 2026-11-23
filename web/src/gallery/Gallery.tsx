@@ -26,10 +26,13 @@ export function Gallery({
   data,
   now,
   actions,
+  inbox,
 }: {
   data: GalleryData;
   now: number;
   actions: GalleryActions;
+  /** How much waits in the inbox, for the rail. */
+  inbox?: number;
 }) {
   const [files, setFiles] = useState(data.files);
   const [next, setNext] = useState(data.next);
@@ -123,7 +126,7 @@ export function Gallery({
   return (
     <div className={s.root}>
       <div className={s.page} inert={viewing || undefined}>
-        <Shell current="gallery" />
+        <Shell current="gallery" inbox={inbox} />
         <main aria-label="Gallery" className={s.panel}>
           <div className={s.bar}>
             <div role="group" aria-label="Show" className={s.tabs}>

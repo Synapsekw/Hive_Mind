@@ -8,6 +8,7 @@ const SCREENS = {
   map: { label: "Hive map", href: "/" },
   vault: { label: "Vault", href: "/vault" },
   gallery: { label: "Gallery", href: "/gallery" },
+  inbox: { label: "Inbox", href: "/inbox" },
 } as const;
 
 export function Notice({
@@ -17,7 +18,7 @@ export function Notice({
 }: {
   children: ReactNode;
   tryAgain?: boolean;
-  current?: "map" | "vault" | "gallery";
+  current?: "map" | "vault" | "gallery" | "inbox";
 }) {
   const screen = SCREENS[current];
   return (

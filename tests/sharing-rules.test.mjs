@@ -1992,3 +1992,466 @@ test("the map is capped at 5,000 items, newest first", async () => {
   assert.ok(bulk.slice(0, room).every((id) => kept.has(id)));
   assert.ok(bulk.slice(room).every((id) => !kept.has(id)));
 });
+
+// ------------------------------------------------------------------- inbox
+// public.inbox(hive) lists what waits for the caller's own decision: link
+// proposals they have not answered and their held notes. inbox_count(hive)
+// is the two totals added. Both are security definer, so these tests check
+// what each caller gets back. Earlier tests leave rows behind: every test
+// finds its own link or note by id.
+
+const inbox = async (who, h = hive) =>
+  (await as(who, "select public.inbox($1) as i", [h]))[0].i;
+const inboxCount = async (who, h = hive) =>
+  (await as(who, "select public.inbox_count($1) as c", [h]))[0].c;
+const linkIn = (i, id) => i.links.find((l) => l.id === id);
+const heldIn = (i, id) => i.held.find((n) => n.id === id);
+const propose = (who, from, to, tier = 3) =>
+  as(
+    who,
+    `insert into public.links (hive_id, from_note, to_note, tier, score) values ($1, $2, $3, $4, 0.5) returning id`,
+    [hive, from, to, tier],
+  ).then((r) => r[0].id);
+const respond = (who, link, accept) =>
+  as(who, `select public.respond_to_link($1, $2) as s`, [link, accept]).then(
+    (r) => r[0].s,
+  );
+const release = (who, id) =>
+  as(who, `update public.notes set quarantined = false where id = $1`, [id]);
+const ib = { links: [] };
+
+test("a link proposed by an agent waits in both owners' inboxes", async () => {
+  const theirs = await addAt(
+    person("ahmed"),
+    "ahmed",
+    "Clients/Acme/ib-ahmed-one.md",
+    "ib ahmed one",
+  );
+  const mine = await addAt(
+    person("dani"),
+    "dani",
+    "ib/dani/one.md",
+    "ib dani one",
+  );
+  const link = await propose(await agentFor("ahmed"), theirs, mine, 3);
+  ib.links.push(link);
+
+  const dani = linkIn(await inbox(person("dani")), link);
+  assert.deepEqual(Object.keys(dani).sort(), [
+    "created_at",
+    "id",
+    "mine",
+    "proposed_by",
+    "theirs",
+    "they_accepted",
+    "tier",
+  ]);
+  assert.equal(dani.tier, 3);
+  assert.ok(dani.created_at);
+  assert.equal(dani.proposed_by, "theirs");
+  assert.equal(dani.they_accepted, false);
+  assert.deepEqual(dani.mine, {
+    id: mine,
+    title: "ib dani one",
+    path: "ib/dani/one.md",
+    workspace_id: ws.dani,
+  });
+  assert.deepEqual(Object.keys(dani.theirs).sort(), [
+    "member_name",
+    "title",
+    "topic",
+  ]);
+  assert.deepEqual(dani.theirs, {
+    member_name: "Ahmed",
+    topic: "Clients/Acme",
+    title: null,
+  });
+  // Nothing else of Ahmed's private note: not its id, title or file name.
+  const text = JSON.stringify(dani);
+  for (const s of [theirs, "ib ahmed one", "ib-ahmed-one", members.ahmed])
+    assert.ok(!text.includes(s), `Dani's item carries ${s}`);
+
+  const ahmed = linkIn(await inbox(person("ahmed")), link);
+  assert.equal(ahmed.proposed_by, "mine");
+  assert.equal(ahmed.they_accepted, false);
+  assert.equal(ahmed.mine.id, theirs);
+  assert.equal(ahmed.mine.title, "ib ahmed one");
+  assert.equal(ahmed.mine.path, "Clients/Acme/ib-ahmed-one.md");
+  assert.equal(ahmed.mine.workspace_id, ws.ahmed);
+  assert.deepEqual(ahmed.theirs, {
+    member_name: "Dani",
+    topic: "ib/dani",
+    title: null,
+  });
+  const back = JSON.stringify(ahmed);
+  for (const s of [mine, "ib dani one", "ib/dani/one", members.dani])
+    assert.ok(!back.includes(s), `Ahmed's item carries ${s}`);
+});
+
+test("the title appears only when the note is already readable", async () => {
+  const theirs = await addAt(
+    person("ahmed"),
+    "ahmed",
+    "Clients/Acme/ib-ahmed-open.md",
+    "ib ahmed open",
+    { visibility: "group" },
+  );
+  const mine = await addAt(
+    person("dani"),
+    "dani",
+    "ib/dani/two.md",
+    "ib dani two",
+  );
+  const link = await propose(await agentFor("ahmed"), theirs, mine, 1);
+  ib.links.push(link);
+
+  const dani = linkIn(await inbox(person("dani")), link);
+  assert.deepEqual(dani.theirs, {
+    member_name: "Ahmed",
+    topic: "Clients/Acme",
+    title: "ib ahmed open",
+  });
+  assert.equal(dani.tier, 1);
+  // Dani's note is still private: Ahmed gets no title.
+  const ahmed = linkIn(await inbox(person("ahmed")), link);
+  assert.equal(ahmed.theirs.title, null);
+});
+
+test("an answered side no longer waits", async () => {
+  const theirs = await addAt(
+    person("ahmed"),
+    "ahmed",
+    "Clients/Acme/ib-ahmed-three.md",
+    "ib ahmed three",
+  );
+  const mine = await addAt(
+    person("dani"),
+    "dani",
+    "ib/dani/three.md",
+    "ib dani three",
+  );
+  const link = await propose(await agentFor("ahmed"), theirs, mine);
+  ib.links.push(link);
+  assert.ok(linkIn(await inbox(person("dani")), link));
+
+  assert.equal(await respond(person("dani"), link, true), "proposed");
+  assert.equal(linkIn(await inbox(person("dani")), link), undefined);
+  const ahmed = linkIn(await inbox(person("ahmed")), link);
+  assert.equal(ahmed.they_accepted, true);
+  assert.equal(ahmed.proposed_by, "mine");
+  assert.equal(ahmed.theirs.title, null);
+
+  assert.equal(await respond(person("ahmed"), link, true), "accepted");
+  assert.equal(linkIn(await inbox(person("dani")), link), undefined);
+  assert.equal(linkIn(await inbox(person("ahmed")), link), undefined);
+});
+
+test("a declined link leaves both inboxes", async () => {
+  const theirs = await addAt(
+    person("ahmed"),
+    "ahmed",
+    "Clients/Acme/ib-ahmed-four.md",
+    "ib ahmed four",
+  );
+  const mine = await addAt(
+    person("dani"),
+    "dani",
+    "ib/dani/four.md",
+    "ib dani four",
+  );
+  const link = await propose(await agentFor("ahmed"), theirs, mine);
+  ib.links.push(link);
+  assert.ok(linkIn(await inbox(person("dani")), link));
+  assert.ok(linkIn(await inbox(person("ahmed")), link));
+
+  assert.equal(await respond(person("dani"), link, false), "declined");
+  assert.equal(linkIn(await inbox(person("dani")), link), undefined);
+  assert.equal(linkIn(await inbox(person("ahmed")), link), undefined);
+});
+
+test("a person who proposes has already accepted", async () => {
+  const theirs = await addAt(
+    person("ahmed"),
+    "ahmed",
+    "Clients/Acme/ib-ahmed-five.md",
+    "ib ahmed five",
+  );
+  const mine = await addAt(
+    person("dani"),
+    "dani",
+    "ib/dani/five.md",
+    "ib dani five",
+  );
+  const link = await propose(person("dani"), mine, theirs, 2);
+  ib.links.push(link);
+
+  assert.equal(linkIn(await inbox(person("dani")), link), undefined);
+  const ahmed = linkIn(await inbox(person("ahmed")), link);
+  assert.equal(ahmed.proposed_by, "theirs");
+  assert.equal(ahmed.they_accepted, true);
+  assert.equal(ahmed.mine.id, theirs);
+  assert.deepEqual(ahmed.theirs, {
+    member_name: "Dani",
+    topic: "ib/dani",
+    title: null,
+  });
+});
+
+test("others see nothing in the inbox", async () => {
+  assert.ok(ib.links.length >= 5);
+  const sara = await inbox(person("sara"));
+  for (const id of ib.links) assert.equal(linkIn(sara, id), undefined, id);
+  const text = JSON.stringify(sara);
+  for (const s of [...ib.links, "ib dani", "ib ahmed", "ib-ahmed"])
+    assert.ok(!text.includes(s), `Sara's inbox carries ${s}`);
+
+  await assert.rejects(inbox(person("outsider")), /not a member of this hive/);
+  await assert.rejects(
+    inboxCount(person("outsider")),
+    /not a member of this hive/,
+  );
+  await assert.rejects(
+    inbox({ role: "authenticated" }),
+    /not a member of this hive/,
+  );
+  await assert.rejects(inbox(null), /permission denied/);
+  await assert.rejects(inboxCount(null), /permission denied/);
+
+  // A member of another hive gets that hive's inbox only, and not this one's.
+  const other = (
+    await as(
+      person("outsider"),
+      `select hive_id from public.members where user_id = $1`,
+      [users.outsider],
+    )
+  )[0].hive_id;
+  assert.deepEqual(await inbox(person("outsider"), other), {
+    links: [],
+    links_total: 0,
+    held: [],
+    held_total: 0,
+  });
+  assert.equal(await inboxCount(person("outsider"), other), 0);
+  await assert.rejects(
+    inbox(person("dani"), other),
+    /not a member of this hive/,
+  );
+  await assert.rejects(
+    inboxCount(person("dani"), other),
+    /not a member of this hive/,
+  );
+});
+
+test("agents are refused by the inbox", async () => {
+  for (const agent of [
+    await agentFor("dani"),
+    await agentFor("ahmed", "self_hosted"),
+  ]) {
+    await assert.rejects(inbox(agent), /inbox is for people/);
+    await assert.rejects(inboxCount(agent), /inbox is for people/);
+  }
+  // A self-hosted claim without an agent id is refused as well.
+  const claim = { ...person("dani"), trust_tier: "self_hosted" };
+  await assert.rejects(inbox(claim), /inbox is for people/);
+  await assert.rejects(inboxCount(claim), /inbox is for people/);
+});
+
+test("held notes wait for their owner only", async () => {
+  const agent = await agentFor("sara", "self_hosted");
+  const held = await agentWrites(
+    agent,
+    "sara",
+    "ib/held/first.md",
+    "ib sara held",
+  );
+  assert.equal(held.quarantined, true);
+
+  const sara = await inbox(person("sara"));
+  const item = heldIn(sara, held.id);
+  assert.deepEqual(Object.keys(item).sort(), [
+    "agent_name",
+    "id",
+    "path",
+    "title",
+    "updated_at",
+    "workspace_id",
+  ]);
+  assert.equal(item.title, "ib sara held");
+  assert.equal(item.path, "ib/held/first.md");
+  assert.equal(item.workspace_id, ws.sara);
+  assert.equal(item.agent_name, "Files agent");
+  assert.ok(item.updated_at);
+  assert.ok(sara.held_total >= 1);
+
+  for (const who of ["dani", "ahmed"]) {
+    const theirs = await inbox(person(who));
+    assert.equal(heldIn(theirs, held.id), undefined, who);
+    const text = JSON.stringify(theirs);
+    assert.ok(!text.includes(held.id), who);
+    assert.ok(!text.includes("ib sara held"), who);
+  }
+
+  const before = sara.held_total;
+  await release(person("sara"), held.id);
+  const after = await inbox(person("sara"));
+  assert.equal(heldIn(after, held.id), undefined);
+  assert.equal(after.held_total, before - 1);
+});
+
+test("a link to a held note is not listed", async () => {
+  const held = (
+    await agentWrites(
+      await agentFor("sara", "self_hosted"),
+      "sara",
+      "ib/held/linked.md",
+      "ib sara held linked",
+    )
+  ).id;
+  const mine = await addAt(
+    person("dani"),
+    "dani",
+    "ib/dani/nine.md",
+    "ib dani nine",
+  );
+  const daniBefore = await inboxCount(person("dani"));
+  const saraBefore = (await inbox(person("sara"))).links_total;
+  const link = await propose(await agentFor("dani"), mine, held);
+
+  const dani = await inbox(person("dani"));
+  assert.equal(linkIn(dani, link), undefined);
+  assert.equal(await inboxCount(person("dani")), daniBefore);
+  const text = JSON.stringify(dani);
+  assert.ok(!text.includes("ib sara held linked"));
+  assert.ok(!text.includes("ib/held"));
+  const sara = await inbox(person("sara"));
+  assert.equal(linkIn(sara, link), undefined);
+  assert.equal(sara.links_total, saraBefore);
+  assert.ok(heldIn(sara, held), "the held note itself still waits for Sara");
+
+  await release(person("sara"), held);
+  const daniAfter = linkIn(await inbox(person("dani")), link);
+  assert.equal(daniAfter.proposed_by, "mine");
+  assert.deepEqual(daniAfter.theirs, {
+    member_name: "Sara",
+    topic: "ib/held",
+    title: null,
+  });
+  assert.equal(await inboxCount(person("dani")), daniBefore + 1);
+  const saraAfter = linkIn(await inbox(person("sara")), link);
+  assert.equal(saraAfter.proposed_by, "theirs");
+  assert.equal(saraAfter.mine.id, held);
+  assert.equal(saraAfter.theirs.member_name, "Dani");
+});
+
+test("the inbox count equals the two totals", async () => {
+  let waiting = 0;
+  for (const who of ["dani", "ahmed", "sara"]) {
+    const i = await inbox(person(who));
+    assert.equal(
+      await inboxCount(person(who)),
+      i.links_total + i.held_total,
+      who,
+    );
+    assert.equal(i.links.length, i.links_total, who);
+    assert.equal(i.held.length, i.held_total, who);
+    waiting += i.links_total + i.held_total;
+  }
+  assert.ok(waiting > 0);
+});
+
+test("the inbox never carries a body", async () => {
+  const marker = "ib-body-marker-7f3a";
+  const theirs = await addAt(
+    person("ahmed"),
+    "ahmed",
+    "Clients/Acme/ib-ahmed-body.md",
+    "ib ahmed body",
+    { body: `${marker} ahmed`, visibility: "group" },
+  );
+  const mine = await addAt(
+    person("dani"),
+    "dani",
+    "ib/dani/body.md",
+    "ib dani body",
+    { body: `${marker} dani` },
+  );
+  const link = await propose(await agentFor("ahmed"), theirs, mine);
+  const held = (
+    await as(
+      await agentFor("dani", "self_hosted"),
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+       values ($1, $2, $3, 'ib/held/body.md', 'ib dani held body', $4) returning id`,
+      [hive, members.dani, ws.dani, `${marker} held`],
+    )
+  )[0].id;
+
+  const dani = await inbox(person("dani"));
+  assert.ok(linkIn(dani, link));
+  assert.ok(heldIn(dani, held));
+  const ahmed = await inbox(person("ahmed"));
+  assert.ok(linkIn(ahmed, link));
+  for (const [who, i] of [
+    ["dani", dani],
+    ["ahmed", ahmed],
+    ["sara", await inbox(person("sara"))],
+  ]) {
+    const text = JSON.stringify(i);
+    assert.ok(!text.includes(marker), who);
+    assert.ok(!text.includes('"body"'), who);
+    assert.ok(!text.includes('"frontmatter"'), who);
+  }
+});
+
+test("each inbox list is the newest 100 and the totals count everything", async () => {
+  // Old held notes and old proposals, inserted outside any session.
+  await db.query(`select set_config('request.jwt.claims', '', false)`);
+  await db.query(
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, quarantined, updated_at)
+     select $1, $2, $3, 'ib/bulk/held-' || g || '.md', 'ib bulk held ' || g, true,
+            timestamptz '2001-01-01' + g * interval '1 second'
+       from generate_series(1, 101) g`,
+    [hive, members.ahmed, ws.ahmed],
+  );
+  await db.query(
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     select $1, $2, $3, 'ib/bulk/a-' || g || '.md', 'ib bulk a ' || g
+       from generate_series(1, 101) g`,
+    [hive, members.ahmed, ws.ahmed],
+  );
+  await db.query(
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     select $1, $2, $3, 'ib/bulk/d-' || g || '.md', 'ib bulk d ' || g
+       from generate_series(1, 101) g`,
+    [hive, members.dani, ws.dani],
+  );
+  const before = await inbox(person("ahmed"));
+  await db.query(`select set_config('request.jwt.claims', '', false)`);
+  await db.query(
+    `insert into public.links (hive_id, from_note, to_note, tier, score, created_at)
+     select $1, d.id, a.id, 4, 0.1,
+            timestamptz '2001-01-01' + d.g * interval '1 second'
+       from (select id, substring(path from 'd-(\\d+)')::int as g
+               from public.notes where path like 'ib/bulk/d-%') d
+       join (select id, substring(path from 'a-(\\d+)')::int as g
+               from public.notes where path like 'ib/bulk/a-%') a using (g)`,
+    [hive],
+  );
+
+  const i = await inbox(person("ahmed"));
+  assert.equal(i.held.length, 100);
+  assert.equal(i.held_total, before.held_total);
+  assert.ok(i.held_total >= 101);
+  assert.equal(i.links.length, 100);
+  assert.equal(i.links_total, before.links_total + 101);
+  assert.equal(await inboxCount(person("ahmed")), i.links_total + i.held_total);
+  // Newest first, and what was listed before is still listed.
+  const order = (rows, key) => rows.map((r) => Date.parse(r[key]));
+  for (const times of [
+    order(i.links, "created_at"),
+    order(i.held, "updated_at"),
+  ])
+    for (let k = 1; k < times.length; k++) assert.ok(times[k - 1] >= times[k]);
+  for (const l of before.links) assert.ok(linkIn(i, l.id), "a newer link cut");
+  // The oldest bulk note fell off the list.
+  assert.ok(!i.held.some((n) => n.title === "ib bulk held 1"));
+});

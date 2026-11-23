@@ -118,7 +118,9 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 ## 4. Other pages
 
 - **Inbox** — overlap suggestions, share proposals from agents, contradiction flags, quarantine
-  releases. Each item: what, who, why, two actions.
+  releases. Each item: what, who, why, two actions. Built so far: proposed links waiting for
+  your own answer (accept or decline) and your held notes (release or open in the vault), with
+  the number waiting on the rail.
 - **Entities** — synthesis at the top with every fact citing its source on hover; contradictions
   pinned; linked notes and files below.
 - **Vault** — folder tree, note list, note preview. Visibility shown inline and changed in place;

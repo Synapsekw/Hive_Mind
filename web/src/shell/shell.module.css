@@ -109,6 +109,25 @@
   padding-left: 4px;
 }
 
+/* How many wait in the inbox: a quiet filled chip at the row's end. The fill is the one the rail
+   already lays under a chosen segment, so it reads on the bare wash and on a hovered or current
+   row alike, in light and dark. */
+.count {
+  flex: none;
+  margin-left: auto;
+  margin-right: 6px;
+  min-width: 20px;
+  padding: 2px 5px;
+  border-radius: 8px;
+  background: var(--fill-on);
+  color: var(--fg);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Agents, Appearance and sign out, at the foot ---- */
 
 .foot {
@@ -345,6 +364,10 @@
   .row[aria-current="page"]::before {
     forced-color-adjust: none;
     background: Highlight;
+  }
+
+  .count {
+    border: 1px solid ButtonText;
   }
 
   .agentDot {
