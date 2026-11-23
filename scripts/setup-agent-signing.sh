@@ -132,7 +132,9 @@ while :; do
   fi
   PUBLISHABLE="$(clean "$PUBLISHABLE")"
   if [ -z "$PUBLISHABLE" ]; then continue; fi
-  if ! printf '%s' "$PUBLISHABLE" | grep -Eq '^[A-Za-z0-9._-]{1,1000}$'; then
+  # No {1,1000} here: the grep that ships with macOS refuses a repetition above 255.
+  if [ "${#PUBLISHABLE}" -gt 1000 ] ||
+    ! printf '%s' "$PUBLISHABLE" | grep -Eq '^[A-Za-z0-9._-]+$'; then
     echo "     That is not a key: it holds a character a key cannot have."
     echo "     If pasting keeps failing, stop (Ctrl-C) and start the script like this:"
     echo "       SUPABASE_ANON_KEY=sb_publishable_... scripts/setup-agent-signing.sh $REF"
