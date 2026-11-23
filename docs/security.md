@@ -41,7 +41,11 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - The web app currently signs in with email and password or an emailed link; MFA and SSO are not
   yet built.
 - Each agent gets its own token, created by the member, bound to one workspace and one trust tier.
-- Tokens are shown once, stored as SHA-256 hashes, and carry an optional expiry.
+- Tokens are shown once, stored as SHA-256 hashes, and carry an optional expiry. In the web app
+  the token is shown in one dialog straight after the agent is created and kept nowhere: not in
+  a log, a URL, browser storage or the page once the dialog is closed. Setting an expiry is not
+  built yet.
+- The owner's "Add a member" form says whether an email has an account. Only the owner sees it.
 - Revocation takes effect on the next sign-in; the MCP server re-signs in at least hourly.
 - Trust tiers: `vendor` (Claude, ChatGPT apps) and `self_hosted` (open-source agents).
 

@@ -133,7 +133,8 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   each answer, agent activity and artifacts on the right. The line under the composer always says
   which workspace is written to and whose subscription is paying.
 - **Settings** — workspaces and tokens, connected agents and setup instructions, sharing defaults,
-  members and roles, audit log.
+  members and roles, audit log. Built so far: your own agents (connect, token shown once,
+  revoke) and the member list, where the owner adds a person who already has an account.
 
 ## 5. Overlays and states
 

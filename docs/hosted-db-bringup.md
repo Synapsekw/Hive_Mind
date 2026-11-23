@@ -61,7 +61,9 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
    select * from public.create_agent('<workspace id>', 'Claude', 'claude');
    ```
 
-   The token is returned once. Put it in `.env` as `HIVE_AGENT_TOKEN` and nowhere else.
+   The token is returned once. Put it in `.env` as `HIVE_AGENT_TOKEN` and nowhere else. This
+   is for the first agent of a new project only; with the web app running, agents are created
+   and revoked, and existing users added as members, in **Settings**.
 
 5. **Verify through the public API** with the anon key from `.env`:
 

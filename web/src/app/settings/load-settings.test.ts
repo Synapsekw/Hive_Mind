@@ -328,6 +328,7 @@ describe("loadSettings", () => {
     ]);
 
     expect(args(t.of("workspaces"), "select")).toEqual(["id, name"]);
+    expect(args(t.of("workspaces"), "eq")).toEqual(["hive_id", HIVE]);
     expect(args(t.of("workspaces"), "order")).toEqual([
       "created_at",
       { ascending: true },
@@ -424,5 +425,19 @@ describe("loadSettings", () => {
     const t = stub(opts);
     expect(await loadSettings(t.db, NOW)).toEqual({ state: "error" });
     expect(log).toHaveBeenCalled();
+  });
+});
+
+describe("loadSettings and other hives", () => {
+  it("leaves out an agent whose workspace is not one of this hive's", async () => {
+    const t = stub({
+      workspaces: { data: [{ id: W1, name: "Main" }], error: null },
+    });
+    const out = await loadSettings(t.db, NOW);
+    expect(out.state).toBe("ok");
+    if (out.state !== "ok") return;
+    expect(out.data.agents.length).toBeGreaterThan(0);
+    expect(out.data.agents.every((a) => a.workspaceId === W1)).toBe(true);
+    expect(out.data.agents.some((a) => a.id === A2)).toBe(false);
   });
 });

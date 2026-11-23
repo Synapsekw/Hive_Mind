@@ -19,7 +19,8 @@ guardrail layers assume any agent may be compromised.
 | Claude Code, Codex CLI                                      | MCP server entry in the tool's config (works locally today) | vendor      |
 | Open-source or self-hosted agents (LangGraph, local models) | MCP with a self-hosted token                                | self_hosted |
 
-The member declares the agent type when creating a token; the tier cannot be raised by the agent.
+The member declares the agent type when creating a token, in the web app under **Settings**; the
+tier cannot be raised by the agent.
 The custom-connector route in the Claude and ChatGPT apps needs a public HTTPS address, so it
 arrives with hosting (phase 3). Until then, connect through Claude Code or Claude Desktop's local
 MCP config.

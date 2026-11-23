@@ -78,7 +78,11 @@ decision: links proposed between one of your notes and a colleague's, and notes 
 self-hosted agent. Accepting a link lets each owner read the other's linked note once both have
 accepted; a declined link cannot be accepted afterwards. It needs the `inbox` migration on the database.
 
-`/dev/map`, `/dev/vault`, `/dev/gallery` and `/dev/inbox` show the screens on sample data, without an
+Settings (**Settings** in the left rail) lists your agents and the hive's members. **Connect an
+agent** creates one and shows its token once; copy it then, because it cannot be shown again.
+**Revoke** stops an agent within the hour. The owner can add a member who already has an account.
+
+`/dev/map`, `/dev/vault`, `/dev/gallery`, `/dev/inbox` and `/dev/settings` show the screens on sample data, without an
 account; `/dev/notice` shows the failed-load notice.
 `pnpm --filter @hive-mind/web test:e2e` runs the browser tests; run
 `pnpm --filter @hive-mind/web exec playwright install chromium` once first. The browser tests are
@@ -96,7 +100,9 @@ select * from public.create_agent(
   (select id from public.workspaces limit 1), 'Claude', 'claude');
 ```
 
-`create_agent` returns the agent token once. Put it in `.env` as `HIVE_AGENT_TOKEN`.
+`create_agent` returns the agent token once. Put it in `.env` as `HIVE_AGENT_TOKEN`. Once the
+web app runs, create further agents in **Settings** instead: the token then never appears in a
+query result.
 
 3. Build the server and register it with Claude Code. The server reads its settings from the
    repo's `.env`, so no secret is copied into a client config:

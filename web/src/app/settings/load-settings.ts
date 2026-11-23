@@ -153,6 +153,7 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
     db
       .from("workspaces")
       .select("id, name")
+      .eq("hive_id", hive.id)
       .order("created_at", { ascending: true }),
     db
       .from("agents")
@@ -170,11 +171,14 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
 
   const rows = all(membersRes.data, toMember);
   const workspaces = all(workspacesRes.data, toWorkspace);
-  const agents = all(agentsRes.data, toAgent(now));
-  if (!rows || !workspaces || !agents) {
+  const everyAgent = all(agentsRes.data, toAgent(now));
+  if (!rows || !workspaces || !everyAgent) {
     console.error("settings answer has an unexpected shape");
     return ERROR;
   }
+  // Only this hive's: an agent of the person's in another hive belongs to that hive's settings.
+  const here = new Set(workspaces.map((w) => w.id));
+  const agents = everyAgent.filter((a) => here.has(a.workspaceId));
 
   const members: Member[] = rows.map((m) => ({
     id: m.id,
