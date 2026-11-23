@@ -17,6 +17,15 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.2.17
         version: 0.2.17
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.2
+        version: 1.32.2(zod@3.25.76)
+      '@netlify/plugin-nextjs':
+        specifier: ^5.16.9
+        version: 5.16.9
+      '@supabase/supabase-js':
+        specifier: 2.119.2
+        version: 2.119.2
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -29,6 +38,9 @@ importers:
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
   mcp:
     dependencies:
@@ -364,6 +376,10 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1 || 2.0.0-beta.2
       '@emnapi/runtime': ^1.7.1 || 2.0.0-beta.2
+
+  '@netlify/plugin-nextjs@5.16.9':
+    resolution: {integrity: sha512-mGGT5FkuMaVHG9F3HFmhcI3cFKtzGlff5NwewEUimi2mHDGlSqpBAXWxwZxkt25nbkT1box5t+0tZ8/u5UWUww==}
+    engines: {node: '>=18.0.0'}
 
   '@next/env@16.4.6':
     resolution: {integrity: sha512-SunBjJ6t+oBtecS3dTjdVuMhUogP5wD/vrGL5EVuQYM1iS4O5ilL51HkiJ3sPjMzRHiCChvr4dbaSJbR7F3lxA==}
@@ -2355,6 +2371,8 @@ snapshots:
       '@emnapi/runtime': 2.0.0-beta.2
       '@tybys/wasm-util': 0.10.5
     optional: true
+
+  '@netlify/plugin-nextjs@5.16.9': {}
 
   '@next/env@16.4.6': {}
 

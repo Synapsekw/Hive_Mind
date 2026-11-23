@@ -6,6 +6,8 @@ const W1 = "00000000-0000-4000-8000-000000000b01";
 const AGENT = "00000000-0000-4000-8000-000000000d01";
 const MEMBER = "00000000-0000-4000-8000-000000000c09";
 const INVITATION = "00000000-0000-4000-8000-000000000e01";
+/** A connected app's id at the auth server. */
+const CLIENT = "00000000-0000-4000-8000-0000000000c1";
 // Made up for these tests; shaped like the real thing so a leak would be caught the same way.
 const TOKEN = `hive_${"ab12".repeat(16)}`;
 
@@ -25,33 +27,65 @@ function stub(
     /** The read of the person's own oldest membership. */
     own?: Res;
     user?: { id: string } | null;
+    /** The read of the revoked agent's own row. */
+    agent?: Res | (() => never);
+    /** The read of the person's agents of the same app that are still in use. */
+    live?: Res;
+    revokeGrant?: Res | (() => never);
   } = {},
 ) {
   const calls: Call[] = [];
+  const steps: string[] = [];
   const from = vi.fn((table: string) => {
     const call: Call = { table, ops: [] };
     calls.push(call);
     const chain: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "order", "limit"])
+    for (const m of ["select", "eq", "is", "order", "limit"])
       chain[m] = (...args: unknown[]) => {
         call.ops.push([m, args]);
         return chain;
       };
-    chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) =>
-      Promise.resolve(
-        opts.own ??
-          ok([{ id: MEMBER, hive_id: HIVE, hive: { name: "Synapse" } }]),
-      ).then(res, rej);
+    chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) => {
+      steps.push(table);
+      const byId = call.ops.some(([m, a]) => m === "eq" && a[0] === "id");
+      const answer = (): Res => {
+        if (table !== "agents")
+          return (
+            opts.own ??
+            ok([{ id: MEMBER, hive_id: HIVE, hive: { name: "Synapse" } }])
+          );
+        if (!byId) return opts.live ?? ok([]);
+        if (typeof opts.agent === "function") return opts.agent();
+        return opts.agent ?? ok([{ oauth_client_id: null }]);
+      };
+      return new Promise<Res>((resolve) => resolve(answer())).then(res, rej);
+    };
     return chain;
   });
-  const rpc = vi.fn(async (_name: string, _args: unknown) =>
-    typeof opts.rpc === "function" ? opts.rpc() : (opts.rpc ?? ok(null)),
-  );
+  const rpc = vi.fn(async (name: string, _args: unknown) => {
+    steps.push(name);
+    return typeof opts.rpc === "function" ? opts.rpc() : (opts.rpc ?? ok(null));
+  });
   const user = opts.user === undefined ? { id: "u-me" } : opts.user;
+  const revokeGrant = vi.fn(async (_o: { clientId: string }) => {
+    steps.push("revokeGrant");
+    return typeof opts.revokeGrant === "function"
+      ? opts.revokeGrant()
+      : (opts.revokeGrant ?? { data: {}, error: null });
+  });
   const auth = {
     getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    oauth: { revokeGrant },
   };
-  return { db: { from, rpc, auth } as never, calls, from, rpc, auth };
+  return {
+    db: { from, rpc, auth } as never,
+    calls,
+    steps,
+    from,
+    rpc,
+    auth,
+    revokeGrant,
+  };
 }
 
 const args = (c: Call, name: string) => c.ops.find(([m]) => m === name)?.[1];
@@ -228,12 +262,104 @@ describe("revokeIn", () => {
     expect(t.rpc).not.toHaveBeenCalled();
   });
 
-  it("revokes through revoke_agent and nothing else", async () => {
+  it("revokes an agent with a token through revoke_agent, and ends no sign-in", async () => {
     const t = stub();
     expect(await revokeIn(t.db, AGENT)).toEqual({ ok: true });
     expect(t.rpc).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledWith("revoke_agent", { p_agent: AGENT });
+    // One read, of that agent's own row and of the one column.
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]!.table).toBe("agents");
+    expect(args(t.calls[0]!, "select")).toEqual(["oauth_client_id"]);
+    expect(args(t.calls[0]!, "eq")).toEqual(["id", AGENT]);
+    expect(t.revokeGrant).not.toHaveBeenCalled();
+  });
+
+  it("revokes a connected app, then ends its sign-in at the auth server", async () => {
+    const t = stub({ agent: ok([{ oauth_client_id: CLIENT }]) });
+    expect(await revokeIn(t.db, AGENT)).toEqual({ ok: true });
+    // The revoke comes first: the sign-in is ended only once the database has cut the app off.
+    expect(t.steps).toEqual([
+      "revoke_agent",
+      "agents",
+      "agents",
+      "revokeGrant",
+    ]);
+    expect(t.revokeGrant).toHaveBeenCalledTimes(1);
+    expect(t.revokeGrant).toHaveBeenCalledWith({ clientId: CLIENT });
+    // The second read: the person's agents of the same app that are still in use.
+    expect(args(t.calls[1]!, "eq")).toEqual(["oauth_client_id", CLIENT]);
+    expect(args(t.calls[1]!, "is")).toEqual(["revoked_at", null]);
+    expect(args(t.calls[1]!, "limit")).toEqual([1]);
+  });
+
+  it("keeps the sign-in while another agent of the same app is still in use", async () => {
+    const t = stub({
+      agent: ok([{ oauth_client_id: CLIENT }]),
+      live: ok([{ id: "00000000-0000-4000-8000-000000000d02" }]),
+    });
+    expect(await revokeIn(t.db, AGENT)).toEqual({ ok: true });
+    expect(t.revokeGrant).not.toHaveBeenCalled();
+  });
+
+  it("ends no sign-in when the database refused the revoke", async () => {
+    const c = consoles();
+    const t = stub({
+      rpc: err("that agent is not yours", "P0001"),
+      agent: ok([{ oauth_client_id: CLIENT }]),
+    });
+    expect(await revokeIn(t.db, AGENT)).toEqual({ ok: false });
     expect(t.from).not.toHaveBeenCalled();
+    expect(t.revokeGrant).not.toHaveBeenCalled();
+    expect(c.said()).not.toContain("sign-in");
+  });
+
+  it.each([
+    ["the auth server refuses", { revokeGrant: err("grant not found", "404") }],
+    [
+      "the auth server cannot be reached",
+      {
+        revokeGrant: () => {
+          throw new Error(`network ${CLIENT}`);
+        },
+      },
+    ],
+    ["the agent's row cannot be read", { agent: err("denied", "42501") }],
+    [
+      "reading the agent's row throws",
+      {
+        agent: () => {
+          throw new Error("network");
+        },
+      },
+    ],
+    ["the other agents cannot be read", { live: err("denied", "42501") }],
+    [
+      "the client id is not a uuid",
+      { agent: ok([{ oauth_client_id: "client-a" }]) },
+    ],
+    ["the agent's row is malformed", { agent: ok(["nonsense"]) }],
+  ])(
+    "the revoke still stands when %s, and one fixed phrase is logged",
+    async (_name, opts) => {
+      const c = consoles();
+      const t = stub({ agent: ok([{ oauth_client_id: CLIENT }]), ...opts });
+      expect(await revokeIn(t.db, AGENT)).toEqual({ ok: true });
+      expect(c.error).toHaveBeenCalledTimes(1);
+      expect(c.error).toHaveBeenCalledWith(
+        "the app's sign-in could not be ended",
+      );
+      expect(c.said()).not.toContain("secret payload");
+      expect(c.said()).not.toContain(CLIENT);
+    },
+  );
+
+  it("ends nothing when the agent's row is not there", async () => {
+    const c = consoles();
+    const t = stub({ agent: ok([]) });
+    expect(await revokeIn(t.db, AGENT)).toEqual({ ok: true });
+    expect(t.revokeGrant).not.toHaveBeenCalled();
+    expect(c.error).not.toHaveBeenCalled();
   });
 
   it("answers not ok when the database refuses, logging code and message only", async () => {

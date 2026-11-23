@@ -1,7 +1,7 @@
 ---
 type: spec
 status: active
-last-updated: 2026-11-22
+last-updated: 2026-11-23
 tags: [project/hive-mind, agents, mcp]
 ---
 
@@ -12,18 +12,31 @@ guardrail layers assume any agent may be compromised.
 
 ## 1. Supported agents
 
-| Agent                                                       | How it connects                                             | Trust tier  |
-| ----------------------------------------------------------- | ----------------------------------------------------------- | ----------- |
-| Claude desktop and web                                      | Remote MCP connector, enabled in one project                | vendor      |
-| ChatGPT desktop and web                                     | Custom connector in developer mode, attached to one Project | vendor      |
-| Claude Code, Codex CLI                                      | MCP server entry in the tool's config (works locally today) | vendor      |
-| Open-source or self-hosted agents (LangGraph, local models) | MCP with a self-hosted token                                | self_hosted |
+| Agent                                                       | How it connects                                                | Trust tier  |
+| ----------------------------------------------------------- | -------------------------------------------------------------- | ----------- |
+| Claude desktop and web                                      | Remote connector: paste `https://<site>/mcp`, sign in, approve | vendor      |
+| ChatGPT desktop and web                                     | Custom connector in developer mode, with the same address      | vendor      |
+| Claude Code, Codex CLI                                      | MCP server entry in the tool's config (works locally today)    | vendor      |
+| Open-source or self-hosted agents (LangGraph, local models) | MCP with a self-hosted token                                   | self_hosted |
 
 The member declares the agent type when creating a token, in the web app under **Settings**; the
 tier cannot be raised by the agent.
-The custom-connector route in the Claude and ChatGPT apps needs a public HTTPS address, so it
-arrives with hosting (phase 3). Until then, connect through Claude Code or Claude Desktop's local
-MCP config.
+
+The remote connector is built. The address is the same for everyone, `https://<site>/mcp`, and
+there is no token to copy: the app opens a Hive Mind window, the member signs in, picks a
+workspace and clicks **Approve**. The app then appears in **Settings** as an agent named after
+it, and is revoked there. Its tier is decided by the database, from every address the app
+registered with the sign-in server, and checked on every call: an app is `vendor` only when all
+of them are `https` addresses on Claude's or ChatGPT's own hosts, and `self_hosted` otherwise.
+Neither the app nor the web app can state the tier. One leftover is known: the app is recorded
+as connected just before the sign-in server confirms the approval, so an approval that fails at
+that last step can leave a connected agent in Settings that no app can use. Steps for the owner
+and for a member are in
+[hosted-db-bringup.md](hosted-db-bringup.md#hosting-and-the-connector); what protects it is in
+[security.md](security.md#10-the-remote-connector).
+
+Claude Code, Codex CLI and Claude Desktop's local MCP config keep using the local server and an
+agent token.
 
 ## 2. MCP tool surface
 
@@ -38,6 +51,10 @@ MCP config.
 | `hive_save_file`    | Upload a deliverable under `outputs/<type>/<customer>/`  | yes    | refused for now | built    |
 | `hive_propose`      | Raise an inbox card: share this note, merge these topics | yes    | yes             | designed |
 | `hive_session_note` | Append the end-of-session summary                        | yes    | held for review | designed |
+
+The remote connector offers the first six tools of the table. `hive_save_file` is in the local
+server only: it reads a file from the computer the agent runs on, and a hosted connector has no
+access to a member's disk.
 
 Deliberately absent: any tool that changes visibility, membership, tokens, trust tiers or entity
 records. Those exist only in the web app for signed-in people.
@@ -94,7 +111,9 @@ ignored and reported.
 ## 5. Instruction template
 
 This is the template for what is built today (seven tools). It goes in the
-`CLAUDE.md` of the folder, or the instructions of the project, that should use the hive.
+`CLAUDE.md` of the folder, or the instructions of the project, that should use the hive. For an
+app connected through the remote connector, leave out the paragraph about `hive_save_file`: that
+tool is not offered there.
 
 ```markdown
 You are working with the Hive memory (workspace <WORKSPACE>) through the hive tools.

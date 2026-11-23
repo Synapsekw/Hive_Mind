@@ -16,6 +16,7 @@
     "test:live": "pnpm --filter @hive-mind/mcp build && node --env-file=.env --test --test-concurrency=1 tests/mcp.integration.test.mjs tests/two-members.integration.test.mjs",
     "demo": "node scripts/demo.mjs",
     "import:vault": "node --env-file=.env scripts/import-vault.mjs",
+    "sync:tools": "node scripts/sync-connector-tools.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:start": "supabase start",
@@ -27,10 +28,14 @@
     "@commitlint/cli": "^19.6.0",
     "@commitlint/config-conventional": "^19.6.0",
     "@electric-sql/pglite": "^0.2.17",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@netlify/plugin-nextjs": "^5.16.9",
+    "@supabase/supabase-js": "2.119.2",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.10",
     "prettier": "^3.4.2",
-    "yaml": "^2.9.1"
+    "yaml": "^2.9.1",
+    "zod": "3.25.76"
   },
   "lint-staged": {
     "*.{ts,js,mjs,json,md,yml,yaml}": [
