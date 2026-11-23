@@ -4,7 +4,14 @@
 // all client state that survives choosing a note. The tab and the open note come from the URL;
 // writes go through `actions`, and the database decides whether they are allowed.
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from "react";
 import { Shell } from "../shell/Shell";
 import { Folders } from "./Folders";
 import { folderMark } from "./marks";
@@ -289,7 +296,8 @@ export function Vault({
       <main
         ref={main}
         aria-label="Vault"
-        className={s.panel}
+        className={`${s.panel} rise`}
+        style={{ "--rise-delay": "0.08s" } as CSSProperties}
         onClickCapture={follow}
       >
         <div className={s.bar}>

@@ -554,6 +554,8 @@ for (const width of [390, 700, 1600]) {
   }) => {
     await page.setViewportSize({ width, height: 800 });
     await open(page, `?note=${README}`);
+    // The card rises in on load; measure it at rest.
+    await page.waitForTimeout(1000);
     // Where the question's Delete will be: ask once, measure, answer Keep.
     await deleteButton(page).click();
     await expect(keepButton(page)).toBeFocused();

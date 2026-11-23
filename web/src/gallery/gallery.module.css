@@ -68,6 +68,7 @@
 /* Mine / Shared with me / All: the map's view switch, a 10 px hairline track with 7 px
    segments. Buttons, not links: choosing one loads nothing. */
 .tabs {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   padding: 3px;
@@ -89,9 +90,7 @@
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
-  transition:
-    background 0.18s var(--ease),
-    color 0.18s var(--ease);
+  transition: color var(--dur-fast) var(--ease);
 }
 
 .tab:hover {
@@ -99,7 +98,6 @@
 }
 
 .tab[aria-pressed="true"] {
-  background: var(--fill-on);
   color: var(--fg);
   font-weight: 500;
 }
@@ -119,6 +117,11 @@
   flex: 0 1 260px;
   min-width: 0;
   display: flex;
+  transition: flex-basis 0.4s var(--ease);
+}
+
+.filter:focus-within {
+  flex-basis: 320px;
 }
 
 .search {
@@ -136,6 +139,10 @@
 
 .search:hover {
   border-color: var(--line-hi);
+}
+
+.search:focus {
+  border-color: var(--brand);
 }
 
 .search::placeholder {
@@ -189,13 +196,15 @@
   text-align: left;
   cursor: pointer;
   transition:
-    background 0.18s var(--ease),
-    border-color 0.24s var(--ease);
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 
 .card:hover {
   border-color: var(--line-hi);
   background: var(--fill);
+  transform: translateY(-1px);
 }
 
 .card[aria-expanded="true"] {
@@ -224,6 +233,11 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform var(--dur-slow) var(--ease);
+}
+
+.card:hover .thumb {
+  transform: scale(1.03);
 }
 
 .sheet {
@@ -487,11 +501,14 @@
   border: 0;
   background: var(--grad);
   color: var(--on-brand);
-  transition: filter 0.18s var(--ease);
+  transition:
+    filter var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 
 .primary:hover {
   filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 
 .secondary,
@@ -597,12 +614,13 @@
   -webkit-backdrop-filter: blur(30px) saturate(1.5);
   backdrop-filter: blur(30px) saturate(1.5);
   color: var(--fg);
-  animation: arrive 0.24s var(--ease);
+  animation: arrive var(--dur) var(--ease);
 }
 
 @keyframes arrive {
   from {
     opacity: 0;
+    transform: scale(0.98);
   }
 }
 
@@ -801,6 +819,12 @@
 
   .viewer {
     animation: none;
+  }
+
+  .card:hover,
+  .primary:hover,
+  .card:hover .thumb {
+    transform: none;
   }
 }
 

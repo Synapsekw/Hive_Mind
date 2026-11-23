@@ -150,13 +150,61 @@
   list-style: none;
 }
 
-/* A row: the words on the left, the decision on the right, a hairline above. */
+/* The row's collapse: the cell shrinks from its full height to nothing as it fades. */
+.cell {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 0.35s var(--ease),
+    opacity 0.35s var(--ease);
+}
+
+.cell[data-leaving] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cell > .item {
+  min-height: 0;
+}
+
+/* A row: the words on the left, the decision on the right, a hairline above. It lifts on hover
+   like a gallery card: the hairline brightens and a fill fades in. */
 .item {
+  position: relative;
+  isolation: isolate;
+  transition:
+    border-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px 28px;
   padding: 14px 0 16px;
   border-top: 1px solid var(--line);
+}
+
+.item::before {
+  content: "";
+  position: absolute;
+  inset: 0 -12px;
+  z-index: -1;
+  border-radius: 12px;
+  background: var(--fill);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+  pointer-events: none;
+}
+
+.item:hover {
+  border-top-color: var(--line-hi);
+  transform: translateY(-1px);
+}
+
+.item:hover::before {
+  opacity: 1;
 }
 
 .text {
@@ -290,11 +338,14 @@
   border: 0;
   background: var(--grad);
   color: var(--on-brand);
-  transition: filter 0.18s var(--ease);
+  transition:
+    filter var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 
 .primary:hover {
   filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 
 .secondary,
@@ -441,6 +492,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .item:hover,
+  .primary:hover {
+    transform: none;
+  }
+
+  .cell,
+  .item,
+  .item::before,
   .own,
   .primary,
   .secondary,

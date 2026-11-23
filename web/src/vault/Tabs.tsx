@@ -1,5 +1,9 @@
 // The workspace tabs and "Shared with me". Tabs are links: switching loads that tab's index.
+"use client";
+import { useRef } from "react";
 import Link from "next/link";
+import { useSlidingPill } from "../shell/useSlidingPill";
+import pillCss from "../shell/SlidingPill.module.css";
 import type { VaultData } from "./types";
 import s from "./vault.module.css";
 
@@ -13,8 +17,15 @@ export function Tabs({
   hrefShared: string;
 }) {
   const tab = data.tab;
+  const group = useRef<HTMLElement>(null);
+  const pill = useSlidingPill(
+    group,
+    '[aria-current="page"]',
+    tab.kind === "workspace" ? tab.id : "shared",
+  );
   return (
-    <nav aria-label="Workspaces" className={s.tabs}>
+    <nav ref={group} aria-label="Workspaces" className={s.tabs}>
+      <span aria-hidden="true" className={pillCss.pill} style={pill} />
       {data.workspaces.map((w) => {
         const on = tab.kind === "workspace" && tab.id === w.id;
         return (

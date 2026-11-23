@@ -210,7 +210,7 @@ export function Preview({
       ? (data.folders.find((f) => f.path === n.rule_folder) ?? null)
       : null;
     body = (
-      <article className={s.article}>
+      <article key={n.id} className={`${s.article} rise`}>
         <header className={s.head}>
           <h2 className={s.noteTitle}>{n.title}</h2>
           <p className={s.path}>{n.path}</p>
