@@ -1,0 +1,108 @@
+// What the settings server actions do, given a client signed in as the person. Each checks its
+// arguments before any call and lets the database decide: `create_agent`, `revoke_agent` and
+// `add_member` refuse an agent, someone else's workspace or agent, and anyone but the owner.
+//
+// The token. `create_agent` answers with the agent's token, once. It leaves `createIn` only in
+// the returned value. Nothing the function answered is ever passed to `console.*`, whether the
+// call worked or not: a log line here carries an error's code and message and nothing else.
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Added, Created, Result } from "../../settings/types";
+import { isUuid } from "../vault/validate";
+import { cleanEmail, cleanName, cleanNewAgent } from "./validate";
+
+type Db = Pick<SupabaseClient, "from" | "rpc" | "auth">;
+type Res = { data: unknown; error: { code?: string; message: string } | null };
+
+const NO: Result = { ok: false };
+const YES: Result = { ok: true };
+const NOT_CREATED: Created = { ok: false };
+const FAILED: Added = { ok: false, reason: "failed" };
+
+/** Only the error's code and message, never the answer beside it. */
+function failed(what: string, res: Res): boolean {
+  if (!res.error) return false;
+  console.error(`${what} failed`, res.error.code, res.error.message);
+  return true;
+}
+
+async function signedIn(db: Db): Promise<boolean> {
+  const { data } = await db.auth.getUser();
+  return Boolean(data.user?.id);
+}
+
+/** The token of the first row of `create_agent`'s answer, or null when it is not there. */
+function tokenOf(data: unknown): string | null {
+  const first: unknown = Array.isArray(data) ? data[0] : undefined;
+  if (typeof first !== "object" || first === null) return null;
+  const { token } = first as Record<string, unknown>;
+  return typeof token === "string" && token.length > 0 ? token : null;
+}
+
+export async function createIn(db: Db, raw: unknown): Promise<Created> {
+  const input = cleanNewAgent(raw);
+  if (!input) return NOT_CREATED;
+  if (!(await signedIn(db))) return NOT_CREATED;
+  const res = (await db.rpc("create_agent", {
+    p_workspace: input.workspaceId,
+    p_name: input.name,
+    p_provider: input.provider,
+    p_trust_tier: input.trustTier,
+  })) as Res;
+  if (failed("create_agent", res)) return NOT_CREATED;
+  const token = tokenOf(res.data);
+  if (token === null) {
+    // Said without the answer: a malformed answer may still hold the token somewhere.
+    console.error("create_agent answer has an unexpected shape");
+    return NOT_CREATED;
+  }
+  return { ok: true, token };
+}
+
+export async function revokeIn(db: Db, id: unknown): Promise<Result> {
+  if (!isUuid(id)) return NO;
+  if (!(await signedIn(db))) return NO;
+  const res = (await db.rpc("revoke_agent", { p_agent: id })) as Res;
+  return failed("revoke_agent", res) ? NO : YES;
+}
+
+/** The message `add_member` raises for an email nobody has signed up with. */
+const NO_ACCOUNT = "no user with that email";
+/** Postgres' unique violation: that person already has a member row in the hive. */
+const UNIQUE_VIOLATION = "23505";
+
+export async function addMemberIn(
+  db: Db,
+  email: unknown,
+  name: unknown,
+): Promise<Added> {
+  const cleanedEmail = cleanEmail(email);
+  const cleanedName = cleanName(name);
+  if (cleanedEmail === null || cleanedName === null) return FAILED;
+  if (!(await signedIn(db))) return FAILED;
+
+  const hives = (await db
+    .from("hives")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)) as Res;
+  if (failed("hives query", hives)) return FAILED;
+  const hive: unknown = Array.isArray(hives.data) ? hives.data[0] : undefined;
+  const hiveId =
+    typeof hive === "object" && hive !== null
+      ? (hive as Record<string, unknown>).id
+      : undefined;
+  if (typeof hiveId !== "string") return FAILED;
+
+  const res = (await db.rpc("add_member", {
+    p_hive: hiveId,
+    p_email: cleanedEmail,
+    p_display_name: cleanedName,
+  })) as Res;
+  if (!res.error) return { ok: true };
+  failed("add_member", res);
+  if (res.error.message.includes(NO_ACCOUNT))
+    return { ok: false, reason: "no-account" };
+  if (res.error.code === UNIQUE_VIOLATION)
+    return { ok: false, reason: "already-member" };
+  return FAILED;
+}
