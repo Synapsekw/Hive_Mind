@@ -124,7 +124,12 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 - **Entities** — synthesis at the top with every fact citing its source on hover; contradictions
   pinned; linked notes and files below.
 - **Vault** — folder tree, note list, note preview. Visibility shown inline and changed in place;
-  quarantine is a folder with a release action.
+  quarantine is a folder with a release action. The preview of your own note has a quiet
+  **Delete** after the sharing control. The first click asks "Delete this note? It is gone for
+  good, with its history and its links. Files attached to it stay in the gallery." with
+  **Delete** and **Keep**; the second Delete counts only half a second after the question
+  appears, as with the inbox's Decline. Afterwards the note's tab closes and a status line says
+  "Note deleted." A colleague's note has no Delete.
 - **Gallery** — previews of generated documents; mine, shared with me, whole hive; a full-screen
   viewer for PDF, PPTX, XLSX and images. Built so far: a card grid with image thumbnails, the
   viewer for images and PDFs, download for every file and delete for your own; PPTX and XLSX

@@ -7,7 +7,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabase } from "../../lib/supabase/server";
 import type { Result, SharePreview } from "../../vault/types";
-import { previewIn, releaseIn, saveFolderIn, saveNoteIn } from "./write";
+import {
+  deleteNoteIn,
+  previewIn,
+  releaseIn,
+  saveFolderIn,
+  saveNoteIn,
+} from "./write";
 
 async function withSession<T>(
   fallback: T,
@@ -42,6 +48,10 @@ export async function saveFolder(
 
 export async function release(noteId: string): Promise<Result> {
   return withSession<Result>({ ok: false }, (db) => releaseIn(db, noteId));
+}
+
+export async function deleteNote(noteId: string): Promise<Result> {
+  return withSession<Result>({ ok: false }, (db) => deleteNoteIn(db, noteId));
 }
 
 export async function preview(

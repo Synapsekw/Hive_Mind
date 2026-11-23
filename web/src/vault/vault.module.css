@@ -710,6 +710,126 @@
   background: var(--fill);
 }
 
+/* ---- Delete ----
+   The open note's own controls share one row: sharing at its start, Delete at its end. The
+   sharing control's box dissolves into the row (display: contents), so its open panel and the
+   delete question each take a full line under it. */
+.tools {
+  align-self: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tools > .share {
+  display: contents;
+}
+
+.tools .pill {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.tools .control,
+.wide {
+  grid-column: 1 / -1;
+}
+
+.tools > .release {
+  margin-top: 0;
+}
+
+/* Delete before it has asked: words only, no edge and no fill until it is pointed at. */
+.quiet {
+  grid-column: 2;
+  grid-row: 1;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.quiet:hover,
+.quiet:focus-visible {
+  border-color: var(--line);
+  color: var(--fg);
+}
+
+/* Delete, once it has asked: said in weight and a full-strength edge, not in a colour. */
+.confirm {
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--fg);
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s var(--ease);
+}
+
+.confirm:hover {
+  background: var(--fill-on);
+}
+
+/* While the delete runs both answers keep their place and their focus, and do nothing: a
+   dashed hairline and quiet text, in either mode. */
+.confirm[aria-disabled="true"],
+.secondary[aria-disabled="true"] {
+  border: 1px dashed var(--line-hi);
+  background: none;
+  color: var(--quiet);
+  font-weight: 500;
+  cursor: default;
+}
+
+/* How the last delete went: one line under the tabs, there until it is dismissed. It keeps to
+   the top of the window where the page scrolls (stacked columns), so it is seen from the list. */
+.said {
+  position: sticky;
+  top: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+}
+
+.saidText {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* A failure is said in words; the bar beside it only draws the eye. */
+.said[data-failed] .saidText {
+  padding-left: 10px;
+  box-shadow: inset 2px 0 0 var(--hue-6);
+}
+
+/* A row brought into view by the focus stays clear of that line. */
+.row {
+  scroll-margin-top: 64px;
+}
+
 /* ---- Markdown ---- */
 
 .markdown {
@@ -860,7 +980,8 @@
   }
 
   .control,
-  .release {
+  .release,
+  .said {
     background: var(--surface);
   }
 }
@@ -1004,7 +1125,9 @@
   .option,
   .person,
   .primary,
-  .secondary {
+  .secondary,
+  .quiet,
+  .confirm {
     transition: none;
   }
 }

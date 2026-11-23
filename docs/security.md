@@ -148,6 +148,11 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   the decision (a note's or folder's visibility and named members, or releasing a held note);
   the database decides whether it is allowed. It never writes a note's text, path or owner.
 - Agents may create inbox proposals (share this note, link these notes); people act on them.
+- Deleting a note is a person's decision, on their own notes only. The database refuses it for
+  any agent identity and for anyone who is not the note's owner; no MCP tool offers it. The
+  vault's Delete goes through a server action with the person's session cookie that sends only
+  the note's id, and the database decides. This rule is older than the vault's Delete and did
+  not change with it.
 - `map_graph`, the one call the web app's map reads, is a security-definer function: a
   deliberate, tested exception to "RLS decides". Row-level security does not apply inside it, so
   every read is filtered by hive and decided with `can_read_note`, the test the notes policy uses.
@@ -175,7 +180,13 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - A file's declared type is not trusted. Only images (in an image element) and PDFs (after the
   browser has checked the content is a PDF) are shown in the app; anything else, including HTML
   and SVG, can only be downloaded.
-- Full version history on notes; deletions soft for 30 days, then purged.
+- Full version history on notes. Deleting a note is permanent: the 30-day soft delete of the
+  design is not built, so there is no trash and no restore.
+- What goes with a deleted note: its history, its links (proposed or accepted) and its topic
+  tags. Files attached to it stay in the gallery with no note; a file with no note is readable
+  by its owner only, so a file that was shared through the note stops being shared.
+- Accepted gaps: there is no undo, so a slip past the confirm loses the note and its history;
+  and a colleague whose note was linked to the deleted one loses the link without a notice.
 - Region: chosen for the customer material members will load; decide whether any class of
   document must stay in the UAE.
 - Export: a member can export their own space as a markdown folder; the owner the whole hive.
@@ -202,6 +213,11 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   invited a person who had a confirmed account), `member.invited` (an invitation was saved),
   `member.joined` (the invited person signed in and became a member) or
   `member.invitation_revoked`. The detail holds the email and the invitation or member id.
+- Built: a note deleted by a person writes one row with the action `note.deleted`. It holds the
+  note's id, the person, and two counts in the detail: the links removed and the files left
+  without a note. Never the note's path, title or body. The row is written in the same
+  transaction as the delete, so a refused or failed delete leaves none. Not recorded: a delete
+  with no person behind it, and notes that go because their whole hive is deleted.
 - Every MCP call logged: agent, member, tool, note, time, result.
 - Owner view: reads and writes per agent per day, failed authorisations, token last use.
 - Alerts: a burst of reads across many entities by one agent; repeated authorisation failures. A

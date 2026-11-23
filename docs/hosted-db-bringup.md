@@ -17,6 +17,9 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
 - Migration `20261123105237_invitations` is applied (2026-11-23) and recorded under that version.
   It adds the `invitations` table and `invite_member`, `revoke_invitation` and
   `claim_invitations` for inviting a member from Settings.
+- Migration `20261123123845_note_delete_audit` is applied (2026-11-23) and recorded under that
+  version. It adds the `notes_deleted_audit` trigger, which writes a deleted note to the audit
+  log.
 - One hive (`Synapse`), one owner member (`Danijel`), one workspace (`Main`), one agent (`Claude`,
   provider `claude`, trust tier `vendor`).
 - The agent token is in the owner's local `.env` as `HIVE_AGENT_TOKEN`. Only its hash is stored in

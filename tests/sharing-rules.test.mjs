@@ -3355,3 +3355,465 @@ test("adding a person closes the invitation that was waiting for them", async ()
   assert.equal((await claim(asUser(id)))[0].n, 0);
   assert.equal((await membershipsOf(id)).length, 1);
 });
+
+// ---------------------------------------------------------- deleting a note
+// The notes_delete policy decides who deletes: the note's owner, signed in as
+// a person. The notes_deleted_audit trigger records it with the note's id and
+// two counts, never its path, title or body.
+
+// As the database owner (no row-level security), with or without a person
+// behind the call. `as` leaves the last caller's claims set, so "no person"
+// has to clear them.
+const asDbOwner = async (claims, sql, params = []) => {
+  await db.exec("reset role");
+  await db.query(`select set_config('request.jwt.claims', $1, false)`, [
+    JSON.stringify(claims ?? {}),
+  ]);
+  return (await db.query(sql, params)).rows;
+};
+const deleteNote = (who, id) =>
+  as(who, `delete from public.notes where id = $1 returning id`, [id]);
+const noteExists = async (id) =>
+  (await db.query(`select 1 from public.notes where id = $1`, [id])).rows
+    .length === 1;
+const deletedAudits = async (since) =>
+  (await auditSince(since)).filter((r) => r.action === "note.deleted");
+const dn = {};
+
+test("a person deletes their own note, with its history, links and tags", async () => {
+  dn.mark = await lastAudit();
+  dn.note = await addAt(
+    person("dani"),
+    "dani",
+    "zebrafinch/quillon.md",
+    "marrowfat title",
+    { body: "pumpernickel body" },
+  );
+  await as(
+    person("dani"),
+    `update public.notes set body = 'pumpernickel body, second' where id = $1`,
+    [dn.note],
+  );
+  dn.sara = await addAt(person("sara"), "sara", "dn/sara.md", "dn sara");
+  dn.ahmed = await addAt(person("ahmed"), "ahmed", "dn/ahmed.md", "dn ahmed");
+  // One accepted link out of the note, one proposed link into it.
+  dn.out = await propose(person("dani"), dn.note, dn.sara);
+  assert.equal(await respond(person("sara"), dn.out, true), "accepted");
+  dn.in = await propose(person("ahmed"), dn.ahmed, dn.note);
+  const entity = (
+    await as(
+      person("dani"),
+      `insert into public.entities (hive_id, type, canonical_name)
+       values ($1, 'client', 'dn client') returning id`,
+      [hive],
+    )
+  )[0].id;
+  await as(
+    person("dani"),
+    `insert into public.note_entities (note_id, entity_id) values ($1, $2)`,
+    [dn.note, entity],
+  );
+  const path = filePath("dani", "dn-attached.pdf");
+  await upload(person("dani"), path);
+  dn.file = (
+    await fileRow(person("dani"), "dani", path, { note: dn.note })
+  )[0].id;
+
+  const count = async (sql) => (await db.query(sql, [dn.note])).rows[0].n;
+  const versions = `select count(*)::int as n from public.note_versions where note_id = $1`;
+  const links = `select count(*)::int as n from public.links where from_note = $1 or to_note = $1`;
+  const tags = `select count(*)::int as n from public.note_entities where note_id = $1`;
+  assert.ok((await count(versions)) >= 1);
+  assert.equal(await count(links), 2);
+  assert.equal(await count(tags), 1);
+
+  assert.deepEqual(await deleteNote(person("dani"), dn.note), [
+    { id: dn.note },
+  ]);
+
+  assert.equal(await noteExists(dn.note), false);
+  assert.equal(await count(versions), 0);
+  assert.equal(await count(links), 0);
+  assert.equal(await count(tags), 0);
+  // The file stays, attached to nothing; so do the notes it was linked to.
+  assert.deepEqual(
+    (
+      await db.query(`select id, note_id from public.files where id = $1`, [
+        dn.file,
+      ])
+    ).rows,
+    [{ id: dn.file, note_id: null }],
+  );
+  assert.ok(await noteExists(dn.sara));
+  assert.ok(await noteExists(dn.ahmed));
+  assert.equal(
+    (await db.query(`select 1 from public.entities where id = $1`, [entity]))
+      .rows.length,
+    1,
+  );
+});
+
+test("deleting a note leaves one audit row with its id and two counts, no text", async () => {
+  const rows = await deletedAudits(dn.mark);
+  assert.equal(rows.length, 1);
+  dn.audit = rows[0].id;
+  assert.deepEqual(rows[0], {
+    id: dn.audit,
+    hive_id: hive,
+    member_id: members.dani,
+    agent_id: null,
+    action: "note.deleted",
+    note_id: dn.note,
+    detail: { links: 2, files: 1 },
+  });
+  // Every column of the row, as text: nothing of the note's path, title or body.
+  const whole = (
+    await db.query(
+      `select to_jsonb(a)::text as t from public.audit_log a where id = $1`,
+      [dn.audit],
+    )
+  ).rows[0].t.toLowerCase();
+  for (const word of [
+    "zebrafinch",
+    "quillon",
+    "marrowfat",
+    "pumpernickel",
+    "dn-attached",
+  ])
+    assert.ok(!whole.includes(word), `the audit row contains "${word}"`);
+});
+
+test("only the note's owner, signed in as a person, deletes it", async () => {
+  const note = await addAt(
+    person("dani"),
+    "dani",
+    "dn/guarded.md",
+    "dn guarded",
+    { visibility: "members", shared_with: [members.ahmed] },
+  );
+  await as(
+    person("dani"),
+    `update public.notes set body = 'guarded, second' where id = $1`,
+    [note],
+  );
+  await propose(person("dani"), note, dn.sara);
+  const path = filePath("dani", "dn-guarded.pdf");
+  await upload(person("dani"), path);
+  await fileRow(person("dani"), "dani", path, { note });
+  const state = async () =>
+    (
+      await db.query(
+        `select (select to_jsonb(n) from public.notes n where n.id = $1) as note,
+                (select count(*)::int from public.note_versions where note_id = $1) as versions,
+                (select count(*)::int from public.links
+                  where from_note = $1 or to_note = $1) as links,
+                (select count(*)::int from public.files where note_id = $1) as files,
+                (select count(*)::int from public.notes) as notes,
+                (select count(*)::int from public.audit_log) as audits`,
+        [note],
+      )
+    ).rows[0];
+
+  // Ahmed can read the note (it is shared with him) and still cannot delete it.
+  assert.ok(await canRead(person("ahmed"), note));
+  const refused = [
+    ["the owner's agent", await agentFor("dani")],
+    ["the owner's self-hosted agent", await agentFor("dani", "self_hosted")],
+    ["a member it is shared with", person("ahmed")],
+    ["another member", person("sara")],
+    ["another member's agent", await agentFor("ahmed")],
+    ["another hive's owner", person("outsider")],
+    ["nobody", null],
+  ];
+  // Measured from here: connecting the agents above is not a delete.
+  const start = await state();
+  assert.ok(start.note);
+  assert.ok(start.versions >= 1);
+  assert.equal(start.links, 1);
+  assert.equal(start.files, 1);
+  for (const [label, who] of refused) {
+    let rows = [];
+    try {
+      rows = await deleteNote(who, note);
+    } catch (e) {
+      assert.match(e.message, /permission denied|row-level security/, label);
+    }
+    assert.deepEqual(rows, [], label);
+    assert.deepEqual(await state(), start, label);
+  }
+  // A delete with a wide filter takes nothing of anyone else's either.
+  for (const who of [person("outsider"), person("ahmed")]) {
+    assert.deepEqual(
+      await as(
+        who,
+        `delete from public.notes where member_id = $1 returning id`,
+        [members.dani],
+      ),
+      [],
+    );
+    assert.deepEqual(await state(), start);
+  }
+
+  // The owner still can.
+  const mark = await lastAudit();
+  assert.deepEqual(await deleteNote(person("dani"), note), [{ id: note }]);
+  const rows = await deletedAudits(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].note_id, note);
+  assert.equal(rows[0].member_id, members.dani);
+  assert.deepEqual(rows[0].detail, { links: 1, files: 1 });
+});
+
+test("only the hive owner reads that a note was deleted", async () => {
+  const read = (who) =>
+    as(
+      who,
+      `select action, note_id, member_id from public.audit_log where id = $1`,
+      [dn.audit],
+    );
+  assert.deepEqual(await read(person("dani")), [
+    { action: "note.deleted", note_id: dn.note, member_id: members.dani },
+  ]);
+  for (const who of [
+    person("ahmed"),
+    person("sara"),
+    person("outsider"),
+    await agentFor("dani"),
+    null,
+  ])
+    assert.deepEqual(await read(who), []);
+
+  // A member's own delete is the owner's to read, not the member's.
+  const mark = await lastAudit();
+  const note = await addAt(person("sara"), "sara", "dn/own.md", "dn sara own");
+  assert.deepEqual(await deleteNote(person("sara"), note), [{ id: note }]);
+  const since = (who) =>
+    as(
+      who,
+      `select action, note_id, member_id, detail from public.audit_log
+        where id > $1 and action = 'note.deleted'`,
+      [mark],
+    );
+  assert.deepEqual(await since(person("dani")), [
+    {
+      action: "note.deleted",
+      note_id: note,
+      member_id: members.sara,
+      detail: { links: 0, files: 0 },
+    },
+  ]);
+  assert.deepEqual(await since(person("sara")), []);
+});
+
+test("a delete with no person behind it writes no audit row", async () => {
+  const note = await addAt(person("dani"), "dani", "dn/service.md", "dn svc");
+  const mark = await lastAudit();
+  const gone = await asDbOwner(
+    null,
+    `delete from public.notes where id = $1 returning id`,
+    [note],
+  );
+  assert.deepEqual(gone, [{ id: note }]);
+  assert.equal(await noteExists(note), false);
+  assert.deepEqual(await auditSince(mark), []);
+});
+
+test("deleting a workspace, a member, an account or a hive still works", async () => {
+  // A workspace, by its person: its notes go and each one is recorded.
+  const space = (
+    await as(
+      person("dani"),
+      `insert into public.workspaces (hive_id, member_id, name)
+       values ($1, $2, 'dn scratch') returning id`,
+      [hive, members.dani],
+    )
+  )[0].id;
+  const inSpace = async (path, title) =>
+    (
+      await as(
+        person("dani"),
+        `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+         values ($1, $2, $3, $4, $5) returning id`,
+        [hive, members.dani, space, path, title],
+      )
+    )[0].id;
+  const one = await inSpace("dn/one.md", "dn space one");
+  const two = await inSpace("dn/two.md", "dn space two");
+  await propose(person("dani"), one, dn.sara);
+  const spaceFile = filePath("dani", "dn-space.pdf", space);
+  await upload(person("dani"), spaceFile);
+  await fileRow(person("dani"), "dani", spaceFile, {
+    note: two,
+    workspace: space,
+  });
+  let mark = await lastAudit();
+  assert.deepEqual(
+    await as(
+      person("dani"),
+      `delete from public.workspaces where id = $1 returning id`,
+      [space],
+    ),
+    [{ id: space }],
+  );
+  assert.equal(await noteExists(one), false);
+  assert.equal(await noteExists(two), false);
+  let rows = await deletedAudits(mark);
+  assert.deepEqual(rows.map((r) => r.note_id).sort(), [one, two].sort());
+  for (const r of rows) {
+    assert.equal(r.member_id, members.dani);
+    assert.equal(r.hive_id, hive);
+    assert.deepEqual(Object.keys(r.detail).sort(), ["files", "links"]);
+  }
+  assert.equal(rows.find((r) => r.note_id === one).detail.links, 1);
+
+  // A member, as the database owner: with nobody signed in, then with a
+  // person signed in (the owner, then the member themself).
+  const leaver = async (tag) => {
+    const email = `dn-${tag}@example.com`;
+    const user = await addUser(email);
+    await as(person("dani"), `select public.add_member($1, $2, $3)`, [
+      hive,
+      email,
+      `Leaver ${tag}`,
+    ]);
+    const m = (
+      await db.query(
+        `select m.id as member, w.id as space from public.members m
+           join public.workspaces w on w.member_id = m.id
+          where m.user_id = $1 and m.hive_id = $2`,
+        [user, hive],
+      )
+    ).rows[0];
+    const who = asUser(user);
+    const mine = (
+      await as(
+        who,
+        `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+         values ($1, $2, $3, 'dn/leaving.md', 'dn leaving') returning id`,
+        [hive, m.member, m.space],
+      )
+    )[0].id;
+    await as(
+      who,
+      `insert into public.links (hive_id, from_note, to_note, tier, score)
+       values ($1, $2, $3, 3, 0.5)`,
+      [hive, mine, dn.sara],
+    );
+    return { who, member: m.member, note: mine };
+  };
+  const removeMember = (claims, id) =>
+    asDbOwner(claims, `delete from public.members where id = $1 returning id`, [
+      id,
+    ]);
+
+  const a = await leaver("a");
+  mark = await lastAudit();
+  assert.deepEqual(await removeMember(null, a.member), [{ id: a.member }]);
+  assert.equal(await noteExists(a.note), false);
+  assert.deepEqual(await deletedAudits(mark), []);
+
+  const b = await leaver("b");
+  mark = await lastAudit();
+  assert.deepEqual(await removeMember(person("dani"), b.member), [
+    { id: b.member },
+  ]);
+  assert.equal(await noteExists(b.note), false);
+  rows = await deletedAudits(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].note_id, b.note);
+  assert.equal(rows[0].member_id, members.dani);
+  assert.deepEqual(rows[0].detail, { links: 1, files: 0 });
+
+  const c = await leaver("c");
+  mark = await lastAudit();
+  assert.deepEqual(await removeMember(c.who, c.member), [{ id: c.member }]);
+  assert.equal(await noteExists(c.note), false);
+  rows = await deletedAudits(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].note_id, c.note);
+  // Their member row went first, so the row names nobody.
+  assert.equal(rows[0].member_id, null);
+
+  // A person's account, which takes their member rows and notes with it.
+  const d = await leaver("d");
+  mark = await lastAudit();
+  await asDbOwner(d.who, `delete from auth.users where id = $1`, [d.who.sub]);
+  assert.equal(await noteExists(d.note), false);
+  assert.equal((await deletedAudits(mark)).length, 1);
+
+  // A whole hive, as the database owner: with nobody signed in, then with its
+  // owner signed in. The audit log goes with the hive, so the trigger must
+  // not write a row that points at a hive that is no longer there.
+  const doomed = async (tag) => {
+    const user = await addUser(`dn-hive-${tag}@example.com`);
+    const who = asUser(user);
+    const h = (
+      await as(who, `select public.create_hive($1, 'Doomed') as id`, [
+        `Doomed ${tag}`,
+      ])
+    )[0].id;
+    const m = (
+      await db.query(
+        `select m.id as member, w.id as space from public.members m
+           join public.workspaces w on w.member_id = m.id where m.hive_id = $1`,
+        [h],
+      )
+    ).rows[0];
+    const made = [];
+    for (const n of ["x", "y", "z"])
+      made.push(
+        (
+          await as(
+            who,
+            `insert into public.notes (hive_id, member_id, workspace_id, path, title, visibility)
+             values ($1, $2, $3, $4, $5, 'group') returning id`,
+            [h, m.member, m.space, `dn/${n}.md`, `dn doomed ${n}`],
+          )
+        )[0].id,
+      );
+    await as(
+      who,
+      `insert into public.links (hive_id, from_note, to_note, tier, score)
+       values ($1, $2, $3, 3, 0.5)`,
+      [h, made[0], made[1]],
+    );
+    const path = `${m.member}/${m.space}/outputs/dn/${tag}.pdf`;
+    await upload(who, path);
+    await as(
+      who,
+      `insert into public.files (hive_id, member_id, workspace_id, note_id, storage_path, name)
+       values ($1, $2, $3, $4, $5, 'a file')`,
+      [h, m.member, m.space, made[2], path],
+    );
+    return { who, hive: h };
+  };
+  const hiveLeft = async (h) =>
+    (
+      await db.query(
+        `select (select count(*)::int from public.hives where id = $1) as hives,
+                (select count(*)::int from public.notes where hive_id = $1) as notes,
+                (select count(*)::int from public.audit_log where hive_id = $1) as audits`,
+        [h],
+      )
+    ).rows[0];
+  for (const tag of ["quiet", "signed-in"]) {
+    const gone = await doomed(tag);
+    assert.ok((await hiveLeft(gone.hive)).audits > 0);
+    mark = await lastAudit();
+    assert.deepEqual(
+      await asDbOwner(
+        tag === "quiet" ? null : gone.who,
+        `delete from public.hives where id = $1 returning id`,
+        [gone.hive],
+      ),
+      [{ id: gone.hive }],
+    );
+    assert.deepEqual(await hiveLeft(gone.hive), {
+      hives: 0,
+      notes: 0,
+      audits: 0,
+    });
+    assert.deepEqual(await auditSince(mark), []);
+  }
+  await asDbOwner(null, `select 1`);
+});
