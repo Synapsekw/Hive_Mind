@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addMemberIn, createIn, revokeIn } from "./write";
+import { createIn, inviteIn, revokeIn, revokeInvitationIn } from "./write";
 
 const HIVE = "00000000-0000-4000-8000-000000000a01";
 const W1 = "00000000-0000-4000-8000-000000000b01";
 const AGENT = "00000000-0000-4000-8000-000000000d01";
 const MEMBER = "00000000-0000-4000-8000-000000000c09";
+const INVITATION = "00000000-0000-4000-8000-000000000e01";
 // Made up for these tests; shaped like the real thing so a leak would be caught the same way.
 const TOKEN = `hive_${"ab12".repeat(16)}`;
 
@@ -21,7 +22,8 @@ const err = (message: string, code?: string): Res => ({
 function stub(
   opts: {
     rpc?: Res | (() => never);
-    hives?: Res;
+    /** The read of the person's own oldest membership. */
+    own?: Res;
     user?: { id: string } | null;
   } = {},
 ) {
@@ -36,7 +38,10 @@ function stub(
         return chain;
       };
     chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) =>
-      Promise.resolve(opts.hives ?? ok([{ id: HIVE }])).then(res, rej);
+      Promise.resolve(
+        opts.own ??
+          ok([{ id: MEMBER, hive_id: HIVE, hive: { name: "Synapse" } }]),
+      ).then(res, rej);
     return chain;
   });
   const rpc = vi.fn(async (_name: string, _args: unknown) =>
@@ -244,7 +249,7 @@ describe("revokeIn", () => {
   });
 });
 
-describe("addMemberIn", () => {
+describe("inviteIn", () => {
   const FAILED = { ok: false, reason: "failed" };
 
   it.each([
@@ -255,113 +260,206 @@ describe("addMemberIn", () => {
     ["a name of 61 characters", "ahmed@example.com", "a".repeat(61)],
     ["a name that is null", "ahmed@example.com", null],
   ])("refuses %s with no call at all", async (_name, email, name) => {
-    const t = stub({ rpc: ok(MEMBER) });
-    expect(await addMemberIn(t.db, email, name)).toEqual(FAILED);
+    const t = stub({ rpc: ok("invited") });
+    expect(await inviteIn(t.db, email, name)).toEqual(FAILED);
     expect(t.auth.getUser).not.toHaveBeenCalled();
     expect(t.rpc).not.toHaveBeenCalled();
     expect(t.from).not.toHaveBeenCalled();
   });
 
   it("refuses without a session, before any query", async () => {
-    const t = stub({ rpc: ok(MEMBER), user: null });
-    expect(await addMemberIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(
-      FAILED,
-    );
+    const t = stub({ rpc: ok("invited"), user: null });
+    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(FAILED);
     expect(t.from).not.toHaveBeenCalled();
     expect(t.rpc).not.toHaveBeenCalled();
   });
 
-  it("finds the first hive by creation, then calls add_member with cleaned values", async () => {
-    const t = stub({ rpc: ok(MEMBER) });
-    expect(await addMemberIn(t.db, " Ahmed@Example.com ", "  Ahmed ")).toEqual({
+  it("finds the hive of the person's own oldest membership, then calls invite_member with cleaned values", async () => {
+    const t = stub({ rpc: ok("invited") });
+    expect(await inviteIn(t.db, " Ahmed@Example.com ", "  Ahmed ")).toEqual({
       ok: true,
+      outcome: "invited",
     });
     expect(t.calls).toHaveLength(1);
-    const [hives] = t.calls;
-    expect(hives!.table).toBe("hives");
-    expect(args(hives!, "select")).toEqual(["id"]);
-    expect(args(hives!, "order")).toEqual(["created_at", { ascending: true }]);
-    expect(args(hives!, "limit")).toEqual([1]);
+    const [own] = t.calls;
+    expect(own!.table).toBe("members");
+    expect(own!.ops).toEqual([
+      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", "u-me"]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [1]],
+    ]);
+    // The id is the one the auth server answered with, asked for once.
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledTimes(1);
-    expect(t.rpc).toHaveBeenCalledWith("add_member", {
+    expect(t.rpc).toHaveBeenCalledWith("invite_member", {
       p_hive: HIVE,
       p_email: "ahmed@example.com",
       p_display_name: "Ahmed",
     });
   });
 
-  it("answers only ok, never what the function returned", async () => {
-    const t = stub({ rpc: ok(MEMBER) });
-    const out = await addMemberIn(t.db, "ahmed@example.com", "Ahmed");
-    expect(Object.keys(out)).toEqual(["ok"]);
-  });
+  it.each(["added", "invited"] as const)(
+    "answers the outcome %s, and only ok and the outcome",
+    async (outcome) => {
+      const c = consoles();
+      const t = stub({ rpc: ok(outcome) });
+      const out = await inviteIn(t.db, "ahmed@example.com", "Ahmed");
+      expect(out).toEqual({ ok: true, outcome });
+      expect(Object.keys(out).sort()).toEqual(["ok", "outcome"]);
+      expect(c.count()).toBe(0);
+    },
+  );
+
+  it.each([
+    ["null", null],
+    ["an unknown word", "joined"],
+    ["a member id", MEMBER],
+    ["a list", ["invited"]],
+    ["an object", { outcome: "added" }],
+    ["a number", 1],
+  ])(
+    "answers failed when the function returned %s, without logging it",
+    async (_name, data) => {
+      const c = consoles();
+      const t = stub({ rpc: ok(data) });
+      expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(
+        FAILED,
+      );
+      expect(c.error).toHaveBeenCalledTimes(1);
+      expect(c.error).toHaveBeenCalledWith(
+        "invite_member answer has an unexpected shape",
+      );
+    },
+  );
 
   it("answers failed without a hive, with no call to the function", async () => {
-    const t = stub({ hives: ok([]) });
-    expect(await addMemberIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(
-      FAILED,
-    );
+    const t = stub({ own: ok([]) });
+    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(FAILED);
     expect(t.rpc).not.toHaveBeenCalled();
   });
 
   it("answers failed when the hive cannot be read", async () => {
     const c = consoles();
-    const t = stub({ hives: err("denied", "42501") });
-    expect(await addMemberIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(
-      FAILED,
-    );
+    const t = stub({ own: err("denied", "42501") });
+    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(FAILED);
     expect(t.rpc).not.toHaveBeenCalled();
     expect(c.error).toHaveBeenCalledWith(
-      "hives query failed",
+      "own hive query failed",
       "42501",
       "denied",
     );
   });
 
-  it("answers no-account for an email nobody signed up with", async () => {
+  it("answers already-member when the database says so", async () => {
     const c = consoles();
-    const t = stub({
-      rpc: err("no user with that email has signed up yet", "P0001"),
-    });
-    expect(await addMemberIn(t.db, "new@example.com", "New")).toEqual({
+    const t = stub({ rpc: err("that person is already a member", "P0001") });
+    expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual({
       ok: false,
-      reason: "no-account",
+      reason: "already-member",
     });
     expect(c.said()).not.toContain("secret payload");
   });
 
-  it("answers already-member on a unique violation", async () => {
-    consoles();
-    const t = stub({
-      rpc: err(
-        'duplicate key value violates unique constraint "members_hive_id_user_id_key"',
-        "23505",
-      ),
-    });
-    expect(await addMemberIn(t.db, "ahmed@example.com", "Ahmed")).toEqual({
+  it("answers already-invited when the database says so", async () => {
+    const c = consoles();
+    const t = stub({ rpc: err("that email is already invited", "P0001") });
+    expect(await inviteIn(t.db, "new@example.com", "New")).toEqual({
       ok: false,
-      reason: "already-member",
+      reason: "already-invited",
     });
+    expect(c.said()).not.toContain("secret payload");
   });
 
   it.each([
-    ["not the owner", err("only the hive owner can add members", "P0001")],
+    ["not the owner", err("only the hive owner can invite members", "P0001")],
     ["an error without a code", err("something else")],
-    ["another constraint", err("null value in column", "23502")],
+    ["a unique violation", err("duplicate key value", "23505")],
+    ["a constraint", err("null value in column", "23502")],
   ])(
     "answers failed for %s, logging code and message only",
     async (_n, res) => {
       const c = consoles();
       const t = stub({ rpc: res });
-      expect(await addMemberIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(
+      expect(await inviteIn(t.db, "ahmed@example.com", "Ahmed")).toEqual(
         FAILED,
       );
       expect(c.error).toHaveBeenCalledWith(
-        "add_member failed",
+        "invite_member failed",
         res.error!.code,
         res.error!.message,
       );
       expect(c.said()).not.toContain("secret payload");
     },
   );
+
+  it("never logs the email or the name", async () => {
+    const c = consoles();
+    for (const rpc of [
+      err("that person is already a member", "P0001"),
+      err("boom", "XX000"),
+      ok(null),
+    ]) {
+      const t = stub({ rpc });
+      await inviteIn(t.db, "ahmed@example.com", "Ahmed Person");
+    }
+    await inviteIn(
+      stub({ user: null }).db,
+      "ahmed@example.com",
+      "Ahmed Person",
+    );
+    await inviteIn(stub().db, "ahmed@example", 7);
+    expect(c.count()).toBeGreaterThan(0);
+    expect(c.said()).not.toContain("ahmed@");
+    expect(c.said()).not.toContain("Ahmed Person");
+  });
+});
+
+describe("revokeInvitationIn", () => {
+  it.each([
+    ["a word", "not-a-uuid"],
+    ["an empty string", ""],
+    ["a number", 7],
+    ["null", null],
+    ["undefined", undefined],
+    ["an object", { id: INVITATION }],
+    ["a uuid with a filter appended", `${INVITATION},revoked_at.is.null`],
+  ])("refuses an id that is %s with no call at all", async (_name, id) => {
+    const t = stub();
+    expect(await revokeInvitationIn(t.db, id)).toEqual({ ok: false });
+    expect(t.auth.getUser).not.toHaveBeenCalled();
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it("refuses without a session, before the function is called", async () => {
+    const t = stub({ user: null });
+    expect(await revokeInvitationIn(t.db, INVITATION)).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it("revokes through revoke_invitation and nothing else", async () => {
+    const t = stub();
+    const out = await revokeInvitationIn(t.db, INVITATION);
+    expect(out).toEqual({ ok: true });
+    expect(Object.keys(out)).toEqual(["ok"]);
+    expect(t.rpc).toHaveBeenCalledTimes(1);
+    expect(t.rpc).toHaveBeenCalledWith("revoke_invitation", {
+      p_invitation: INVITATION,
+    });
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it("answers not ok when the database refuses, logging code and message only", async () => {
+    const c = consoles();
+    const t = stub({ rpc: err("invitation not found", "P0001") });
+    expect(await revokeInvitationIn(t.db, INVITATION)).toEqual({ ok: false });
+    expect(c.error).toHaveBeenCalledWith(
+      "revoke_invitation failed",
+      "P0001",
+      "invitation not found",
+    );
+    expect(c.said()).not.toContain("secret payload");
+  });
 });

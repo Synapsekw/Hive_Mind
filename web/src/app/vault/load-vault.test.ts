@@ -4,6 +4,7 @@ import { loadVault, toNote } from "./load-vault";
 const HIVE = "00000000-0000-4000-8000-000000000a01";
 const ME = "00000000-0000-4000-8000-000000000001";
 const AHMED = "00000000-0000-4000-8000-000000000002";
+const U_ME = "11111111-1111-4111-8111-111111111101";
 const W1 = "00000000-0000-4000-8000-000000000b01";
 const W2 = "00000000-0000-4000-8000-000000000b02";
 const MINE = "00000000-0000-4000-8000-000000010001";
@@ -35,13 +36,17 @@ function row(id: string, over: Record<string, unknown> = {}) {
 
 const ok = (data: unknown): Res => ({ data, error: null });
 
+/** The session cookie's access token: its payload names the user. */
+const tokenOf = (sub: string) =>
+  `h.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.s`;
+
 /**
  * A stand-in client: every `from(table)` chain is recorded and resolves to what `answer`
- * returns for it. `getUser` answers with the caller's user id.
+ * returns for it. `getUser` answers with the caller's user id, and the session's token names it.
  */
 function stub(
   answer: (c: Call) => Res | undefined,
-  user: { id: string } | null = { id: "u-me" },
+  user: { id: string } | null = { id: U_ME },
 ) {
   const calls: Call[] = [];
   const from = vi.fn((table: string) => {
@@ -50,6 +55,9 @@ function stub(
     const chain: Record<string, unknown> = {};
     for (const m of ["select", "eq", "neq", "order", "limit", "in"])
       chain[m] = (...args: unknown[]) => {
+        // The read of the person's own oldest membership is filed apart from the hive's members.
+        if (table === "members" && m === "eq" && args[0] === "user_id")
+          call.table = "own";
         call.ops.push([m, args]);
         return chain;
       };
@@ -60,8 +68,12 @@ function stub(
   const rpc = vi.fn();
   const auth = {
     getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getSession: vi.fn(async () => ({
+      data: { session: user ? { access_token: tokenOf(user.id) } : null },
+      error: null,
+    })),
   };
-  return { db: { from, rpc, auth } as never, calls, from, rpc };
+  return { db: { from, rpc, auth } as never, calls, from, rpc, auth };
 }
 
 const op = (c: Call, name: string) => c.ops.filter(([m]) => m === name);
@@ -84,10 +96,11 @@ function world(opts: {
         data: null,
         error: { message: "boom", code: "XX000", details: "Secret title" },
       };
-    if (c.table === "hives") return ok([{ id: HIVE, name: "Synapse" }]);
+    if (c.table === "own")
+      return ok([{ id: ME, hive_id: HIVE, hive: { name: "Synapse" } }]);
     if (c.table === "members")
       return ok([
-        { id: ME, display_name: "Danijel", user_id: "u-me" },
+        { id: ME, display_name: "Danijel", user_id: U_ME },
         { id: AHMED, display_name: "Ahmed", user_id: "u-ahmed" },
       ]);
     if (c.table === "workspaces")
@@ -108,7 +121,7 @@ function world(opts: {
 }
 
 describe("loadVault", () => {
-  it("reads the first hive, its members, own workspaces, and the first workspace's index", async () => {
+  it("reads the hive of the person's own oldest membership, its members, own workspaces, and the first workspace's index", async () => {
     const t = stub(world({ index: [row(MINE)] }));
     const out = await loadVault(t.db, {});
     expect(out.state).toBe("ok");
@@ -131,9 +144,17 @@ describe("loadVault", () => {
     expect(out.data.open).toBeNull();
     expect(out.data.truncated).toBe(false);
 
-    const hives = t.calls.find((c) => c.table === "hives")!;
-    expect(has(hives, "order", "created_at", { ascending: true })).toBe(true);
-    expect(has(hives, "limit", 1)).toBe(true);
+    expect(t.calls[0]!.table).toBe("own");
+    expect(t.from.mock.calls[0]).toEqual(["members"]);
+    expect(t.calls[0]!.ops).toEqual([
+      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", U_ME]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [1]],
+    ]);
+    // One call to the auth server, as before.
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
     const index = t.calls.find((c) => c.table === "notes")!;
     expect(has(index, "eq", "workspace_id", W1)).toBe(true);
     expect(has(index, "order", "path")).toBe(true);
@@ -143,7 +164,7 @@ describe("loadVault", () => {
     expect(selected(index)).toContain("rule_folder:note_rule_folder");
     expect(selected(index)).toContain("access:note_access");
     expect(t.calls.map((c) => c.table).sort()).toEqual(
-      ["folders", "hives", "members", "notes", "workspaces"].sort(),
+      ["folders", "members", "notes", "own", "workspaces"].sort(),
     );
     expect(t.rpc).not.toHaveBeenCalled();
   });
@@ -249,9 +270,9 @@ describe("loadVault", () => {
   });
 
   it("is no-hive when the caller has no hive, and reads nothing else", async () => {
-    const t = stub((c) => (c.table === "hives" ? ok([]) : undefined));
+    const t = stub((c) => (c.table === "own" ? ok([]) : undefined));
     expect(await loadVault(t.db, {})).toEqual({ state: "no-hive" });
-    expect(t.calls.map((c) => c.table)).toEqual(["hives"]);
+    expect(t.calls.map((c) => c.table)).toEqual(["own"]);
   });
 
   it("is error when there is no session", async () => {
@@ -259,7 +280,7 @@ describe("loadVault", () => {
     expect(await loadVault(t.db, {})).toEqual({ state: "error" });
   });
 
-  for (const table of ["hives", "members", "workspaces", "folders", "notes"]) {
+  for (const table of ["own", "members", "workspaces", "folders", "notes"]) {
     it(`is error when the ${table} read fails, logging only code and message`, async () => {
       const spy = vi.spyOn(console, "error").mockImplementation(() => {});
       const t = stub(world({ fail: table }));

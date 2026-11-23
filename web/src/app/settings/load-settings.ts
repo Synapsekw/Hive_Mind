@@ -1,12 +1,15 @@
 // What `/settings` reads, given a client signed in as the person. Row-level security decides
-// what comes back: every member of the hive, and only the person's own workspaces and agents.
+// what comes back: every member of the hive, only the person's own workspaces and agents, and
+// the hive's open invitations for its owner alone (nobody else gets a row).
 // Nothing here decides who may see a row. The answer for the browser is built from named values
 // only, so a member's `user_id` and anything else the contract does not name never leave the
 // server, and a row that is not what was promised refuses the whole answer.
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ownHive } from "../own-hive";
 import type {
   Agent,
   AgentStatus,
+  Invitation,
   Member,
   SettingsData,
   Workspace,
@@ -25,6 +28,7 @@ type Res = { data: unknown; error: { code?: string; message: string } | null };
 const AGENT_COLUMNS =
   "id, member_id, workspace_id, name, provider, trust_tier, expires_at, revoked_at, last_used_at, created_at";
 const MAX_AGENTS = 200;
+const MAX_INVITATIONS = 100;
 
 /** Only the error's code and message, never a payload. */
 function failed(what: string, res: Res): boolean {
@@ -78,6 +82,22 @@ function toWorkspace(v: unknown): Workspace | null {
   return { id, name };
 }
 
+function toInvitation(v: unknown): Invitation | null {
+  if (!row(v)) return null;
+  const { id, email, display_name, created_at, expires_at } = v;
+  if (!str(id) || !str(email) || !str(display_name)) return null;
+  // The screen shows both as dates.
+  if (!str(created_at) || time(created_at) === null) return null;
+  if (!str(expires_at) || time(expires_at) === null) return null;
+  return {
+    id,
+    email,
+    name: display_name,
+    createdAt: created_at,
+    expiresAt: expires_at,
+  };
+}
+
 const toAgent =
   (now: number) =>
   (v: unknown): Agent | null => {
@@ -118,24 +138,14 @@ function all<T>(list: unknown, one: (v: unknown) => T | null): T[] | null {
 const ERROR: SettingsLoad = { state: "error" };
 
 /**
- * Everything `/settings` shows: the hive's name and members, and the person's own workspaces
- * and newest 200 agents, each with its status at `now`.
+ * Everything `/settings` shows: the hive's name and members, the person's own workspaces and
+ * newest 200 agents, each with its status at `now`, and the newest 100 invitations still open at
+ * `now`.
  */
 export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
-  const hives = (await db
-    .from("hives")
-    .select("id, name")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return ERROR;
-  const hive = Array.isArray(hives.data)
-    ? (hives.data[0] as unknown)
-    : undefined;
-  if (hive === undefined) return { state: "no-hive" };
-  if (!row(hive) || !str(hive.id) || !str(hive.name)) {
-    console.error("hives answer has an unexpected shape");
-    return ERROR;
-  }
+  const hive = await ownHive(db);
+  if (hive === "error") return ERROR;
+  if (hive === null) return { state: "no-hive" };
 
   const { data: session } = await db.auth.getUser();
   const userId = session.user?.id;
@@ -144,37 +154,49 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
     return ERROR;
   }
 
-  const [membersRes, workspacesRes, agentsRes] = (await Promise.all([
-    db
-      .from("members")
-      .select("id, display_name, role, user_id")
-      .eq("hive_id", hive.id)
-      .order("created_at", { ascending: true }),
-    db
-      .from("workspaces")
-      .select("id, name")
-      .eq("hive_id", hive.id)
-      .order("created_at", { ascending: true }),
-    db
-      .from("agents")
-      .select(AGENT_COLUMNS)
-      // Agents still in use first, so the cap can only ever cut off old revoked ones.
-      .order("revoked_at", { ascending: true, nullsFirst: true })
-      .order("created_at", { ascending: false })
-      .limit(MAX_AGENTS),
-  ])) as [Res, Res, Res];
+  const [membersRes, workspacesRes, agentsRes, invitationsRes] =
+    (await Promise.all([
+      db
+        .from("members")
+        .select("id, display_name, role, user_id")
+        .eq("hive_id", hive.id)
+        .order("created_at", { ascending: true }),
+      db
+        .from("workspaces")
+        .select("id, name")
+        .eq("hive_id", hive.id)
+        .order("created_at", { ascending: true }),
+      db
+        .from("agents")
+        .select(AGENT_COLUMNS)
+        // Agents still in use first, so the cap can only ever cut off old revoked ones.
+        .order("revoked_at", { ascending: true, nullsFirst: true })
+        .order("created_at", { ascending: false })
+        .limit(MAX_AGENTS),
+      db
+        .from("invitations")
+        .select("id, email, display_name, created_at, expires_at")
+        .eq("hive_id", hive.id)
+        .is("accepted_at", null)
+        .is("revoked_at", null)
+        .gt("expires_at", new Date(now).toISOString())
+        .order("created_at", { ascending: false })
+        .limit(MAX_INVITATIONS),
+    ])) as [Res, Res, Res, Res];
   // Each is checked, so every failure is logged, not only the first.
   const bad = [
     failed("members query", membersRes),
     failed("workspaces query", workspacesRes),
     failed("agents query", agentsRes),
+    failed("invitations query", invitationsRes),
   ];
   if (bad.some(Boolean)) return ERROR;
 
   const rows = all(membersRes.data, toMember);
   const workspaces = all(workspacesRes.data, toWorkspace);
   const everyAgent = all(agentsRes.data, toAgent(now));
-  if (!rows || !workspaces || !everyAgent) {
+  const invitations = all(invitationsRes.data, toInvitation);
+  if (!rows || !workspaces || !everyAgent || !invitations) {
     console.error("settings answer has an unexpected shape");
     return ERROR;
   }
@@ -196,6 +218,7 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
       workspaces,
       agents,
       members,
+      invitations,
     },
   };
 }

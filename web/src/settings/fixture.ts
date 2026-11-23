@@ -1,8 +1,15 @@
 // Deterministic sample settings for the dev page and the tests: the hive Synapse with two
-// workspaces, three agents and three members. The edges the screen has to show are all there: an
-// agent used recently, a self-hosted one never used, a revoked one, and the owner's and a plain
-// member's view. Ids and timestamps are fixed; nothing is random and nothing reads the clock.
-import type { Agent, Member, SettingsData, Workspace } from "./types";
+// workspaces, three agents, three members and two pending invitations. The edges the screen has to
+// show are all there: an agent used recently, a self-hosted one never used, a revoked one, and the
+// owner's and a plain member's view. Ids and timestamps are fixed; nothing is random and nothing
+// reads the clock.
+import type {
+  Agent,
+  Invitation,
+  Member,
+  SettingsData,
+  Workspace,
+} from "./types";
 
 const MAIN = "00000000-0000-4000-8000-0000000000e1";
 const DRA = "00000000-0000-4000-8000-0000000000e2";
@@ -55,9 +62,28 @@ const MEMBERS: Omit<Member, "isMe">[] = [
   { id: SARA, name: "Sara", role: "member" },
 ];
 
+// Newest first, each open for fourteen days, as the loader hands them over.
+const INVITATIONS: Invitation[] = [
+  {
+    id: "00000000-0000-4000-8000-00000000c001",
+    email: "lena@example.com",
+    name: "Lena",
+    createdAt: "2026-11-22T16:00:00.000Z",
+    expiresAt: "2026-12-06T16:00:00.000Z",
+  },
+  {
+    id: "00000000-0000-4000-8000-00000000c002",
+    email: "marko@example.com",
+    name: "Marko",
+    createdAt: "2026-11-20T09:30:00.000Z",
+    expiresAt: "2026-12-04T09:30:00.000Z",
+  },
+];
+
 /**
  * The sample settings, as the owner Danijel sees them. `member` is Ahmed's view: not the owner,
- * and the "you" mark on Ahmed. `none` has no agents yet.
+ * the "you" mark on Ahmed, and no invitations, which only the owner can read. `none` has no
+ * agents yet.
  */
 export function fixtureSettings(
   opts: { member?: boolean; none?: boolean } = {},
@@ -69,5 +95,6 @@ export function fixtureSettings(
     workspaces: WORKSPACES.map((w) => ({ ...w })),
     agents: opts.none ? [] : AGENTS.map((a) => ({ ...a })),
     members: MEMBERS.map((m) => ({ ...m, isMe: m.id === me })),
+    invitations: opts.member ? [] : INVITATIONS.map((i) => ({ ...i })),
   };
 }

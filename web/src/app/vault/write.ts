@@ -4,6 +4,7 @@
 // Only an error's code and message are logged.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Choice, Result, SharePreview } from "../../vault/types";
+import { ownHive } from "../own-hive";
 import { cleanChoice, cleanPath, isUuid, othersIn } from "./validate";
 
 type Db = Pick<SupabaseClient, "from" | "rpc" | "auth">;
@@ -28,18 +29,12 @@ async function userId(db: Db): Promise<string | null> {
 
 /** The ids the person may name: the members of their hive except themselves, read now. */
 async function others(db: Db, uid: string): Promise<string[] | null> {
-  const hives = (await db
-    .from("hives")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return null;
-  const hive = Array.isArray(hives.data) ? hives.data[0] : undefined;
-  if (!hive) return null;
+  const hive = await ownHive(db, uid);
+  if (hive === "error" || hive === null) return null;
   const members = (await db
     .from("members")
     .select("id, user_id")
-    .eq("hive_id", (hive as { id: string }).id)) as Res;
+    .eq("hive_id", hive.id)) as Res;
   if (failed("members query", members) || !Array.isArray(members.data))
     return null;
   return othersIn(members.data as { id: string; user_id: string }[], uid);

@@ -15,6 +15,8 @@ describe("fixtureSettings", () => {
     a.agents[0]!.name = "changed";
     a.members.pop();
     a.workspaces[0]!.name = "changed";
+    a.invitations[0]!.name = "changed";
+    a.invitations.pop();
     expect(fixtureSettings()).toEqual(data);
   });
 
@@ -66,11 +68,41 @@ describe("fixtureSettings", () => {
     ]);
   });
 
+  it("has two pending invitations, the newest first", () => {
+    expect(data.invitations).toEqual([
+      {
+        id: "00000000-0000-4000-8000-00000000c001",
+        email: "lena@example.com",
+        name: "Lena",
+        createdAt: "2026-11-22T16:00:00.000Z",
+        expiresAt: "2026-12-06T16:00:00.000Z",
+      },
+      {
+        id: "00000000-0000-4000-8000-00000000c002",
+        email: "marko@example.com",
+        name: "Marko",
+        createdAt: "2026-11-20T09:30:00.000Z",
+        expiresAt: "2026-12-04T09:30:00.000Z",
+      },
+    ]);
+  });
+
+  it("gives every invitation a lower-case email and fourteen days", () => {
+    const days = 14 * 24 * 60 * 60 * 1000;
+    for (const i of data.invitations) {
+      expect(i.email).toBe(i.email.toLowerCase());
+      expect(
+        new Date(i.expiresAt).getTime() - new Date(i.createdAt).getTime(),
+      ).toBe(days);
+    }
+  });
+
   it("has well-formed ids, unique across the data", () => {
     const ids = [
       ...data.workspaces.map((w) => w.id),
       ...data.agents.map((a) => a.id),
       ...data.members.map((m) => m.id),
+      ...data.invitations.map((i) => i.id),
     ];
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id).toMatch(UUID);
@@ -80,6 +112,10 @@ describe("fixtureSettings", () => {
     for (const a of data.agents) {
       expect(fixed(a.createdAt)).toBe(true);
       if (a.lastUsedAt !== null) expect(fixed(a.lastUsedAt)).toBe(true);
+    }
+    for (const i of data.invitations) {
+      expect(fixed(i.createdAt)).toBe(true);
+      expect(fixed(i.expiresAt)).toBe(true);
     }
   });
 
@@ -94,6 +130,7 @@ describe("fixtureSettings", () => {
     expect(m.agents).toEqual(data.agents);
     expect(m.workspaces).toEqual(data.workspaces);
     expect(m.hiveName).toBe("Synapse");
+    expect(m.invitations).toEqual([]);
   });
 
   it("none: no agents, the rest unchanged", () => {
@@ -101,6 +138,7 @@ describe("fixtureSettings", () => {
     expect(n.agents).toEqual([]);
     expect(n.workspaces).toEqual(data.workspaces);
     expect(n.members).toEqual(data.members);
+    expect(n.invitations).toEqual(data.invitations);
     expect(n.isOwner).toBe(true);
   });
 
@@ -108,6 +146,7 @@ describe("fixtureSettings", () => {
     const b = fixtureSettings({ member: true, none: true });
     expect(b.isOwner).toBe(false);
     expect(b.agents).toEqual([]);
+    expect(b.invitations).toEqual([]);
     expect(b.members.find((x) => x.isMe)!.name).toBe("Ahmed");
   });
 });

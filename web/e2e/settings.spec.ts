@@ -1,6 +1,11 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { fixtureSettings } from "../src/settings/fixture";
-import { MCP_COMMAND, envLine } from "../src/settings/text";
+import {
+  INVITE_HELP,
+  MCP_COMMAND,
+  envLine,
+  inviteNotice,
+} from "../src/settings/text";
 
 const DATA = fixtureSettings();
 const [CLAUDE_CODE, LOCAL, OLD] = DATA.agents as [
@@ -11,6 +16,10 @@ const [CLAUDE_CODE, LOCAL, OLD] = DATA.agents as [
 const [MAIN, DRA] = DATA.workspaces as [
   (typeof DATA.workspaces)[number],
   (typeof DATA.workspaces)[number],
+];
+const [LENA, MARKO] = DATA.invitations as [
+  (typeof DATA.invitations)[number],
+  (typeof DATA.invitations)[number],
 ];
 
 /** The dev page's stand-in token; the database has never seen it. */
@@ -50,10 +59,24 @@ const connect = (page: Page) =>
   main(page).getByRole("button", { name: "Connect an agent" });
 const connectForm = (page: Page) =>
   main(page).getByRole("form", { name: "Connect an agent" });
-const addButton = (page: Page) =>
-  main(page).getByRole("button", { name: "Add a member" });
-const addForm = (page: Page) =>
-  main(page).getByRole("form", { name: "Add a member" });
+const inviteButton = (page: Page) =>
+  main(page).getByRole("button", { name: "Invite a member" });
+const inviteForm = (page: Page) =>
+  main(page).getByRole("form", { name: "Invite a member" });
+const invitationRow = (page: Page, name: string) =>
+  rows(page, "Invitations").filter({ hasText: name });
+const notice = (page: Page) => main(page).getByRole("status");
+/** Where an invited person signs in: this app's own origin. */
+const loginAddress = (page: Page) => `${new URL(page.url()).origin}/login`;
+
+/** Opens the invite form, fills it and presses Invite. */
+async function invite(page: Page, email = "mira@example.com", name = "Mira") {
+  await inviteButton(page).click();
+  const form = inviteForm(page);
+  await form.getByLabel("Email").fill(email);
+  await form.getByLabel("Display name").fill(name);
+  await form.getByRole("button", { name: "Invite", exact: true }).click();
+}
 const dialog = (page: Page) => page.getByRole("dialog");
 const live = (page: Page) => main(page).locator('[aria-live="polite"]');
 const revokeButton = (row: Locator) =>
@@ -409,23 +432,245 @@ test("a failed create says so in the form and shows no dialog; a failed revoke k
   await expect(revokeButton(target)).toBeVisible();
   await expect(live(page)).toHaveText(FAILED);
   await expect(rows(page, "Agents").nth(0)).toContainText(LOCAL.name);
-
-  // Adding a member fails the same way.
-  await addButton(page).click();
-  await addForm(page).getByLabel("Email").fill("mira@example.com");
-  await addForm(page).getByLabel("Display name").fill("Mira");
-  await addForm(page).getByRole("button", { name: "Add" }).click();
-  await expect(addForm(page)).toContainText(FAILED);
-  await expect(rows(page, "Members")).toHaveCount(3);
 });
 
-test("a member who is not the owner sees the members and no way to add one", async ({
+test("Invite a member: the form says what will happen; a bad email or an empty name is refused with no call", async ({
+  page,
+}) => {
+  await open(page);
+  await inviteButton(page).click();
+  const form = inviteForm(page);
+  await expect(form).toContainText(INVITE_HELP);
+  const email = form.getByLabel("Email");
+  const name = form.getByLabel("Display name");
+  const send = form.getByRole("button", { name: "Invite", exact: true });
+  await expect(email).toBeFocused();
+
+  for (const bad of ["", "mira", "mira@@example.com", "mi ra@example.com"]) {
+    await email.fill(bad);
+    await name.fill("Mira");
+    await send.click();
+    await expect(form).toContainText("Enter an email address.");
+    await expect(email).toBeFocused();
+  }
+  await email.fill("mira@example.com");
+  await name.fill("  ");
+  await send.click();
+  await expect(form).toContainText("Give them a display name.");
+  await expect(name).toBeFocused();
+  await name.fill("M".repeat(61));
+  await send.click();
+  await expect(form).toContainText("Keep the name to 60 characters or fewer.");
+  expect(await calls(page)).toEqual([]);
+
+  // Opening the other form closes this one: one at a time.
+  await connect(page).click();
+  await expect(form).toHaveCount(0);
+  await expect(connectForm(page)).toBeVisible();
+  await inviteButton(page).click();
+  await expect(connectForm(page)).toHaveCount(0);
+  await expect(email).toHaveValue("");
+  // Escape puts the form away.
+  await page.keyboard.press("Escape");
+  await expect(form).toHaveCount(0);
+  await expect(inviteButton(page)).toBeFocused();
+  expect(await calls(page)).toEqual([]);
+});
+
+test("inviting someone who has an account adds them: the member row appears, it says so and the form closes", async ({
+  page,
+}) => {
+  await open(page, "?outcome=added");
+  await invite(page, " mira@example.com ", " Mira ");
+  await expect(rows(page, "Members")).toHaveCount(4);
+  await expect(memberRow(page, "Mira")).toContainText("Member");
+  expect(await calls(page)).toEqual([
+    { name: "inviteMember", args: ["mira@example.com", "Mira"] },
+  ]);
+  await expect(inviteForm(page)).toHaveCount(0);
+  await expect(inviteButton(page)).toBeFocused();
+  await expect(live(page)).toHaveText("Mira added.");
+  // Nobody was invited: no new invitation and nothing to pass on.
+  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await expect(notice(page)).toBeEmpty();
+  // The next form starts empty.
+  await inviteButton(page).click();
+  await expect(inviteForm(page).getByLabel("Email")).toHaveValue("");
+  await expect(inviteForm(page).getByLabel("Display name")).toHaveValue("");
+});
+
+test("inviting someone new: the invitation is listed with its dates; the notice stays, Copy address copies the sign-in address, Dismiss removes it", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await open(page);
+  // The two that were already open, the newest first.
+  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await expect(rows(page, "Invitations").nth(0)).toContainText(LENA.name);
+  const lena = invitationRow(page, LENA.name);
+  await expect(lena).toContainText(LENA.email);
+  await expect(lena).toContainText("Invited 22 Nov");
+  await expect(lena).toContainText("Expires 6 Dec");
+  await expect(invitationRow(page, MARKO.name)).toContainText("Expires 4 Dec");
+  await expect(notice(page)).toBeEmpty();
+
+  await invite(page, " mira@example.com ", " Mira ");
+  expect(await calls(page)).toEqual([
+    { name: "inviteMember", args: ["mira@example.com", "Mira"] },
+  ]);
+  await expect(inviteForm(page)).toHaveCount(0);
+  await expect(rows(page, "Members")).toHaveCount(3);
+  await expect(rows(page, "Invitations")).toHaveCount(3);
+  const mira = invitationRow(page, "Mira");
+  await expect(mira).toContainText("mira@example.com");
+  await expect(mira).toContainText("Invited 23 Nov");
+  await expect(mira).toContainText("Expires 7 Dec");
+
+  const address = loginAddress(page);
+  const said = inviteNotice("Mira", "mira@example.com", address);
+  await expect(notice(page)).toHaveText(said);
+  await expect(notice(page)).toBeInViewport();
+
+  // It stays: another form opened and closed does not take it away.
+  await connect(page).click();
+  await connectForm(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(notice(page)).toHaveText(said);
+
+  await main(page).getByRole("button", { name: "Copy address" }).click();
+  await expect(
+    main(page).getByRole("button", { name: "Copied" }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    address,
+  );
+  await expect(live(page)).toHaveText("Address copied.");
+
+  // A key still held on Copy address repeats; only the fresh press copies.
+  await page.evaluate(() => {
+    const w = window as unknown as { __copies?: number };
+    w.__copies = 0;
+    const write = navigator.clipboard.writeText.bind(navigator.clipboard);
+    navigator.clipboard.writeText = (text: string) => {
+      w.__copies = (w.__copies ?? 0) + 1;
+      return write(text);
+    };
+  });
+  const copy = main(page).getByRole("button", { name: /^Cop/ });
+  await copy.focus();
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.up("Enter");
+  await page.waitForTimeout(200);
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __copies?: number }).__copies,
+    ),
+  ).toBe(1);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    address,
+  );
+
+  await main(page).getByRole("button", { name: "Dismiss" }).click();
+  await expect(notice(page)).toBeEmpty();
+  await expect(main(page).getByRole("button", { name: "Dismiss" })).toHaveCount(
+    0,
+  );
+  await expect(main(page)).not.toContainText("Invitation saved.");
+  await expect(inviteButton(page)).toBeFocused();
+  // The invitation itself is still open.
+  await expect(rows(page, "Invitations")).toHaveCount(3);
+});
+
+test("a refused invitation says why and keeps the form open with what was typed", async ({
+  page,
+}) => {
+  for (const [query, said] of [
+    ["?reason=already-member", "That person is already a member."],
+    ["?reason=already-invited", "That email is already invited."],
+    ["?fail=1", FAILED],
+  ] as const) {
+    await open(page, query);
+    await invite(page);
+    const form = inviteForm(page);
+    await expect(form).toContainText(said);
+    await expect(live(page)).toHaveText(said);
+    await expect(form.getByLabel("Email")).toHaveValue("mira@example.com");
+    await expect(form.getByLabel("Display name")).toHaveValue("Mira");
+    await expect(rows(page, "Members")).toHaveCount(3);
+    await expect(rows(page, "Invitations")).toHaveCount(2);
+    await expect(notice(page)).toBeEmpty();
+    expect(await calls(page)).toEqual([
+      { name: "inviteMember", args: ["mira@example.com", "Mira"] },
+    ]);
+  }
+});
+
+test("Revoke on an invitation removes it in one step; a refused revoke keeps the row and says so", async ({
+  page,
+}) => {
+  await open(page);
+  const lena = invitationRow(page, LENA.name);
+  // Each Revoke says whose invitation it is.
+  await expect(
+    lena.getByRole("button", { name: `Revoke invitation for ${LENA.name}` }),
+  ).toBeVisible();
+  await expect(
+    invitationRow(page, MARKO.name).getByRole("button", {
+      name: `Revoke invitation for ${MARKO.name}`,
+    }),
+  ).toBeVisible();
+  await lena.getByRole("button").click();
+  await expect(rows(page, "Invitations")).toHaveCount(1);
+  await expect(lena).toHaveCount(0);
+  await expect(invitationRow(page, MARKO.name)).toBeVisible();
+  expect(await calls(page)).toEqual([
+    { name: "revokeInvitation", args: [LENA.id] },
+  ]);
+  await expect(live(page)).toHaveText(`Invitation for ${LENA.name} revoked.`);
+  await expect(dialog(page)).toHaveCount(0);
+
+  // The last one gone, the section goes with it.
+  await invitationRow(page, MARKO.name).getByRole("button").click();
+  await expect(section(page, "Invitations")).toHaveCount(0);
+  await expect(inviteButton(page)).toBeFocused();
+
+  await open(page, "?fail=1");
+  const kept = invitationRow(page, LENA.name);
+  await kept.getByRole("button").click();
+  await expect(kept).toContainText(FAILED);
+  await expect(live(page)).toHaveText(FAILED);
+  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await expect(kept.getByRole("button")).toBeFocused();
+  expect(await calls(page)).toEqual([
+    { name: "revokeInvitation", args: [LENA.id] },
+  ]);
+});
+
+test("revoking the invitation a notice is about takes the notice away too", async ({
+  page,
+}) => {
+  await open(page);
+  await invite(page);
+  await expect(notice(page)).toContainText("Invitation saved.");
+  await invitationRow(page, "Mira").getByRole("button").click();
+  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await expect(notice(page)).toBeEmpty();
+});
+
+test("a member who is not the owner sees the members, no invite form and no invitations", async ({
   page,
 }) => {
   await open(page, "?member=1");
   await expect(rows(page, "Members")).toHaveCount(3);
-  await expect(addButton(page)).toHaveCount(0);
-  await expect(addForm(page)).toHaveCount(0);
+  await expect(inviteButton(page)).toHaveCount(0);
+  await expect(inviteForm(page)).toHaveCount(0);
+  await expect(section(page, "Invitations")).toHaveCount(0);
+  await expect(rows(page, "Invitations")).toHaveCount(0);
+  await expect(main(page)).not.toContainText("Invitations");
+  await expect(main(page)).not.toContainText(LENA.email);
+  await expect(notice(page)).toHaveCount(0);
   await expect(
     memberRow(page, "Ahmed").getByText("you", { exact: true }),
   ).toBeVisible();
@@ -437,72 +682,52 @@ test("a member who is not the owner sees the members and no way to add one", asy
   await expect(connect(page)).toBeVisible();
 });
 
-test("Add a member: a bad email is refused with no call; success adds the row; each refusal says why", async ({
+test("at 1100 x 560 with the invite form open, the notice and the invitations, the page does not scroll", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1100, height: 560 });
   await open(page);
-  await addButton(page).click();
-  const form = addForm(page);
-  await expect(form).toContainText(
-    "They need an account already. Inviting someone new comes later.",
-  );
-  const email = form.getByLabel("Email");
-  const name = form.getByLabel("Display name");
-  await expect(email).toBeFocused();
+  const measure = () =>
+    page.evaluate(() => {
+      const root = document.scrollingElement!;
+      const panel = document.querySelector("main")!.getBoundingClientRect();
+      return {
+        pageScrolls:
+          root.scrollHeight > window.innerHeight ||
+          root.scrollWidth > window.innerWidth,
+        inside:
+          panel.bottom <= window.innerHeight &&
+          panel.right <= window.innerWidth,
+        sideways: [...document.querySelectorAll("main *")].some(
+          (el) =>
+            el.scrollWidth > el.clientWidth + 1 &&
+            /auto|scroll/.test(getComputedStyle(el).overflowY),
+        ),
+      };
+    });
+  const fine = { pageScrolls: false, inside: true, sideways: false };
+  await expect(rows(page, "Invitations")).toHaveCount(2);
+  expect(await measure()).toEqual(fine);
 
-  for (const bad of ["", "mira", "mira@@example.com", "mi ra@example.com"]) {
-    await email.fill(bad);
-    await name.fill("Mira");
-    await form.getByRole("button", { name: "Add" }).click();
-    await expect(form).toContainText("Enter an email address.");
-    await expect(email).toBeFocused();
-  }
-  await email.fill("mira@example.com");
-  await name.fill("  ");
-  await form.getByRole("button", { name: "Add" }).click();
-  await expect(form).toContainText("Give them a display name.");
-  expect(await calls(page)).toEqual([]);
+  await inviteButton(page).click();
+  const form = inviteForm(page);
+  // The form opens low in the card and is brought whole into view.
+  await expect(form.getByLabel("Email")).toBeInViewport();
+  await expect(form.getByRole("button", { name: "Cancel" })).toBeInViewport();
+  expect(await measure()).toEqual(fine);
 
-  // Opening the other form closes this one: one at a time.
-  await connect(page).click();
-  await expect(form).toHaveCount(0);
-  await expect(connectForm(page)).toBeVisible();
-  await addButton(page).click();
-  await expect(connectForm(page)).toHaveCount(0);
-  await expect(email).toHaveValue("");
-
-  await email.fill(" mira@example.com ");
-  await name.fill(" Mira ");
-  await form.getByRole("button", { name: "Add" }).click();
-  await expect(rows(page, "Members")).toHaveCount(4);
-  await expect(memberRow(page, "Mira")).toContainText("Member");
-  expect(await calls(page)).toEqual([
-    { name: "addMember", args: ["mira@example.com", "Mira"] },
-  ]);
-  // The form is put away, and the next one starts empty.
-  await expect(form).toHaveCount(0);
-  await expect(addButton(page)).toBeFocused();
-  await expect(live(page)).toHaveText("Mira added.");
-  await addButton(page).click();
-  await expect(email).toHaveValue("");
-  await expect(name).toHaveValue("");
-
-  for (const [reason, said] of [
-    ["no-account", "Nobody with that email has an account yet."],
-    ["already-member", "That person is already a member."],
-  ] as const) {
-    await open(page, `?reason=${reason}`);
-    await addButton(page).click();
-    await addForm(page).getByLabel("Email").fill("mira@example.com");
-    await addForm(page).getByLabel("Display name").fill("Mira");
-    await addForm(page).getByRole("button", { name: "Add" }).click();
-    await expect(addForm(page)).toContainText(said);
-    await expect(live(page)).toHaveText(said);
-    await expect(rows(page, "Members")).toHaveCount(3);
-    await expect(addForm(page).getByLabel("Email")).toHaveValue(
-      "mira@example.com",
-    );
-  }
+  await form.getByLabel("Email").fill("mira@example.com");
+  await form.getByLabel("Display name").fill("Mira");
+  await form.getByRole("button", { name: "Invite", exact: true }).click();
+  await expect(notice(page)).toContainText("Invitation saved.");
+  await inviteButton(page).click();
+  await expect(rows(page, "Invitations")).toHaveCount(3);
+  expect(await measure()).toEqual(fine);
+  // Every invitation's Revoke can be reached inside the card.
+  const last = invitationRow(page, MARKO.name).getByRole("button");
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport();
+  expect(await measure()).toEqual(fine);
 });
 
 test("at 1100 x 560 the page does not scroll; the keyboard reaches every control and the dialog holds the focus", async ({
@@ -545,7 +770,8 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   expect((await scrolls()).inside).toBe(true);
   expect((await scrolls()).sideways).toBe(false);
 
-  // From the heading, Tab walks the card: Connect, each Revoke, Add a member.
+  // From the heading, Tab walks the card: Connect, each Revoke, Invite a member, then each
+  // invitation's Revoke.
   await main(page).getByRole("heading", { level: 1 }).focus();
   await page.keyboard.press("Tab");
   await expect(connect(page)).toBeFocused();
@@ -561,8 +787,16 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   await page.keyboard.press("Tab");
   await expect(revokeButton(agentRow(page, "Connected 18 Nov"))).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(addButton(page)).toBeFocused();
-  await expect(addButton(page)).toBeInViewport();
+  await expect(inviteButton(page)).toBeFocused();
+  await expect(inviteButton(page)).toBeInViewport();
+  for (const who of [LENA, MARKO]) {
+    await page.keyboard.press("Tab");
+    await expect(
+      main(page).getByRole("button", {
+        name: `Revoke invitation for ${who.name}`,
+      }),
+    ).toBeFocused();
+  }
 
   // The connect form, by keyboard alone.
   await connect(page).focus();

@@ -4,11 +4,12 @@
 // values only, and refuses the whole answer when any part of it is not what was promised.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { HeldItem, InboxData, LinkItem, Tier } from "../../inbox/types";
+import { ownHive } from "../own-hive";
 
 export type InboxLoad =
   { state: "ok"; data: InboxData } | { state: "no-hive" } | { state: "error" };
 
-type Db = Pick<SupabaseClient, "from" | "rpc">;
+type Db = Pick<SupabaseClient, "from" | "rpc" | "auth">;
 type Row = Record<string, unknown>;
 type Res = { data: unknown; error: { code?: string; message: string } | null };
 
@@ -106,25 +107,12 @@ export function toData(raw: unknown): InboxData | null {
   };
 }
 
-/** The caller's first hive: its id, null when they have none, "error" when it cannot be read. */
-async function firstHive(db: Db): Promise<string | null | "error"> {
-  const hives = (await db
-    .from("hives")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)) as Res;
-  if (failed("hives query", hives)) return "error";
-  const hive = Array.isArray(hives.data) ? (hives.data[0] as Row) : undefined;
-  if (!hive) return null;
-  return str(hive.id) ? hive.id : "error";
-}
-
 /** Everything `/inbox` shows: the newest 100 proposals and 100 held notes, with totals. */
 export async function loadInbox(db: Db): Promise<InboxLoad> {
-  const hive = await firstHive(db);
+  const hive = await ownHive(db);
   if (hive === "error") return { state: "error" };
   if (hive === null) return { state: "no-hive" };
-  const res = (await db.rpc("inbox", { p_hive: hive })) as Res;
+  const res = (await db.rpc("inbox", { p_hive: hive.id })) as Res;
   if (failed("inbox", res)) return { state: "error" };
   const data = toData(res.data);
   if (!data) {
@@ -145,9 +133,9 @@ let saidNotThere = false;
  */
 export async function loadInboxCount(db: Db): Promise<number> {
   try {
-    const hive = await firstHive(db);
+    const hive = await ownHive(db);
     if (hive === "error" || hive === null) return 0;
-    const res = (await db.rpc("inbox_count", { p_hive: hive })) as Res;
+    const res = (await db.rpc("inbox_count", { p_hive: hive.id })) as Res;
     if (res.error) {
       if (NOT_THERE.has(res.error.code ?? "")) {
         if (saidNotThere) return 0;

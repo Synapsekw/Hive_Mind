@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  INVITE_HELP,
   MCP_COMMAND,
-  addFailure,
   envLine,
+  inviteFailure,
+  inviteNotice,
   sortAgents,
   statusText,
   tierHelp,
@@ -58,13 +60,37 @@ describe("statusText", () => {
   });
 });
 
-describe("addFailure", () => {
+describe("inviteFailure", () => {
   it.each([
-    ["no-account", "Nobody with that email has an account yet."],
     ["already-member", "That person is already a member."],
+    ["already-invited", "That email is already invited."],
     ["failed", "That didn't work. Try again."],
   ] as const)("%s → %j", (reason, text) => {
-    expect(addFailure(reason)).toBe(text);
+    expect(inviteFailure(reason)).toBe(text);
+  });
+});
+
+describe("inviteNotice", () => {
+  it("tells the owner what the invited person has to do", () => {
+    expect(
+      inviteNotice("Lena", "lena@example.com", "https://hive.example/login"),
+    ).toBe(
+      "Invitation saved. Ask Lena to open https://hive.example/login, enter lena@example.com and choose Email me a link.",
+    );
+  });
+
+  it("uses the name, the email and the address it was given", () => {
+    expect(inviteNotice("Marko", "marko@example.com", "localhost:3000")).toBe(
+      "Invitation saved. Ask Marko to open localhost:3000, enter marko@example.com and choose Email me a link.",
+    );
+  });
+});
+
+describe("INVITE_HELP", () => {
+  it("says when the invited person joins", () => {
+    expect(INVITE_HELP).toBe(
+      "If they have an account they are added now. Otherwise they join when they first sign in with this email.",
+    );
   });
 });
 

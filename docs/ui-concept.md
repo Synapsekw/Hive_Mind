@@ -1,7 +1,7 @@
 ---
 type: design
 status: active
-last-updated: 2026-11-22
+last-updated: 2026-11-23
 tags: [project/hive-mind, ui, design]
 ---
 
@@ -134,7 +134,11 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   which workspace is written to and whose subscription is paying.
 - **Settings** — workspaces and tokens, connected agents and setup instructions, sharing defaults,
   members and roles, audit log. Built so far: your own agents (connect, token shown once,
-  revoke) and the member list, where the owner adds a person who already has an account.
+  revoke) and the member list. Under Members the owner has an **Invite a member** form (email
+  and display name): a person with an account is added at once, anyone else is listed under
+  **Invitations** with name, email, invited and expiry dates and **Revoke**. After an invitation
+  is saved a notice stays until dismissed, with the sign-in address to pass on and **Copy
+  address**. A member who is not the owner sees neither the form nor the invitations.
 
 ## 5. Overlays and states
 

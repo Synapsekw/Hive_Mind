@@ -30,7 +30,8 @@ function stub(
 ) {
   const calls: Call[] = [];
   const answer = (c: Call): Res => {
-    if (c.table === "hives") return ok([{ id: HIVE }]);
+    if (c.table === "own")
+      return ok([{ id: ME, hive_id: HIVE, hive: { name: "Synapse" } }]);
     if (c.table === "members")
       return ok([
         { id: ME, user_id: "u-me" },
@@ -46,6 +47,9 @@ function stub(
     const chain: Record<string, unknown> = {};
     for (const m of ["select", "eq", "order", "limit", "update", "upsert"])
       chain[m] = (...args: unknown[]) => {
+        // The read of the person's own oldest membership is filed apart from the hive's members.
+        if (table === "members" && m === "eq" && args[0] === "user_id")
+          call.table = "own";
         call.ops.push([m, args]);
         return chain;
       };
@@ -85,6 +89,26 @@ describe("saveNoteIn", () => {
     ]);
     expect(args(w!, "eq")).toEqual(["id", NOTE]);
     expect(args(w!, "select")).toEqual(["id"]);
+  });
+
+  it("checks named members against the hive of the person's own oldest membership", async () => {
+    const t = stub();
+    await saveNoteIn(t.db, NOTE, {
+      visibility: "members",
+      shared_with: [AHMED],
+    });
+    expect(t.calls.map((c) => c.table)).toEqual(["own", "members", "notes"]);
+    expect(t.from.mock.calls[0]).toEqual(["members"]);
+    expect(t.calls[0]!.ops).toEqual([
+      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", "u-me"]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [1]],
+    ]);
+    expect(args(t.calls[1]!, "eq")).toEqual(["hive_id", HIVE]);
+    // The id is the one the auth server answered with, asked for once.
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
   });
 
   it("sends no own setting as null with an empty list", async () => {
