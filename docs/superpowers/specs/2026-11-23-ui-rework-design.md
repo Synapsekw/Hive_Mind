@@ -61,24 +61,27 @@ section 3 is updated to match.
 - **Dots on cells.** The dot buttons stay (keyboard, labels, hover and selection unchanged) and
   sit on their cell centres, drawn smaller (notes and files 6 px, hubs 11 px).
 - **Links hidden at rest.** Links are not drawn until a dot is hot or selected; then its links
-  draw and fire as in every view. Ambient link pulses are off in Hive (the bees replace them).
-- **Bees show who is at the hive.** In Hive the agent dots are drawn as small bees (a striped body
-  in the brand colour, two wings), always on or just under the comb, never far from it. Their
-  state comes from `agentStatus` and `last_used_at`, which the map already loads:
-  - **Live** (status "connected"): the bee perches on the edge of its member's most recently
-    changed cell, hovers in a small loop (about 2 px) and flutters its wings. About every 3.4 s
-    it hops 0.8 s to another cell of its member, changed in the last few days and at most three
-    cells away. That cell's honey flares and fades back.
-  - **Today** (used in the last 24 hours, not connected): the bee rests, still, on its member's
-    latest cell.
-  - **Asleep** (older or never used): the bee sits dimmed, wings folded, in a row inside a small
+  draw and fire as in every view. Ambient link pulses are off in Hive (the agent marks replace
+  them).
+- **Agent marks show who is at the hive.** In Hive the agent dots are drawn as a small geometric
+  mark, not an illustration: a 12 px hexagon outline in the brand colour with a centre point.
+  Nothing pictorial (no insects, wings or faces). The marks sit on or just under the comb, never
+  far from it. Their state comes from `agentStatus` and `last_used_at`, which the map already
+  loads:
+  - **Live** (status "connected"): a solid centre and a soft brand-coloured glow that swells and
+    fades on a 2.6 s cycle. The mark sits on the edge of its member's most recently changed cell.
+    About every 3.4 s it moves 0.8 s to another cell of its member, changed in the last few days
+    and at most three cells away. That cell's honey flares and fades back.
+  - **Today** (used in the last 24 hours, not connected): a still outline with a small
+    text-coloured centre, on its member's latest cell.
+  - **Idle** (older or never used): an empty outline at 40% opacity, in a row inside a small
     entrance arch drawn under the comb.
-  - Hops never happen while a dot is hot, while the tab is hidden or under reduced motion (then
-    the bees stay still, but keep their state styling).
+  - Moves and the glow never run while a dot is hot, while the tab is hidden or under reduced
+    motion. The marks then stay still, but keep their state styling.
 - **"At the hive" panel.** In Hive a small glass panel at the top right of the stage lists the
-  live and today agents (a mini bee, the name, then "live" in the brand colour or "2h ago"),
-  and one line "_n_ asleep at the entrance". Hovering a row makes that bee hot. It is a list with
-  real text, so a screen reader hears who is live.
+  live and today agents (the mark, the name, then "live" in the brand colour or "2h ago"), and
+  one line "_n_ idle at the entrance". Hovering a row makes that agent's mark hot. It is a list
+  with real text, so a screen reader hears who is live.
 - **Filters and hover** dim the cells with their dots: cells outside the filter or the hot
   neighbourhood drop to a near-empty frame.
 - **Grid size.** The radius above (12 cells, 469 cells, cell radius 15.5) is the minimum. When the
@@ -214,10 +217,8 @@ listed in `adjustments.generated.txt`, as for every theme.
 - **Dot colours** come from the existing "Follow theme" generator (eight hues fanned 160° around
   the honey-to-orange midpoint), not hand-picked. That lands on warm rose, coral, apricot, amber,
   pollen, lime and mint, as in the prototype. "Classic" still gives the fixed eight.
-- **Honeycomb texture.** One new derived token, `--texture`: for Hive a faint honeycomb pattern
-  (an inline SVG data URI, the brand colour at 4.5% opacity in dark and white at 6% in light),
-  painted under the bloom on the page background. For every other theme it is `none`. It is
-  decoration only and is dropped under `prefers-contrast: more` and forced colours.
+- **No texture.** The theme is colour only: no honeycomb pattern on the page, the rail or the
+  panels. The honeycomb lives only in the map's Hive view.
 - **The mark** (the hexagon at the top of the rail) is filled with the brand gradient in Hive.
   In other themes it stays the text colour. This is driven by a token (`--mark`), never by the
   theme's name.
@@ -318,9 +319,9 @@ These have no shared state with one another and can be built in parallel once th
   role on every page.
 - **H. Vault, Gallery, Inbox and Settings polish.**
 - **I. Hive view**: the `hive` layout in `layouts.ts` (pure, alongside the others), the comb
-  backdrop, the bees and the "At the hive" panel. It replaces Circle in the view list. The layout
-  is independent of everything else; the comb and bees consume D's motion conventions.
-- **J. Hive theme**: seeds in `themes.json`, the `--texture` and `--mark` tokens in the
+  backdrop, the agent marks and the "At the hive" panel. It replaces Circle in the view list. The
+  layout is independent of everything else; the comb and marks consume D's motion conventions.
+- **J. Hive theme**: seeds in `themes.json`, the `--mark` token in the
   generator, the regenerated CSS and adjustments, the new default, and the Appearance tests
   updated for it. It has no dependency on any other unit.
 
@@ -330,11 +331,11 @@ These have no shared state with one another and can be built in parallel once th
   own cell (no two items share one); every item sits inside its own topic's territory and each
   territory is contiguous; the index is on the centre cell; the grid grows to hold 5,000 items
   and stays inside the 1000 × 760 box; recency maps to the honey opacity formula; each agent's
-  bee state (live, today, asleep) follows from its status and last use; a live bee's next cell
+  mark state (live, today, idle) follows from its status and last use; a live mark's next cell
   is its own member's and at most three cells away.
 - **Unit (vitest), Hive theme:** the existing contrast, token, lint and generated-CSS tests pass
-  with Hive included (now 18 themes, 108 combinations); `--texture` is `none` for every theme
-  but Hive; a stored choice is kept and an empty one resolves to Hive.
+  with Hive included (now 18 themes, 108 combinations); `--mark` is the text colour for every
+  theme but Hive; a stored choice is kept and an empty one resolves to Hive.
 - **Unit (vitest):** the camera maths (zoom toward a point keeps that point fixed; clamping;
   fit; framing a set of points), the semantic-label selection (thresholds, viewport culling, the
   cap of 60), the sparkline series from `activity().days`, the short agent "last used" form, the
