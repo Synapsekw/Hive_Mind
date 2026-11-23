@@ -33,3 +33,7 @@ One design language across our products is cheaper to build and maintain; the gl
 - Negative: the theme values are a copy. When Monolith changes its themes, Hive does not follow unless someone re-copies them.
 - Negative: in "Follow theme" a topic has no fixed colour across themes, and topics are closer in hue than in Classic.
 - Open follow-ups: a contrast test over every theme, mode and reach; a fallback where `backdrop-filter` is unsupported; where a person's appearance choice is stored; the chat screen (`docs/ui/chat.dc.html`) is still in the old look; the Quiet and Agent dock options were not chosen but the agent dock may return for chat.
+
+## Addendum 2026-11-23
+
+The Hive theme (honey and amber, colour only, no texture) was added and made the default, so there are 18 themes. The Keystone glass layout grammar is unchanged: rail and side panel on the wash, content on one inset card. The Circle view was replaced by the Hive view (a honeycomb, a territory per topic), and the map is now drawn on one canvas for speed. See `docs/ui-concept.md` sections 2, 3 and 7.
