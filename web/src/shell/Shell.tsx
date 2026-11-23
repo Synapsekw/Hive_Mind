@@ -1,6 +1,6 @@
-// The left rail, shared by the map and the vault: the mark, the destinations (Map, Vault), the
-// agents when given, the Appearance panel and sign out. It sits straight on the wash, so it is
-// the "chrome" scope (white text in light mode).
+// The left rail, shared by the map, the vault and the gallery: the mark, the destinations (Map,
+// Vault, Gallery), the agents when given, the Appearance panel and sign out. It sits straight on
+// the wash, so it is the "chrome" scope (white text in light mode).
 import Link from "next/link";
 import { Appearance } from "./Appearance";
 import s from "./shell.module.css";
@@ -49,13 +49,25 @@ const DESTINATIONS = [
       </svg>
     ),
   },
+  {
+    key: "gallery",
+    href: "/gallery",
+    name: "Gallery",
+    icon: (
+      <svg aria-hidden="true" {...ICON}>
+        <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+        <path d="m2.5 11 3.2-3.2 2.6 2.6 2-2 3.2 3.2" />
+        <circle cx="10.6" cy="5.8" r="1" />
+      </svg>
+    ),
+  },
 ] as const;
 
 export function Shell({
   current,
   agents = [],
 }: {
-  current: "map" | "vault";
+  current: "map" | "vault" | "gallery";
   agents?: AgentRow[];
 }) {
   return (

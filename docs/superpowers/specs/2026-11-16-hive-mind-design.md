@@ -38,17 +38,17 @@ decide what is shared.
 
 ## 4. Architecture
 
-| Component       | Technology                            | Responsibility                                                                                            |
-| --------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Database        | Supabase Postgres                     | Hives, members, agents, notes, files, entities, links, synthesis, audit                                   |
-| Access control  | Supabase Auth + row-level security    | Member identity, agent claims, visibility enforced in every query                                         |
-| Agent interface | MCP server (TypeScript)               | overview, search, read, write, append, propose link                                                       |
-| Object storage  | Supabase Storage (private buckets)    | Deliverables; signed URLs only (not built)                                                                |
-| Vector search   | pgvector                              | Embedding per note for semantic search and tier-4 links (not built)                                       |
-| Background jobs | Edge Functions + triggers + `pg_cron` | Entity extraction, link proposal, synthesis, housekeeper (not built)                                      |
-| Realtime        | Supabase Realtime                     | Pushes link suggestions and notifications to the web app (not built)                                      |
-| Web app         | Next.js                               | Map, inbox, vault, gallery, entity pages, settings. Built so far: sign-in, the map and the vault (`web/`) |
-| Hosted chat     | Vendor sign-in programmes             | Optional browser chat on the member's own plan, subject to vendor approval                                |
+| Component       | Technology                            | Responsibility                                                                                                         |
+| --------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Database        | Supabase Postgres                     | Hives, members, agents, notes, files, entities, links, synthesis, audit                                                |
+| Access control  | Supabase Auth + row-level security    | Member identity, agent claims, visibility enforced in every query                                                      |
+| Agent interface | MCP server (TypeScript)               | overview, search, read, write, append, propose link                                                                    |
+| Object storage  | Supabase Storage (private buckets)    | Deliverables; signed URLs only (built)                                                                                 |
+| Vector search   | pgvector                              | Embedding per note for semantic search and tier-4 links (not built)                                                    |
+| Background jobs | Edge Functions + triggers + `pg_cron` | Entity extraction, link proposal, synthesis, housekeeper (not built)                                                   |
+| Realtime        | Supabase Realtime                     | Pushes link suggestions and notifications to the web app (not built)                                                   |
+| Web app         | Next.js                               | Map, inbox, vault, gallery, entity pages, settings. Built so far: sign-in, the map, the vault and the gallery (`web/`) |
+| Hosted chat     | Vendor sign-in programmes             | Optional browser chat on the member's own plan, subject to vendor approval                                             |
 
 The desktop apps talk to the database only through the MCP server. The web app goes direct with
 the signed-in person's identity. Nothing uses the service-role key except background jobs.

@@ -3,6 +3,13 @@ import type { ReactNode } from "react";
 import { Shell } from "./Shell";
 import s from "./notice.module.css";
 
+/** Each destination's name for the card and where "Try again" leads. */
+const SCREENS = {
+  map: { label: "Hive map", href: "/" },
+  vault: { label: "Vault", href: "/vault" },
+  gallery: { label: "Gallery", href: "/gallery" },
+} as const;
+
 export function Notice({
   children,
   tryAgain,
@@ -10,19 +17,17 @@ export function Notice({
 }: {
   children: ReactNode;
   tryAgain?: boolean;
-  current?: "map" | "vault";
+  current?: "map" | "vault" | "gallery";
 }) {
+  const screen = SCREENS[current];
   return (
     <div className={s.root}>
       <Shell current={current} />
-      <main
-        aria-label={current === "vault" ? "Vault" : "Hive map"}
-        className={s.card}
-      >
+      <main aria-label={screen.label} className={s.card}>
         <div className={s.notice}>
           <p className={s.text}>{children}</p>
           {tryAgain && (
-            <a href={current === "vault" ? "/vault" : "/"} className={s.action}>
+            <a href={screen.href} className={s.action}>
               Try again
             </a>
           )}

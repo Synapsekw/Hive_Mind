@@ -15,8 +15,9 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
 - A scripted walkthrough (`pnpm demo`) of two people and their agents.
 - An MCP server with seven tools, proven against the live project by `pnpm test:live`.
 - An importer for a folder of markdown notes.
-- The web app (`web/`) has sign-in, the map and the vault, where a person reads their notes and
-  decides who may read them. The other pages are not built; `docs/ui/` holds the design
+- The web app (`web/`) has sign-in, the map, the vault, where a person reads their notes and
+  decides who may read them, and the gallery, where they view, download and delete the files
+  their agents saved. The other pages are not built; `docs/ui/` holds the design
   prototypes for the map and chat.
 
 ## Start here
@@ -68,8 +69,12 @@ To open the vault, choose **Vault** in the left rail, or select a note on the ma
 have shared with you. Choose a note or a folder and use the sharing pill to change who can read
 it; nothing is saved until you choose "Save".
 
-`/dev/map` and `/dev/vault` show the two screens on sample data, without an account;
-`/dev/notice` shows the failed-load notice.
+The gallery (**Gallery** in the left rail) shows the files you may read as cards. Images and
+PDFs open in a full-window viewer; every file downloads; your own files can be deleted. A file is
+shared exactly as the note it is attached to, so sharing is changed on the note, in the vault.
+
+`/dev/map`, `/dev/vault` and `/dev/gallery` show the three screens on sample data, without an
+account; `/dev/notice` shows the failed-load notice.
 `pnpm --filter @hive-mind/web test:e2e` runs the browser tests; run
 `pnpm --filter @hive-mind/web exec playwright install chromium` once first. The browser tests are
 run by hand; they are not part of CI.
