@@ -5,7 +5,14 @@
 // Every view, Orbit included, is drawn on one canvas (MapCanvas); a visually hidden list of
 // real buttons (DotList) carries the keyboard and screen readers. Hover and keyboard focus make a
 // dot hot (the peek card, firing links, the soft dim); the Hive's agent marks move (useMarks).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { activity, agentStatus, buildModel } from "./graph";
 import { hiveComb } from "./hive";
 import { layout, orbit } from "./layouts";
@@ -118,13 +125,43 @@ export function HiveMap({
   const basePos = view === "hive" ? comb.pos : flatPos;
   const isOrbit = view === "orbit";
   if (isOrbit && !cache.orbit) cache.orbit = orbit(model);
-  // In the Hive the agents sit where their marks are now (they move; the comb does not).
-  const hivePos = useMemo(() => {
-    const out = comb.pos.slice();
-    for (const m of agentMarks.marks) out[m.node] = m.pos;
+  const pos = basePos;
+  // In the Hive the agents sit where their marks are now. The marks move, the comb does not: the
+  // canvas reads the marks as a small override, so a move never touches the cached dot batches.
+  const markPos = useMemo(
+    () =>
+      new Map(
+        agentMarks.marks.map(
+          (m) => [m.node, m.pos] as [number, [number, number]],
+        ),
+      ),
+    [agentMarks.marks],
+  );
+  const moved = view === "hive" ? markPos : null;
+
+  // The hidden list's positions follow the canvas only once a glide has landed, so a view switch
+  // never waits on 5,000 buttons' data-x/data-y before its first frame.
+  const [listAt, setListAt] = useState({ pos, view, model });
+  const onLanded = useCallback(
+    (p: [number, number][], v: View, m: typeof model) =>
+      // A transition: React may yield to the canvas's frames while it re-renders the list.
+      startTransition(() =>
+        setListAt((cur) =>
+          cur.pos === p && cur.view === v ? cur : { pos: p, view: v, model: m },
+        ),
+      ),
+    [],
+  );
+  const listBase = listAt.model === model ? listAt.pos : pos;
+  const listView = listAt.model === model ? listAt.view : view;
+  // Keyed on the list's own positions and view, so a view switch changes nothing here until the
+  // glide lands.
+  const listPos = useMemo(() => {
+    if (listView !== "hive") return listBase;
+    const out = listBase.slice();
+    for (const [i, at] of markPos) out[i] = at;
     return out;
-  }, [comb, agentMarks.marks]);
-  const pos = view === "hive" ? hivePos : basePos;
+  }, [listBase, listView, markPos]);
 
   // The scene is built from the comb's own positions, so a mark's move never rebuilds it.
   const scene = useMemo(
@@ -406,10 +443,13 @@ export function HiveMap({
             cameraRef={cameraRef}
             fire={fire}
             flare={agentMarks.flare}
+            moved={moved}
+            onLanded={onLanded}
           />
           <DotList
             model={model}
-            pos={pos}
+            pos={listPos}
+            view={listView}
             lit={on}
             sel={sel}
             onFocusDot={onFocusDot}

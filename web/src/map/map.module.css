@@ -453,7 +453,8 @@
   transition: background var(--dur-fast) var(--ease);
 }
 
-.presenceList li:hover {
+.presenceList li:hover,
+.presenceList li:focus-visible {
   background: var(--fill);
 }
 

@@ -65,10 +65,14 @@ export function Presence({
           {here.map((m) => {
             const info = names.get(m.node);
             return (
+              // Focusable, so the keyboard reaches what hover shows: focus makes the mark hot.
               <li
                 key={m.node}
+                tabIndex={0}
                 onPointerEnter={() => onHot(m.node)}
                 onPointerLeave={() => onHot(null)}
+                onFocus={() => onHot(m.node)}
+                onBlur={() => onHot(null)}
               >
                 <Mark state={m.state} />
                 <span className={s.presenceName}>{info?.name ?? "Agent"}</span>

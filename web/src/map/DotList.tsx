@@ -51,6 +51,7 @@ const Item = memo(function Item({
 export const DotList = memo(function DotList({
   model,
   pos,
+  view,
   lit,
   sel,
   onFocusDot,
@@ -58,13 +59,15 @@ export const DotList = memo(function DotList({
 }: {
   model: MapModel;
   pos: [number, number][];
+  /** The view `pos` belongs to (it lags the canvas until a glide lands). */
+  view?: string;
   lit: boolean[];
   sel: number | null;
   onFocusDot(i: number | null): void;
   onPick(i: number): void;
 }) {
   return (
-    <ul aria-label="Items on the map" className={s.srList}>
+    <ul aria-label="Items on the map" className={s.srList} data-view={view}>
       {model.nodes.map((n) => {
         const [x, y] = pos[n.i] ?? [500, 380];
         return (

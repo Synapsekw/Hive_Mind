@@ -48,3 +48,23 @@ it("fades the far side, never below 0.35 and never above 1", () => {
   expect(orbitAlpha(0.8)).toBeCloseTo(0.84);
   expect(orbitAlpha(1.5)).toBe(1);
 });
+
+it("reusing the previous frame's buffers gives the same projection and order", () => {
+  const pts: [number, number, number][] = Array.from(
+    { length: 300 },
+    (_, i) => [
+      250 * Math.cos(i * 0.7),
+      120 * Math.sin(i * 1.3),
+      250 * Math.sin(i * 0.7),
+    ],
+  );
+  let prev = projectOrbit(pts, 0, 1, W, H);
+  for (const ry of [0.01, 0.02, 1.5, 3.1]) {
+    const fresh = projectOrbit(pts, ry, 1, W, H);
+    const reused = projectOrbit(pts, ry, 1, W, H, prev);
+    expect(reused.pos).toEqual(fresh.pos);
+    expect([...reused.order]).toEqual([...fresh.order]);
+    expect(reused.equator).toEqual(fresh.equator);
+    prev = reused;
+  }
+});

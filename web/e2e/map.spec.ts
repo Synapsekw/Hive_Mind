@@ -34,6 +34,17 @@ async function pick(page: Page, dot: Locator) {
 
 /** A dot's point on screen, from its box coordinates, with the camera at Fit. */
 async function dotPoint(page: Page, dot: Locator) {
+  // The hidden list's data-x/data-y follow the canvas once a glide has landed.
+  const view = await page
+    .locator("[data-map-canvas]")
+    .getAttribute("data-view");
+  await expect(
+    page.locator(`ul[aria-label="Items on the map"][data-view="${view}"]`),
+  ).toBeAttached({ timeout: 5000 });
+  await expect(page.locator("[data-map-canvas]")).not.toHaveAttribute(
+    "data-animating",
+    { timeout: 5000 },
+  );
   const canvas = (await page.locator("[data-map-canvas]").boundingBox())!;
   const x = Number(await dot.getAttribute("data-x"));
   const y = Number(await dot.getAttribute("data-y"));
@@ -143,6 +154,19 @@ test("the hive names who is at the hive", async ({ page }) => {
   await expect(presence).toContainText("Laptop");
   await expect(presence).toContainText("live");
   await expect(presence).toContainText("idle at the entrance");
+  // A row reached by keyboard does what hovering it does: the agent's mark becomes hot.
+  const row = presence.getByRole("listitem").filter({ hasText: "Laptop" });
+  await row.focus();
+  await expect(page.locator("[data-map-canvas]")).not.toHaveAttribute(
+    "data-hot",
+    "",
+  );
+  await expect(page.locator("[data-map-peek]")).toContainText("Agent");
+  await row.blur();
+  await expect(page.locator("[data-map-canvas]")).toHaveAttribute(
+    "data-hot",
+    "",
+  );
   // Only in the Hive.
   await viewButton(page, "Rings").click();
   await expect(presence).toHaveCount(0);
@@ -188,6 +212,10 @@ test("switching views glides the dots, then the map comes to rest", async ({
   await expect(canvas).not.toHaveAttribute("data-animating", {
     timeout: 4000,
   });
+  // The hidden list followed once the dots landed.
+  await expect(
+    page.locator('ul[aria-label="Items on the map"][data-view="topics"]'),
+  ).toBeAttached();
 });
 
 test("orbit is drawn on the canvas and turns when dragged", async ({

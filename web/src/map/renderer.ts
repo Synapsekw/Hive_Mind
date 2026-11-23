@@ -27,8 +27,16 @@ export type FrameState = {
   reducedMotion: boolean;
   /** The camera is moving (wheel, drag, glide): the resting layer is moved, not redrawn. */
   moving?: boolean;
-  /** New dots growing in after a refresh: node -> scale (0 to 1). */
-  grow?: Map<number, number> | null;
+  /**
+   * New dots growing in after a refresh: one shared scale (0 to 1) for one set of nodes. The set
+   * keeps its identity for the whole growth, so the dot batches are rebuilt once, not per frame.
+   */
+  grow?: { nodes: Set<number>; k: number } | null;
+  /**
+   * Agents drawn somewhere other than `pos` (the Hive's marks mid-move). Read only where a single
+   * node's position is needed, never by the cached dot batches, so a mark move rebuilds nothing.
+   */
+  moved?: Map<number, [number, number]> | null;
   /** The resting layer's opacity (it fades in while the dots glide to a new view). */
   layerAlpha?: number;
   /** Orbit only: this frame's projection of the 3D positions (orbit3d.ts). */
@@ -289,7 +297,8 @@ type Frame = {
 };
 
 const CENTRE: [number, number] = [500, 380];
-const P = (F: Frame, i: number): [number, number] => F.f.pos[i] ?? CENTRE;
+const P = (F: Frame, i: number): [number, number] =>
+  F.f.moved?.get(i) ?? F.f.pos[i] ?? CENTRE;
 const hueOf = (F: Frame, topic: number) =>
   F.pal.hue[F.model.topics[topic]?.hue ?? -1] ?? F.pal.fg2;
 const colourOf = (F: Frame, n: ModelNode) =>
@@ -417,11 +426,25 @@ export function drawFrame(
 function drawGrowing(F: Frame) {
   const g = F.f.grow;
   if (!g) return;
-  for (const [i, k] of g)
-    if (i !== F.f.hot && !F.near.has(i)) drawOne(F, i, k, 0);
+  for (const i of g.nodes)
+    if (i !== F.f.hot && !F.near.has(i)) drawOne(F, i, g.k, 0);
 }
 
 const IDENTITY: Cam = { k: 1, tx: 0, ty: 0 };
+const KINDS: Kind[] = ["note", "file", "lnote", "lfile", "hub"];
+const KIND_INDEX: Record<Kind, number> = {
+  note: 0,
+  file: 1,
+  lnote: 2,
+  lfile: 3,
+  hub: 4,
+};
+/** drawOrbit's per-frame lists, kept between frames so a turning orbit makes little garbage. */
+const orbitScratch = {
+  lists: new Map<number, number[]>(),
+  used: [] as number[],
+  loose: [] as number[],
+};
 /** Depth slices in Orbit: dots are batched within a slice and slices drawn far to near. */
 const SLICES = 8;
 
@@ -485,15 +508,14 @@ function drawOrbit(
   drawFocusLinks(F);
   drawPulses(F);
 
-  // Far to near, in slices; within a slice one batch per topic, kind and alpha.
+  // Far to near, in slices; within a slice one batch per topic, kind and alpha. Group keys are
+  // integers (hubs sort last, so they draw on top) and the group lists are reused every frame.
   const n = o.order.length;
   const per = Math.max(1, Math.ceil(n / SLICES));
+  const { lists, used, loose } = orbitScratch;
   for (let a = 0; a < n; a += per) {
-    const groups = new Map<
-      string,
-      { kind: Kind; topic: number; a: number; n: number[] }
-    >();
-    const loose: number[] = [];
+    used.length = 0;
+    loose.length = 0;
     for (let j = a; j < Math.min(n, a + per); j++) {
       const i = o.order[j]!;
       const node = model.nodes[i];
@@ -502,31 +524,37 @@ function drawOrbit(
         loose.push(i);
         continue;
       }
-      const kind = kindOf(node);
+      const kind = KIND_INDEX[kindOf(node)];
       const base = alphaOf(F, i);
-      const al =
-        Math.round(
-          (base === 1 ? orbitAlpha(o.p[i]!) : base) *
-            (theirs(node) ? 0.72 : 1) *
-            20,
-        ) / 20;
-      const key = `${node.topic}|${kind}|${al}`;
-      const g = groups.get(key);
-      if (g) g.n.push(i);
-      else groups.set(key, { kind, topic: node.topic, a: al, n: [i] });
+      const al = Math.round(
+        (base === 1 ? orbitAlpha(o.p[i]!) : base) *
+          (theirs(node) ? 0.72 : 1) *
+          20,
+      ); // 0..20
+      const key =
+        ((kind === 4 ? 1 : 0) * 4096 + node.topic) * 128 + kind * 21 + al;
+      let list = lists.get(key);
+      if (!list) lists.set(key, (list = []));
+      if (list.length === 0) used.push(key);
+      list.push(i);
     }
-    for (const g of [...groups.values()].sort(
-      (x, y) => +(x.kind === "hub") - +(y.kind === "hub"),
-    ))
+    used.sort((x, y) => x - y);
+    for (const key of used) {
+      const list = lists.get(key)!;
+      const al = key % 21;
+      const kind = KINDS[Math.floor((key % 128) / 21)]!;
+      const topic = Math.floor(key / 128) % 4096;
       fillGroup(
         F,
-        g.kind,
-        hueOf(F, g.topic),
-        g.a,
-        groupPaths(F, g.kind, g.n, 1),
+        kind,
+        hueOf(F, topic),
+        al / 20,
+        groupPaths(F, kind, list, 1),
         0,
-        g.topic,
+        topic,
       );
+      list.length = 0;
+    }
     for (const i of loose)
       if (model.nodes[i]!.kind === "agent") drawAgent(F, i, 1, 0);
       else drawRoot(F, 1, 0);
@@ -540,7 +568,7 @@ function drawOrbit(
 }
 
 const special = (F: Frame, i: number) =>
-  i === F.f.hot || F.near.has(i) || !!F.f.grow?.has(i);
+  i === F.f.hot || F.near.has(i) || !!F.f.grow?.nodes.has(i);
 /** Orbit: a node's perspective scale (near dots larger); 1 in the flat views. */
 const depthOf = (F: Frame, i: number) => (F.depth ? (F.depth[i] ?? 1) : 1);
 
@@ -986,7 +1014,7 @@ type DotCache = {
   hot: number | null;
   sel: number | null;
   focus: number | null;
-  grow: Map<number, number> | null;
+  grow: Set<number> | null;
   s: number;
   batches: Batch[];
 };
@@ -1008,7 +1036,7 @@ function drawDots(F: Frame) {
     dc.hot !== f.hot ||
     dc.sel !== f.sel ||
     dc.focus !== f.focusRing ||
-    dc.grow !== (f.grow ?? null) ||
+    dc.grow !== (f.grow?.nodes ?? null) ||
     dc.s !== s
   ) {
     const batches: Batch[] = [];
@@ -1042,7 +1070,7 @@ function drawDots(F: Frame) {
       hot: f.hot,
       sel: f.sel,
       focus: f.focusRing,
-      grow: f.grow ?? null,
+      grow: f.grow?.nodes ?? null,
       s,
       batches,
     };

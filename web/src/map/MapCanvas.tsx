@@ -79,6 +79,13 @@ type Props = {
   fire: { from: number; at: number } | null;
   /** A comb cell's honey flares and fades back (an agent mark arrived). */
   flare: { node: number; at: number } | null;
+  /**
+   * Hive: where each agent mark is now (node -> box position). A change glides the moved marks
+   * over 0.8 s without touching `pos`, so the cached dot batches are never rebuilt for it.
+   */
+  moved?: Map<number, [number, number]> | null;
+  /** The dots have reached `pos` (a glide landed, or there was none): the hidden list may follow. */
+  onLanded?(pos: [number, number][], view: View, model: MapModel): void;
 };
 
 type Tween = {
@@ -136,7 +143,17 @@ export function MapCanvas(props: Props): JSX.Element {
   } | null>(null);
   const shown = useRef<[number, number][] | null>(null);
   const tween = useRef<Tween | null>(null);
-  const grow = useRef<{ nodes: number[]; t0: number } | null>(null);
+  const grow = useRef<{ nodes: Set<number>; t0: number } | null>(null);
+  /** Agent marks mid-move (Hive): node -> where it left from, where it goes and when. */
+  const markAnim = useRef(
+    new Map<
+      number,
+      { from: [number, number]; to: [number, number]; t0: number }
+    >(),
+  );
+  const markShown = useRef(new Map<number, [number, number]>());
+  const markTarget = useRef<Map<number, [number, number]> | null>(null);
+  const reported = useRef<[number, number][] | null>(null);
   const pulses = useRef<Pulse[]>([]);
   const lastAmbient = useRef(-Infinity);
   const flares = useRef(new Map<number, number>());
@@ -258,7 +275,7 @@ export function MapCanvas(props: Props): JSX.Element {
         moved = true;
     }
     if (fresh.length && fresh.length < to.length)
-      grow.current = { nodes: fresh, t0: time };
+      grow.current = { nodes: new Set(fresh), t0: time };
     if (!moved) {
       tween.current = null;
       shown.current = to;
@@ -309,21 +326,66 @@ export function MapCanvas(props: Props): JSX.Element {
       }
     }
     shown.current = drawn;
-    let growing: Map<number, number> | null = null;
+    // New dots grow in; the set keeps its identity, so the batches are rebuilt once.
+    let growing: { nodes: Set<number>; k: number } | null = null;
     const g = grow.current;
     if (g) {
       const u = (time - g.t0) / GROW_MS;
       if (u >= 1) grow.current = null;
       else {
-        growing = new Map(g.nodes.map((i) => [i, ease(Math.max(0, u))]));
+        growing = { nodes: g.nodes, k: ease(Math.max(0, u)) };
         motion = true;
       }
     }
 
+    // Agent marks (Hive): glide the ones whose target changed, as a small override map.
+    let movedNow: Map<number, [number, number]> | null = null;
+    const mt = p.view === "hive" ? (p.moved ?? null) : null;
+    if (mt !== markTarget.current) {
+      markTarget.current = mt;
+      const anim = markAnim.current;
+      if (!mt) {
+        anim.clear();
+        markShown.current.clear();
+      } else
+        for (const [i, to] of mt) {
+          const from = markShown.current.get(i) ?? p.pos[i] ?? to;
+          if (still.current || (from[0] === to[0] && from[1] === to[1]))
+            anim.delete(i);
+          else anim.set(i, { from, to, t0: time });
+        }
+    }
+    if (mt) {
+      movedNow = new Map();
+      for (const [i, to] of mt) {
+        const a = markAnim.current.get(i);
+        let at = to;
+        if (a) {
+          const u = (time - a.t0) / MARK_MS;
+          if (u >= 1) markAnim.current.delete(i);
+          else {
+            const e = ease(Math.max(0, u));
+            at = [
+              a.from[0] + (a.to[0] - a.from[0]) * e,
+              a.from[1] + (a.to[1] - a.from[1]) * e,
+            ];
+            motion = true;
+          }
+        }
+        movedNow.set(i, at);
+      }
+      markShown.current = movedNow;
+    }
+
     // Orbit: turn unless dragged (or within 3 s of a drag), hovered, or still; then project.
     let proj: OrbitProjection | null = null;
+    const o = orbitState.current;
+    if (p.view !== "orbit") {
+      // Left Orbit mid-drag: the next visit starts turning normally.
+      o.dragging = false;
+      o.lastT = null;
+    }
     if (p.view === "orbit" && p.orbit) {
-      const o = orbitState.current;
       const spin =
         !still.current &&
         p.hot === null &&
@@ -333,13 +395,17 @@ export function MapCanvas(props: Props): JSX.Element {
         o.ry += ORBIT_SPIN * Math.min(4, (time - o.lastT) / (1000 / 60));
       o.lastT = spin ? time : null;
       if (spin) motion = true;
-      proj = projectOrbit(p.orbit, o.ry, o.zoom, sw, sh);
+      // The previous frame's buffers are reused (little garbage while it turns).
+      proj = projectOrbit(p.orbit, o.ry, o.zoom, sw, sh, orbitProj.current);
       el.setAttribute("data-ry", o.ry.toFixed(3));
     } else el.removeAttribute("data-ry");
     orbitProj.current = proj;
 
     // Pulses: firing ones, and a faint ambient one about every 700 ms in the calm flat views.
-    pulses.current = pulses.current.filter((q) => time < q.t0 + q.dur);
+    // A hot dot stops the ambient pulses at once (its own firing pulses stay).
+    pulses.current = pulses.current.filter(
+      (q) => time < q.t0 + q.dur && !(q.ambient && p.hot !== null),
+    );
     const ambientOk =
       !still.current &&
       PULSE_VIEWS.has(p.view) &&
@@ -397,6 +463,7 @@ export function MapCanvas(props: Props): JSX.Element {
         reducedMotion: still.current,
         moving,
         grow: growing,
+        moved: movedNow,
         layerAlpha,
         orbit: proj,
       },
@@ -427,10 +494,14 @@ export function MapCanvas(props: Props): JSX.Element {
       el.removeAttribute("data-animating");
       el.removeAttribute("data-ambient");
     }
-    // The dots have landed: the pointer may now be over one.
+    // The dots have landed: the pointer may now be over one, and the hidden list may follow.
     if (landed && pointer.current && !dragging.current) {
       const at = pointer.current;
       setHover(hitAt(at.x, at.y), at);
+    }
+    if (!tween.current && reported.current !== p.pos) {
+      reported.current = p.pos;
+      p.onLanded?.(p.pos, p.view, p.model);
     }
   };
 
@@ -646,7 +717,14 @@ export function MapCanvas(props: Props): JSX.Element {
   ]);
 
   // Hit testing runs against where the dots land, not where a glide has them mid-way.
-  const grid = useMemo(() => buildHitGrid(pos), [pos]);
+  const moved = props.view === "hive" ? (props.moved ?? null) : null;
+  const hitPos = useMemo(() => {
+    if (!moved?.size) return pos;
+    const out = pos.slice();
+    for (const [i, at] of moved) out[i] = at;
+    return out;
+  }, [pos, moved]);
+  const grid = useMemo(() => buildHitGrid(hitPos), [hitPos]);
   // The zoom a screen reader hears: only once the camera settles, not on every frame.
   const settledK = useMemo(() => cam.current.k, [camera.settled, cam]);
 
@@ -694,7 +772,7 @@ export function MapCanvas(props: Props): JSX.Element {
     };
     return hitTest(grid, bx, by, MAX_REACH / sc, (i) => {
       if (!eligible(i)) return false;
-      const [x, y] = p.pos[i] ?? CENTRE;
+      const [x, y] = hitPos[i] ?? CENTRE;
       return Math.hypot(x - bx, y - by) <= reach(i);
     });
   };
