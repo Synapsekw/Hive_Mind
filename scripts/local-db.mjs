@@ -9,7 +9,11 @@ const STUB = `
   create role authenticated nologin;
   create role service_role nologin bypassrls;
   create schema auth;
-  create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+  -- email_confirmed_at is set once the person has proved the address; the
+  -- invitation functions let nobody join a hive without it.
+  create table auth.users (
+    id uuid primary key default gen_random_uuid(), email text,
+    email_confirmed_at timestamptz default now());
   create function auth.jwt() returns jsonb language sql stable as $$
     select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
   create function auth.uid() returns uuid language sql stable as $$
@@ -57,10 +61,13 @@ export async function openDb() {
     }
   }
 
-  async function addUser(email) {
+  // A person with an account. `confirmed: false` is one who never proved the
+  // email address (Supabase leaves email_confirmed_at null until they do).
+  async function addUser(email, { confirmed = true } = {}) {
     const r = await db.query(
-      `insert into auth.users (email) values ($1) returning id`,
-      [email],
+      `insert into auth.users (email, email_confirmed_at)
+       values ($1, case when $2::boolean then now() end) returning id`,
+      [email, confirmed],
     );
     return r.rows[0].id;
   }
