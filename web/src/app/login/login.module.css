@@ -1,0 +1,140 @@
+/* Sign-in in Keystone glass: no rail, one frosted card centred on the wash, the same card as the
+   map's. Colours are tokens only, read with var(). */
+
+.page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.panel {
+  width: 100%;
+  max-width: 360px;
+  padding: 36px 32px 28px;
+  border: 1px solid var(--edge-card);
+  border-radius: 20px;
+  background: var(--glow), var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--lift);
+  color: var(--fg);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.mark {
+  width: 18px;
+  height: 18px;
+  background: var(--grad);
+  clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%);
+}
+
+.name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.input {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
+  font: inherit;
+  transition: border-color 0.24s var(--ease);
+}
+
+.input:hover,
+.input:focus-visible {
+  border-color: var(--line-hi);
+}
+
+.input:focus-visible,
+.primary:focus-visible,
+.quiet:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.primary,
+.quiet {
+  height: 36px;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary {
+  margin-top: 8px;
+  border: 0;
+  background: var(--grad);
+  color: var(--on-brand);
+  font-weight: 500;
+  transition: filter 0.24s var(--ease);
+}
+
+.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.quiet {
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--fg2);
+  transition:
+    border-color 0.24s var(--ease),
+    color 0.24s var(--ease);
+}
+
+.quiet:hover:not(:disabled) {
+  border-color: var(--line-hi);
+  color: var(--fg);
+}
+
+.primary:disabled,
+.quiet:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status {
+  margin: 4px 0 0;
+  min-height: 21px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--fg2);
+}
+
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .panel {
+    background: var(--glow), var(--bg);
+  }
+}

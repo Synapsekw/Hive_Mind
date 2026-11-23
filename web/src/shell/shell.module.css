@@ -1,0 +1,381 @@
+/* The left rail, after docs/ui/map.dc.html: no background of its own, straight on the wash.
+   Colours are tokens only; the rail is data-scope="chrome". */
+
+.rail {
+  flex: 1 1 208px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 14px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  color: var(--fg);
+  font-size: 14px;
+}
+
+/* ---- Mark and name ---- */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 3px;
+}
+
+.mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  background: var(--fg);
+  clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%);
+}
+
+.brandName {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ---- Rows: destinations, Appearance, sign out ---- */
+
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.row:hover {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.row[aria-current="page"] {
+  background: var(--sel);
+  color: var(--fg);
+}
+
+/* The 3 px bar on the rail's outer edge marks where you are. */
+.row[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--grad);
+}
+
+.rail .control:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.slot {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rowLabel {
+  flex: 1;
+  min-width: 0;
+  padding-left: 4px;
+}
+
+/* How many wait in the inbox: a quiet filled chip at the row's end. The fill is the one the rail
+   already lays under a chosen segment, so it reads on the bare wash and on a hovered or current
+   row alike, in light and dark. */
+.count {
+  flex: none;
+  margin-left: auto;
+  margin-right: 6px;
+  min-width: 20px;
+  padding: 2px 5px;
+  border-radius: 8px;
+  background: var(--fill-on);
+  color: var(--fg);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Agents, Appearance and sign out, at the foot ---- */
+
+.foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.heading {
+  margin: 0 0 6px 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.agentList {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  min-height: 28px;
+}
+
+.agent .slot {
+  height: 20px;
+}
+
+.agentDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--quiet);
+}
+
+.agentDot[data-on] {
+  background: var(--grad);
+}
+
+.agentName {
+  min-width: 0;
+  padding-left: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.agentStatus {
+  grid-column: 2;
+  min-width: 0;
+  padding-left: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.signOutForm {
+  margin: 0;
+}
+
+/* ---- Appearance ---- */
+
+.appearance {
+  display: flex;
+  flex-direction: column;
+}
+
+.current {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+}
+
+.themeName {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding-right: 6px;
+  font-size: 12px;
+}
+
+/* A reset scope: dark text on a light surface even inside the white light-mode rail. */
+.popover {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 6px 0 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  color: var(--fg);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.segments {
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--fill);
+}
+
+.segment {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.segment:hover {
+  color: var(--fg);
+}
+
+.segment[aria-checked="true"] {
+  background: var(--fill-on);
+  color: var(--fg);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* The ring is an outline, not a shadow, so it survives forced colours. */
+.swatch[aria-checked="true"] {
+  outline: 1.5px solid var(--fg);
+  outline-offset: 2px;
+}
+
+.popover .segment:focus-visible,
+.popover .swatch:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.popover .swatch:focus-visible {
+  outline-offset: 4px;
+  border-radius: 50%;
+}
+
+/* Side by side from 1100 x 560, the page is one window tall: the rail scrolls on its own if
+   the open panel makes it run long. */
+@media (min-width: 1100px) and (min-height: 560px) {
+  .rail {
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fill-on) transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .segment {
+    transition: none;
+  }
+}
+
+/* Forced colours (Windows high contrast): the swatches keep their own colours with a system
+   border, and every "this one" state is drawn in Highlight, since backgrounds and shadows are
+   overridden. */
+@media (forced-colors: active) {
+  .swatch,
+  .current {
+    forced-color-adjust: none;
+    border: 1px solid ButtonText;
+  }
+
+  .swatch[aria-checked="true"],
+  .segment[aria-checked="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  .segment[aria-checked="true"] {
+    outline-offset: -2px;
+  }
+
+  .row[aria-current="page"] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+
+  .row[aria-current="page"]::before {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  .count {
+    border: 1px solid ButtonText;
+  }
+
+  .agentDot {
+    forced-color-adjust: none;
+    background: GrayText;
+  }
+
+  .agentDot[data-on] {
+    background: Highlight;
+  }
+}

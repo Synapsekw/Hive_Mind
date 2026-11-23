@@ -7,8 +7,12 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
 ## Current state of the dev project
 
 - Migrations `20261120000001_schema`, `20261120000002_sharing_rules` and
-  `20261122063919_file_storage` are applied and recorded under those versions. The last one adds a
+  `20261122063919_file_storage` are applied and recorded under those versions. The third adds a
   private `files` storage bucket.
+- Migration `20261122083415_map_graph` is applied too, through the Supabase MCP and re-stamped
+  like the earlier ones. It adds `map_graph` and `note_topic` for the web app's map.
+- Migration `20261123071625_inbox` is applied (2026-11-23) and recorded under that version. It
+  adds `inbox` and `inbox_count` for the web app's inbox.
 - One hive (`Synapse`), one owner member (`Danijel`), one workspace (`Main`), one agent (`Claude`,
   provider `claude`, trust tier `vendor`).
 - The agent token is in the owner's local `.env` as `HIVE_AGENT_TOKEN`. Only its hash is stored in
@@ -69,8 +73,23 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
    | `GET /rest/v1/agents`                              | 401, permission denied             |
    | `POST /rest/v1/rpc/create_hive`                    | 401, permission denied             |
 
-## What this does not prove
+## Run the web app
 
-`agent_login` works with the anon key, but the MCP server's next step — signing its own JWT with the
-project secret and reading as the member — has still not run against this database. That is T2 of
-the [Phase 1 plan](superpowers/plans/2026-11-21-local-end-to-end.md).
+The web app needs two public values from Project Settings → API: the project URL and the
+publishable key. Put them in `web/.env.local` (copy `web/.env.example`) and run `pnpm dev:web`.
+`NEXT_PUBLIC_*` values are baked in when the app is built, so rebuild after changing them.
+
+- **Password.** Set one on the member's account in the dashboard (Authentication → Users). A
+  password never goes through an agent.
+- **Emailed links.** Add `http://localhost:3000/**` to the allowed redirect URLs (Authentication
+  → URL Configuration), or the link is refused.
+
+## What is proven, and what is not
+
+- `pnpm test:live` runs 19 checks against the hosted project: the MCP server signs in with an
+  agent token and calls every tool as the member, and two members' agents keep private notes
+  private until a person shares them or both accept a link. It also calls `map_graph` as a
+  member and as an agent, which is refused, and checks that a note an agent writes into a folder
+  its member has shared is readable by the second member at once.
+- Signing in to the web app through the browser, and the map it then draws, are checked by hand.
+  No automated test signs in to the hosted project through the browser.

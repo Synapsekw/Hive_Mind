@@ -176,6 +176,50 @@ describe("two members and their agents on a live database", { skip }, () => {
     assert.deepEqual(direct.json, [], "b read a's private note directly");
   });
 
+  test("the map shows each member the other's private note as a stub", async () => {
+    const mapOf = async (who) => {
+      const r = await rest("rpc/map_graph", {
+        jwt: who.person,
+        method: "POST",
+        body: { p_hive: who.me.hive_id },
+      });
+      assert.equal(r.status, 200, r.text);
+      return r.json;
+    };
+    for (const [who, own, other] of [
+      [a, "a-private", "b-private"],
+      [b, "b-private", "a-private"],
+    ]) {
+      const m = await mapOf(who);
+      const mine = m.nodes.find((n) => n.id === ids[own]);
+      assert.equal(mine.locked, false);
+      assert.equal(mine.path, `${DIR}${own}.md`);
+      const stub = m.nodes.find((n) => n.id === ids[other]);
+      assert.ok(stub, `${other} is missing from the map`);
+      assert.equal(stub.locked, true);
+      for (const k of [
+        "title",
+        "path",
+        "workspace_id",
+        "by_agent",
+        "agent_id",
+        "note_id",
+      ])
+        assert.equal(stub[k], null, k);
+      const raw = JSON.stringify(m);
+      assert.ok(!raw.includes(`${other} ${WORD}`), "the map carries a body");
+      assert.ok(!raw.includes(`${DIR}${other}.md`), "the map carries a path");
+    }
+    // An agent cannot draw the map.
+    const byAgent = await rest("rpc/map_graph", {
+      jwt: a.agent,
+      method: "POST",
+      body: { p_hive: a.me.hive_id },
+    });
+    assert.equal(byAgent.status, 400, byAgent.text);
+    assert.match(byAgent.text, /map_graph is for people/);
+  });
+
   test("an agent cannot share a note; once its owner does, the other member reads it", async () => {
     const w = await a.call("hive_write", {
       path: `${DIR}a-shared.md`,
@@ -254,6 +298,31 @@ describe("two members and their agents on a live database", { skip }, () => {
       );
     };
 
+    // The proposal waits in the other person's inbox, without the proposer's title or body.
+    const inbox = (jwt) =>
+      rest("rpc/inbox", {
+        jwt,
+        method: "POST",
+        body: { p_hive: a.me.hive_id },
+      });
+    const waiting = await inbox(b.person);
+    const item = waiting.json.links.find((l) => l.id === link.id);
+    assert.ok(item, waiting.text);
+    assert.equal(item.proposed_by, "theirs");
+    assert.equal(item.theirs.title, null);
+    assert.ok(
+      !waiting.text.includes(`a-private ${WORD}`),
+      "a body in the inbox",
+    );
+    assert.ok(
+      !waiting.text.includes(`${DIR}a-private.md`),
+      "a path in the inbox",
+    );
+    // An agent cannot read the inbox.
+    const byAgent = await inbox(b.agent);
+    assert.equal(byAgent.status, 400, byAgent.text);
+    assert.match(byAgent.text, /inbox is for people/);
+
     // Proposing is not accepting, and no agent can accept.
     await closed();
     for (const agent of [a.agent, b.agent]) {
@@ -322,5 +391,52 @@ describe("two members and their agents on a live database", { skip }, () => {
       `${DIR}a-private.md`,
       `${DIR}a-shared.md`,
     ]);
+  });
+
+  test("a folder shared by its owner shares the note an agent writes there", async () => {
+    const folder = `${DIR}shared-folder`;
+    const notePath = `${folder}/by-agent.md`;
+    let folderId;
+    try {
+      const rule = await rest("folders?on_conflict=workspace_id,path", {
+        jwt: a.person,
+        method: "POST",
+        prefer: "resolution=merge-duplicates,return=representation",
+        body: {
+          workspace_id: a.me.workspace_id,
+          member_id: a.me.member_id,
+          path: folder,
+          visibility: "group",
+        },
+      });
+      assert.equal(rule.status, 201, rule.text);
+      folderId = rule.json[0].id;
+
+      const w = await a.call("hive_write", {
+        path: notePath,
+        title: "in a shared folder",
+        body: `written after the folder was shared ${WORD}`,
+      });
+      assert.ok(!w.isError, text(w));
+      const id = data(await a.call("hive_read", { path: notePath })).id;
+
+      const r = await rest(
+        `notes?select=id,effective:note_visibility,rule_folder:note_rule_folder,access:note_access&id=eq.${id}`,
+        { jwt: b.person },
+      );
+      assert.equal(r.status, 200, r.text);
+      assert.deepEqual(r.json, [
+        { id, effective: "group", rule_folder: folder, access: "shared" },
+      ]);
+    } finally {
+      if (folderId) {
+        const gone = await rest(`folders?id=eq.${folderId}`, {
+          jwt: a.person,
+          method: "DELETE",
+        });
+        assert.ok(gone.status < 300, `folder cleanup failed: ${gone.text}`);
+      }
+      await cleanUp(a);
+    }
   });
 });

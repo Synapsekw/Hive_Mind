@@ -1,0 +1,828 @@
+/* The gallery screen in Keystone glass, in the vault's grammar (vault.module.css): the rail
+   (web/src/shell/) on the wash, then one frosted card holding the tabs, the filter and a grid of
+   file cards that scrolls inside it. The details of a file open under its card as a reset
+   popover (data-scope="reset"); the viewer is a glass sheet over the whole window. Colours are
+   tokens only (themes.generated.css). */
+
+.root {
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.root button,
+.root input {
+  font-family: inherit;
+}
+
+.root button:focus-visible,
+.root input:focus-visible,
+.root a:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- The card ---- */
+
+.panel {
+  flex: 999 1 620px;
+  min-width: 0;
+  margin: 8px 8px 8px 4px;
+  padding: 16px 20px 0;
+  border: 1px solid var(--edge-card);
+  border-radius: 20px;
+  background: var(--glow), var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--lift);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+
+/* Mine / Shared with me / All: the map's view switch, a 10 px hairline track with 7 px
+   segments. Buttons, not links: choosing one loads nothing. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tab[aria-pressed="true"] {
+  background: var(--fill-on);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.root .tab:focus-visible {
+  border-radius: 7px;
+}
+
+.count {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.filter {
+  flex: 0 1 260px;
+  min-width: 0;
+  display: flex;
+}
+
+.search {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
+  font-size: 13px;
+  transition: border-color 0.24s var(--ease);
+}
+
+.search:hover {
+  border-color: var(--line-hi);
+}
+
+.search::placeholder {
+  color: var(--muted);
+}
+
+/* ---- The grid ---- */
+
+/* The scroll box runs to the card's edges, so the scrollbar sits on the edge and a focus
+   outline on the outermost cards is not cut off. */
+.scroller {
+  position: relative;
+  margin: 0 -20px;
+  padding: 16px 20px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.grid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.cell {
+  position: relative;
+  min-width: 0;
+  display: flex;
+}
+
+/* The open card and its popover sit above the rows that follow. */
+.cell[data-open] {
+  z-index: 2;
+}
+
+.card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.card:hover {
+  border-color: var(--line-hi);
+  background: var(--fill);
+}
+
+.card[aria-expanded="true"] {
+  border-color: var(--line-hi);
+  background: var(--sel);
+}
+
+.root .card:focus-visible {
+  border-radius: 12px;
+}
+
+/* The preview: a thumbnail, or a sheet of paper carrying the type. */
+.tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 10;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: var(--fill);
+  overflow: hidden;
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sheet {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  box-sizing: border-box;
+  width: 60px;
+  height: 74px;
+  padding: 0 0 9px 8px;
+  border-radius: 4px;
+  background: var(--fill-on);
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+}
+
+/* The folded corner. */
+.sheet::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  border-bottom-left-radius: 4px;
+  background: var(--line-hi);
+}
+
+.sheetLabel,
+.label {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sheetLabel {
+  color: var(--fg);
+  line-height: 1;
+}
+
+.label {
+  color: var(--muted);
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.meta,
+.owner {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.owner {
+  color: var(--fg2);
+}
+
+/* ---- Sharing: a dot and its words, never colour alone ----
+   Hollow: private. Filled: shared through a note. Half: a colleague's, shared with you. */
+
+.sharing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg2);
+}
+
+.sharing[data-wrap] {
+  align-items: baseline;
+}
+
+.sharing[data-wrap] .mark {
+  transform: translateY(0.5px);
+}
+
+.sharingText {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mark {
+  flex: none;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--fg2);
+  border-radius: 50%;
+}
+
+.mark[data-sharing="through-note"] {
+  background-color: var(--fg2);
+}
+
+.mark[data-sharing="shared-with-me"] {
+  background-image: linear-gradient(90deg, var(--fg2) 50%, transparent 50%);
+}
+
+.empty {
+  margin: 0;
+  padding: 8px 0;
+  max-width: 44ch;
+  color: var(--muted);
+}
+
+.foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-top: 18px;
+}
+
+/* ---- Details: the popover under a card ---- */
+
+.details {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line-hi);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  color: var(--fg);
+  font-size: 13px;
+  scroll-margin-bottom: 16px;
+}
+
+/* Room under the popover when it is the last thing in the scroll box. */
+.details::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 1px;
+  height: 16px;
+}
+
+.detailsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.detailsName {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 12px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.facts dt {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.why {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- The action row: Download, the note link, Delete ---- */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.actions[data-stacked] {
+  flex-direction: column;
+  align-items: stretch;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.ask {
+  margin: 0 4px 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+/* In the popover the question fills exactly the room of the controls it replaces (Download,
+   and the note link when there is one), so Cancel lands where Delete was. */
+.actions[data-stacked] .ask {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.actions[data-stacked][data-note] .ask {
+  min-height: 74px;
+}
+
+.primary,
+.secondary,
+.quiet,
+.confirm {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary {
+  border: 0;
+  background: var(--grad);
+  color: var(--on-brand);
+  transition: filter 0.18s var(--ease);
+}
+
+.primary:hover {
+  filter: brightness(1.08);
+}
+
+.secondary,
+.quiet,
+.confirm {
+  background: none;
+  color: var(--fg);
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.secondary {
+  border: 1px solid var(--line);
+}
+
+.secondary:hover {
+  border-color: var(--line-hi);
+  background: var(--fill);
+}
+
+/* Delete, before it has asked: the quietest control in the row. */
+.quiet {
+  border: 1px solid transparent;
+  color: var(--muted);
+}
+
+.quiet:hover {
+  border-color: var(--line);
+  background: var(--fill);
+  color: var(--fg);
+}
+
+/* Delete, once it has asked: said in weight and a full-strength edge, not in a colour. */
+.confirm {
+  border: 1px solid var(--fg);
+  font-weight: 600;
+}
+
+.confirm:hover {
+  background: var(--fill-on);
+}
+
+/* A refusal is said in words; the bar beside it only draws the eye. */
+.refused {
+  margin: 0;
+  padding-left: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--hue-6);
+}
+
+/* A square control holding one drawn glyph: close, previous, next. */
+.icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.icon:hover {
+  border-color: var(--line);
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.icon[aria-disabled="true"] {
+  border-color: transparent;
+  background: none;
+  color: var(--quiet);
+  cursor: default;
+}
+
+.detailsHead .icon {
+  width: 28px;
+  height: 28px;
+  margin-right: -4px;
+}
+
+/* ---- The viewer: one glass sheet over the whole window ---- */
+
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  color: var(--fg);
+  animation: arrive 0.24s var(--ease);
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+  }
+}
+
+.viewerBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  min-height: 62px;
+  padding: 10px 14px 10px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.viewerTitle {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewerName {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.viewerMeta {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.viewerMeta > :first-child {
+  flex: none;
+}
+
+.pager {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pagerCount {
+  position: relative;
+  min-width: 44px;
+  text-align: center;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.viewerBar > .actions {
+  flex: none;
+  flex-wrap: nowrap;
+}
+
+.stage {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  padding: 24px;
+}
+
+.shot {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: var(--lift);
+}
+
+.frame {
+  width: 100%;
+  height: 100%;
+  max-width: 1100px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.stageNote {
+  margin: 0;
+  color: var(--muted);
+}
+
+.stageNote[role="alert"] {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* A file the viewer will not draw: its sheet, one sentence, and the way out. */
+.instead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 40ch;
+  text-align: center;
+}
+
+.insteadText {
+  margin: 0;
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
+
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .panel {
+    background: var(--glow), var(--bg);
+  }
+
+  .viewer {
+    background: var(--bg);
+  }
+}
+
+/* ---- One window from 1100 x 560 ----
+   The page is exactly one window tall and the grid scrolls inside the card. Narrower or very
+   short windows let the page scroll instead. */
+
+@media (min-width: 1100px) and (min-height: 560px) {
+  .page {
+    height: 100dvh;
+    min-height: 0;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .panel {
+    min-height: 0;
+  }
+
+  .scroller {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fill-on) transparent;
+  }
+}
+
+/* Stacked, the grid is not a scroll box, so an open popover under the last row needs room of
+   its own inside the card. */
+@media not ((min-width: 1100px) and (min-height: 560px)) {
+  .scroller:has(.details) {
+    padding-bottom: 340px;
+  }
+}
+
+/* A narrow window: the viewer's bar wraps under the name instead of squeezing it. */
+@media not (min-width: 900px) {
+  .viewerBar {
+    flex-wrap: wrap;
+    padding-left: 14px;
+  }
+
+  .viewerTitle {
+    flex-basis: 100%;
+  }
+
+  .viewerBar > .actions {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab,
+  .search,
+  .card,
+  .primary,
+  .secondary,
+  .quiet,
+  .confirm,
+  .icon {
+    transition: none;
+  }
+
+  .viewer {
+    animation: none;
+  }
+}
+
+/* Forced colours: the chosen tab and the open card are drawn in Highlight, since backgrounds
+   are overridden, and the sharing dots keep their three shapes. */
+@media (forced-colors: active) {
+  .tab[aria-pressed="true"],
+  .card[aria-expanded="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .mark {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+  }
+
+  .mark[data-sharing="through-note"] {
+    background-color: CanvasText;
+  }
+
+  .mark[data-sharing="shared-with-me"] {
+    background-image: linear-gradient(90deg, CanvasText 50%, transparent 50%);
+  }
+}
