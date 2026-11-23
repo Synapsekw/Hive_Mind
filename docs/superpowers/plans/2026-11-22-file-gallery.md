@@ -209,8 +209,8 @@ loader and `Gallery`.
       (modules missing).
 - [ ] **Step 3: Implement.** `fileKind`: take the text after the last `.` in the name,
       lower-cased; look it up in a table `{ png: ["image", "image/png"], jpg: ["image",
-  "image/jpeg"], jpeg: ["image", "image/jpeg"], gif: ["image", "image/gif"], webp: ["image",
-  "image/webp"], avif: ["image", "image/avif"], pdf: ["pdf", "application/pdf"] }` and
+"image/jpeg"], jpeg: ["image", "image/jpeg"], gif: ["image", "image/gif"], webp: ["image",
+"image/webp"], avif: ["image", "image/avif"], pdf: ["pdf", "application/pdf"] }` and
       require `mime` (lower-cased, parameters after `;` dropped) to equal the table's type;
       `pptx` → `slides`, `xlsx` / `csv` → `sheet`, `docx` / `md` / `txt` → `doc` regardless of
       `mime`; everything else `other`. Fixture: names like real deliverables (proposal PDFs,
@@ -218,8 +218,8 @@ loader and `Gallery`.
       `Sara`), dates relative to `now`; thumbnails are one 1 × 1 PNG data link per image.
 - [ ] **Step 4: Rail.** Add to `DESTINATIONS` in `Shell.tsx`, after Vault:
       `{ key: "gallery", href: "/gallery", name: "Gallery", icon: <svg aria-hidden="true"
-  {...ICON}><rect x="2" y="2.5" width="12" height="11" rx="1.5" /><path d="m2.5 11 3.2-3.2
-  2.6 2.6 2-2 3.2 3.2" /><circle cx="10.6" cy="5.8" r="1" /></svg> }`; widen `current` in
+{...ICON}><rect x="2" y="2.5" width="12" height="11" rx="1.5" /><path d="m2.5 11 3.2-3.2
+2.6 2.6 2-2 3.2 3.2" /><circle cx="10.6" cy="5.8" r="1" /></svg> }`; widen `current` in
       `Shell` and `Notice` to `"map" | "vault" | "gallery"`; in `Notice` the label and the
       "Try again" link become a lookup: map → "Hive map", `/`; vault → "Vault", `/vault`;
       gallery → "Gallery", `/gallery`. Update the file's opening comment.
@@ -391,7 +391,7 @@ grammar (root layout, card, tabs, filter box, popover with `data-scope="reset"`)
       `<Notice current="gallery">You're not in a hive yet. Ask its owner to invite you.</Notice>`;
       `error` → `<Notice current="gallery" tryAgain>Couldn't load the hive.</Notice>`; else
       `<Gallery data={result.data} now={Date.now()} actions={{ openFile, downloadFile,
-  deleteFile, loadMore }} />`.
+deleteFile, loadMore }} />`.
 - [ ] **Step 2:** `pnpm build`. Expected: `/gallery` and `/dev/gallery` listed as dynamic.
 - [ ] **Step 3:** Update the four docs.
 - [ ] **Step 4: Live check, by hand, signed in on the hosted project** (`pnpm dev:web`, needs
