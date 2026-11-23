@@ -51,5 +51,7 @@ export type VaultActions = {
     choice: Choice,
   ): Promise<Result>;
   release(noteId: string): Promise<Result>;
+  /** Removes the note for good. Only its owner, as a person, is allowed to. */
+  deleteNote(noteId: string): Promise<Result>;
   preview(workspaceId: string, path: string): Promise<SharePreview | null>;
 };

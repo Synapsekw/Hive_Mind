@@ -84,3 +84,9 @@ export function folderSentence(a: {
 export function releaseSentence(mark: Mark): string {
   return `This note was written by a self-hosted agent. Releasing it makes it follow its sharing setting: ${mark.label}.`;
 }
+
+// Deleting a note: the question before it, and what is said after.
+export const DELETE_QUESTION =
+  "Delete this note? It is gone for good, with its history and its links. Files attached to it stay in the gallery.";
+export const DELETED = "Note deleted.";
+export const DELETE_FAILED = "That didn't work. Try again.";
