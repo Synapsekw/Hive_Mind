@@ -102,6 +102,13 @@ show_log() {
   ' "$1" || true
 }
 
+# What was typed or pasted, without what a terminal adds around a paste: the
+# bracketed-paste markers (ESC [200~ ... ESC [201~), control characters, spaces
+# and line ends.
+clean() {
+  printf '%s' "$1" | tr -d '[:cntrl:][:space:]' | sed -e 's/\[20[01]~//g'
+}
+
 echo "Agent sign-in setup for project $REF."
 echo "Run this in your own terminal only, never through an AI assistant: it makes"
 echo "a private key that must not enter a chat. The key is not printed."
@@ -123,8 +130,12 @@ while :; do
     read -r PUBLISHABLE
     continue
   fi
+  PUBLISHABLE="$(clean "$PUBLISHABLE")"
+  if [ -z "$PUBLISHABLE" ]; then continue; fi
   if ! printf '%s' "$PUBLISHABLE" | grep -Eq '^[A-Za-z0-9._-]{1,1000}$'; then
-    echo "     That is not a key: it holds a space or another character a key cannot have."
+    echo "     That is not a key: it holds a character a key cannot have."
+    echo "     If pasting keeps failing, stop (Ctrl-C) and start the script like this:"
+    echo "       SUPABASE_ANON_KEY=sb_publishable_... scripts/setup-agent-signing.sh $REF"
     PUBLISHABLE=""
     continue
   fi
@@ -301,7 +312,7 @@ clear_clipboard
 while :; do
   printf '     Key id shown in the dashboard (Enter to keep %s): ' "$KID"
   read -r SHOWN
-  SHOWN="$(printf '%s' "$SHOWN" | tr -d '[:space:]')"
+  SHOWN="$(clean "$SHOWN")"
   if [ -z "$SHOWN" ]; then break; fi
   if printf '%s' "$SHOWN" | grep -Eq '^[A-Za-z0-9._-]{1,128}$'; then
     if [ "$SHOWN" != "$KID" ]; then
