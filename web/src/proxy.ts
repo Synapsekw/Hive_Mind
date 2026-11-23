@@ -1,12 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { safeNext } from "./lib/safe-next";
 
 const OPEN = [/^\/login(\/|$)/, /^\/auth(\/|$)/];
 // The fixture map under /dev is open in development only; in production it needs a sign-in.
 if (process.env.NODE_ENV !== "production") OPEN.push(/^\/dev(\/|$)/);
 
+// What a connecting app calls with its own pass, or with none: these never carry a person's
+// session, so they pass straight through and the session cookies are not read or refreshed.
+const MACHINE = [/^\/mcp(\/|$)/, /^\/\.well-known(\/|$)/];
+// The approval window for a connecting app: a visitor is sent to sign in and comes back to the
+// same address, query included.
+const RETURNS = /^\/oauth\/consent(\/|$)/;
+
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
+  if (MACHINE.some((re) => re.test(pathname))) {
+    return NextResponse.next({ request });
+  }
   const isOpen = OPEN.some((re) => re.test(pathname));
   const isLogin = /^\/login(\/|$)/.test(pathname);
 
@@ -61,8 +72,17 @@ export async function proxy(request: NextRequest) {
     return res;
   };
 
-  if (!user && !isOpen) return redirect("/login");
-  if (user && isLogin) return redirect("/");
+  if (!user && !isOpen) {
+    return redirect(
+      RETURNS.test(pathname)
+        ? `/login?next=${encodeURIComponent(pathname + search)}`
+        : "/login",
+    );
+  }
+  // Signed in already: on to where the sign-in page was asked to return, a path on this site.
+  if (user && isLogin) {
+    return redirect(safeNext(request.nextUrl.searchParams.get("next")));
+  }
   return response;
 }
 

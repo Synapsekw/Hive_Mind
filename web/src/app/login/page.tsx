@@ -1,12 +1,16 @@
 import { LoginForm } from "./login-form";
+import { afterSignIn } from "./next";
 import styles from "./login.module.css";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string | string[] }>;
+  searchParams: Promise<{
+    error?: string | string[];
+    next?: string | string[];
+  }>;
 }) {
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
   const linkExpired = error === "link";
   const configured = Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
@@ -20,7 +24,11 @@ export default async function LoginPage({
           <span className={styles.mark} aria-hidden="true" />
           <h1 className={styles.name}>Hive</h1>
         </div>
-        <LoginForm configured={configured} linkExpired={linkExpired} />
+        <LoginForm
+          configured={configured}
+          linkExpired={linkExpired}
+          next={afterSignIn(next)}
+        />
       </div>
     </main>
   );

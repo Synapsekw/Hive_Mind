@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { createBrowserSupabase } from "../../lib/supabase/browser";
 import styles from "./login.module.css";
+import { afterSignIn, confirmAddress } from "./next";
 
 const COPY = {
   notConfigured:
@@ -21,9 +22,12 @@ const COPY = {
 export function LoginForm({
   configured,
   linkExpired,
+  next = "/",
 }: {
   configured: boolean;
   linkExpired: boolean;
+  /** Where to go once signed in: a path on this site, checked again before it is followed. */
+  next?: string;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -52,7 +56,7 @@ export function LoginForm({
         setBusy(false);
         return;
       }
-      window.location.assign("/");
+      window.location.assign(afterSignIn(next));
     } catch {
       setMessage(COPY.unreachable);
       setBusy(false);
@@ -66,7 +70,9 @@ export function LoginForm({
     try {
       const { error } = await createBrowserSupabase().auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: `${window.location.origin}/auth/confirm` },
+        options: {
+          emailRedirectTo: confirmAddress(window.location.origin, next),
+        },
       });
       setMessage(error ? COPY.linkFailed : COPY.linkSent);
     } catch {
