@@ -1,0 +1,812 @@
+/* The settings screen in Keystone glass, in the inbox's grammar (inbox.module.css): the rail
+   (web/src/shell/) on the wash, then one frosted card holding the heading and two sections
+   that scroll inside it. A row is an agent or a member; a form opens in place above its list.
+   The token dialog is a solid sheet over a dimmed window. Colours are tokens only
+   (themes.generated.css). */
+
+.root {
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.root button,
+.root input,
+.root select {
+  font-family: inherit;
+}
+
+.root button:focus-visible,
+.root input:focus-visible,
+.root select:focus-visible,
+.title:focus-visible,
+.dialogTitle:focus-visible,
+.item:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- The card ---- */
+
+.panel {
+  position: relative;
+  flex: 999 1 620px;
+  min-width: 0;
+  margin: 8px 8px 8px 4px;
+  padding: 16px 20px 0;
+  border: 1px solid var(--edge-card);
+  border-radius: 20px;
+  background: var(--glow), var(--glass);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--lift);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-height: 36px;
+  padding: 0 4px;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 36px;
+  letter-spacing: -0.01em;
+}
+
+/* Whose settings these are: the hive's name, beside the heading. */
+.hive {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- The sections ---- */
+
+/* The scroll box runs to the card's edges, so the scrollbar sits on the edge and a focus
+   outline on the outermost controls is not cut off. */
+.scroller {
+  position: relative;
+  margin: 0 -20px;
+  padding: 18px 24px 24px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+/* A reading width: on a wide window the action stays near the row it acts on. */
+.section {
+  width: 100%;
+  max-width: 1040px;
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 24px;
+  padding-bottom: 12px;
+}
+
+.headText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.count {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--fg2);
+}
+
+.note {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---- An agent: who it is on the left, Revoke on the right, a hairline above ---- */
+
+.item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px 28px;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--line);
+}
+
+.text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.what {
+  margin: 0 0 2px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.name {
+  min-width: 0;
+  color: var(--fg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* "Revoked", "Expired" and "you": said in words, set like a label. */
+.mark {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  font-size: 13px;
+  color: var(--fg2);
+}
+
+.meta + .meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.meta > span + span::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--quiet);
+}
+
+/* An agent that no longer works steps back: quieter words, and its status beside the name. */
+.item[data-off] .name {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.item[data-off] .meta {
+  color: var(--muted);
+}
+
+/* ---- The answer ---- */
+
+.side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ask {
+  margin: 0 6px 0 0;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.aside {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.primary,
+.secondary,
+.confirm {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary {
+  border: 0;
+  background: var(--grad);
+  color: var(--on-brand);
+  transition: filter 0.18s var(--ease);
+}
+
+.primary:hover {
+  filter: brightness(1.08);
+}
+
+.secondary,
+.confirm {
+  background: none;
+  color: var(--fg);
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.secondary {
+  border: 1px solid var(--line);
+}
+
+.secondary:hover {
+  border-color: var(--line-hi);
+  background: var(--fill);
+}
+
+/* Revoke, once it has asked, and Done: said in weight and a full-strength edge, not a colour. */
+.confirm {
+  border: 1px solid var(--fg);
+  font-weight: 600;
+}
+
+.confirm:hover {
+  background: var(--fill-on);
+}
+
+/* While its action runs a control keeps its place and its focus, and does nothing: no
+   gradient, a dashed hairline and quiet text, in either mode. */
+.primary[aria-disabled="true"],
+.secondary[aria-disabled="true"],
+.confirm[aria-disabled="true"] {
+  border: 1px dashed var(--line-hi);
+  background: none;
+  color: var(--quiet);
+  font-weight: 500;
+  filter: none;
+  cursor: default;
+}
+
+/* A refusal is said in words; the bar beside it only draws the eye. */
+.refused {
+  margin: 0;
+  padding-left: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--hue-6);
+}
+
+/* ---- A member: the name, "you" where it applies, the role ---- */
+
+.member {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) auto;
+  justify-content: start;
+  align-items: baseline;
+  gap: 4px 28px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.memberName {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+}
+
+.memberText {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.role {
+  font-size: 13px;
+  color: var(--fg2);
+}
+
+/* ---- A form, opened in place above its list ---- */
+
+.form {
+  margin: 0 0 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--fill);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: arrive 0.24s var(--ease);
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+  }
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  padding: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.input,
+.select,
+.token {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
+  font-size: 13px;
+  transition: border-color 0.24s var(--ease);
+}
+
+.input:hover,
+.select:hover,
+.token:hover {
+  border-color: var(--line-hi);
+}
+
+.input::placeholder {
+  color: var(--quiet);
+}
+
+/* The select keeps the field's shape; its arrow is drawn, not the system's. */
+.selectBox {
+  position: relative;
+  display: flex;
+}
+
+.select {
+  appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+}
+
+.select[data-empty] {
+  color: var(--muted);
+}
+
+.select option {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.selectBox::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+
+/* The two trust tiers: each a whole sentence about what happens to the agent's notes. */
+.tiers {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tierList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.tier {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  align-content: start;
+  gap: 2px 10px;
+  padding: 10px 14px 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.tier:hover {
+  border-color: var(--line-hi);
+}
+
+.tier:has(input:checked) {
+  border-color: var(--line-hi);
+  background: var(--fill-on);
+}
+
+.tier:has(input:focus-visible) {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.hiddenInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ring {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--line-hi);
+  border-radius: 50%;
+}
+
+.tier:has(input:checked) .ring {
+  border-color: var(--fg);
+  background: radial-gradient(circle, var(--fg) 0 3px, transparent 3.5px);
+}
+
+.tierName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.tierHelp {
+  grid-column: 2;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.formFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.formFoot .refused {
+  margin-left: 8px;
+}
+
+/* ---- No agents yet ---- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--line);
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.emptyText {
+  margin: 0;
+  max-width: 52ch;
+  color: var(--muted);
+}
+
+/* ---- The token dialog: a solid sheet over the dimmed window ----
+   Solid, so the token and the commands are read against one flat colour. */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  animation: arrive 0.24s var(--ease);
+}
+
+.dialog {
+  width: min(620px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 20px 24px;
+  border: 1px solid var(--line-hi);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dialogTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.warning {
+  margin: 0;
+  padding-left: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--hue-6);
+}
+
+.tokenRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.token {
+  flex: 1;
+  height: 38px;
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.tokenRow .primary {
+  height: 38px;
+  min-width: 88px;
+}
+
+.how {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.steps {
+  margin: 0;
+  padding: 0 0 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg2);
+}
+
+.steps li::marker {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.step {
+  margin: 0;
+}
+
+.step code {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+}
+
+.code {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code code {
+  font-family: inherit;
+}
+
+.dialogFoot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.dialogFoot .confirm {
+  min-width: 88px;
+}
+
+/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
+
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .panel {
+    background: var(--glow), var(--bg);
+  }
+}
+
+/* ---- The answer beside the words ----
+   From a card wide enough for both. */
+
+@media (min-width: 900px) {
+  .item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .side {
+    max-width: 420px;
+    align-items: flex-end;
+  }
+
+  .actions {
+    justify-content: flex-end;
+  }
+
+  .aside {
+    text-align: right;
+  }
+}
+
+/* ---- One window from 1100 x 560 ----
+   The page is exactly one window tall and the sections scroll inside the card. Narrower or
+   very short windows let the page scroll instead. */
+
+@media (min-width: 1100px) and (min-height: 560px) {
+  .page {
+    height: 100dvh;
+    min-height: 0;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .panel {
+    min-height: 0;
+  }
+
+  .scroller {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fill-on) transparent;
+  }
+
+  /* In a column that scrolls, a section keeps its own height. */
+  .section {
+    flex: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary,
+  .secondary,
+  .confirm,
+  .input,
+  .select,
+  .token,
+  .tier {
+    transition: none;
+  }
+
+  .form,
+  .scrim {
+    animation: none;
+  }
+}
+
+/* Forced colours: the chosen tier keeps its dot. */
+@media (forced-colors: active) {
+  .tier:has(input:checked) .ring {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: CanvasText;
+  }
+}

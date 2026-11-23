@@ -1,7 +1,7 @@
-// The left rail, shared by the map, the vault, the gallery and the inbox: the mark, the
-// destinations (Map, Vault, Gallery, Inbox with the number waiting), the agents when given, the
-// Appearance panel and sign out. It sits straight on the wash, so it is the "chrome" scope
-// (white text in light mode).
+// The left rail, shared by the map, the vault, the gallery, the inbox and the settings: the mark,
+// the destinations (Map, Vault, Gallery, Inbox with the number waiting, Settings), the agents when
+// given, the Appearance panel and sign out. It sits straight on the wash, so it is the "chrome"
+// scope (white text in light mode).
 import Link from "next/link";
 import { badge } from "../inbox/text";
 import { Appearance } from "./Appearance";
@@ -74,6 +74,18 @@ const DESTINATIONS = [
       </svg>
     ),
   },
+  {
+    key: "settings",
+    href: "/settings",
+    name: "Settings",
+    icon: (
+      <svg aria-hidden="true" {...ICON}>
+        <path d="M2 4.5h5.5M10.5 4.5H14M2 11.5h2.5M7.5 11.5H14" />
+        <circle cx="9" cy="4.5" r="1.5" />
+        <circle cx="6" cy="11.5" r="1.5" />
+      </svg>
+    ),
+  },
 ] as const;
 
 export function Shell({
@@ -81,7 +93,7 @@ export function Shell({
   agents = [],
   inbox,
 }: {
-  current: "map" | "vault" | "gallery" | "inbox";
+  current: "map" | "vault" | "gallery" | "inbox" | "settings";
   agents?: AgentRow[];
   /** How many links and held notes wait for the person; shown on the Inbox row. */
   inbox?: number;
