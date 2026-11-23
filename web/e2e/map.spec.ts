@@ -107,6 +107,108 @@ test("an idle map breathes at a calm rate, not every frame", async ({
   await expect(canvas).not.toHaveAttribute("data-animating");
 });
 
+test("hovering a dot peeks at it and makes it hot", async ({ page }) => {
+  await open(page);
+  await viewButton(page, "Rings").click();
+  const hub = page.locator('[data-map-dot][data-kind="hub"]').first();
+  const p = await dotPoint(page, hub);
+  await page.mouse.move(p.x, p.y);
+  await expect(page.locator("[data-map-peek]")).toBeVisible();
+  await expect(page.locator("[data-map-peek]")).toContainText("Topic");
+  await expect(page.locator("[data-map-canvas]")).not.toHaveAttribute(
+    "data-hot",
+    "",
+  );
+  await page.mouse.move(5, 5);
+  await expect(page.locator("[data-map-peek]")).toBeHidden();
+});
+
+test("a locked dot's peek shows only that it is private", async ({ page }) => {
+  await open(page);
+  await page
+    .locator('[data-map-dot][data-kind="note"][data-locked]')
+    .first()
+    .focus();
+  const peek = page.locator("[data-map-peek]");
+  await expect(peek).toContainText("Private note");
+  await expect(peek).toContainText("Not shared with you");
+  const text = (await peek.innerText()).toLowerCase();
+  for (const n of fixturePayload(Date.now()).nodes)
+    if (n.title !== null) expect(text).not.toContain(n.title.toLowerCase());
+});
+
+test("the hive names who is at the hive", async ({ page }) => {
+  await open(page);
+  const presence = page.getByRole("complementary", { name: "At the hive" });
+  await expect(presence).toContainText("Laptop");
+  await expect(presence).toContainText("live");
+  await expect(presence).toContainText("idle at the entrance");
+  // Only in the Hive.
+  await viewButton(page, "Rings").click();
+  await expect(presence).toHaveCount(0);
+});
+
+test("with reduced motion the map does not keep animating", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page);
+  await page.waitForTimeout(1200);
+  const canvas = page.locator("[data-map-canvas]");
+  for (const name of ["Hive", "Rings", "Orbit"]) {
+    await viewButton(page, name).click();
+    await page.waitForTimeout(400);
+    await expect(canvas).not.toHaveAttribute("data-animating");
+    await expect(canvas).not.toHaveAttribute("data-ambient");
+    // Nothing is drawn on its own: no frame in a whole second.
+    const frames = await page.evaluate(async () => {
+      const proto = CanvasRenderingContext2D.prototype;
+      const clear = proto.clearRect;
+      let n = 0;
+      proto.clearRect = function (...a: Parameters<typeof clear>) {
+        if (this.canvas.hasAttribute("data-map-canvas")) n++;
+        return clear.apply(this, a);
+      };
+      await new Promise((r) => setTimeout(r, 1000));
+      proto.clearRect = clear;
+      return n;
+    });
+    expect(frames).toBe(0);
+  }
+});
+
+test("switching views glides the dots, then the map comes to rest", async ({
+  page,
+}) => {
+  await open(page);
+  const canvas = page.locator("[data-map-canvas]");
+  await expect(canvas).not.toHaveAttribute("data-animating");
+  await viewButton(page, "Topics").click();
+  await expect(canvas).toHaveAttribute("data-animating", "");
+  await expect(canvas).not.toHaveAttribute("data-animating", {
+    timeout: 4000,
+  });
+});
+
+test("orbit is drawn on the canvas and turns when dragged", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page);
+  await viewButton(page, "Orbit").click();
+  const canvas = page.locator("[data-map-canvas]");
+  await expect(canvas).toHaveAttribute("data-view", "orbit");
+  // The dots stay reachable by keyboard in Orbit.
+  await expect(page.locator("[data-map-dot]").first()).toBeAttached();
+  const before = await canvas.getAttribute("data-ry");
+  const box = (await page.locator("[data-map-stage]").boundingBox())!;
+  await page.mouse.move(box.x + 40, box.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160, box.y + 40, { steps: 6 });
+  await page.mouse.up();
+  await expect(canvas).not.toHaveAttribute("data-ry", before ?? "");
+});
+
 test("pointing at a dot on the canvas selects it", async ({ page }) => {
   await open(page);
   await viewButton(page, "Rings").click();
@@ -276,7 +378,12 @@ async function hubAndHue(page: Page) {
   await viewButton(page, "Rings").click();
   const hub = page.locator('[data-map-dot][data-kind="hub"][data-topic="0"]');
   const p = await dotPoint(page, hub);
-  await page.waitForTimeout(300);
+  // The dots glide to the new view first.
+  await expect(page.locator("[data-map-canvas]")).not.toHaveAttribute(
+    "data-animating",
+    { timeout: 4000 },
+  );
+  await page.waitForTimeout(100);
   return page.evaluate(({ x, y }) => {
     const canvas =
       document.querySelector<HTMLCanvasElement>("[data-map-canvas]")!;

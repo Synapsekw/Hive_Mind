@@ -185,16 +185,6 @@
   cursor: grab;
 }
 
-/* Orbit still draws DOM dots, in a 1000 x 760 box centred in the stage. */
-.stage {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: min(100cqw, calc(100cqh * 1000 / 760));
-  aspect-ratio: 1000 / 760;
-  container-type: inline-size;
-}
-
 /* The hidden list of dot buttons: there for the keyboard and screen readers, drawn by the
    canvas. Every item sits on one 1 px spot, so the list never adds height or scroll. */
 .srList {
@@ -277,46 +267,7 @@
   color: var(--muted);
 }
 
-/* ---- Orbit dots and the detail rail's marks (the flat views draw on the canvas) ---- */
-
-.dot {
-  position: absolute;
-  z-index: 2;
-  display: flex;
-  padding: 3px;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  transform: translate(-50%, -50%);
-  transition:
-    left 0.9s var(--ease),
-    top 0.9s var(--ease),
-    opacity 0.25s ease;
-}
-
-.dot[data-lit] {
-  z-index: 3;
-}
-
-/* Dimmed: everything outside the filter, search or selection. */
-.dot:not([data-lit]) {
-  opacity: 0.1;
-}
-
-/* A dimmed dot reached by keyboard shows itself and its focus ring at full strength. */
-.dot:focus-visible {
-  z-index: 6;
-  opacity: 1;
-}
-
-.dot[data-kind="hub"],
-.dot[data-kind="root"] {
-  z-index: 4;
-}
-
-.dot[aria-pressed="true"] {
-  z-index: 5;
-}
+/* ---- The detail rail's marks (the map itself draws on the canvas) ---- */
 
 /* The selected ring: a gap in the card's colour, then a fine ring in the text colour. */
 .shape {
@@ -373,103 +324,180 @@
     var(--ring);
 }
 
-.label {
-  position: absolute;
-  top: 50%;
-  left: calc(50% + var(--d) / 2 + 6px);
-  max-width: 240px;
-  padding: 1px 6px;
-  border-radius: 6px;
+/* ---- The peek card: glass next to the pointer, never in the way of it ---- */
+
+.peek {
+  position: fixed;
+  z-index: 50;
+  width: 250px;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  box-shadow: var(--lift);
+  color: var(--fg);
+  pointer-events: none;
+  animation: peek 0.16s var(--ease) both;
+}
+
+@keyframes peek {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.peekKind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.peekSwatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+}
+
+.peekSwatch[data-kind="file"] {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.85);
+}
+
+.peekTitle {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.peekFacts {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.peekFacts div {
+  display: flex;
+  gap: 8px;
+}
+
+.peekFacts dt {
+  flex: none;
+  width: 58px;
+  color: var(--quiet);
+}
+
+.peekFacts dd {
+  min-width: 0;
+  margin: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  background: color-mix(in srgb, var(--bg) 84%, transparent);
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: 400;
-  pointer-events: none;
-  transform: translateY(-50%);
+  color: var(--fg2);
 }
 
-.label[data-flip] {
-  left: auto;
-  right: calc(50% + var(--d) / 2 + 6px);
-}
+/* ---- "At the hive": who is at the hive, top right of the stage ---- */
 
-.label[data-strong] {
-  font-weight: 500;
-}
-
-/* ---- Orbit: the same dots on a turning sphere ---- */
-
-.orbit {
+.presence {
   position: absolute;
-  inset: 0;
-  perspective: 150cqw;
-}
-
-.orbitTilt {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform-style: preserve-3d;
-  transform: rotateX(-16deg);
-}
-
-.spin {
-  transform-style: preserve-3d;
-  animation: spin 80s linear infinite;
-}
-
-.equator {
-  position: absolute;
-  left: -34cqw;
-  top: -34cqw;
-  width: 68cqw;
-  height: 68cqw;
-  border-radius: 50%;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  min-width: 168px;
+  max-width: 240px;
+  padding: 9px 12px 10px;
   border: 1px solid var(--line);
-  transform: rotateX(90deg);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  font-size: 12px;
 }
 
-.at {
-  position: absolute;
-  left: 0;
-  top: 0;
-  transform-style: preserve-3d;
+.presenceHead {
+  margin: 0 0 6px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
-.billboard {
-  left: 0;
-  top: 0;
-  transform: rotateX(16deg) translate(-50%, -50%);
-  transition: opacity 0.25s ease;
-  animation: unspin 80s linear infinite;
+.presenceList {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
 }
 
-@keyframes spin {
-  from {
-    transform: rotateY(0deg);
-  }
-  to {
-    transform: rotateY(360deg);
-  }
+.presenceList li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 -6px;
+  padding: 3px 6px;
+  border-radius: 7px;
+  transition: background var(--dur-fast) var(--ease);
 }
 
-@keyframes unspin {
-  from {
-    transform: rotateY(0deg) rotateX(16deg) translate(-50%, -50%);
-  }
-  to {
-    transform: rotateY(-360deg) rotateX(16deg) translate(-50%, -50%);
-  }
+.presenceList li:hover {
+  background: var(--fill);
 }
 
-.orbit:hover .spin,
-.orbit:hover .billboard,
-.orbit:focus-within .spin,
-.orbit:focus-within .billboard {
-  animation-play-state: paused;
+.presenceMark {
+  flex: none;
+}
+
+.presenceMark polygon {
+  fill: var(--bg);
+  stroke: var(--brand);
+  stroke-width: 1.4;
+}
+
+.presenceMark circle {
+  fill: var(--fg2);
+}
+
+.presenceMark[data-state="live"] circle {
+  fill: var(--brand);
+}
+
+.presenceName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+.presenceLive {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.presenceAgo {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--quiet);
+}
+
+.presenceIdle {
+  margin: 0;
+  color: var(--quiet);
 }
 
 /* ---- Chips ---- */
@@ -791,7 +819,9 @@
     background: var(--panel-solid);
   }
 
-  .zoom {
+  .zoom,
+  .presence,
+  .peek {
     background: var(--surface);
   }
 }
@@ -829,8 +859,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dot,
-  .billboard,
   .tab,
   .toggle,
   .search,
@@ -841,8 +869,7 @@
   .primaryLink {
     transition: none;
   }
-  .spin,
-  .billboard {
+  .peek {
     animation: none;
   }
 }

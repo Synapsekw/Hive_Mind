@@ -5,6 +5,7 @@
 // `globalAlpha`. Line widths and radii are divided by the scale, so they keep their screen size.
 import type { Cam } from "./camera";
 import { size } from "./nodeShape";
+import { orbitAlpha, type OrbitProjection } from "./orbit3d";
 import type { Scene } from "./scene";
 import type { MapModel, ModelNode, View } from "./types";
 
@@ -20,18 +21,28 @@ export type FrameState = {
   focusRing: number | null; // keyboard-focused dot
   labels: Set<number>;
   marks: Map<number, { state: "live" | "today" | "idle" }>; // agent node -> mark state (Hive)
-  pulses: {
-    from: number;
-    to: number;
-    t0: number;
-    colour: string;
-    dur: number;
-  }[];
+  pulses: Pulse[];
   flares: Map<number, number>; // comb cell node -> flare start time
   time: number; // performance.now() for animations
   reducedMotion: boolean;
   /** The camera is moving (wheel, drag, glide): the resting layer is moved, not redrawn. */
   moving?: boolean;
+  /** New dots growing in after a refresh: node -> scale (0 to 1). */
+  grow?: Map<number, number> | null;
+  /** The resting layer's opacity (it fades in while the dots glide to a new view). */
+  layerAlpha?: number;
+  /** Orbit only: this frame's projection of the 3D positions (orbit3d.ts). */
+  orbit?: OrbitProjection | null;
+};
+
+export type Pulse = {
+  from: number;
+  to: number;
+  t0: number;
+  colour: string;
+  dur: number;
+  /** A faint ambient pulse (brand colour, thinner): calm, drawn at the ambient rate. */
+  ambient?: boolean;
 };
 
 export type Palette = {
@@ -271,6 +282,10 @@ type Frame = {
   near: Set<number>;
   motion: boolean;
   ambient: boolean;
+  /** Labels past this x (in `pos` units) sit on the dot's left. */
+  flipX: number;
+  /** Orbit: perspective per node (dots grow near, shrink far), else null. */
+  depth: Float32Array | null;
 };
 
 const CENTRE: [number, number] = [500, 380];
@@ -345,7 +360,10 @@ export function drawFrame(
   ctx.globalAlpha = 1;
   ctx.shadowBlur = 0;
   ctx.clearRect(0, 0, cssW, cssH);
-  if (f.view === "orbit") return false;
+  if (f.view === "orbit") {
+    if (!f.orbit) return false;
+    return drawOrbit(ctx, dpr, scene, model, f, f.orbit, pal, cssW, cssH);
+  }
 
   const s = (f.world.w / 1000) * f.cam.k;
   const c = cacheFor(scene);
@@ -371,6 +389,8 @@ export function drawFrame(
     near: new Set(f.hot !== null ? (model.nodes[f.hot]?.nb ?? []) : []),
     motion: false,
     ambient: false,
+    flipX: 760,
+    depth: null,
   };
 
   drawLayer(F);
@@ -385,6 +405,7 @@ export function drawFrame(
   drawDots(F);
   for (const i of scene.agents) if (!special(F, i)) drawAgent(F, i, 1, 0);
   if (!special(F, scene.root)) drawRoot(F, 1, 0);
+  drawGrowing(F);
   drawHot(F);
   drawRings(F);
   drawLabels(F);
@@ -392,7 +413,136 @@ export function drawFrame(
   return F.motion ? "motion" : F.ambient ? "ambient" : false;
 }
 
-const special = (F: Frame, i: number) => i === F.f.hot || F.near.has(i);
+/** Dots new in a refreshed payload, growing from nothing to their size. */
+function drawGrowing(F: Frame) {
+  const g = F.f.grow;
+  if (!g) return;
+  for (const [i, k] of g)
+    if (i !== F.f.hot && !F.near.has(i)) drawOne(F, i, k, 0);
+}
+
+const IDENTITY: Cam = { k: 1, tx: 0, ty: 0 };
+/** Depth slices in Orbit: dots are batched within a slice and slices drawn far to near. */
+const SLICES = 8;
+
+/**
+ * Orbit: the projected dots in stage pixels (scale 1), far to near, faded with depth. The same
+ * drawing functions as the flat views run on a frame whose positions are the projection.
+ */
+function drawOrbit(
+  ctx: CanvasRenderingContext2D,
+  dpr: number,
+  scene: Scene,
+  model: MapModel,
+  f0: FrameState,
+  o: OrbitProjection,
+  pal: Palette,
+  cssW: number,
+  cssH: number,
+): Animating {
+  const f: FrameState = {
+    ...f0,
+    pos: o.pos,
+    cam: IDENTITY,
+    world: { w: 1000, h: 760 },
+  };
+  const F: Frame = {
+    ctx,
+    dpr,
+    scene,
+    model,
+    f,
+    pal,
+    c: cacheFor(scene),
+    s: 1,
+    px: 1,
+    cssW,
+    cssH,
+    hive: false,
+    small: false,
+    still: f.reducedMotion,
+    T: Math.max(1, model.topics.length),
+    filtered: false,
+    busy: f.hot !== null || f.sel !== null,
+    near: new Set(f.hot !== null ? (model.nodes[f.hot]?.nb ?? []) : []),
+    motion: false,
+    ambient: false,
+    flipX: cssW * 0.76,
+    depth: o.p,
+  };
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  // The agents' ring.
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = pal.line;
+  ctx.beginPath();
+  o.equator.forEach(([x, y], j) =>
+    j === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y),
+  );
+  ctx.stroke();
+  drawFocusLinks(F);
+  drawPulses(F);
+
+  // Far to near, in slices; within a slice one batch per topic, kind and alpha.
+  const n = o.order.length;
+  const per = Math.max(1, Math.ceil(n / SLICES));
+  for (let a = 0; a < n; a += per) {
+    const groups = new Map<
+      string,
+      { kind: Kind; topic: number; a: number; n: number[] }
+    >();
+    const loose: number[] = [];
+    for (let j = a; j < Math.min(n, a + per); j++) {
+      const i = o.order[j]!;
+      const node = model.nodes[i];
+      if (!node || special(F, i)) continue;
+      if (node.kind === "agent" || node.kind === "root") {
+        loose.push(i);
+        continue;
+      }
+      const kind = kindOf(node);
+      const base = alphaOf(F, i);
+      const al =
+        Math.round(
+          (base === 1 ? orbitAlpha(o.p[i]!) : base) *
+            (theirs(node) ? 0.72 : 1) *
+            20,
+        ) / 20;
+      const key = `${node.topic}|${kind}|${al}`;
+      const g = groups.get(key);
+      if (g) g.n.push(i);
+      else groups.set(key, { kind, topic: node.topic, a: al, n: [i] });
+    }
+    for (const g of [...groups.values()].sort(
+      (x, y) => +(x.kind === "hub") - +(y.kind === "hub"),
+    ))
+      fillGroup(
+        F,
+        g.kind,
+        hueOf(F, g.topic),
+        g.a,
+        groupPaths(F, g.kind, g.n, 1),
+        0,
+        g.topic,
+      );
+    for (const i of loose)
+      if (model.nodes[i]!.kind === "agent") drawAgent(F, i, 1, 0);
+      else drawRoot(F, 1, 0);
+  }
+  drawGrowing(F);
+  drawHot(F);
+  drawRings(F);
+  drawLabels(F);
+  ctx.globalAlpha = 1;
+  return F.motion ? "motion" : F.ambient ? "ambient" : false;
+}
+
+const special = (F: Frame, i: number) =>
+  i === F.f.hot || F.near.has(i) || !!F.f.grow?.has(i);
+/** Orbit: a node's perspective scale (near dots larger); 1 in the flat views. */
+const depthOf = (F: Frame, i: number) => (F.depth ? (F.depth[i] ?? 1) : 1);
 
 // ---- The resting layer: comb, guides, resting edges ----
 
@@ -641,7 +791,7 @@ function drawLayer(F: Frame) {
     dpr * cam.tx - (L.ox + dpr * L.tx) * r,
     dpr * cam.ty - (L.oy + dpr * L.ty) * r,
   );
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = f.layerAlpha ?? 1;
   ctx.drawImage(L.canvas, 0, 0);
 }
 
@@ -655,7 +805,8 @@ function drawFlares(F: Frame) {
     const p = (f.time - t0) / FLARE_MS;
     const ci = c.cellOf.get(node);
     if (p >= 1 || ci === undefined) continue;
-    F.motion = true;
+    // A slow fade: the calm ambient rate is enough.
+    F.ambient = true;
     if (p < 0) continue;
     const cell = scene.combCells[ci]!;
     const path = new Path2D();
@@ -689,21 +840,22 @@ function drawFocusLinks(F: Frame) {
 
 /** Pulses: a 7%-long segment of light running along a link. */
 function drawPulses(F: Frame) {
-  const { ctx, f, pal, px } = F;
+  const { ctx, f, px } = F;
   for (const p of f.pulses) {
     const k = (f.time - p.t0) / p.dur;
     if (k >= 1) continue;
-    F.motion = true;
+    if (p.ambient) F.ambient = true;
+    else F.motion = true;
     if (k < 0) continue;
     const a = P(F, p.from);
     const b = P(F, p.to);
     const k0 = Math.max(0, k - 0.035);
     const k1 = Math.min(1, k + 0.035);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = p.ambient ? 0.55 : 1;
     ctx.strokeStyle = p.colour;
     ctx.shadowColor = p.colour;
-    ctx.shadowBlur = 6;
-    ctx.lineWidth = (p.colour === pal.brand ? 1.4 : 2.2) * px;
+    ctx.shadowBlur = p.ambient ? 4 : 6;
+    ctx.lineWidth = (p.ambient ? 1.4 : 2.2) * px;
     ctx.beginPath();
     ctx.moveTo(a[0] + (b[0] - a[0]) * k0, a[1] + (b[1] - a[1]) * k0);
     ctx.lineTo(a[0] + (b[0] - a[0]) * k1, a[1] + (b[1] - a[1]) * k1);
@@ -758,7 +910,8 @@ function groupPaths(
     }
     return p;
   };
-  const rad = (i: number) => (diam(F, model.nodes[i]!) / 2) * scale * px;
+  const rad = (i: number) =>
+    (diam(F, model.nodes[i]!) / 2) * scale * depthOf(F, i) * px;
   if (kind === "hub")
     return [
       at((i) => rad(i) + 1.5 * px),
@@ -833,6 +986,7 @@ type DotCache = {
   hot: number | null;
   sel: number | null;
   focus: number | null;
+  grow: Map<number, number> | null;
   s: number;
   batches: Batch[];
 };
@@ -854,6 +1008,7 @@ function drawDots(F: Frame) {
     dc.hot !== f.hot ||
     dc.sel !== f.sel ||
     dc.focus !== f.focusRing ||
+    dc.grow !== (f.grow ?? null) ||
     dc.s !== s
   ) {
     const batches: Batch[] = [];
@@ -887,6 +1042,7 @@ function drawDots(F: Frame) {
       hot: f.hot,
       sel: f.sel,
       focus: f.focusRing,
+      grow: f.grow ?? null,
       s,
       batches,
     };
@@ -897,9 +1053,10 @@ function drawDots(F: Frame) {
 }
 
 /** Agents: a ring with a centre point, or in Hive a hexagon mark by state. */
-function drawAgent(F: Frame, i: number, scale: number, glow: number) {
+function drawAgent(F: Frame, i: number, s0: number, glow: number) {
   const { ctx, model, f, pal, px, still } = F;
   const n = model.nodes[i]!;
+  const scale = s0 * depthOf(F, i);
   const [x, y] = P(F, i);
   const a = alphaOf(F, i);
   if (F.hive) {
@@ -918,9 +1075,11 @@ function drawAgent(F: Frame, i: number, scale: number, glow: number) {
     ctx.stroke(p);
     ctx.shadowBlur = 0;
     if (state === "live") {
-      if (!still) F.ambient = true;
+      // The glow swells on a 2.6 s cycle, and holds still while a dot is hot.
+      const calm = still || f.hot !== null;
+      if (!calm) F.ambient = true;
       ctx.shadowColor = pal.brand;
-      ctx.shadowBlur = still ? 7 : 7 + 5 * Math.sin((TAU * f.time) / 2600);
+      ctx.shadowBlur = calm ? 7 : 7 + 5 * Math.sin((TAU * f.time) / 2600);
       ctx.fillStyle = pal.brand;
       ctx.beginPath();
       ctx.arc(x, y, 2.6 * scale * px, 0, TAU);
@@ -957,10 +1116,11 @@ function drawAgent(F: Frame, i: number, scale: number, glow: number) {
 }
 
 /** The index: a hexagon turning once every 30 s. */
-function drawRoot(F: Frame, scale: number, glow: number) {
+function drawRoot(F: Frame, s0: number, glow: number) {
   const { ctx, model, scene, f, pal, px, still } = F;
   const n = model.nodes[scene.root];
   if (!n) return;
+  const scale = s0 * depthOf(F, scene.root);
   const [x, y] = P(F, scene.root);
   if (!still) F.ambient = true;
   const turn = still ? 0 : (TAU * (f.time % 30_000)) / 30_000;
@@ -1007,7 +1167,7 @@ function drawHot(F: Frame) {
   ctx.globalAlpha = 1;
   ctx.fillStyle = pal.bg;
   ctx.beginPath();
-  ctx.arc(x, y, ((diam(F, n) / 2) * 1.7 + 2) * px, 0, TAU);
+  ctx.arc(x, y, ((diam(F, n) / 2) * 1.7 * depthOf(F, f.hot) + 2) * px, 0, TAU);
   ctx.fill();
   drawOne(F, f.hot, 1.7, 14);
 }
@@ -1019,7 +1179,7 @@ function drawRings(F: Frame) {
     const n = model.nodes[i];
     if (!n) return;
     const [x, y] = P(F, i);
-    const r = (diam(F, n) / 2) * (i === f.hot ? 1.7 : 1);
+    const r = (diam(F, n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = colour;
     ctx.lineWidth = w * px;
@@ -1070,9 +1230,9 @@ function drawLabels(F: Frame) {
     const font = `${weight} 12px ${fam}`;
     ctx.font = font;
     const m = fit(ctx, font, n.title, LABEL_MAX - 12);
-    const r = (diam(F, n) / 2) * (i === f.hot ? 1.7 : 1);
+    const r = (diam(F, n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
     const w = m.w + 12;
-    const lx = bx > 760 ? x - r - 6 - w : x + r + 6;
+    const lx = bx > F.flipX ? x - r - 6 - w : x + r + 6;
     const a = alphaOf(F, i);
     ctx.globalAlpha = 0.84 * a;
     ctx.fillStyle = pal.bg;

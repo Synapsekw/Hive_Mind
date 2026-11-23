@@ -27,6 +27,22 @@ export type CameraApi = {
   frameOn(points: [number, number][]): void;
   panBy(dx: number, dy: number): void;
   k(): number;
+  /** Where node `i` is drawn now, in client px (the peek's anchor for a focused dot). */
+  screenOf(i: number): { x: number; y: number } | null;
+};
+
+/** The camera itself; MapCanvas adds `screenOf`, which needs the drawn positions. */
+type CamOnly = Omit<CameraApi, "screenOf">;
+
+/**
+ * While set (the Orbit view), the stage's wheel and drag go here instead of to the camera: the
+ * wheel zooms the sphere and a drag turns it.
+ */
+export type Gesture = {
+  wheel(deltaY: number): void;
+  /** Horizontal movement since the last call, css px. */
+  drag(dx: number): void;
+  end(): void;
 };
 
 export type Size = {
@@ -56,6 +72,7 @@ export function reducedMotion(): boolean {
 export function useCamera(
   stage: RefObject<HTMLElement | null>,
   onChange: () => void,
+  gesture?: RefObject<Gesture | null>,
 ) {
   const cam = useRef<Cam>({ k: 1, tx: 0, ty: 0 });
   const size = useRef<Size>({ sw: 0, sh: 0, w: 0, h: 0 });
@@ -120,7 +137,7 @@ export function useCamera(
     [jump, set, settle, stop],
   );
 
-  const api = useRef<CameraApi>(null as unknown as CameraApi);
+  const api = useRef<CamOnly>(null as unknown as CamOnly);
   api.current = {
     zoomBy(f) {
       const { sw, sh } = size.current;
@@ -175,6 +192,7 @@ export function useCamera(
     const wheel = (e: WheelEvent) => {
       if (onOverlay(e)) return;
       e.preventDefault();
+      if (gesture?.current) return gesture.current.wheel(e.deltaY);
       const [x, y] = local(e);
       jump(zoomAt(cam.current, wheelFactor(e.deltaY, e.ctrlKey), x, y));
     };
@@ -184,6 +202,7 @@ export function useCamera(
       tx: number;
       ty: number;
       id: number;
+      lastX: number;
     } | null = null;
     // Touch pointers in stage pixels. With two, the gesture is a pinch (zoom about the midpoint,
     // pan with it); once a gesture has pinched, a remaining finger never pans on its own.
@@ -211,6 +230,7 @@ export function useCamera(
         tx: cam.current.tx,
         ty: cam.current.ty,
         id: e.pointerId,
+        lastX: e.clientX,
       };
     };
     const move = (e: PointerEvent) => {
@@ -247,6 +267,11 @@ export function useCamera(
           // The pointer may already be gone.
         }
       }
+      if (gesture?.current) {
+        gesture.current.drag(e.clientX - start.lastX);
+        start.lastX = e.clientX;
+        return;
+      }
       set({ k: cam.current.k, tx: start.tx + dx, ty: start.ty + dy });
     };
     const up = (e: PointerEvent) => {
@@ -261,12 +286,13 @@ export function useCamera(
       start = null;
       if (dragging.current) {
         dragging.current = false;
+        gesture?.current?.end();
         change.current();
         settle(SETTLE_MS);
       }
     };
     const dbl = (e: MouseEvent) => {
-      if (onOverlay(e)) return;
+      if (onOverlay(e) || gesture?.current) return;
       const [x, y] = local(e);
       const to = zoomAt(cam.current, 2, x, y);
       to.k = clampK(to.k);
@@ -286,7 +312,7 @@ export function useCamera(
       el.removeEventListener("pointercancel", up);
       el.removeEventListener("dblclick", dbl);
     };
-  }, [stage, jump, glideTo, set, settle, stop]);
+  }, [stage, jump, glideTo, set, settle, stop, gesture]);
 
   useEffect(
     () => () => {
