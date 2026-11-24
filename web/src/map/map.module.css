@@ -76,6 +76,20 @@
   border-radius: 10px;
 }
 
+.arrange {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.arrangeLabel {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--quiet);
+}
+
 .tab {
   position: relative;
   z-index: 1;

@@ -9,7 +9,7 @@ import s from "./map.module.css";
 const KINDS: [NodeKind, string][] = [
   ["note", "Notes"],
   ["file", "Files"],
-  ["hub", "Topics"],
+  ["hub", "Groups"],
   ["agent", "Agents"],
 ];
 
@@ -32,6 +32,7 @@ function aim(onPreview: (p: Preview | null) => void, p: Preview) {
 
 export function Dock({
   model,
+  heading,
   topic,
   onTopic,
   kind,
@@ -41,6 +42,7 @@ export function Dock({
   onPreview,
 }: {
   model: MapModel;
+  heading: string;
   topic: number | null;
   onTopic: (t: number | null) => void;
   kind: NodeKind | null;
@@ -76,9 +78,9 @@ export function Dock({
   if (model.nodes.length <= 1) return null;
   return (
     <div className={s.dock} data-map-overlay="">
-      <div role="group" aria-label="Topics" className={s.dockGroup}>
+      <div role="group" aria-label={heading} className={s.dockGroup}>
         <span aria-hidden="true" className={s.dockLabel}>
-          Topics
+          {heading}
         </span>
         <div ref={row} className={s.dockTopics} data-over={over || undefined}>
           {model.topics.map((t, i) => (

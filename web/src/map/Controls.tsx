@@ -2,6 +2,7 @@
 // the legend dock (Dock.tsx) sits on the stage.
 import { useRef } from "react";
 import type { View } from "./types";
+import { ARRANGES, type Arrange } from "./arrange";
 import { useSlidingPill } from "../shell/useSlidingPill";
 import pill from "../shell/SlidingPill.module.css";
 import s from "./map.module.css";
@@ -16,6 +17,8 @@ export function TopBar({
   stats,
   view,
   onView,
+  arrange,
+  onArrange,
   names,
   onNames,
   q,
@@ -24,6 +27,8 @@ export function TopBar({
   stats: string;
   view: View;
   onView: (v: View) => void;
+  arrange: Arrange;
+  onArrange: (a: Arrange) => void;
   names: boolean;
   onNames: () => void;
   q: string;
@@ -31,6 +36,12 @@ export function TopBar({
 }) {
   const group = useRef<HTMLDivElement>(null);
   const pillStyle = useSlidingPill(group, '[aria-pressed="true"]', view);
+  const arrangeGroup = useRef<HTMLDivElement>(null);
+  const arrangePill = useSlidingPill(
+    arrangeGroup,
+    '[aria-pressed="true"]',
+    `${view}:${arrange}`,
+  );
   return (
     <div className={s.bar}>
       <p className={s.stats} aria-live="polite">
@@ -50,6 +61,36 @@ export function TopBar({
           </button>
         ))}
       </div>
+      {view === "rings" && (
+        <div className={s.arrange}>
+          <span aria-hidden="true" className={s.arrangeLabel}>
+            Arrange by
+          </span>
+          <div
+            ref={arrangeGroup}
+            role="group"
+            aria-label="Arrange by"
+            className={s.switch}
+          >
+            <span
+              aria-hidden="true"
+              className={pill.pill}
+              style={arrangePill}
+            />
+            {ARRANGES.map(([a, name]) => (
+              <button
+                key={a}
+                type="button"
+                className={s.tab}
+                aria-pressed={arrange === a}
+                onClick={() => onArrange(a)}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className={s.tools}>
         <button
           type="button"

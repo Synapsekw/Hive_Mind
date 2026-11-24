@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activity, agentStatus, BOX, buildModel } from "./graph";
+import { grouping } from "./arrange";
 import { fixturePayload } from "./fixture";
 import type { MapNode, MapPayload } from "./types";
 
@@ -104,6 +105,34 @@ describe("buildModel", () => {
     expect(m.topics.map((t) => t.name)).toEqual(["T0", "T1", "T2"]);
     expect(m.topics.map((t) => t.hue)).toEqual([0, 1, 2]);
     expect(m.topics.some((t) => t.name === "Other")).toBe(false);
+  });
+
+  it("builds one hub per time group, in order, and files each item under its group", () => {
+    const p = payload([
+      note("a", "X", { updated_at: iso(NOW - 2 * DAY) }),
+      note("b", "X", { updated_at: iso(NOW - 40 * DAY) }),
+      note("c", "Y", { updated_at: iso(NOW - 41 * DAY) }),
+      note("d", "Y", { updated_at: iso(NOW - 80 * DAY) }),
+    ]);
+    const g = grouping(p, "time", NOW);
+    const m = buildModel(p, g);
+    expect(m.topics.map((t) => t.name)).toEqual(g.names);
+    expect(m.nodes.filter((n) => n.kind === "hub")).toHaveLength(
+      g.names.length,
+    );
+    const items = m.nodes.filter((n) => n.kind === "note");
+    items.forEach((n, i) => expect(n.topic).toBe(g.of[i]));
+    expect(m.topics.reduce((s, t) => s + t.count, 0)).toBe(items.length);
+  });
+
+  it("gives 12 groups the hues 0 to 7 then 0 to 3", () => {
+    const counts = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+    const p = topicsPayload(counts);
+    const m = buildModel(p, grouping(p, "folder", NOW));
+    expect(m.topics).toHaveLength(12);
+    expect(m.topics.map((t) => t.hue)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3,
+    ]);
   });
 
   it("orders nodes root, hubs, items, agents", () => {
