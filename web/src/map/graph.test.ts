@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { activity, agentStatus, BOX, buildModel } from "./graph";
+import {
+  activity,
+  agentColumns,
+  agentStatus,
+  BOX,
+  buildModel,
+  DAYS,
+  dayIndex,
+} from "./graph";
 import { grouping } from "./arrange";
 import { fixturePayload } from "./fixture";
 import type { MapNode, MapPayload } from "./types";
@@ -393,5 +401,101 @@ describe("activity", () => {
     );
     const a = activity(m, NOW);
     expect(a.days).toEqual([{ day: 13, member: ME.id, count: 2 }]);
+  });
+
+  it("keeps counting by last change, whatever the created date", () => {
+    const m = buildModel(
+      payload([
+        note("n1", "A", {
+          by_agent: true,
+          updated_at: iso(NOW - HOUR),
+          created_at: iso(NOW - 400 * DAY),
+        }),
+      ]),
+    );
+    const a = activity(m, NOW);
+    expect(a.today).toBe(1);
+    expect(a.days).toEqual([{ day: 13, member: ME.id, count: 1 }]);
+  });
+});
+
+describe("created dates", () => {
+  const of = (extra: Partial<MapNode>) =>
+    buildModel(payload([note("n1", "A", extra)])).nodes.find(
+      (x) => x.id === "n1",
+    )!;
+
+  it("reads createdAt from created_at", () => {
+    const n = of({ created_at: "2024-03-14T12:00:00.000Z" });
+    expect(n.createdAt).toBe(Date.UTC(2024, 2, 14, 12));
+    expect(n.updatedAt).toBe(NOW - 3 * DAY);
+  });
+
+  it("falls back to updatedAt when created_at is absent, null or unparseable", () => {
+    expect(of({}).createdAt).toBe(NOW - 3 * DAY);
+    expect(of({ created_at: null }).createdAt).toBe(NOW - 3 * DAY);
+    expect(of({ created_at: "nope" }).createdAt).toBe(NOW - 3 * DAY);
+    expect(of({ created_at: "" }).createdAt).toBe(NOW - 3 * DAY);
+  });
+
+  it("gives the root, hubs and agents no created date", () => {
+    const m = buildModel(
+      payload([note("n1", "A")], {
+        agents: [
+          {
+            id: "ag",
+            member_id: ME.id,
+            provider: "Claude",
+            trust_tier: "vendor",
+            last_used_at: iso(NOW),
+            name: null,
+          },
+        ],
+      }),
+    );
+    for (const n of m.nodes) if (n.kind !== "note") expect(n.createdAt).toBe(0);
+  });
+
+  it("keeps the timeline's fourteen columns", () => {
+    expect(DAYS).toBe(14);
+    expect(dayIndex(NOW, NOW)).toBe(13);
+    expect(dayIndex(NOW - 40 * DAY, NOW)).toBe(0);
+  });
+});
+
+describe("agentColumns", () => {
+  it("counts agent-written items per column of the scale, by created date", () => {
+    const m = buildModel(
+      payload([
+        // Written in September, changed an hour ago: it counts in September's column.
+        note("n1", "A", {
+          by_agent: true,
+          updated_at: iso(NOW - HOUR),
+          created_at: iso(Date.UTC(2026, 8, 10)),
+        }),
+        note("n2", "A", {
+          by_agent: true,
+          created_at: iso(Date.UTC(2026, 8, 20)),
+        }),
+        note("n3", "A", { by_agent: true, created_at: iso(NOW - HOUR) }),
+        note("n4", "A", {
+          by_agent: true,
+          member_id: AHMED.id,
+          created_at: iso(NOW - HOUR),
+        }),
+        note("n5", "A", { by_agent: false, created_at: iso(NOW - HOUR) }),
+        // Older than the first column: it sits in the first column.
+        note("n6", "A", {
+          by_agent: true,
+          created_at: iso(Date.UTC(2020, 0, 1)),
+        }),
+      ]),
+    );
+    expect(agentColumns(m, { unit: "month", now: NOW })).toEqual([
+      { column: 0, member: ME.id, count: 1 },
+      { column: 11, member: ME.id, count: 2 },
+      { column: 13, member: AHMED.id, count: 1 },
+      { column: 13, member: ME.id, count: 1 },
+    ]);
   });
 });

@@ -747,6 +747,7 @@ export function MapCanvas(props: Props): JSX.Element {
         data-view={props.view}
         data-hot={props.hot ?? ""}
         data-preview={previewTag(props.preview)}
+        data-guides={props.scene.guideLabels.map((g) => g.text).join("|")}
         onPointerMove={(e) => {
           const el = e.currentTarget;
           pointer.current = { x: e.clientX, y: e.clientY };

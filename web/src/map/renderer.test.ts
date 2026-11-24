@@ -14,6 +14,7 @@ function node(kind: ModelNode["kind"], nb: number[] = []): ModelNode {
     title: "x",
     path: null,
     updatedAt: 0,
+    createdAt: 0,
     byAgent: false,
     nb,
   };

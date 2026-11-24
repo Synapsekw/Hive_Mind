@@ -61,10 +61,17 @@ function folder(p: Input): Raw {
 const RECENT = "Last 2 weeks";
 const EARLIER = "Earlier";
 
+/** When an item was written; its last change when the payload has no usable created date. */
+function written(n: Input["nodes"][number]): number {
+  const t =
+    typeof n.created_at === "string" ? Date.parse(n.created_at) : Number.NaN;
+  return Number.isNaN(t) ? Date.parse(n.updated_at) : t;
+}
+
 function time(p: Input, now: number): Raw {
   // Month rank is year * 12 + month, so a bigger rank is newer.
   const rank = new Map<string, number>();
-  const stamp = p.nodes.map((n) => Date.parse(n.updated_at));
+  const stamp = p.nodes.map(written);
   const key = p.nodes.map((_, i) => {
     const t = stamp[i]!;
     if (Number.isNaN(t)) return "";

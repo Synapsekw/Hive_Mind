@@ -1,6 +1,13 @@
 // Turns the `map_graph` payload into the drawing model. Pure and deterministic.
 import { grouping, type Grouping } from "./arrange";
-import type { Activity, MapModel, MapPayload, ModelNode } from "./types";
+import { COLUMNS, columnOf, type Scale } from "./timescale";
+import type {
+  Activity,
+  AgentColumn,
+  MapModel,
+  MapPayload,
+  ModelNode,
+} from "./types";
 
 export const BOX: { w: 1000; h: 760 } = { w: 1000, h: 760 };
 
@@ -23,8 +30,8 @@ const MONTHS = [
   "Dec",
 ];
 
-/** Number of day columns in the timeline and in `Activity.days`. */
-export const DAYS = 14;
+/** Number of columns in the timeline and of days in `Activity.days`. */
+export const DAYS = COLUMNS;
 
 /**
  * The timeline column of a moment: 13 = the UTC calendar day of `now`, 0 = 13 days earlier.
@@ -36,8 +43,8 @@ export function dayIndex(t: number, now: number): number {
   return Math.max(0, Math.min(DAYS - 1, DAYS - 1 - ago));
 }
 
-function parseTime(s: string | null): number {
-  if (s === null) return 0;
+function parseTime(s: string | null | undefined): number {
+  if (typeof s !== "string") return 0;
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : 0;
 }
@@ -76,6 +83,7 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
     title: "Hive index",
     path: null,
     updatedAt: 0,
+    createdAt: 0,
     byAgent: false,
   });
   const hubAt = topics.map((t, ti) =>
@@ -89,12 +97,14 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
       title: t.name,
       path: null,
       updatedAt: 0,
+      createdAt: 0,
       byAgent: false,
     }),
   );
   const byId = new Map<string, number>();
   for (const [at, n] of payload.nodes.entries()) {
     const locked = n.locked;
+    const updatedAt = parseTime(n.updated_at);
     const i = add({
       id: n.id,
       kind: n.kind,
@@ -108,7 +118,9 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
           : "Private note"
         : (n.title ?? (n.kind === "file" ? "Untitled file" : "Untitled note")),
       path: locked ? null : n.path,
-      updatedAt: parseTime(n.updated_at),
+      updatedAt,
+      // A payload without a usable created date (an older database) falls back to the change.
+      createdAt: parseTime(n.created_at) || updatedAt,
       byAgent: !locked && n.by_agent === true,
     });
     byId.set(n.id, i);
@@ -187,6 +199,7 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
         (a.trust_tier === "self_hosted" ? ", self-hosted" : ""),
       path: null,
       updatedAt: parseTime(a.last_used_at),
+      createdAt: 0,
       byAgent: false,
     });
     const hubs = mine
@@ -242,6 +255,30 @@ export function activity(model: MapModel, now: number): Activity {
         (a.member < b.member ? -1 : a.member > b.member ? 1 : 0),
     );
   return { today, perMember, days };
+}
+
+/**
+ * The Timeline's agent row: per column of `scale` and member, how many notes and files an agent
+ * wrote whose created date falls in it. Sorted by column, then member.
+ */
+export function agentColumns(model: MapModel, scale: Scale): AgentColumn[] {
+  const count = new Map<string, number>();
+  for (const n of model.nodes) {
+    if (n.kind !== "note" && n.kind !== "file") continue;
+    if (!n.byAgent || n.member === null) continue;
+    const key = `${columnOf(scale, n.createdAt)}\u0000${n.member}`;
+    count.set(key, (count.get(key) ?? 0) + 1);
+  }
+  return [...count.entries()]
+    .map(([k, c]) => {
+      const [column, member] = k.split("\u0000") as [string, string];
+      return { column: Number(column), member, count: c };
+    })
+    .sort(
+      (a, b) =>
+        a.column - b.column ||
+        (a.member < b.member ? -1 : a.member > b.member ? 1 : 0),
+    );
 }
 
 export function agentStatus(lastUsedAt: string | null, now: number): string {
