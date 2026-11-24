@@ -92,7 +92,12 @@ function world(opts: {
   open?: unknown[];
   fail?: string;
   topics?: (c: Call) => Res;
+  /** The most rows the API answers per request (the hosted API's max-rows). */
+  maxRows?: number;
+  /** Answer the second index request with this error. */
+  failPage?: number;
 }) {
+  let indexRequests = 0;
   return (c: Call): Res | undefined => {
     if (opts.fail === c.table)
       return {
@@ -118,7 +123,14 @@ function world(opts: {
       if (has(c, "eq", "id", MINE) || has(c, "eq", "id", THEIRS))
         return ok(opts.open ?? []);
       if (op(c, "neq").length) return ok(opts.shared ?? []);
-      return ok(opts.index ?? []);
+      const all = opts.index ?? [];
+      const r = op(c, "range")[0]?.[1] as [number, number] | undefined;
+      if (!r) return ok(all);
+      indexRequests += 1;
+      if (opts.failPage === indexRequests)
+        return { data: null, error: { message: "boom", code: "XX000" } };
+      const to = Math.min(r[1], r[0] + (opts.maxRows ?? Infinity) - 1);
+      return ok(all.slice(r[0], to + 1));
     }
     return undefined;
   };
@@ -162,7 +174,7 @@ describe("loadVault", () => {
     const index = t.calls.find((c) => c.table === "notes")!;
     expect(has(index, "eq", "workspace_id", W1)).toBe(true);
     expect(has(index, "order", "path")).toBe(true);
-    expect(has(index, "limit", 2001)).toBe(true);
+    expect(has(index, "range", 0, 999)).toBe(true);
     expect(selected(index)).toContain("effective:note_visibility");
     expect(selected(index)).toContain("effective_with:note_shared_with");
     expect(selected(index)).toContain("rule_folder:note_rule_folder");
@@ -194,6 +206,60 @@ describe("loadVault", () => {
     if (out.state !== "ok") throw new Error(out.state);
     expect(out.data.notes).toHaveLength(2000);
     expect(out.data.truncated).toBe(true);
+  });
+
+  it("reads a workspace's index in ranges of 1,000: 1,641 notes in exactly two requests, none lost", async () => {
+    const rows = Array.from({ length: 1641 }, (_, i) =>
+      row(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+    );
+    const t = stub(world({ index: rows, maxRows: 1000 }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes).toHaveLength(1641);
+    expect(out.data.truncated).toBe(false);
+    const reads = t.calls.filter(
+      (c) => c.table === "notes" && has(c, "eq", "workspace_id", W1),
+    );
+    expect(reads).toHaveLength(2);
+    expect(has(reads[0]!, "range", 0, 999)).toBe(true);
+    expect(has(reads[1]!, "range", 1000, 1999)).toBe(true);
+  });
+
+  it("cuts a 2,500-note workspace at 2,000, says so, and makes at most three requests", async () => {
+    const rows = Array.from({ length: 2500 }, (_, i) =>
+      row(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+    );
+    const t = stub(world({ index: rows, maxRows: 1000 }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes).toHaveLength(2000);
+    expect(out.data.truncated).toBe(true);
+    const reads = t.calls.filter(
+      (c) => c.table === "notes" && has(c, "eq", "workspace_id", W1),
+    );
+    expect(reads.length).toBeLessThanOrEqual(3);
+  });
+
+  it("makes exactly one index request for a workspace under 1,000 notes", async () => {
+    const t = stub(world({ index: [row(MINE), row(THEIRS)], maxRows: 1000 }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes).toHaveLength(2);
+    const reads = t.calls.filter(
+      (c) => c.table === "notes" && has(c, "eq", "workspace_id", W1),
+    );
+    expect(reads).toHaveLength(1);
+  });
+
+  it("is error when the second page of the index fails, logging only code and message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rows = Array.from({ length: 1641 }, (_, i) =>
+      row(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+    );
+    const t = stub(world({ index: rows, maxRows: 1000, failPage: 2 }));
+    expect(await loadVault(t.db, {})).toEqual({ state: "error" });
+    expect(spy).toHaveBeenCalledWith("notes query failed", "XX000", "boom");
+    spy.mockRestore();
   });
 
   it("opens the workspace named in ?ws=, and falls back to the first for an unknown one", async () => {
@@ -653,5 +719,66 @@ describe("loadVault: the hive's topics", () => {
     expect(JSON.stringify(spy.mock.calls)).toContain("XX000");
     expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
     spy.mockRestore();
+  });
+});
+
+describe("loadVault: a note's topics follow the map's order", () => {
+  const entity = (n: number, type: string, canonical_name: string) => ({
+    id: T(n),
+    type,
+    canonical_name,
+  });
+  const link = (n: number, confidence: number) => ({
+    entity_id: T(n),
+    confidence,
+    detached_at: null,
+  });
+  const hive = [
+    entity(1, "vendor", "Zeta"),
+    entity(2, "client", "Acme"),
+    entity(3, "client", "Beta"),
+    entity(4, "vendor", "Alpha"),
+  ];
+  const firstPage = (c: Call) =>
+    ok((op(c, "range")[0]![1][0] as number) === 0 ? hive : []);
+
+  it("orders equal confidence by kind, then name, whatever order the API answered; an unknown id is last", async () => {
+    const mine = row(MINE, {
+      body: "x",
+      note_entities: [
+        link(1, 0.9),
+        link(2, 0.9),
+        link(9, 0.9),
+        link(4, 0.9),
+        link(3, 0.9),
+      ],
+    });
+    const t = stub(world({ index: [mine], open: [mine], topics: firstPage }));
+    const out = await loadVault(t.db, { note: MINE });
+    if (out.state !== "ok") throw new Error(out.state);
+    // customers first (Acme, Beta), then vendors (Alpha, Zeta), then the unknown id.
+    const want = [T(2), T(3), T(4), T(1), T(9)];
+    expect(out.data.notes[0]!.topics).toEqual(want);
+    expect(
+      (out.data.open as { note: { topics: string[] } }).note.topics,
+    ).toEqual(want);
+  });
+
+  it("puts the vendor the API answered first behind the customer it answered second", async () => {
+    const mine = row(MINE, { note_entities: [link(1, 0.8), link(2, 0.8)] });
+    const t = stub(world({ index: [mine], topics: firstPage }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes[0]!.topics).toEqual([T(2), T(1)]);
+  });
+
+  it("does not cut the list at five", async () => {
+    const mine = row(MINE, {
+      note_entities: [1, 2, 3, 4, 5, 6, 7].map((n) => link(n, 0.5)),
+    });
+    const t = stub(world({ index: [mine], topics: firstPage }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes[0]!.topics).toHaveLength(7);
   });
 });

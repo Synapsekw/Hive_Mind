@@ -8,6 +8,7 @@ import type {
   VaultTopic,
   Visibility,
 } from "../../vault/types";
+import { compareRanked, type Ranked } from "../../topics/order";
 import { KINDS, type Kind } from "../../topics/types";
 import { ownHive } from "../own-hive";
 import { counting, paged } from "./connect";
@@ -28,6 +29,8 @@ export const NOTE_COLUMNS =
   "note_entities(entity_id,confidence,detached_at)";
 
 const INDEX_CAP = 2000;
+/** The most rows the hosted API answers in one request. */
+const PAGE = 1000;
 const SHARED_CAP = 500;
 const BODY_CAP = 200_000;
 const LINKS_CAP = 50;
@@ -40,11 +43,12 @@ const ids = (v: unknown): string[] =>
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /**
- * The ids of a note's attached topics, strongest first: rows not detached, by confidence
- * descending (a stable sort keeps the order the database answered for ties). Anything that is
- * not a pair of an id and a number is skipped.
+ * The ids of a note's attached topics, strongest first: rows not detached. With the hive's
+ * topics given, in the order the map uses (`compareRanked`); without them, by confidence
+ * descending, ties in the order the database answered. Anything that is not a pair of an id and
+ * a number is skipped.
  */
-function topicsOf(v: unknown): string[] {
+function topicsOf(v: unknown, known?: Map<string, VaultTopic>): string[] {
   if (!Array.isArray(v)) return [];
   const kept: { id: string; confidence: number }[] = [];
   for (const r of v) {
@@ -55,14 +59,31 @@ function topicsOf(v: unknown): string[] {
     if (detached_at !== null && detached_at !== undefined) continue;
     kept.push({ id: entity_id, confidence });
   }
-  return kept.sort((a, b) => b.confidence - a.confidence).map((k) => k.id);
+  if (!known)
+    return kept.sort((a, b) => b.confidence - a.confidence).map((k) => k.id);
+  const ranked = (k: { id: string; confidence: number }): Ranked => {
+    const t = known.get(k.id);
+    return {
+      id: k.id,
+      confidence: k.confidence,
+      kind: t?.kind ?? null,
+      name: t?.name ?? null,
+    };
+  };
+  return kept
+    .sort((a, b) => compareRanked(ranked(a), ranked(b)))
+    .map((k) => k.id);
 }
 
 /**
  * A note row as the vault shows it. The computed columns are null for a note the caller cannot
  * read; they read as private, shared with nobody, and (on a colleague's note) opened by a link.
  */
-export function toNote(r: Row, me: string): VaultNote {
+export function toNote(
+  r: Row,
+  me: string,
+  known?: Map<string, VaultTopic>,
+): VaultNote {
   const member_id = text(r.member_id);
   const access =
     r.access === "own" || r.access === "shared" || r.access === "link"
@@ -85,7 +106,7 @@ export function toNote(r: Row, me: string): VaultNote {
     effective_with: ids(r.effective_with),
     rule_folder: typeof r.rule_folder === "string" ? r.rule_folder : null,
     access,
-    topics: topicsOf(r.note_entities),
+    topics: topicsOf(r.note_entities, known),
   };
 }
 
@@ -169,6 +190,30 @@ async function hiveTopics(db: Db, hiveId: string): Promise<VaultTopic[]> {
 }
 
 /**
+ * A workspace's note index, in ranges of `PAGE` rows by path, until a range comes back short or
+ * empty or `INDEX_CAP + 1` rows are in hand (one more than is shown, so a cut is known): the
+ * hosted API answers at most 1,000 rows per request, however many are asked for. The first
+ * range that fails is the answer.
+ */
+async function workspaceIndex(db: Db, workspaceId: string): Promise<Res> {
+  const all: unknown[] = [];
+  for (let from = 0; all.length < INDEX_CAP + 1; from = all.length) {
+    const to = Math.min(from + PAGE - 1, INDEX_CAP);
+    const res = (await db
+      .from("notes")
+      .select(NOTE_COLUMNS)
+      .eq("workspace_id", workspaceId)
+      .order("path")
+      .range(from, to)) as Res;
+    if (res.error) return res;
+    const got = Array.isArray(res.data) ? res.data : [];
+    all.push(...got);
+    if (got.length < to - from + 1) break;
+  }
+  return { data: all, error: null };
+}
+
+/**
  * Everything `/vault` shows, in this order: the caller's own hive; then its members, the
  * caller's workspaces in it, the caller's user, the `?note=` body and that note's links in
  * parallel; then the open tab's folders and note index in parallel. Row-level security decides every row.
@@ -222,6 +267,7 @@ export async function loadVault(
     name: text(w.name),
   }));
 
+  const known = new Map(topics.map((t) => [t.id, t]));
   let open: VaultData["open"] = null;
   if (noteId !== null) {
     const r = opened ? rows(opened)[0] : undefined;
@@ -229,7 +275,7 @@ export async function loadVault(
     else {
       const body = text(r.body);
       open = {
-        note: toNote(r, meId),
+        note: toNote(r, meId, known),
         body: body.length > BODY_CAP ? body.slice(0, BODY_CAP) : body,
         cut: body.length > BODY_CAP,
         links,
@@ -262,12 +308,7 @@ export async function loadVault(
         .select("path, visibility, shared_with")
         .eq("workspace_id", tab.id)
         .order("path") as unknown as Promise<Res>,
-      db
-        .from("notes")
-        .select(NOTE_COLUMNS)
-        .eq("workspace_id", tab.id)
-        .order("path")
-        .limit(INDEX_CAP + 1) as unknown as Promise<Res>,
+      workspaceIndex(db, tab.id),
     ]);
     if (failed("folders query", f)) return { state: "error" };
     folders = rows(f).map((r) => ({
@@ -301,7 +342,7 @@ export async function loadVault(
       workspaces: spaces,
       tab,
       folders,
-      notes: all.slice(0, cap).map((r) => toNote(r, meId)),
+      notes: all.slice(0, cap).map((r) => toNote(r, meId, known)),
       truncated: all.length > cap,
       open,
       topics,
