@@ -6935,6 +6935,8 @@ const HD_OPEN = [
   "audit_log",
   "deleted_hives",
   "file_references", // rows go with their file or note; the insert trigger refuses a closing hive
+  "gallery_folder_files", // rows go with their folder or file; the insert trigger refuses a closing hive
+  "gallery_folders", // rows go with their member; the insert trigger refuses a closing hive
   "hives",
   "notifications",
   "sessions", // written only by the session functions, none of which writes a note into a closing hive
