@@ -48,10 +48,13 @@ deleted is in [Hive deletion](#hive-deletion).
   `supabase db query --linked -f <file>` in one transaction and recorded under that version. It
   replaces `create_hive`: at most 5 hives owned by one person, both names 1 to 60 characters
   after trimming, and a `hive.created` entry in the audit log.
-- Migration `20261124091833_hive_deletion` is **not applied yet**. The Edge Function
-  `purge-hives` is not deployed, its secret `HIVE_PURGE_SECRET` is not set and the scheduler
-  is not set up (no `pg_cron` job `purge-hives`). Until the steps in
-  [Hive deletion](#hive-deletion) are done, a hive cannot be deleted on this project.
+- Migration `20261124091833_hive_deletion` is applied (2026-11-24) in one transaction and
+  recorded under that version. The Edge Function `purge-hives` is deployed with JWT
+  verification off, `scripts/setup-hive-purge.sh` has been run (`pg_cron` and `pg_net` on, the
+  secret in the function's secrets and the database's secret store, job `purge-hives` daily at
+  03:17 UTC). Checked: a call without the secret or with a wrong one gets 401; one run started
+  through the job's own command answered `{"ok":true,"purged":0,"failed":0}`. Not yet seen on
+  this project: a real erase, since no hive has been due.
 - The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
   the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
   still the build from before its signing code moved to `_shared/`; behaviour is the same.
