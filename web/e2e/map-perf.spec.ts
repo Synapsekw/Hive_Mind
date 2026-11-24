@@ -36,11 +36,9 @@ test("switching the arrangement at 5,000 items stays smooth", async ({
 }) => {
   await openBig(page);
   // Every frame from the click until the glide has landed.
+  await page.getByRole("button", { name: "Group by Folder" }).click();
   const { f, p95, longest } = await framesOf(page, () =>
-    page
-      .getByRole("group", { name: "Arrange by" })
-      .getByRole("button", { name: "Time", exact: true })
-      .click(),
+    page.getByRole("menuitemradio", { name: "Time", exact: true }).click(),
   );
   expect(f.length).toBeGreaterThan(10);
   expect(p95).toBeLessThan(34);

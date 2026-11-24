@@ -32,9 +32,11 @@ import { lit, nodeIndex, nodeKey, shown, topicIndexOf } from "./select";
 import { buildScene } from "./scene";
 import type { MapModel, MapPayload, NodeKind, View } from "./types";
 import { TopBar } from "./Controls";
+import { TodayButton } from "./TodayButton";
 import { DetailRail } from "./DetailRail";
 import { DotList } from "./DotList";
 import { FilterBar } from "./FilterBar";
+import { Legend } from "./Legend";
 import { MapCanvas, type CameraApi, type Preview } from "./MapCanvas";
 import { Peek } from "./Peek";
 import {
@@ -94,7 +96,7 @@ export function HiveMap({
   const cameraRef = useRef<CameraApi | null>(null);
   const hotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hotRef = useRef<number | null>(null);
-  const { togglePanel, openPanel } = useFold();
+  const { fold, togglePanel, openPanel } = useFold();
   const sidePresent = useFoldSidePresent();
 
   // A refresh that delivers the same payload keeps the model, so no layout runs again.
@@ -308,16 +310,6 @@ export function HiveMap({
     return out;
   }, [model, on, sel, selNode, names, view, query, hits, kinds]);
 
-  const items = useMemo(
-    () =>
-      model.nodes.filter((n) => n.kind === "note" || n.kind === "file").length,
-    [model],
-  );
-  const stats = query
-    ? `${hits} ${hits === 1 ? "match" : "matches"}`
-    : `${items} ${items === 1 ? "item" : "items"}, ${model.linkCount} ${model.linkCount === 1 ? "link" : "links"}` +
-      (model.truncated ? ". Showing the 5,000 most recent items" : "");
-
   // A pick toggles the selection; selecting frames the dot and its neighbours.
   const posRef = useRef(pos);
   posRef.current = pos;
@@ -501,15 +493,52 @@ export function HiveMap({
       <Shell current="map" agents={agents} inbox={inbox} now={now} />
       <main aria-label="Hive map" className={s.panel}>
         <TopBar
-          stats={stats}
           view={view}
           onView={switchView}
           arrange={arrange}
           onArrange={changeArrange}
-          names={names}
-          onNames={() => setNames((v) => !v)}
-          q={q}
-          onQ={filter(setQ)}
+          filter={
+            <FilterBar
+              model={model}
+              heading={view === "rings" ? GROUP_HEADING[arrange] : "Topics"}
+              rings={view === "rings"}
+              topics={topics}
+              onTopics={filter((next: number[]) =>
+                setTopicNames(
+                  next.flatMap((t) => {
+                    const name = model.topics[t]?.name;
+                    return name === undefined ? [] : [name];
+                  }),
+                ),
+              )}
+              kinds={kinds}
+              onKinds={filter(setKinds)}
+              members={members}
+              onMembers={filter(setMemberIds)}
+              q={q}
+              onQ={filter(setQ)}
+              onClearSearch={() => filter(setQ)("")}
+              counts={counts}
+              truncated={model.truncated}
+              onClearAll={() => {
+                setTopicNames([]);
+                setKinds([]);
+                setMemberIds([]);
+                setQ("");
+                setSelKey(null);
+              }}
+              onPreview={setPreview}
+            />
+          }
+          today={
+            <TodayButton
+              today={act.today}
+              needs={inbox ?? 0}
+              open={fold.panel === "open"}
+              controls="hv-details"
+              onToggle={togglePanel}
+            />
+          }
         />
         <div className={s.stageFit} data-map-stage="">
           <MapCanvas
@@ -525,6 +554,13 @@ export function HiveMap({
             sel={sel}
             focusRing={focusDot}
             labelsOn={names}
+            onNames={() => setNames((v) => !v)}
+            legend={
+              <Legend
+                rings={view === "rings"}
+                hubs={view === "rings" ? "Group hub" : "Topic hub"}
+              />
+            }
             labels={labels}
             onHover={setHot}
             onPick={canvasPick}
@@ -540,35 +576,6 @@ export function HiveMap({
             sel={sel}
             onFocusDot={onFocusDot}
             onPick={pick}
-          />
-          <FilterBar
-            model={model}
-            heading={view === "rings" ? GROUP_HEADING[arrange] : "Topics"}
-            rings={view === "rings"}
-            topics={topics}
-            onTopics={filter((next: number[]) =>
-              setTopicNames(
-                next.flatMap((t) => {
-                  const name = model.topics[t]?.name;
-                  return name === undefined ? [] : [name];
-                }),
-              ),
-            )}
-            kinds={kinds}
-            onKinds={filter(setKinds)}
-            members={members}
-            onMembers={filter(setMemberIds)}
-            q={q}
-            onClearSearch={() => filter(setQ)("")}
-            counts={counts}
-            onClearAll={() => {
-              setTopicNames([]);
-              setKinds([]);
-              setMemberIds([]);
-              setQ("");
-              setSelKey(null);
-            }}
-            onPreview={setPreview}
           />
         </div>
         {hotNode && anchor && (

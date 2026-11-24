@@ -37,19 +37,19 @@ no bloom and no frosted glass. It replaces the Keystone glass look
 ([[2026-11-22-decision-13-keystone-glass-look-with-themes]]), which replaced the navy look the
 first map was built with.
 
-| Token      | Choice                                                                                                                                                                                                                                             |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Background | One flat colour, the theme's page colour, behind the rail and the side panel                                                                                                                                                                       |
-| Map card   | A solid card colour, 20 px radius, a 1 px line. Behind the centre of the map sits one faint radial tint of the theme's glow colour (5% to 10%), gone by 58% of the radius. Blueprint also draws a fine grid on the card                            |
-| Side panel | The same solid card colour, with a 1 px line                                                                                                                                                                                                       |
-| Left rail  | No panel; it sits on the page colour                                                                                                                                                                                                               |
-| Text       | From the theme: `text`, `muted`. Every theme, Paper included, uses its own text colour on the rail, the side panel and the card alike                                                                                                              |
-| Accent     | The theme's one accent. Fills that mark "active" or "primary" use it as a single colour; the chosen segment and the active nav row use the theme's own active fill and text                                                                        |
-| Type       | Inter 400 / 500 / 600; JetBrains Mono for counts and section labels (11 px, uppercase, 0.12em tracking); tabular numbers                                                                                                                           |
-| Controls   | 8 px radius (7 px inside the 10 px view-switch track). Hairlines brighten on hover, never thicken: the line colour moves 25% towards the text colour                                                                                               |
-| Nav rows   | 24 px icon slot, then the label. Active row: the theme's active fill plus a 3 px bar of the accent on the rail's outer edge                                                                                                                        |
-| Depth      | No drop shadows on controls and no blur. In the dark themes nothing is lifted; in Paper the card carries one soft shadow (`--lift`)                                                                                                                |
-| Motion     | Dots glide between views and between arrangements in a staggered wave; hubs and the freshest dots breathe; the orbit turns; links fire a pulse. Shared tokens `--dur-fast`, `--dur`, `--dur-slow`, `.rise`; easing `cubic-bezier(0.16, 1, 0.3, 1)` |
+| Token      | Choice                                                                                                                                                                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Background | One flat colour, the theme's page colour, behind the rail and the side panel                                                                                                                                                                    |
+| Map card   | A solid card colour, 20 px radius, a 1 px line. Behind the centre of the map sits one faint radial tint of the theme's glow colour (5% to 10%), gone by 58% of the radius. Blueprint also draws a fine grid on the card                         |
+| Side panel | The same solid card colour, with a 1 px line                                                                                                                                                                                                    |
+| Left rail  | No panel; it sits on the page colour                                                                                                                                                                                                            |
+| Text       | From the theme: `text`, `muted`. Every theme, Paper included, uses its own text colour on the rail, the side panel and the card alike                                                                                                           |
+| Accent     | The theme's one accent. Fills that mark "active" or "primary" use it as a single colour; the chosen segment and the active nav row use the theme's own active fill and text                                                                     |
+| Type       | Inter 400 / 500 / 600; JetBrains Mono for counts and section labels (11 px, uppercase, 0.12em tracking); tabular numbers                                                                                                                        |
+| Controls   | 8 px radius (7 px inside the 10 px view-switch track). Hairlines brighten on hover, never thicken: the line colour moves 25% towards the text colour                                                                                            |
+| Nav rows   | 24 px icon slot, then the label. Active row: the theme's active fill plus a 3 px bar of the accent on the rail's outer edge                                                                                                                     |
+| Depth      | No drop shadows on controls and no blur. In the dark themes nothing is lifted; in Paper the card carries one soft shadow (`--lift`)                                                                                                             |
+| Motion     | Dots glide between views and between groupings in a staggered wave; hubs and the freshest dots breathe; the orbit turns; links fire a pulse. Shared tokens `--dur-fast`, `--dur`, `--dur-slow`, `.rise`; easing `cubic-bezier(0.16, 1, 0.3, 1)` |
 
 ### Themes
 
@@ -125,34 +125,51 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
   spokes from the index to the hubs, and group names are drawn on the canvas on one circle outside
   the rings, as "name · count". A dot's own links show when it is hot (hovered),
   focused or selected.
-- **Arrange by:** a switch that appears only in Rings, with Folder, Links and Time. Folder groups
-  by topic (the largest first, up to twelve groups, the rest folded into "Other"). Links groups
-  items that link to each other into clusters, named after their best-linked note, with "Hub
-  notes", "Small clusters", "Linked to hubs" (notes whose only links go to hub notes) and
-  "Unlinked" for the rest. Time groups by month, with "Last 2 weeks"
-  first when anything changed in that time. Changing it moves the dots in one glide, keeps the
-  selected item selected, and clears a pinned group filter, since the groups are new. It is client
+- **Group by:** a menu in the top bar that appears only in Rings. The button reads "Group by
+  Folder" (or Links, Time) and opens a menu of three radio rows, the current one ticked. Folder
+  groups by topic (the largest first, up to twelve groups, the rest folded into "Other"). Links
+  groups items that link to each other into clusters, named after their best-linked note, with
+  "Hub notes", "Small clusters", "Linked to hubs" (notes whose only links go to hub notes) and
+  "Unlinked" for the rest. Time groups by month, with "Last 2 weeks" first when anything changed
+  in that time. Changing it moves the dots in one glide, keeps the selected item selected, clears
+  a chosen group filter, since the groups are new, and closes the menu. Escape or a press outside
+  also closes it and returns focus to the button. It is client
   state only and sends no request.
 - **Timeline and Orbit** keep the per-topic colours (at most eight topics, the rest folded into
-  "Other"), and the filter bar calls the list "Topics".
+  "Other"), and the filter list calls its first column "Topics".
 - **Zoom and pan:** wheel or pinch toward the cursor, drag to pan, double-click to zoom in, a
   zoom control (+, −, Fit), and keys. Orbit turns by dragging. Labels are chosen once motion
   settles; zoom-driven labels are capped at 60 and never overlap (rule labels are not capped).
 - **Hover peek:** a small card with the title, group and owner; links fire a pulse along their
   length. The index dot's card says "Groups" with a count.
-- **Filter bar:** a solid bar at the bottom left of the map, in place of the old legend dock. It
-  holds three list buttons (the groups, Kind and People), a chip for each choice and for the
-  search text, a count, Clear all and a Legend. In Rings the group list is named "Folders",
-  "Clusters" or "Months" to follow the arrangement, and the kind row for hubs reads "Groups"; in
-  Timeline and Orbit both read "Topics". A list button opens a list of checkboxes above the bar,
-  one list at a time. Pointing at or focusing a row previews it on the map without choosing it;
-  Escape, a press outside or tabbing out closes the list. Choosing as many rows as you like
-  works by one rule: any within a list, all across lists, so two folders show both, and adding a
-  person narrows that to the person's items in those folders. Each choice shows as a chip with a
-  remove button, and the count reads "All N shown" or "M of N shown". The Legend lists the shapes,
-  and in Rings only, that brighter means changed more recently. Choosing a filter clears the
-  selection, and choosing another arrangement clears the group choice. A "By person" row in the
-  side panel is a button that adds the same person to the filter.
+- **Top bar:** one row at the top of the card holds the view switch, Group by (Rings only), the
+  search field with a Filter button at its end, the chips, one count and the Today button. The
+  search field says "Search notes and files"; `/` focuses it.
+- **Filter:** the Filter button opens one list under the search field, with three columns side by
+  side: the groups, Kind and People. The groups' column is named "Folders", "Clusters" or
+  "Months" to follow the grouping in Rings, and "Topics" in Timeline and Orbit; in Kind the row for
+  hubs reads "Groups" in Rings and "Topics" elsewhere. Each row is a checkbox with a name and a
+  count. Pointing at or focusing a row previews it on the map without choosing it. Escape, a
+  press outside, tabbing out or focusing the search field closes the list. It also closes when
+  the card is resized (a window resize, or the side panel opening), because it was placed for the
+  card's width when it opened. Only one popover on the map is open at a time: opening the Filter
+  list closes the Group by menu or the Legend, and the reverse. Each column scrolls by itself when
+  it is longer than the list (at most 60% of the map's height); on a card too narrow for three
+  columns they stack and the list scrolls as one. Choosing as many rows as you like works by one
+  rule: any within a list, all across lists, so two folders show both, and adding a person narrows
+  that to the person's items in those folders. The button shows a badge with the number of
+  choices, and a screen reader hears "Filter, N chosen".
+- **Chips and count:** each choice and the search text shows as a chip with a remove button; when
+  the chips do not fit, the first ones show and a "+N" chip counts the rest. One count at the right
+  of the bar reads "301 items" (or "1 item") when nothing is filtered, "96 of 301 shown" when a
+  filter or search text is on, and "5,000 most recent items" when the map was cut to its newest
+  5,000 (then "96 of 5,000 shown" when filtered). The number of links is not shown. Clear all
+  follows the count while anything is filtered. Choosing a filter clears the selection, and
+  choosing another grouping clears the group choice. A "By person" row in the side panel is a
+  button that adds the same person to the filter.
+- **Bottom right corner:** the zoom control, then Labels ("Aa") and the Legend ("?"). Labels
+  toggles the labels. The Legend opens upward and lists the shapes, and in Rings only, that
+  brighter means changed more recently.
 - **Shapes:** circle = note, diamond = file, ringed circle = hub, hollow = a colleague's item that
   is not shared with you, hexagon = the hive index. In Rings the agents are dots on the outer
   ring. Nothing on the map shows whether an agent is live, wrote today or is idle; the agents card
@@ -163,23 +180,34 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
   it and what it connects to. An unshared note shows only "Private note" and its topic.
 - **Search:** matching dots stay lit and get labels when there are few enough.
 
-Layout: a left rail on the page colour (mark and the hive's name, five destinations with icons, agents
-summary, account button), the map on the card with the view switch as one segmented control,
-and a solid side panel. It shows Today until something is selected (a count-up of today's writes,
-a 14-day sparkline of agent writes, By person, and Needs you), then Selected. The housekeeper's last
-run sits below.
+Layout: a left rail on the page colour (mark and the hive's name, five destinations with icons,
+agents summary, account button) and the map on the card, with the top bar along its top. On a card
+under about 1100 px wide the bar is two rows: the view switch, Group by and Today on the first,
+the search field, chips and count on the second; the search field is never narrower than 220 px.
+The side panel is hidden until it is asked for, and the map card takes the width. Today, a
+selected dot or `]` asks for it. It is a solid panel that shows Today (a count-up of today's
+writes, a 14-day sparkline of agent writes, By person, and Needs you), then Selected. The
+housekeeper's last run sits below.
 
-**Folding.** The left rail folds to a 60 px strip of icons, on every page that has a rail, and the
-map's side panel folds to a 52 px strip that shows today's count and, when anything waits, the
-number that needs you. Each has a fold button (named "Fold navigation" or "Unfold navigation",
-"Fold details" or "Unfold details") and a key: `[` for the rail and `]` for the panel (the panel
-only on the map). The keys are ignored while typing, inside a popover or dialog, with a modifier
-held, and on key repeat. The state is kept in one cookie, `hive-fold`, as `<rail>.<panel>` with
-each part `open` or `shut`, and the server draws it on the page, so a reload does not flash.
-Below 700 px the layout stacks and nothing folds. Folding keeps the map's view, so a zoomed-in
-map stays zoomed in. Selecting a dot while the panel is folded opens it. The rail's active bar marks the current page (each page renders its own rail, so the bar does
-not slide between pages), the agents card collapses, and an account popover holds Appearance,
-Settings and Sign out; the member's name, role and hive load in the root layout.
+**The Today button** is the last control in the top bar. It shows today's number of writes, and a
+small accent mark when anything needs the person. Its name reads "Today, 82 notes written or
+changed", with ", 5 need you" added when that applies. It opens and closes the side panel.
+
+**Folding.** The left rail folds to a 60 px strip of icons, on every page that has a rail. It has
+a fold button ("Fold navigation" or "Unfold navigation") and the key `[`. The map's side panel does
+not fold to a strip: it is shut by default and is either shown or gone. The Today button, a
+selected dot and `]` open it; the Today button, `]` and a "Close details" button at the panel's
+top right close it, and closing keeps the selection. When the panel closes with focus inside it,
+focus moves to the Today button. The keys are ignored while typing, inside a popover or dialog,
+with a modifier held, and on key repeat. The state is kept in one cookie, `hive-fold`, as
+`<rail>.<panel>` with each part `open` or `shut`, and the server draws it on the page, so a reload
+does not flash. A missing cookie, or a panel part that is missing or unknown, gives a shut panel;
+a cookie that says `open` keeps it open. Below 700 px the layout stacks, the panel sits under the
+map, the Today button is not shown and nothing folds. Folding the rail keeps the map's view, so a
+zoomed-in map stays zoomed in. The rail's active bar marks the current page (each page renders its
+own rail, so the bar does not slide between pages), the agents card collapses, and an account
+popover holds Appearance, Settings and Sign out; the member's name, role and hive load in the
+root layout.
 
 **The hive switcher.** The hive's name beside the mark at the top of the rail is a button. It
 opens a popover, in the way the account button does, with:
@@ -318,7 +346,7 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 
 - Colour meaning is doubled by shape or text.
 - Real buttons and labels everywhere; visible keyboard focus.
-- Reduced-motion setting stops everything that moves on its own: the view and arrangement glide and
+- Reduced-motion setting stops everything that moves on its own: the view and grouping glide and
   waves, hub breathing, the orbit turn, firing pulses, the count-up and ambient frames.
   Nothing moves under it; the map is drawn still.
 - Contrast, in every theme (8), asserted by `web/src/theme/contrast.test.ts`: text at least 4.5:1;
@@ -333,15 +361,15 @@ The map is **one canvas**, not a DOM node per dot (DOM dots ran at 20 to 30 fps 
 drawn on demand; ambient motion (hub breathing, orbit turn) is throttled to about
 12 fps and pauses when the map is off-screen or the tab hidden. A browser check (`e2e/map-perf.spec.ts`)
 keeps the 95th-percentile frame of a one-second wheel zoom on 5,000 items under 34 ms, and the same
-limit holds for the glide after choosing another arrangement and after switching Rings to
+limit holds for the glide after choosing another grouping and after switching Rings to
 Timeline; neither glide may have a frame of a second or more. Halos are skipped when more than 400 notes
 are at the two freshest levels, because stamping a halo per fresh note on every frame while all
 the dots move broke the 34 ms limit at 5,000 items. In development, `/dev/map?items=N`
 builds a map of N items to test this.
 
-Three views of one graph, and three arrangements of Rings, must be **one load and zero further
+Three views of one graph, and three groupings of Rings, must be **one load and zero further
 round-trips**: fetch the nodes and links once, compute every layout and grouping in the browser,
-and switch views and arrangements in client state only. The
+and switch views and groupings in client state only. The
 fetch must be bounded: select only the columns the map draws, over indexed columns, never note
 bodies.
 

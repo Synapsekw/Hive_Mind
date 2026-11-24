@@ -158,14 +158,12 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
     link(hub, i);
   });
 
-  let linkCount = 0;
   for (const l of payload.links) {
     const a = byId.get(l.from);
     const b = byId.get(l.to);
     if (a === undefined || b === undefined) continue;
-    // Count only links that drew a new edge: a reverse duplicate or a link that repeats a
-    // structural edge adds nothing to the map.
-    if (link(a, b)) linkCount++;
+    // A reverse duplicate or a link that repeats a structural edge draws nothing new.
+    link(a, b);
   }
 
   // Agents: own agents connect to the hubs where they wrote (agent_id); a colleague's agent to
@@ -213,7 +211,6 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
     members,
     nodes,
     edges,
-    linkCount,
     truncated: payload.truncated,
   };
 }

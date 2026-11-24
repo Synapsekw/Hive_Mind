@@ -11,7 +11,7 @@ import {
 } from "react";
 import type { Preview } from "./MapCanvas";
 import type { Activity, MapModel, ModelNode } from "./types";
-import { useFold, useFoldSide } from "../shell/FoldProvider";
+import { foldWide, useFold, useFoldSide } from "../shell/FoldProvider";
 import { Shape } from "./Shape";
 import { daySeries, sparkPath } from "./sparkline";
 import { reducedMotion } from "./useCamera";
@@ -377,35 +377,37 @@ export function DetailRail({
   onPreview: (p: Preview | null) => void;
   onClear: () => void;
 }) {
-  const { fold, togglePanel, openPanel } = useFold();
+  const { fold, togglePanel } = useFold();
   // Tells the provider a panel is on the page, so the `]` key has something to fold.
   useFoldSide("panel");
   const folded = fold.panel === "shut";
-  const panelId = useId();
-  const foldRef = useRef<HTMLButtonElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  // Folding hides the body: a By person row pointed at or focused there ends its preview, and
-  // focus inside it moves to the fold button rather than being lost. Before paint, while the
-  // focused row is still the active element.
+  const asideRef = useRef<HTMLElement>(null);
+  // Shutting hides the panel: a By person row pointed at or focused there ends its preview, and
+  // focus inside it moves to the Today button rather than being lost. Before paint, while the
+  // focused element is still the active element.
   useLayoutEffect(() => {
-    if (!folded) return;
+    // Under 700 px the panel is always shown and nothing folds, so there is nothing to end.
+    if (!folded || !foldWide()) return;
     onPreview(null);
     const active = document.activeElement;
-    if (active && bodyRef.current?.contains(active)) foldRef.current?.focus();
+    if (active && asideRef.current?.contains(active))
+      document.querySelector<HTMLElement>("[data-today]")?.focus();
   }, [folded, onPreview]);
   const n = sel !== null ? model.nodes[sel] : undefined;
   const info = n?.kind === "agent" && n.id ? agentInfo.get(n.id) : undefined;
   return (
-    <aside id={panelId} aria-label="Details" className={s.details}>
+    <aside
+      ref={asideRef}
+      id="hv-details"
+      aria-label="Details"
+      className={s.details}
+    >
       <button
-        ref={foldRef}
         type="button"
         className={s.foldBtn}
-        aria-expanded={!folded}
-        aria-controls={panelId}
         aria-keyshortcuts="]"
-        aria-label={folded ? "Unfold details" : "Fold details"}
-        title={folded ? "Unfold details ( ] )" : "Fold details ( ] )"}
+        aria-label="Close details"
+        title="Close details ( ] )"
         onClick={togglePanel}
       >
         <svg
@@ -419,28 +421,10 @@ export function DetailRail({
           strokeLinecap="round"
           strokeLinejoin="round"
         >
-          <rect x="2" y="2.5" width="12" height="11" rx="2" />
-          <path d="M10 2.5v11" />
-          <path
-            d={folded ? "M7 6.5 5.5 8 7 9.5" : "m5.5 6.5 1.5 1.5-1.5 1.5"}
-          />
+          <path d="m4 4 8 8M12 4l-8 8" />
         </svg>
       </button>
-      {/* Folded, the strip shows the two numbers and pressing it unfolds. The CSS shows it only
-          when folded and hides the body then, so the body is out of reach of keys and readers. */}
-      <div className={s.strip} onClick={openPanel}>
-        <span className={s.stripNum}>
-          <span aria-hidden="true">{act.today}</span>
-          <span className={s.srOnly}>{act.today} written or changed today</span>
-        </span>
-        {inbox > 0 && (
-          <span className={s.stripBadge}>
-            <span aria-hidden="true">{inbox}</span>
-            <span className={s.srOnly}>{inbox} need you</span>
-          </span>
-        )}
-      </div>
-      <div ref={bodyRef} className={s.detailBody}>
+      <div className={s.detailBody}>
         <div key={sel ?? "today"} className="rise">
           {n ? (
             <Selected
