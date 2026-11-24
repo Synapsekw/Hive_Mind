@@ -1,3 +1,4 @@
+import { Logo } from "../../brand/Logo";
 import { LoginForm } from "./login-form";
 import { afterSignIn } from "./next";
 import styles from "./login.module.css";
@@ -21,8 +22,9 @@ export default async function LoginPage({
     <main className={styles.page}>
       <div className={styles.panel}>
         <div className={styles.brand}>
-          <span className={styles.mark} aria-hidden="true" />
-          <h1 className={styles.name}>Hive</h1>
+          <h1 className={styles.name}>
+            <Logo />
+          </h1>
         </div>
         <LoginForm
           configured={configured}

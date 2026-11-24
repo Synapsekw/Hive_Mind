@@ -27,7 +27,7 @@ colour-literal lint stays clean.
 
 ## The wordmark
 
-"HIVE MIND" in capitals: **HIVE** Inter 700 in `--text`, **MIND** Inter 300 in `--muted`, letter
+"HIVE MIND" in capitals: **HIVE** Inter 700 in `--fg`, **MIND** Inter 300 in `--muted`, letter
 spacing 0.08em. The self-hosted Inter is a variable font; its declared weight range widens from
 `400 600` to `300 700` so these weights are real, not synthesised.
 

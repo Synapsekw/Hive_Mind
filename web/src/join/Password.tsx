@@ -7,6 +7,7 @@
 // action and never comes back. The answer is only whether it worked and one of a few fixed
 // reasons. After a refusal by the server the fields are emptied.
 import { useRef, useState, type FormEvent } from "react";
+import { Logo } from "../brand/Logo";
 import card from "../app/login/login.module.css";
 import s from "./join.module.css";
 import { checkPassword } from "./rules";
@@ -91,8 +92,9 @@ export function Password({
     <main className={card.page} aria-label={PASSWORD_TITLE}>
       <div className={card.panel}>
         <div className={card.brand}>
-          <span className={card.mark} aria-hidden="true" />
-          <h1 className={card.name}>Hive</h1>
+          <h1 className={card.name}>
+            <Logo />
+          </h1>
         </div>
         <form ref={form} className={card.form} onSubmit={submit} noValidate>
           <h2 className={s.title}>{PASSWORD_TITLE}</h2>
