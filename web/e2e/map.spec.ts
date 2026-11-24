@@ -1397,6 +1397,15 @@ test("pressing outside the Filter popover closes it", async ({ page }) => {
   await expect(filterButton(page)).toHaveAttribute("aria-expanded", "false");
 });
 
+test("resizing the card closes the Filter popover", async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await open(page);
+  await openList(page, "People");
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect(filterPop(page)).toHaveCount(0);
+  await expect(filterButton(page)).toHaveAttribute("aria-expanded", "false");
+});
+
 test("tabbing out of the Filter popover closes it", async ({ page }) => {
   await open(page);
   const list = await openList(page, "People");

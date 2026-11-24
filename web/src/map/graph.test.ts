@@ -260,7 +260,6 @@ describe("buildModel", () => {
         ],
       }),
     );
-    expect(m.linkCount).toBe(1);
     const a = m.nodes.findIndex((x) => x.id === "n1");
     const b = m.nodes.findIndex((x) => x.id === "n2");
     expect(m.edges).toContainEqual([a, b]);
@@ -280,7 +279,6 @@ describe("buildModel", () => {
         ],
       }),
     );
-    expect(m.linkCount).toBe(1);
   });
 
   it("names the folded topic Other topics when a real topic is called Other", () => {
@@ -343,7 +341,6 @@ describe("buildModel", () => {
     expect(m.nodes[0]!.kind).toBe("root");
     expect(m.topics).toEqual([]);
     expect(m.edges).toEqual([]);
-    expect(m.linkCount).toBe(0);
   });
 
   it("builds the fixture without leaking a locked title", () => {

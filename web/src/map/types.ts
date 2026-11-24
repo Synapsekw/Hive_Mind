@@ -60,7 +60,6 @@ export type MapModel = {
   members: { id: string; name: string; isMe: boolean }[];
   nodes: ModelNode[];
   edges: [number, number][]; // structural edges and real links
-  linkCount: number; // real links only
   truncated: boolean;
 };
 

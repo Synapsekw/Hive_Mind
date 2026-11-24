@@ -381,6 +381,23 @@ export function FilterBar({
     return { side, width, stack: width < POP_STACK, height };
   };
 
+  // The popover was placed for the card's width when it opened; if that width changes while it is
+  // open (a window resize, the side panel opening) it closes, focus where it is.
+  useEffect(() => {
+    if (!open) return;
+    const card = root.current?.closest("main");
+    if (!card) return;
+    let width: number | null = null;
+    const ro = new ResizeObserver(() => {
+      const w = card.getBoundingClientRect().width;
+      if (width === null) width = w;
+      else if (Math.abs(w - width) > 1) close(false);
+    });
+    ro.observe(card);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   const toggleOpen = () => {
     if (open) return close(false);
     onPreview(null);
