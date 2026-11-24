@@ -87,7 +87,7 @@
 }
 
 .tab[aria-current="page"] {
-  color: var(--fg);
+  color: var(--active-fg);
   font-weight: 500;
 }
 

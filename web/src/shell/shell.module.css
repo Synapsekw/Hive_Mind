@@ -673,39 +673,6 @@
   color: var(--muted);
 }
 
-.segments {
-  display: flex;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--fill);
-}
-
-.segment {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    background 0.18s var(--ease),
-    color 0.18s var(--ease);
-}
-
-.segment:hover {
-  color: var(--fg);
-}
-
-.segment[aria-checked="true"] {
-  background: var(--active-bg);
-  color: var(--active-fg);
-}
-
 .swatches {
   display: flex;
   flex-wrap: wrap;
@@ -728,7 +695,6 @@
   outline-offset: 2px;
 }
 
-.popover .segment:focus-visible,
 .popover .swatch:focus-visible {
   outline: 2px solid var(--acc);
   outline-offset: 2px;
@@ -886,7 +852,6 @@
   .rail,
   .fold,
   .row,
-  .segment,
   .link::before,
   .link .slot,
   .bar,
@@ -915,14 +880,9 @@
     border: 1px solid ButtonText;
   }
 
-  .swatch[aria-checked="true"],
-  .segment[aria-checked="true"] {
+  .swatch[aria-checked="true"] {
     outline: 2px solid Highlight;
     outline-offset: 2px;
-  }
-
-  .segment[aria-checked="true"] {
-    outline-offset: -2px;
   }
 
   .row[aria-current="page"] {
@@ -952,7 +912,8 @@
 
 /* ---- The banner of a hive that is being deleted ----
    One line above the rail and the page, straight on the page colour like the rail, and part
-   of the flow: it covers nothing, and the one-window pages give it its height back through --closing-banner (ClosingBanner.tsx measures it). */
+   of the flow: it covers nothing, and the one-window pages give it its height back through
+   --closing-banner (ClosingBanner.tsx measures it). */
 
 .closing {
   display: flex;

@@ -96,7 +96,7 @@
 }
 
 .tab[aria-pressed="true"] {
-  color: var(--fg);
+  color: var(--active-fg);
   font-weight: 500;
 }
 
@@ -608,7 +608,7 @@
   z-index: 10;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  background: var(--bg);
   color: var(--fg);
   animation: arrive var(--dur) var(--ease);
 }

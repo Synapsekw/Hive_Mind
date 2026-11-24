@@ -55,6 +55,9 @@ textarea {
     --glow: none !important;
     --glass: transparent !important;
     --glass2: transparent !important;
+    --surface: transparent !important;
+    --card-tint: none !important;
+    --active-bg: transparent !important;
   }
 
   :root {

@@ -23,14 +23,10 @@ function Radios<T extends string>({
   options,
   value,
   onChange,
-  label,
-  swatches,
 }: {
   options: Option<T>[];
   value: T;
   onChange(v: T): void;
-  label?: string;
-  swatches?: boolean;
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const at = Math.max(
@@ -52,8 +48,8 @@ function Radios<T extends string>({
   return (
     <div
       role="radiogroup"
-      aria-label={label}
-      className={swatches ? s.swatches : s.segments}
+      aria-label="Theme"
+      className={s.swatches}
       onKeyDown={onKeyDown}
     >
       {options.map((o, i) => {
@@ -68,16 +64,14 @@ function Radios<T extends string>({
             role="radio"
             aria-checked={on}
             tabIndex={on ? 0 : -1}
-            className={swatches ? s.swatch : s.segment}
-            data-keep-colours={swatches ? "" : undefined}
-            aria-label={swatches ? o.label : undefined}
-            title={swatches ? o.label : undefined}
+            className={s.swatch}
+            data-keep-colours=""
+            aria-label={o.label}
+            title={o.label}
             // The one inline colour in the app: a theme's own colours, read from themes.json.
-            style={swatches ? { background: swatch(o.value) } : undefined}
+            style={{ background: swatch(o.value) }}
             onClick={() => onChange(o.value)}
-          >
-            {swatches ? null : o.label}
-          </button>
+          ></button>
         );
       })}
     </div>
@@ -92,11 +86,9 @@ export function AppearancePanel({ id }: { id?: string }) {
   return (
     <div id={`${panelId}-panel`} className={s.popover}>
       <Radios
-        label="Theme"
         options={THEME_OPTIONS}
         value={look.theme}
         onChange={(theme) => setLook({ theme })}
-        swatches
       />
     </div>
   );

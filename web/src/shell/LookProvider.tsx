@@ -22,7 +22,8 @@ const LookContext = createContext<LookApi | null>(null);
 function paint(look: Look) {
   const d = document.documentElement.dataset;
   d.theme = look.theme;
-  // Each theme is dark or light by itself; the attribute keeps `[data-mode]` selectors working.
+  // Each theme is dark or light by itself; the attribute states the theme's scheme for tests and
+  // for any rule that needs it.
   d.mode = schemeOf(look.theme);
 }
 
