@@ -1186,13 +1186,102 @@ test("several choices at once: any within a list, all across lists", async ({
 test("chips that do not fit give way to a +N chip that counts them", async ({
   page,
 }) => {
+  // Wide enough for some chips to show whole, so the test sees chips and "+N" side by side.
+  await page.setViewportSize({ width: 1600, height: 1000 });
   await open(page);
   const folders = await openList(page, "Folders");
   for (const name of ["DMT", "ADNOC", "Hiring", "Emsteel"])
     await row(folders, name).click();
   await listButton(page, "Folders").click();
-  await expect(page.getByText(/^\+\d+ more$/)).toBeVisible();
-  // Every choice is still counted, so none is lost from view.
+  const more = page.getByText(/^\+\d+ more$/);
+  await expect(more).toBeVisible();
+  // The chips shown and the "+N" chip account for every choice, so none is lost from view.
+  const shownChips = await page
+    .getByRole("button", { name: /^Remove / })
+    .count();
+  const n = Number((await more.textContent())!.match(/\d+/)![0]);
+  expect(shownChips).toBeGreaterThan(0);
+  expect(shownChips + n).toBe(4);
   await expect(countText(page)).toHaveText(/^\d+ of \d+ shown$/);
   await expect(listButton(page, "Folders")).toContainText("4");
+});
+
+/** The names of the chips' remove buttons, in order. */
+const chipNames = (page: Page) =>
+  page
+    .getByRole("button", { name: /^Remove / })
+    .evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
+
+test("with both sides open at 1600 px two folders get two chips and no +N", async ({
+  page,
+}) => {
+  // The project's device sets 1280 x 720; this test is about a 1600 px window.
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await open(page);
+  await expect(page.locator("html")).toHaveAttribute("data-rail", "open");
+  await expect(page.locator("html")).toHaveAttribute("data-panel", "open");
+  const folders = await openList(page, "Folders");
+  await row(folders, "DMT").click();
+  await row(folders, "Tower inspections").click();
+  await listButton(page, "Folders").click();
+  await expect
+    .poll(() => chipNames(page))
+    .toEqual(["Remove DMT", "Remove Tower inspections"]);
+  await expect(page.getByText(/^\+\d+ more$/)).toHaveCount(0);
+});
+
+test("at 1280 px with both sides open many choices give way to +N and the bar keeps clear of the zoom control", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await open(page);
+  const folders = await openList(page, "Folders");
+  for (const name of ["DMT", "Tower inspections", "Airspace approvals"])
+    await row(folders, name).click();
+  await listButton(page, "Folders").click();
+  const people = await openList(page, "People");
+  await row(people, /^Ahmed/).click();
+  await listButton(page, "People").click();
+  await expect(page.getByText(/^\+\d+ more$/)).toBeVisible();
+  const bar = (await page.locator('[class*="filterBar"]').boundingBox())!;
+  const zoom = (await page.getByRole("group", { name: "Zoom" }).boundingBox())!;
+  expect(bar.x + bar.width).toBeLessThanOrEqual(zoom.x);
+});
+
+test("a group the next view does not have is dropped, not kept for later", async ({
+  page,
+}) => {
+  await open(page);
+  // Timeline draws 8 groups; the fixture's 10th folder is not one of them.
+  const folders = await openList(page, "Folders");
+  await row(folders, "Ops handbook").click();
+  await listButton(page, "Folders").click();
+  await expect(countText(page)).toHaveText(/^\d+ of \d+ shown$/);
+  await viewButton(page, "Timeline").click();
+  await expect(viewButton(page, "Timeline")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
+  await viewButton(page, "Rings").click();
+  await expect(viewButton(page, "Rings")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
+  await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0);
+});
+
+test("Escape closes a list opened by mouse even when nothing has focus, and keeps the selection", async ({
+  page,
+}) => {
+  await open(page);
+  const dot = page.locator('[data-map-dot][aria-label^="<img src=x"]');
+  await pick(page, dot);
+  await expect(dot).toHaveAttribute("aria-pressed", "true");
+  const list = await openList(page, "Kind");
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+  await page.keyboard.press("Escape");
+  await expect(list).toHaveCount(0);
+  await expect(dot).toHaveAttribute("aria-pressed", "true");
 });

@@ -33,6 +33,7 @@ import { Peek } from "./Peek";
 import {
   foldKeyIgnored,
   foldWide,
+  quietTarget,
   useFold,
   useFoldSidePresent,
 } from "../shell/FoldProvider";
@@ -131,8 +132,19 @@ export function HiveMap({
   const act = useMemo(() => activity(model, now), [model, now]);
 
   const sel = useMemo(() => nodeIndex(model, selKey), [model, selKey]);
-  // Groups and people the model no longer has are left out here; the next change to that list
-  // writes back only what is left, so they are dropped without a state update during render.
+  // Groups and people the model does not have are left out here at once, then dropped from state
+  // for good once the model changes (another view family or payload), so a filter never comes
+  // back on its own when an earlier model returns.
+  useEffect(() => {
+    setTopicNames((cur) => {
+      const next = cur.filter((name) => topicIndexOf(model, name) !== null);
+      return next.length === cur.length ? cur : next;
+    });
+    setMemberIds((cur) => {
+      const next = cur.filter((id) => model.members.some((m) => m.id === id));
+      return next.length === cur.length ? cur : next;
+    });
+  }, [model]);
   const topics = useMemo(
     () =>
       topicNames
@@ -302,8 +314,8 @@ export function HiveMap({
       const key = nodeKey(model, i);
       if (selKeyRef.current === key) return setSelKey(null);
       setSelKey(key);
-      // A folded panel opens to show what was selected.
-      openPanel();
+      // A folded panel opens to show what was selected; a narrow window stacks and never folds.
+      if (foldWide()) openPanel();
       setFire({ from: i, at: performance.now() });
       const p = posRef.current;
       const n = model.nodes[i];
@@ -421,16 +433,15 @@ export function HiveMap({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target;
-      if (
-        t instanceof HTMLElement &&
-        (t.isContentEditable ||
-          t.closest(
-            'input, textarea, select, [data-popover], [role="radiogroup"], [role="dialog"]',
-          ))
-      )
+      // `]` follows the fold keys' own rule, which lets AltGr and Option type it.
+      if (e.key === "]") {
+        if (foldKeyIgnored(e) || !sidePresent("panel") || !foldWide()) return;
+        e.preventDefault();
+        togglePanel();
         return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (quietTarget(e.target)) return;
       const cam = cameraRef.current;
       switch (e.key) {
         case "+":
@@ -461,10 +472,6 @@ export function HiveMap({
           break;
         case "/":
           document.getElementById("hv-search")?.focus();
-          break;
-        case "]":
-          if (foldKeyIgnored(e) || !sidePresent("panel") || !foldWide()) return;
-          togglePanel();
           break;
         default:
           return;

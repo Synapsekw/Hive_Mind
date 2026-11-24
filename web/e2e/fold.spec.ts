@@ -284,6 +284,22 @@ test("a By person row is a button that adds that person to the filter bar and na
   await expect(countText(page)).toHaveText(/^All \d+ shown$/);
 });
 
+test("folding the panel from a focused By person row ends the preview and keeps focus on the fold button", async ({
+  page,
+}) => {
+  await open(page);
+  const canvas = page.locator("[data-map-canvas]");
+  const person = rightPanel(page).getByRole("button", { name: /^Ahmed/ });
+  await person.focus();
+  await expect(canvas).toHaveAttribute("data-preview", /^member:/);
+  await page.keyboard.press("]");
+  await expect(html(page)).toHaveAttribute("data-panel", "shut");
+  await expect(canvas).toHaveAttribute("data-preview", "");
+  await expect(
+    page.getByRole("button", { name: "Unfold details", exact: true }),
+  ).toBeFocused();
+});
+
 // ---- Folding keeps the map's view, and nothing collides ----
 
 /** The zoom control's visible number. */

@@ -1,7 +1,14 @@
 // The right rail: today's activity until something is selected, then what it is, who wrote
 // it and what it connects to. Every title is rendered as a text node.
 import Link from "next/link";
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { Preview } from "./MapCanvas";
 import type { Activity, MapModel, ModelNode } from "./types";
 import { useFold, useFoldSide } from "../shell/FoldProvider";
@@ -373,6 +380,17 @@ export function DetailRail({
   useFoldSide("panel");
   const folded = fold.panel === "shut";
   const panelId = useId();
+  const foldRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // Folding hides the body: a By person row pointed at or focused there ends its preview, and
+  // focus inside it moves to the fold button rather than being lost. Before paint, while the
+  // focused row is still the active element.
+  useLayoutEffect(() => {
+    if (!folded) return;
+    onPreview(null);
+    const active = document.activeElement;
+    if (active && bodyRef.current?.contains(active)) foldRef.current?.focus();
+  }, [folded, onPreview]);
   const n = sel !== null ? model.nodes[sel] : undefined;
   const info = n?.kind === "agent" && n.id ? agentInfo.get(n.id) : undefined;
   return (
@@ -383,6 +401,7 @@ export function DetailRail({
       className={s.details}
     >
       <button
+        ref={foldRef}
         type="button"
         className={s.foldBtn}
         aria-expanded={!folded}
@@ -424,7 +443,7 @@ export function DetailRail({
           </span>
         )}
       </div>
-      <div className={s.detailBody}>
+      <div ref={bodyRef} className={s.detailBody}>
         <div key={sel ?? "today"} className="rise">
           {n ? (
             <Selected

@@ -75,9 +75,15 @@ describe("lit", () => {
   });
 
   it("narrows a group list by the search too", () => {
-    const q = "zzzz-no-match";
+    // "overview" is a note title in every group, so it matches inside group 0 and outside it.
+    const q = "overview";
+    const hit = (i: number) => model.nodes[i]!.title.toLowerCase().includes(q);
+    const inside = model.nodes.filter((n) => n.topic === 0 && hit(n.i));
+    const outside = model.nodes.filter((n) => n.topic !== 0 && hit(n.i));
+    expect(inside.length).toBeGreaterThan(0);
+    expect(outside.length).toBeGreaterThan(0);
     const on = lit(model, { ...NONE, topics: [0], q });
-    expect(on.filter(Boolean).length).toBe(0);
+    model.nodes.forEach((n, i) => expect(on[i]).toBe(n.topic === 0 && hit(i)));
   });
 
   it("lights a selection and its neighbours only", () => {

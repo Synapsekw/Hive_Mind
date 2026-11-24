@@ -14,7 +14,7 @@ import {
   useState,
 } from "react";
 import { foldCookie } from "./cookie";
-import { DEFAULT_FOLD, formatFold, type Fold } from "./fold";
+import { DEFAULT_FOLD, foldKeyIgnored, formatFold, type Fold } from "./fold";
 
 type FoldApi = {
   fold: Fold;
@@ -44,8 +44,7 @@ function apply(fold: Fold) {
   }
 }
 
-const QUIET =
-  'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-popover], [role="dialog"], [role="radiogroup"]';
+export { foldKeyIgnored, quietTarget, QUIET } from "./fold";
 
 /** Below this width the page stacks and nothing folds; the CSS uses the same figure. */
 export const FOLD_MEDIA = "(min-width: 700px)";
@@ -53,27 +52,6 @@ export const FOLD_MEDIA = "(min-width: 700px)";
 /** True when the window is wide enough to fold. Read in handlers only, never during render. */
 export function foldWide(): boolean {
   return typeof window !== "undefined" && window.matchMedia(FOLD_MEDIA).matches;
-}
-
-/**
- * True when a fold key must do nothing: the key is held down (repeats), a modifier is held, or
- * the key lands while typing in a field, inside a popover, a dialog or a radio group (where
- * keys already mean something).
- */
-export function foldKeyIgnored(e: KeyboardEvent): boolean {
-  if (
-    e.repeat ||
-    e.defaultPrevented ||
-    e.ctrlKey ||
-    e.metaKey ||
-    e.altKey ||
-    e.shiftKey
-  )
-    return true;
-  const target = e.target;
-  if (!(target instanceof Element)) return false;
-  if (target instanceof HTMLElement && target.isContentEditable) return true;
-  return target.closest(QUIET) !== null;
 }
 
 export function FoldProvider({

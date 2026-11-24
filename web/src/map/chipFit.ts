@@ -6,7 +6,7 @@ export type ChipFitInput = {
   widths: number[];
   /** The space between chips, px. */
   gap: number;
-  /** The row's width, px. */
+  /** The width the row may take, px: the bar at its cap less everything else in it. */
   room: number;
   /** The "+N" chip's width, px. */
   plus: number;

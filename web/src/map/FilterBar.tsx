@@ -155,8 +155,20 @@ export function FilterBar({
       // After the press's own focus change, which would otherwise blur the button again.
       if (!takesFocus) setTimeout(() => btn?.focus({ preventScroll: true }), 0);
     };
+    // Escape closes the list wherever focus is, <body> included (Safari does not focus a button
+    // on click). Caught first, so the map's own Escape does not also clear the selection.
+    const esc = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeRef.current(true);
+    };
     document.addEventListener("pointerdown", down);
-    return () => document.removeEventListener("pointerdown", down);
+    document.addEventListener("keydown", esc, true);
+    return () => {
+      document.removeEventListener("pointerdown", down);
+      document.removeEventListener("keydown", esc, true);
+    };
   }, [open]);
 
   // A list that loses its entries (another arrangement) or the bar going away ends the preview.
@@ -275,10 +287,26 @@ export function FilterBar({
   const [least, setLeast] = useState(0);
   const [fit, setFit] = useState(Infinity);
   const chipSig = chips.map((c) => c.key + c.name).join("\n");
+  const barShown = model.nodes.length > 1;
   useLayoutEffect(() => {
     const m = measure.current;
     const r = row.current;
-    if (!m || !r) return;
+    const bar = root.current;
+    if (!m || !r || !bar) return;
+    // The stage the bar is placed in: its cap is the stage's width less the gutter.
+    const stage =
+      bar.offsetParent instanceof HTMLElement ? bar.offsetParent : null;
+    /** The width the row may take: the bar at its cap, less everything else in the bar. Not the
+     * row's own width, which is small while its chips are hidden. */
+    const roomAtCap = () => {
+      const barW = bar.getBoundingClientRect().width;
+      const others = barW - r.getBoundingClientRect().width;
+      const gutter =
+        parseFloat(getComputedStyle(bar).getPropertyValue("--filter-gutter")) ||
+        0;
+      const cap = stage ? stage.clientWidth - gutter : barW;
+      return Math.max(0, Math.floor(cap - others));
+    };
     const compute = () => {
       const all = [...m.children] as HTMLElement[];
       const plus = all.pop();
@@ -293,15 +321,18 @@ export function FilterBar({
         chipFit({
           widths,
           gap,
-          room: r.clientWidth,
+          room: roomAtCap(),
           plus: plusW,
           min: MIN_CHIP,
         }),
       );
     };
     compute();
+    // The stage (a fold, a window resize) and the rest of the bar (the count's text) change room.
     const ro = new ResizeObserver(compute);
     ro.observe(r);
+    ro.observe(bar);
+    if (stage) ro.observe(stage);
     // A web font that arrives late changes every chip's width.
     let gone = false;
     const fonts = typeof document !== "undefined" ? document.fonts : undefined;
@@ -315,7 +346,7 @@ export function FilterBar({
       gone = true;
       ro.disconnect();
     };
-  }, [chipSig]);
+  }, [chipSig, barShown]);
   const shownChips = fit >= chips.length ? chips : chips.slice(0, fit);
   const hidden = chips.length - shownChips.length;
 
@@ -346,13 +377,6 @@ export function FilterBar({
     if (!open || !to) return;
     const slot = buttons.current[open]?.parentElement;
     if (!slot?.contains(to)) close(false);
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape" && open) {
-      e.preventDefault();
-      close(true);
-    }
   };
 
   // Arrow keys and Home/End move between a list's rows; Tab goes on as usual.
@@ -465,13 +489,7 @@ export function FilterBar({
   };
 
   return (
-    <div
-      ref={root}
-      className={s.filterBar}
-      data-map-overlay=""
-      onKeyDown={onKeyDown}
-      onBlur={onBlur}
-    >
+    <div ref={root} className={s.filterBar} data-map-overlay="" onBlur={onBlur}>
       {listButton("topics")}
       {listButton("kinds")}
       {listButton("members")}
