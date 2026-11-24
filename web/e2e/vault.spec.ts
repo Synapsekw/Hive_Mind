@@ -1886,8 +1886,11 @@ test("after the last batch the import connects the wiki links and counts them", 
   await expect(importButton(page)).toHaveAttribute("aria-disabled", "true");
   expect(await leavingAsks(page)).toBe(true);
 
+  // Connecting, then attaching, each take three slow steps: the end is a good while off.
   const done = panelNamed(page, T.FINISHED);
-  await expect(done.getByRole("heading", { name: T.FINISHED })).toBeFocused();
+  await expect(done.getByRole("heading", { name: T.FINISHED })).toBeFocused({
+    timeout: 15_000,
+  });
   await expect(done.getByText("Created 2", { exact: true })).toBeVisible();
   await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
   await expect(
@@ -2180,6 +2183,134 @@ test("only one of the two panels is open; an import at work disables both opener
   }
   await expect(running).toBeVisible();
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+});
+
+test("attach is the third opener: only one panel is open, and one at work disables the others", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await attachButton(page).click();
+  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
+  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "true");
+  await connectButton(page).click();
+  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
+  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
+  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "false");
+  await attachButton(page).click();
+  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
+  await importButton(page).click();
+  await expect(panelNamed(page, T.IMPORT)).toBeVisible();
+  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
+  await attachButton(page).click();
+  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
+  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
+
+  // An import at work: the attach opener does nothing either.
+  await importButton(page).click();
+  await page
+    .getByLabel(T.FOLDER_INPUT)
+    .setInputFiles(folder("Thirty", many(30)));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const running = panelNamed(page, T.RUNNING);
+  await expect(running).toBeVisible();
+  for (const opener of [attachButton(page), connectButton(page)]) {
+    await expect(opener).toHaveAttribute("aria-disabled", "true");
+    await opener.evaluate((el: HTMLElement) => el.click());
+  }
+  await expect(running).toBeVisible();
+  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+});
+
+test("the attach panel at work: it cannot be closed, leaving asks, Stop keeps the counts so far", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await attachButton(page).click();
+  const ready = panelNamed(page, A.ATTACH);
+  await ready.getByRole("button", { name: A.START, exact: true }).click();
+  const running = panelNamed(page, A.ATTACHING);
+  await expect(
+    running.getByRole("heading", { name: A.ATTACHING }),
+  ).toBeFocused();
+  await expect(running).toHaveAttribute("aria-busy", "true");
+  await expect(running.getByRole("status")).toHaveText(
+    A.attachProgress(40, 90),
+  );
+  await page.keyboard.press("Escape");
+  await running
+    .getByRole("button", { name: /^Close/ })
+    .evaluate((el: HTMLElement) => el.click());
+  for (const opener of [
+    attachButton(page),
+    connectButton(page),
+    importButton(page),
+  ]) {
+    await expect(opener).toHaveAttribute("aria-disabled", "true");
+    await opener.evaluate((el: HTMLElement) => el.click());
+  }
+  await expect(running).toBeVisible();
+  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+  expect(await leavingAsks(page)).toBe(true);
+
+  await running.getByRole("button", { name: T.STOP, exact: true }).click();
+  await expect(
+    running.getByRole("button", { name: T.STOPPING }),
+  ).toHaveAttribute("aria-disabled", "true");
+  const done = panelNamed(page, A.ATTACH_STOPPED);
+  await expect(
+    done.getByRole("heading", { name: A.ATTACH_STOPPED }),
+  ).toBeFocused();
+  await expect(
+    done.getByText("Attached to a topic 18", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Already attached 6", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Notes with no topic 8", { exact: true }),
+  ).toBeVisible();
+  await expect(done.getByRole("alert")).toHaveCount(0);
+  expect((await attachCalls(page)).length).toBe(2);
+  expect(await leavingAsks(page)).toBe(false);
+  for (const opener of [
+    attachButton(page),
+    connectButton(page),
+    importButton(page),
+  ])
+    await expect(opener).not.toHaveAttribute("aria-disabled", "true");
+});
+
+test("Stop during the import's attaching stage keeps the notes and links and says where to finish", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await pick(page, folder("Field notes", { "a.md": "[[b]]", "b.md": "B" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const attaching = panelNamed(page, A.ATTACHING);
+  await expect(
+    attaching.getByRole("heading", { name: A.ATTACHING }),
+  ).toBeFocused({ timeout: 15_000 });
+  await expect(attaching).toHaveAttribute("aria-busy", "true");
+  await expect(attaching.getByRole("status")).toHaveText(
+    A.attachProgress(40, 90),
+  );
+  await attaching.getByRole("button", { name: T.STOP, exact: true }).click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Created 2", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
+  await expect(done.getByText(A.AFTER_IMPORT_UNFINISHED)).toBeVisible();
+  expect((await attachCalls(page)).length).toBe(2);
+  expect(await leavingAsks(page)).toBe(false);
 });
 
 test("opening another workspace closes a connect panel that is not running", async ({
