@@ -909,6 +909,13 @@
 }
 
 .barRow {
+  width: calc(100% + 12px);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   display: grid;
   grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) auto;
   gap: 14px;
@@ -921,6 +928,99 @@
 
 .barRow:hover {
   background: var(--fill);
+}
+
+.barRow[aria-pressed="true"] {
+  background: var(--fill-on);
+  box-shadow: inset 2px 0 0 var(--acc);
+}
+
+/* ---- Folding the panel ---- */
+
+.foldBtn {
+  align-self: flex-end;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -10px -6px -22px 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.foldBtn:hover {
+  background: var(--fill-on);
+  color: var(--fg);
+}
+
+.detailBody {
+  display: contents;
+}
+
+.strip {
+  display: none;
+}
+
+/* A narrow window stacks the page: nothing folds there, so there is no fold button. */
+@media not (min-width: 700px) {
+  .foldBtn {
+    display: none;
+  }
+}
+
+/* Folded: a 52 px strip with today's count and, when anything waits, how many. Set on <html>
+   from the cookie (see FoldProvider), so the first paint is already folded. No animation. */
+@media (min-width: 700px) {
+  :global(html[data-panel="shut"]) .details {
+    flex: 0 0 52px;
+    width: 52px;
+    padding: 12px 0;
+    gap: 14px;
+    align-items: center;
+    overflow: hidden;
+  }
+
+  :global(html[data-panel="shut"]) .foldBtn {
+    align-self: center;
+    margin: 0;
+  }
+
+  :global(html[data-panel="shut"]) .detailBody {
+    display: none;
+  }
+
+  :global(html[data-panel="shut"]) .strip {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+  }
+}
+
+.stripNum {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.stripBadge {
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 11px;
+  background: var(--fill-on);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
 }
 
 .track {

@@ -30,6 +30,12 @@ import { DotList } from "./DotList";
 import { FilterBar } from "./FilterBar";
 import { MapCanvas, type CameraApi, type Preview } from "./MapCanvas";
 import { Peek } from "./Peek";
+import {
+  foldKeyIgnored,
+  foldWide,
+  useFold,
+  useFoldSidePresent,
+} from "../shell/FoldProvider";
 import { Shell, type AgentRow } from "../shell/Shell";
 import s from "./map.module.css";
 
@@ -78,6 +84,8 @@ export function HiveMap({
   const cameraRef = useRef<CameraApi | null>(null);
   const hotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hotRef = useRef<number | null>(null);
+  const { togglePanel, openPanel } = useFold();
+  const sidePresent = useFoldSidePresent();
 
   // A refresh that delivers the same payload keeps the model, so no layout runs again.
   const sig = useMemo(() => JSON.stringify(payload), [payload]);
@@ -295,6 +303,8 @@ export function HiveMap({
       const key = nodeKey(model, i);
       if (selKeyRef.current === key) return setSelKey(null);
       setSelKey(key);
+      // A folded panel opens to show what was selected.
+      openPanel();
       setFire({ from: i, at: performance.now() });
       const p = posRef.current;
       const n = model.nodes[i];
@@ -304,7 +314,7 @@ export function HiveMap({
           ...n.nb.map((j) => p[j]).filter((v) => v !== undefined),
         ]);
     },
-    [model],
+    [model, openPanel],
   );
   const canvasPick = useCallback(
     (i: number | null) => {
@@ -453,6 +463,10 @@ export function HiveMap({
         case "/":
           document.getElementById("hv-search")?.focus();
           break;
+        case "]":
+          if (foldKeyIgnored(e) || !sidePresent("panel") || !foldWide()) return;
+          togglePanel();
+          break;
         default:
           return;
       }
@@ -460,7 +474,7 @@ export function HiveMap({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [togglePanel, sidePresent]);
 
   return (
     <div className={s.root}>
@@ -556,6 +570,8 @@ export function HiveMap({
         agentInfo={agentInfo}
         now={now}
         inbox={inbox}
+        members={members}
+        onMembers={filter(setMemberIds)}
         onPick={pick}
         onHot={setHot}
         onPreview={setPreview}
