@@ -163,6 +163,17 @@ export async function deleteNoteIn(db: Db, noteId: unknown): Promise<Result> {
   return onlyRow(res, id) ? YES : NO;
 }
 
+// The database decides who may end a link (an owner of one of its two notes, as a person) and
+// what ending it means. Its reason for a refusal is logged, never returned.
+export async function unlinkIn(db: Db, linkId: unknown): Promise<Result> {
+  if (!isUuid(linkId)) return NO;
+  const id = linkId.toLowerCase();
+  if (!(await userId(db))) return NO;
+  const res = (await db.rpc("unlink", { p_link: id })) as Res;
+  if (failed("unlink", res)) return NO;
+  return YES;
+}
+
 export async function previewIn(
   db: Db,
   workspaceId: unknown,

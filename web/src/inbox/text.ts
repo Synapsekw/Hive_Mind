@@ -39,6 +39,11 @@ export function acceptEffect(item: LinkItem): string {
   );
 }
 
+/** What Decline asks before it counts. A declined pair of notes stays declined. */
+export function declineQuestion(): string {
+  return "Decline this link? It cannot be proposed again.";
+}
+
 /** Everything waiting, counted from the totals rather than the rows on the page. */
 export function inboxCount(data: InboxData): number {
   return data.linksTotal + data.heldTotal;

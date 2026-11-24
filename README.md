@@ -90,7 +90,13 @@ shared exactly as the note it is attached to, so sharing is changed on the note,
 The inbox (**Inbox** in the left rail, with the number waiting) lists what needs your own
 decision: links proposed between one of your notes and a colleague's, and notes held from a
 self-hosted agent. Accepting a link lets each owner read the other's linked note once both have
-accepted; a declined link cannot be accepted afterwards. It needs the `inbox` migration on the database.
+accepted; a declined link cannot be accepted afterwards, and the same two notes cannot be
+proposed again. It needs the `inbox` migration on the database.
+
+An accepted link is ended in the vault: open one of the two notes, find the other under
+**Linked with**, and choose **Unlink**, then **Unlink** again (or **Keep** to back out). Each
+owner stops reading the other's note through that link at once, and the two notes cannot be
+linked again. It needs the `link_behaviours` migration on the database.
 
 Settings (**Settings** in the left rail) lists your agents and the hive's members. **Connect an
 agent** creates one and shows its token once; copy it then, because it cannot be shown again.
@@ -205,8 +211,8 @@ note by putting it somewhere else.
 
 The audit log records these sharing changes made by a person: a note's own setting changed; a
 held note released; a folder rule set, changed, removed, renamed or deleted; and a note moved by
-a person when that changes who can read it. Not yet recorded: a change to a member's default
-visibility, and accepting a link. Only the hive owner can read the audit log. It records who
+a person when that changes who can read it. Accepting, declining and unlinking a link are
+recorded too. Not yet recorded: a change to a member's default visibility. Only the hive owner can read the audit log. It records who
 changed what and the before and after settings, and a folder's path; it never holds a note's
 text, title or path. A note deleted by a person is recorded too, with the note's id and how many
 links and attached files it had.

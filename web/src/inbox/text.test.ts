@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   acceptEffect,
   badge,
+  declineQuestion,
   inboxCount,
   proposer,
   theirNote,
@@ -85,6 +86,14 @@ describe("acceptEffect", () => {
   it("takes effect at once when they have accepted", () => {
     expect(acceptEffect(link({ theyAccepted: true }))).toBe(
       "Accepting lets Ahmed read this note and lets you read theirs. Ahmed has accepted, so it takes effect at once.",
+    );
+  });
+});
+
+describe("declineQuestion", () => {
+  it("asks, and says a decline is final", () => {
+    expect(declineQuestion()).toBe(
+      "Decline this link? It cannot be proposed again.",
     );
   });
 });

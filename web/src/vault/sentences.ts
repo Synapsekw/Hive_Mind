@@ -90,3 +90,22 @@ export const DELETE_QUESTION =
   "Delete this note? It is gone for good, with its history and its links. Files attached to it stay in the gallery.";
 export const DELETED = "Note deleted.";
 export const DELETE_FAILED = "That didn't work. Try again.";
+
+// Linked notes: the list on the open note, the question before a link is ended, and what is
+// said when ending it did not work.
+export const LINKED_WITH = "Linked with";
+export const YOU = "You";
+export const UNLINK = "Unlink";
+export const UNLINK_GROUP = "Unlink these notes";
+export const UNLINK_FAILED = "That didn't work. Try again.";
+
+/** `own`: both notes are the person's. Else `owner` is the colleague on the other side. */
+export function unlinkQuestion(a: { own: boolean; owner: string }): string {
+  return a.own
+    ? "Unlink these two notes of yours?"
+    : `Unlink these notes? You and ${a.owner} will no longer read each other's note through this link. The two notes cannot be linked again.`;
+}
+
+/** What the two answers are called, by the other note's title. */
+export const unlinkName = (title: string) => `Unlink ${title}`;
+export const keepLinkName = (title: string) => `Keep the link with ${title}`;

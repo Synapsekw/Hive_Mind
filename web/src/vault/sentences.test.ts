@@ -4,9 +4,14 @@ import {
   DELETE_QUESTION,
   DELETED,
   folderSentence,
+  keepLinkName,
+  LINKED_WITH,
   noteSentence,
   people,
   releaseSentence,
+  UNLINK_FAILED,
+  unlinkName,
+  unlinkQuestion,
 } from "./sentences";
 import type { Mark } from "./marks";
 
@@ -244,5 +249,28 @@ describe("deleting a note", () => {
   it("says what happened", () => {
     expect(DELETED).toBe("Note deleted.");
     expect(DELETE_FAILED).toBe("That didn't work. Try again.");
+  });
+});
+
+describe("unlinking two notes", () => {
+  it("names the colleague, and says the pair cannot be linked again", () => {
+    expect(unlinkQuestion({ own: false, owner: "Sara" })).toBe(
+      "Unlink these notes? You and Sara will no longer read each other's note through this link. The two notes cannot be linked again.",
+    );
+  });
+  it("asks plainly about two notes of one's own", () => {
+    expect(unlinkQuestion({ own: true, owner: "Danijel" })).toBe(
+      "Unlink these two notes of yours?",
+    );
+  });
+  it("names the buttons after the other note", () => {
+    expect(unlinkName("Pricing options")).toBe("Unlink Pricing options");
+    expect(keepLinkName("Pricing options")).toBe(
+      "Keep the link with Pricing options",
+    );
+  });
+  it("has a heading and says when it did not work", () => {
+    expect(LINKED_WITH).toBe("Linked with");
+    expect(UNLINK_FAILED).toBe("That didn't work. Try again.");
   });
 });

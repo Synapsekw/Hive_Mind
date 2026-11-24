@@ -138,7 +138,8 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 - **Inbox** — overlap suggestions, share proposals from agents, contradiction flags, quarantine
   releases. Each item: what, who, why, two actions. Built so far: proposed links waiting for
   your own answer (accept or decline) and your held notes (release or open in the vault), with
-  the number waiting on the rail.
+  the number waiting on the rail. Decline asks first: "Decline this link? It cannot be proposed
+  again." A declined pair of notes stays declined.
 - **Entities** — synthesis at the top with every fact citing its source on hover; contradictions
   pinned; linked notes and files below.
 - **Vault** — folder tree, note list, note preview. Visibility shown inline and changed in place;
@@ -147,7 +148,15 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   good, with its history and its links. Files attached to it stay in the gallery." with
   **Delete** and **Keep**; the second Delete counts only half a second after the question
   appears, as with the inbox's Decline. Afterwards the note's tab closes and a status line says
-  "Note deleted." A colleague's note has no Delete.
+  "Note deleted." A colleague's note has no Delete. A note with accepted links shows **Linked
+  with** under the sharing control: for each link the other note's title (which opens it in the
+  vault), its owner, and **Unlink**. A note with no accepted links shows no such heading.
+  Unlink asks in place, as Delete does: "Unlink these notes? You and (owner) will no longer
+  read each other's note through this link. The two notes cannot be linked again." with
+  **Unlink** and **Keep**. For two notes of your own it asks "Unlink these two notes of
+  yours?", and those two can be linked again later. Afterwards the page refreshes; if the open
+  note was a colleague's that you could read only through that link, it is gone and the vault
+  shows its "not found" state.
 - **Gallery** — previews of generated documents; mine, shared with me, whole hive; a full-screen
   viewer for PDF, PPTX, XLSX and images. Built so far: a card grid with image thumbnails, the
   viewer for images and PDFs, download for every file and delete for your own; PPTX and XLSX
@@ -166,18 +175,18 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 
 ## 5. Overlays and states
 
-| Overlay or state         | Behaviour                                                |
-| ------------------------ | -------------------------------------------------------- |
-| Command palette          | Searches notes, entities, files and actions              |
-| Share dialog             | Private, group or named members; shows what will change  |
-| Handshake                | Names the entity only; share or decline                  |
-| Contradiction resolver   | Two facts side by side with owners and dates             |
-| Token dialog             | Name, workspace, trust tier, expiry; token shown once    |
-| First run                | Empty map with the onboarding steps and a connect action |
-| Token revoked or expired | Inbox item with a regenerate action                      |
-| Write rejected           | Inbox item with the attempted path and the reason        |
-| Synthesis failed         | Entity page shows the last good version with a retry     |
-| Offline                  | Map freezes with a reconnect notice                      |
+| Overlay or state         | Behaviour                                                   |
+| ------------------------ | ----------------------------------------------------------- |
+| Command palette          | Searches notes, entities, files and actions                 |
+| Share dialog             | Private, group or named members; shows what will change     |
+| Handshake                | Names the entity only; share or decline; a decline is final |
+| Contradiction resolver   | Two facts side by side with owners and dates                |
+| Token dialog             | Name, workspace, trust tier, expiry; token shown once       |
+| First run                | Empty map with the onboarding steps and a connect action    |
+| Token revoked or expired | Inbox item with a regenerate action                         |
+| Write rejected           | Inbox item with the attempted path and the reason           |
+| Synthesis failed         | Entity page shows the last good version with a retry        |
+| Offline                  | Map freezes with a reconnect notice                         |
 
 ## 6. Accessibility
 
