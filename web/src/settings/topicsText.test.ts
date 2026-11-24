@@ -22,6 +22,25 @@ describe("the sentences of the Topics section", () => {
     expect(t.candidateNotes("client", 1)).toBeNull();
   });
 
+  it("lists a candidate's other names, or nothing", () => {
+    expect(t.alsoKnown(["Orbit Aerospace"])).toBe("also: Orbit Aerospace");
+    expect(t.alsoKnown(["A", "B", "C"])).toBe("also: A, B, C");
+    expect(t.alsoKnown([])).toBeNull();
+  });
+
+  it("puts the other names in a candidate's checkbox name, after the old format", () => {
+    expect(t.pickLabel("Customers", "Orbit")).toBe("Customers: Orbit");
+    expect(t.pickLabel("Customers", "Orbit", ["Orbit Aerospace", "OA"])).toBe(
+      "Customers: Orbit, also: Orbit Aerospace, OA",
+    );
+  });
+
+  it("tells the owner who will see a topic's names", () => {
+    expect(t.FOUND_NOTE).toMatch(
+      /Tick the ones this hive should have\. Every member of the hive can see a topic's name and its other names\.$/,
+    );
+  });
+
   it("says what a save did", () => {
     expect(t.saved(0)).toBe("Those topics were already there.");
     expect(t.saved(1)).toBe("1 topic saved.");

@@ -268,6 +268,7 @@ export function Topics({
                 <ul role="list" className={s.rows}>
                   {of.map(({ c, i }) => {
                     const extra = t.candidateNotes(c.kind, c.notes);
+                    const also = t.alsoKnown(c.aliases);
                     return (
                       <li key={i} className={s.item}>
                         <label className={s.text}>
@@ -275,7 +276,11 @@ export function Topics({
                             type="checkbox"
                             checked={stage.ticked.has(i)}
                             disabled={stage.saving}
-                            aria-label={t.pickLabel(t.KIND_NAMES[kind], c.name)}
+                            aria-label={t.pickLabel(
+                              t.KIND_NAMES[kind],
+                              c.name,
+                              c.aliases,
+                            )}
                             onChange={(e) => {
                               const ticked = new Set(stage.ticked);
                               if (e.currentTarget.checked) ticked.add(i);
@@ -285,6 +290,7 @@ export function Topics({
                           />{" "}
                           <span className={s.name}>{c.name}</span>
                           {extra && <span className={s.mark}>{extra}</span>}
+                          {also && <span className={s.meta}>{also}</span>}
                         </label>
                       </li>
                     );

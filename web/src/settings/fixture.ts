@@ -110,7 +110,7 @@ export function fixtureHeads(): NoteHead[] {
   return [
     {
       path: "Employers/Orbit/_Index.md",
-      title: "Orbit",
+      title: "Orbit Aerospace",
       type: "client-entity",
       aliases: [],
       tags: [],

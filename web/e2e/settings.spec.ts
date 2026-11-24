@@ -1538,6 +1538,13 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
   await expect(flare).not.toBeChecked();
   await expect(found.getByRole("checkbox", { name: /Zain/ })).toHaveCount(0);
   await expect(found).toContainText("tag on 5 notes");
+  // What is saved with a topic is shown, and so is who will see it.
+  await expect(found.getByText("also: Orbit Aerospace")).toBeVisible();
+  await expect(
+    found.getByText(
+      "Every member of the hive can see a topic's name and its other names.",
+    ),
+  ).toBeVisible();
 
   await found.getByRole("button", { name: "Save topics" }).click();
   await expect(found).toHaveCount(0);
@@ -1558,7 +1565,7 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
   expect(saves).toEqual([
     {
       name: "saveTopics",
-      args: [[{ kind: "client", name: "Orbit", aliases: [] }]],
+      args: [[{ kind: "client", name: "Orbit", aliases: ["Orbit Aerospace"] }]],
     },
   ]);
   // Both of the owner's workspaces were read, from the start.

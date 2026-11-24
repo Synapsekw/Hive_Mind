@@ -8,7 +8,7 @@ export const FIND = "Find topics in my notes";
 export const FINDING = "Reading your notes";
 export const FOUND = "Topics found in your notes";
 export const FOUND_NOTE =
-  "From notes that say what they are, folders with an index note, and tags on five or more notes. Tick the ones this hive should have.";
+  "From notes that say what they are, folders with an index note, and tags on five or more notes. Tick the ones this hive should have. Every member of the hive can see a topic's name and its other names.";
 export const NOTHING_NEW =
   "Nothing new found. Every topic your notes name is already here.";
 export const SCAN_FAILED = "Your notes could not be read. Try again.";
@@ -55,5 +55,15 @@ export function saved(n: number): string {
 
 export const deleteQuestion = (name: string) => `Delete the topic ${name}?`;
 export const deleted = (name: string) => `${name} deleted.`;
-export const pickLabel = (kindName: string, name: string) =>
-  `${kindName}: ${name}`;
+/** Under a candidate's name: the other names that are saved with it, or null for none. */
+export const alsoKnown = (aliases: string[]): string | null =>
+  aliases.length === 0 ? null : `also: ${aliases.join(", ")}`;
+
+export const pickLabel = (
+  kindName: string,
+  name: string,
+  aliases: string[] = [],
+) => {
+  const also = alsoKnown(aliases);
+  return `${kindName}: ${name}${also ? `, ${also}` : ""}`;
+};
