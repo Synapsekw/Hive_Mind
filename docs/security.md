@@ -21,21 +21,21 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 
 ## 2. Threat model
 
-| Threat                               | Example                                                                             | Control                                                                                                                                                                                                                                                         | Status   |
-| ------------------------------------ | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| Private note leaks across members    | A bug or prompt-injected agent reads a colleague's private folder                   | Row-level security; agents inherit member permissions; no service-role key in the agent path                                                                                                                                                                    | built    |
-| Stolen or leaked agent token         | Lost laptop, token pasted in a public repo                                          | Tokens hashed at rest, bound to one workspace, revocable per agent, last use recorded                                                                                                                                                                           | built    |
-| Over-sharing by an agent             | Agent writes client material into a shared folder by mistake                        | Private by default; agents can never set sharing; writes are versioned. A note an agent writes into a folder its owner shared is shared at once, unreviewed (accepted; the vault says so whenever a folder is shared)                                           | built    |
-| Sharing by moving a note             | Agent moves a private note into a shared folder                                     | Agents cannot change a note's path, and cannot change, rename or delete a folder record                                                                                                                                                                         | built    |
-| A sharing change with no trace       | Someone shares a folder and nobody can tell when or who                             | A person's changes to a note's own setting or a folder rule, releases of held notes, and moves that change who can read a note write one audit row each, readable by the hive owner only. Not yet recorded: a member's default visibility, and accepting a link | built    |
-| A connected app acting as the person | Claude or ChatGPT holds a pass that names the member, and uses it to change sharing | The database refuses an app's pass everywhere except the one function that swaps it for a limited agent identity (section 10)                                                                                                                                   | built    |
-| Untrusted self-hosted agent          | Open-source agent with no vendor safety layer                                       | Lower trust tier: reads shared notes only, writes are quarantined until the member releases them                                                                                                                                                                | built    |
-| Prompt injection via note content    | A shared note tells agents to exfiltrate data                                       | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine                                                                                                                                                               | partly   |
-| Departing member                     | Colleague leaves with access                                                        | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision                                                                                                                                                                           | designed |
-| Joining a hive unasked or uninvited  | A stranger signs up, or an owner adds a person who never agreed                     | Sign-ups off; an account exists only through an emailed invitation; a person becomes a member only by pressing Join, and only for their own confirmed email (section 3)                                                                                         | built    |
-| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs and the invitation mail function; secrets in a vault; MFA on the owner account                                                                                                                                         | designed |
-| Overlap detection as a side channel  | Notifications reveal what a colleague works on                                      | Notification names only the entity; content never moves before double accept; mute per folder                                                                                                                                                                   | designed |
-| The map as a side channel            | Locked dots show that a colleague has notes in a folder                             | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents                                                                                                                                                               | built    |
+| Threat                               | Example                                                                             | Control                                                                                                                                                                                                                                                                                    | Status   |
+| ------------------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| Private note leaks across members    | A bug or prompt-injected agent reads a colleague's private folder                   | Row-level security; agents inherit member permissions; no service-role key in the agent path                                                                                                                                                                                               | built    |
+| Stolen or leaked agent token         | Lost laptop, token pasted in a public repo                                          | Tokens hashed at rest, bound to one workspace, revocable per agent, last use recorded                                                                                                                                                                                                      | built    |
+| Over-sharing by an agent             | Agent writes client material into a shared folder by mistake                        | Private by default; agents can never set sharing; writes are versioned. A note an agent writes into a folder its owner shared is shared at once, unreviewed (accepted; the vault says so whenever a folder is shared)                                                                      | built    |
+| Sharing by moving a note             | Agent moves a private note into a shared folder                                     | Agents cannot change a note's path, and cannot change, rename or delete a folder record                                                                                                                                                                                                    | built    |
+| A sharing change with no trace       | Someone shares a folder and nobody can tell when or who                             | A person's changes to a note's own setting or a folder rule, releases of held notes, and moves that change who can read a note write one audit row each, readable by the hive owner only; so do accepting, declining and unlinking a link. Not yet recorded: a member's default visibility | built    |
+| A connected app acting as the person | Claude or ChatGPT holds a pass that names the member, and uses it to change sharing | The database refuses an app's pass everywhere except the one function that swaps it for a limited agent identity (section 10)                                                                                                                                                              | built    |
+| Untrusted self-hosted agent          | Open-source agent with no vendor safety layer                                       | Lower trust tier: reads shared notes only, writes are quarantined until the member releases them                                                                                                                                                                                           | built    |
+| Prompt injection via note content    | A shared note tells agents to exfiltrate data                                       | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine                                                                                                                                                                                          | partly   |
+| Departing member                     | Colleague leaves with access                                                        | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision                                                                                                                                                                                                      | designed |
+| Joining a hive unasked or uninvited  | A stranger signs up, or an owner adds a person who never agreed                     | Sign-ups off; an account exists only through an emailed invitation; a person becomes a member only by pressing Join, and only for their own confirmed email (section 3)                                                                                                                    | built    |
+| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs and the invitation mail function; secrets in a vault; MFA on the owner account                                                                                                                                                                    | designed |
+| Overlap detection as a side channel  | Notifications reveal what a colleague works on                                      | Notification names only the entity; content never moves before double accept; mute per folder                                                                                                                                                                                              | designed |
+| The map as a side channel            | Locked dots show that a colleague has notes in a folder                             | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents                                                                                                                                                                                          | built    |
 
 ## 3. Identity and tokens
 
@@ -279,6 +279,32 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   the decision (a note's or folder's visibility and named members, or releasing a held note);
   the database decides whether it is allowed. It never writes a note's text, path or owner.
 - Agents may create inbox proposals (share this note, link these notes); people act on them.
+- Links between notes:
+  - **One link per pair of notes**, in either direction. A second proposal for the same two
+    notes is refused by the database whichever note it starts from, for a person and for an
+    agent alike. The proposer is told `this link was declined` when the pair was declined or
+    unlinked, and `these notes already have a link` otherwise. The proposer owns one of the two
+    notes and could already read every link touching it, so the message tells them nothing new.
+  - **A decline is final.** A declined pair cannot be proposed again, by anyone, from either
+    side. Decline answers a proposal only: the database refuses it for an accepted link.
+  - **Unlink** is a separate action that ends an accepted link. Either owner of the two notes
+    can do it, in the vault, on the open note. The pair then counts as declined and cannot be
+    proposed again. The one exception is a link between two notes of the same owner, which
+    never needed a second person: unlinking removes it, and the two notes can be linked again.
+  - **Accept, Decline and Unlink are a person's decisions.** The database refuses all three for
+    any agent identity and for an app's pass, and no MCP tool offers them. The vault's Unlink
+    goes through a server action with the person's session cookie that sends only the link's
+    id, and the database decides.
+  - **Unlinking ends read access through that link at once.** Reading a colleague's note by
+    way of a link follows accepted links only, so the moment a link is unlinked each owner
+    stops reading the other's note through it. A note that is also shared in another way stays
+    readable in that way.
+  - The list of a note's accepted links in the vault is read through `note_links`, for people
+    only: at most 50 links of one note, and only for a member who owns a note on at least one
+    side.
+  - Known gaps: the colleague gets no notice when a link is declined or unlinked, and there is
+    no undo for either. A slip past the confirmation can only be mended by sharing the note in
+    another way.
 - Deleting a note is a person's decision, on their own notes only. The database refuses it for
   any agent identity and for anyone who is not the note's owner; no MCP tool offers it. The
   vault's Delete goes through a server action with the person's session cookie that sends only
@@ -336,7 +362,7 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - Built: these sharing changes by a person each write one row to `audit_log`: a note's own
   setting changed; a held note released; a folder rule set, changed, removed, renamed or deleted;
   a note moved by a person when that changes who can read it. Not yet recorded: a change to a
-  member's default visibility, and accepting a link. A row holds the hive, the person, the
+  member's default visibility. A row holds the hive, the person, the
   note id or the folder's path, and the settings before and after; never a note's text, title or
   path. Only the hive owner can read it, and there is no screen for it yet. Writes with no person
   behind them are not recorded.
@@ -348,6 +374,13 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   stay in the log. `member.invitation_emailed` is written when the database hands the address
   to the mail function, before the mail goes out, so a row does not prove delivery. The
   invitation itself keeps the time of the last one and how many were requested.
+- Built: a person's decisions about a link write one row each, with the action `link.accepted`
+  (the accept that completes the link; the first of the two accepts writes none),
+  `link.declined` (a proposal was declined) or `link.unlinked` (an accepted link was ended). A
+  row holds the hive, the person, that person's own note in the link and, in the detail, the
+  link's id and the other note's id; never a title, path or text. Declining a link that is
+  already declined changes nothing and writes no row. The link itself keeps when it ended and
+  who ended it.
 - Built: a note deleted by a person writes one row with the action `note.deleted`. It holds the
   note's id, the person, and two counts in the detail: the links removed and the files left
   without a note. Never the note's path, title or body. The row is written in the same
@@ -403,7 +436,7 @@ it in a Hive Mind window. Setup is in
   revoked. Then it returns the agent's ids and its trust tier. The connector signs the usual
   one-hour agent identity (the same claims `agent-session` writes, including the `session_id`
   that matches no session) and runs the tool with it. From there on the rules are those of any
-  agent: writes only in its workspace, never sharing, accepting a link or deleting.
+  agent: writes only in its workspace, never sharing, accepting or ending a link, or deleting.
 - **The database refuses the pass everywhere else.** A pass names a person, so without this rule
   an app could do what the person can, including change sharing. Every table in `public`, and
   stored files, has a restrictive policy that fails for an identity carrying `client_id`, and

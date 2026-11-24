@@ -60,10 +60,9 @@ all passed.
 
 ## Open threads
 
-- **Sign-ups are still open.** Left for Danijel in the Supabase dashboard: SMTP through Resend
-  for the project's own mails, code length 10 and lifetime 86400, then "Allow new users to sign
-  up" off, and one check that an uninvited address gets no account. Steps:
-  `docs/hosted-db-bringup.md`, "Invitation email".
+- **Sign-ups are closed** (done later the same day): SMTP through Resend, code length 10,
+  lifetime 86400, minimum password length 10, "Allow new users to sign up" off. An uninvited
+  address is refused, and an invitation was sent and joined afterwards.
 - The cause of the "wrong account stays signed in" report is likely, not proven: the site's
   session refresh and the new sign-in writing cookies on one response. Both that path and the
   general case are closed, and the retest passed.

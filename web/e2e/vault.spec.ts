@@ -10,7 +10,13 @@ import {
   DELETE_QUESTION,
   DELETED,
   folderSentence,
+  keepLinkName,
+  LINKED_WITH,
   noteSentence,
+  UNLINK_FAILED,
+  UNLINK_GROUP,
+  unlinkName,
+  unlinkQuestion,
 } from "../src/vault/sentences";
 import { setLook } from "./look";
 
@@ -521,11 +527,15 @@ test("your own note has Delete, a held one too; a colleague's has none", async (
   await expect(deleteButton(page)).toBeVisible();
 
   await open(page, "?tab=shared");
-  for (const title of ["Pricing options", "Site visit"]) {
-    await noteLinks(page).filter({ hasText: title }).click();
-    await expect(openTitle(page, title)).toBeVisible();
-    await expect(preview(page).getByRole("button")).toHaveCount(0);
-  }
+  await noteLinks(page).filter({ hasText: "Site visit" }).click();
+  await expect(openTitle(page, "Site visit")).toBeVisible();
+  await expect(preview(page).getByRole("button")).toHaveCount(0);
+  // Opened by a link: the link can be ended, the note cannot be deleted or shared.
+  await noteLinks(page).filter({ hasText: "Pricing options" }).click();
+  await expect(openTitle(page, "Pricing options")).toBeVisible();
+  await expect(deleteButton(page)).toHaveCount(0);
+  await expect(preview(page).getByRole("button")).toHaveCount(1);
+  await expect(preview(page).getByRole("button")).toHaveText("Unlink");
 });
 
 test("Delete asks first; Keep puts everything back", async ({ page }) => {
@@ -964,4 +974,318 @@ for (const look of LOOKS)
         expect(page_.across).toBe(false);
         if (size.width >= 1100) expect(page_.down).toBe(false);
       });
+  }
+
+// ---- Linked with, and Unlink ----
+
+const SHARED_DATA = fixtureVault(0, { tab: "shared" });
+const FINDINGS = idOf("Findings draft");
+const CALL_NOTES = idOf("Call notes");
+const PRICING = SHARED_DATA.notes.find(
+  (n) => n.title === "Pricing options",
+)!.id;
+const linksOf = (note: string) => {
+  const opened = fixtureVault(0, { note }).open;
+  if (!opened || !("note" in opened)) throw new Error(note);
+  return opened.links;
+};
+const [WITH_SARA, WITH_MINE] = linksOf(FINDINGS).map((l) => l.id) as [
+  string,
+  string,
+];
+const ASK_SARA = unlinkQuestion({ own: false, owner: "Sara" });
+const ASK_OWN = unlinkQuestion({ own: true, owner: "Danijel" });
+
+const linked = (page: Page) =>
+  preview(page).getByRole("region", { name: LINKED_WITH });
+const linkedRows = (page: Page) => linked(page).getByRole("listitem");
+const unlinkButton = (page: Page, title: string) =>
+  linked(page).getByRole("button", { name: unlinkName(title), exact: true });
+const keepLink = (page: Page, title: string) =>
+  linked(page).getByRole("button", { name: keepLinkName(title), exact: true });
+const unlinkQuestions = (page: Page) =>
+  linked(page).getByRole("group", { name: UNLINK_GROUP });
+
+/** Asks, waits out the guard and answers Unlink. */
+async function confirmUnlink(page: Page, title: string, sentence: string) {
+  await unlinkButton(page, title).click();
+  await expect(unlinkQuestions(page)).toContainText(sentence);
+  await page.waitForTimeout(600);
+  await unlinkButton(page, title).click();
+}
+
+test("an open note lists the notes it is linked with, under the sharing control", async ({
+  page,
+}) => {
+  await open(page, `?note=${FINDINGS}`);
+  await expect(
+    linked(page).getByRole("heading", { name: LINKED_WITH }),
+  ).toBeVisible();
+  await expect(linkedRows(page)).toHaveCount(2);
+  // The other note's title and its owner; one's own note says "You".
+  const sara = linkedRows(page).nth(0);
+  await expect(sara.getByRole("link")).toContainText("Pricing options");
+  await expect(sara.getByRole("link")).toContainText("Sara");
+  await expect(sara.getByRole("link")).toHaveAttribute(
+    "href",
+    `/dev/vault?note=${PRICING}`,
+  );
+  const own = linkedRows(page).nth(1);
+  await expect(own.getByRole("link")).toContainText("Call notes");
+  await expect(own.getByRole("link")).toContainText("You");
+  await expect(own.getByRole("link")).toHaveAttribute(
+    "href",
+    `/dev/vault?note=${CALL_NOTES}`,
+  );
+  for (const title of ["Pricing options", "Call notes"])
+    await expect(unlinkButton(page, title)).toHaveText("Unlink");
+  // After the sharing control and Delete, before the note's text.
+  const order = await page.evaluate(() => {
+    const at = (sel: string) => document.querySelector(sel)!;
+    const before = (a: Element, b: Element) =>
+      !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const list = at('section[aria-label="Note"] section');
+    return [
+      before(at('button[aria-label^="Sharing: "]'), list),
+      before(at('button[aria-label="Delete note"]'), list),
+      before(list, at('section[aria-label="Note"] article > :last-child')),
+    ];
+  });
+  expect(order).toEqual([true, true, true]);
+  expect(await calls(page)).toEqual([]);
+});
+
+test("a note with no links has no Linked with heading", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await expect(openTitle(page, "Readme")).toBeVisible();
+  await expect(linked(page)).toHaveCount(0);
+  await expect(preview(page).getByText(LINKED_WITH)).toHaveCount(0);
+  await expect(
+    preview(page).getByRole("button", { name: /^Unlink/ }),
+  ).toHaveCount(0);
+});
+
+test("a linked note's title opens that note in the vault", async ({ page }) => {
+  await open(page, `?note=${FINDINGS}`);
+  await linked(page)
+    .getByRole("link", { name: /Call notes/ })
+    .click();
+  await expect(openTitle(page, "Call notes")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`note=${CALL_NOTES}`));
+  // The same link, from its other side.
+  await expect(linkedRows(page)).toHaveCount(1);
+  await expect(linkedRows(page).getByRole("link")).toContainText(
+    "Findings draft",
+  );
+
+  // A colleague's note opens on the shared tab.
+  await open(page, `?note=${FINDINGS}`);
+  await linked(page)
+    .getByRole("link", { name: /Pricing options/ })
+    .click();
+  await expect(openTitle(page, "Pricing options")).toBeVisible();
+  await expect(tab(page, "Shared with me")).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+});
+
+test("Unlink asks first and names the colleague; Keep puts everything back", async ({
+  page,
+}) => {
+  await open(page, `?note=${FINDINGS}`);
+  await unlinkButton(page, "Pricing options").click();
+  await expect(unlinkQuestions(page)).toHaveCount(1);
+  await expect(unlinkQuestions(page)).toContainText(ASK_SARA);
+  await expect(unlinkQuestions(page)).toContainText("You and Sara");
+  await expect(unlinkButton(page, "Pricing options")).toHaveCount(1);
+  await expect(unlinkButton(page, "Pricing options")).toHaveText("Unlink");
+  await expect(keepLink(page, "Pricing options")).toHaveText("Keep");
+  // The safe answer holds the focus.
+  await expect(keepLink(page, "Pricing options")).toBeFocused();
+
+  await keepLink(page, "Pricing options").click();
+  await expect(unlinkQuestions(page)).toHaveCount(0);
+  await expect(unlinkButton(page, "Pricing options")).toBeFocused();
+  await expect(linkedRows(page)).toHaveCount(2);
+  await expect(status(page)).toHaveText("");
+  expect(await calls(page)).toEqual([]);
+});
+
+test("two notes of one's own are asked about plainly", async ({ page }) => {
+  await open(page, `?note=${FINDINGS}`);
+  await unlinkButton(page, "Call notes").click();
+  await expect(unlinkQuestions(page)).toContainText(ASK_OWN);
+  await expect(preview(page)).not.toContainText("cannot be linked again");
+  await keepLink(page, "Call notes").click();
+
+  // From the other side it is still two notes of one's own.
+  await open(page, `?note=${CALL_NOTES}`);
+  await unlinkButton(page, "Findings draft").click();
+  await expect(unlinkQuestions(page)).toContainText(ASK_OWN);
+});
+
+test("by keyboard: Unlink asks, Escape answers Keep", async ({ page }) => {
+  await open(page, `?note=${FINDINGS}`);
+  await unlinkButton(page, "Pricing options").focus();
+  await page.keyboard.press("Enter");
+  await expect(unlinkQuestions(page)).toContainText(ASK_SARA);
+  await expect(keepLink(page, "Pricing options")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(unlinkQuestions(page)).toHaveCount(0);
+  await expect(unlinkButton(page, "Pricing options")).toBeFocused();
+  // Unlink comes before Keep.
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Shift+Tab");
+  await expect(unlinkButton(page, "Pricing options")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(linkedRows(page)).toHaveCount(2);
+  expect(await calls(page)).toEqual([]);
+});
+
+test("a second press that lands on the question's Unlink ends nothing", async ({
+  page,
+}) => {
+  await open(page, `?note=${FINDINGS}`);
+  await unlinkButton(page, "Call notes").click();
+  // At once, as the second half of a double click would.
+  await unlinkButton(page, "Call notes").click();
+  await expect(unlinkQuestions(page)).toContainText(ASK_OWN);
+  await expect(linkedRows(page)).toHaveCount(2);
+  expect(await calls(page)).toEqual([]);
+});
+
+test("a second, deliberate Unlink removes the row and leaves the other", async ({
+  page,
+}) => {
+  await open(page, `?note=${FINDINGS}`);
+  await confirmUnlink(page, "Pricing options", ASK_SARA);
+  await expect(linkedRows(page)).toHaveCount(1);
+  await expect(linkedRows(page).getByRole("link")).toContainText("Call notes");
+  await expect(unlinkQuestions(page)).toHaveCount(0);
+  await expect(openTitle(page, "Findings draft")).toBeVisible();
+  await expect(status(page)).toHaveText("");
+  expect(await calls(page)).toEqual([{ name: "unlink", args: [WITH_SARA] }]);
+  // The focus is not lost with the row: it is on the open note in the list.
+  await expect(
+    noteLinks(page).filter({ hasText: "Findings draft" }),
+  ).toBeFocused();
+
+  // The last link gone, the heading goes too.
+  await confirmUnlink(page, "Call notes", ASK_OWN);
+  await expect(linked(page)).toHaveCount(0);
+  await expect(preview(page).getByText(LINKED_WITH)).toHaveCount(0);
+  await expect(openTitle(page, "Findings draft")).toBeVisible();
+  expect(await calls(page)).toEqual([
+    { name: "unlink", args: [WITH_SARA] },
+    { name: "unlink", args: [WITH_MINE] },
+  ]);
+});
+
+test("a refused unlink says so, keeps the row and closes the question", async ({
+  page,
+}) => {
+  await open(page, `?fail=1&note=${FINDINGS}`);
+  await confirmUnlink(page, "Pricing options", ASK_SARA);
+  await expect(status(page)).toHaveText(UNLINK_FAILED);
+  await expect(status(page)).toBeVisible();
+  await expect(unlinkQuestions(page)).toHaveCount(0);
+  await expect(unlinkButton(page, "Pricing options")).toBeFocused();
+  await expect(linkedRows(page)).toHaveCount(2);
+  expect(await calls(page)).toEqual([{ name: "unlink", args: [WITH_SARA] }]);
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByText(UNLINK_FAILED)).toHaveCount(1);
+});
+
+test("while an unlink runs, neither answer nor Escape does anything", async ({
+  page,
+}) => {
+  await open(page, `?slow=1&note=${FINDINGS}`);
+  await confirmUnlink(page, "Pricing options", ASK_SARA);
+  await expect(unlinkQuestions(page)).toHaveAttribute("aria-busy", "true");
+  await expect(unlinkButton(page, "Pricing options")).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await expect(keepLink(page, "Pricing options")).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+
+  await keepLink(page, "Pricing options").evaluate((el: HTMLElement) =>
+    el.click(),
+  );
+  await page.keyboard.press("Escape");
+  await unlinkButton(page, "Pricing options").evaluate((el: HTMLElement) =>
+    el.click(),
+  );
+  // Still asked, still running, still one request.
+  await expect(unlinkQuestions(page)).toHaveAttribute("aria-busy", "true");
+  await expect(linkedRows(page)).toHaveCount(2);
+  expect(await calls(page)).toEqual([{ name: "unlink", args: [WITH_SARA] }]);
+
+  await expect(linkedRows(page)).toHaveCount(1);
+  expect(await calls(page)).toEqual([{ name: "unlink", args: [WITH_SARA] }]);
+});
+
+test("unlinking a colleague's note read only through the link names its owner, and the note is gone", async ({
+  page,
+}) => {
+  await open(page, `?note=${PRICING}`);
+  await expect(openTitle(page, "Pricing options")).toBeVisible();
+  await expect(linkedRows(page)).toHaveCount(1);
+  await expect(linkedRows(page).getByRole("link")).toContainText(
+    "Findings draft",
+  );
+  await expect(linkedRows(page).getByRole("link")).toContainText("You");
+  await confirmUnlink(page, "Findings draft", ASK_SARA);
+  await expect(preview(page)).toContainText("That note isn't available.");
+  await expect(linked(page)).toHaveCount(0);
+  await expect(
+    noteLinks(page).filter({ hasText: "Pricing options" }),
+  ).toHaveCount(0);
+  expect(await calls(page)).toEqual([{ name: "unlink", args: [WITH_SARA] }]);
+});
+
+test("opening another note closes a pending unlink question", async ({
+  page,
+}) => {
+  await open(page, `?note=${FINDINGS}`);
+  await unlinkButton(page, "Call notes").click();
+  await expect(unlinkQuestions(page)).toHaveCount(1);
+  await noteLinks(page).filter({ hasText: "Client list" }).click();
+  await expect(openTitle(page, "Client list")).toBeVisible();
+  await noteLinks(page).filter({ hasText: "Findings draft" }).click();
+  await expect(openTitle(page, "Findings draft")).toBeVisible();
+  await expect(linkedRows(page)).toHaveCount(2);
+  await expect(unlinkQuestions(page)).toHaveCount(0);
+  expect(await calls(page)).toEqual([]);
+});
+
+for (const look of LOOKS)
+  for (const size of [
+    { width: 1100, height: 560 },
+    { width: 390, height: 800 },
+  ]) {
+    test(`at ${size.width} x ${size.height} the unlink question keeps both answers reachable${named(look)}`, async ({
+      page,
+      context,
+    }) => {
+      if (look) await setLook(context, look);
+      await page.setViewportSize(size);
+      await open(page, `?note=${FINDINGS}`);
+      await unlinkButton(page, "Pricing options").click();
+      await expect(unlinkQuestions(page)).toContainText(ASK_SARA);
+      for (const button of [
+        unlinkButton(page, "Pricing options"),
+        keepLink(page, "Pricing options"),
+        unlinkButton(page, "Call notes"),
+      ]) {
+        await button.scrollIntoViewIfNeeded();
+        expect(await button.evaluate(inView)).toBe(true);
+      }
+      const page_ = await scrolls(page);
+      expect(page_.across).toBe(false);
+      if (size.width >= 1100) expect(page_.down).toBe(false);
+    });
   }

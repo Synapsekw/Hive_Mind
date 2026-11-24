@@ -2462,6 +2462,676 @@ test("each inbox list is the newest 100 and the totals count everything", async 
   assert.ok(!i.held.some((n) => n.title === "ib bulk held 1"));
 });
 
+// --------------------------------------------------------- link behaviours
+// One link per pair of notes, whichever way it points. A decline is final and
+// answers a proposal only; ending an accepted link is unlink(). note_links()
+// lists a note's accepted links for the vault. Every test makes its own notes.
+
+const lbNote = (name, tag, n = "a", extra = {}) =>
+  addAt(
+    person(name),
+    name,
+    `lb/${tag}/${name}-${n}.md`,
+    `lb ${tag} ${name} ${n}`,
+    extra,
+  );
+// A note of Dani's and one of Ahmed's.
+const lbPair = async (tag) => [
+  await lbNote("dani", tag),
+  await lbNote("ahmed", tag),
+];
+// The same two, linked and accepted by both: Dani proposed, Ahmed accepted.
+const lbAccepted = async (tag) => {
+  const [mine, theirs] = await lbPair(tag);
+  const link = await propose(person("dani"), mine, theirs);
+  assert.equal(await respond(person("ahmed"), link, true), "accepted");
+  return { mine, theirs, link };
+};
+const linkRow = async (id) =>
+  (await db.query(`select * from public.links where id = $1`, [id])).rows[0];
+const unlink = (who, link) => as(who, `select public.unlink($1)`, [link]);
+const noteLinks = (who, note) =>
+  as(who, `select * from public.note_links($1)`, [note]);
+const linkAudits = async (since) =>
+  (await auditSince(since)).filter((r) => r.action.startsWith("link."));
+const DECLINED = /^error: this link was declined$/;
+const HAS_LINK = /^error: these notes already have a link$/;
+const NOT_ACCEPTED = /^error: this link is not accepted$/;
+const LINK_NOT_FOUND = /^error: link not found$/;
+const PEOPLE_UNLINK = /^error: only a person can unlink notes$/;
+
+test("a declined pair cannot be proposed again, from either side", async () => {
+  const [mine, theirs] = await lbPair("declined");
+  const link = await propose(person("dani"), mine, theirs);
+  assert.equal(await respond(person("ahmed"), link, false), "declined");
+
+  await assert.rejects(propose(person("ahmed"), theirs, mine), DECLINED);
+  await assert.rejects(propose(person("dani"), mine, theirs), DECLINED);
+  assert.equal((await linkRow(link)).status, "declined");
+  const rows = await db.query(
+    `select id from public.links where from_note in ($1, $2) or to_note in ($1, $2)`,
+    [mine, theirs],
+  );
+  assert.deepEqual(rows.rows, [{ id: link }]);
+});
+
+test("a pair with a proposed or an accepted link takes no second one", async () => {
+  const [mine, theirs] = await lbPair("second");
+  const link = await propose(person("dani"), mine, theirs);
+  await assert.rejects(propose(person("ahmed"), theirs, mine), HAS_LINK);
+  await assert.rejects(propose(person("dani"), mine, theirs), HAS_LINK);
+
+  assert.equal(await respond(person("ahmed"), link, true), "accepted");
+  await assert.rejects(propose(person("ahmed"), theirs, mine), HAS_LINK);
+  await assert.rejects(propose(person("dani"), mine, theirs), HAS_LINK);
+  assert.equal((await linkRow(link)).status, "accepted");
+});
+
+test("an agent cannot propose a declined pair again either", async () => {
+  const [mine, theirs] = await lbPair("agent");
+  const link = await propose(await agentFor("dani"), mine, theirs);
+  assert.equal(await respond(person("ahmed"), link, false), "declined");
+
+  await assert.rejects(
+    propose(await agentFor("ahmed"), theirs, mine),
+    DECLINED,
+  );
+  await assert.rejects(propose(await agentFor("dani"), mine, theirs), DECLINED);
+});
+
+test("the pair index refuses a reversed row when the trigger does not run", async () => {
+  const [mine, theirs] = await lbPair("index");
+  await propose(person("dani"), mine, theirs);
+  await db.exec("reset role");
+  await db.exec("set session_replication_role = replica");
+  try {
+    await assert.rejects(
+      db.query(
+        `insert into public.links (hive_id, from_note, to_note, tier, score)
+         values ($1, $2, $3, 3, 0.5)`,
+        [hive, theirs, mine],
+      ),
+      /links_pair_idx/,
+    );
+  } finally {
+    await db.exec("set session_replication_role = origin");
+  }
+  const index = (
+    await db.query(
+      `select indexdef from pg_indexes
+        where schemaname = 'public' and indexname = 'links_pair_idx'`,
+    )
+  ).rows[0].indexdef;
+  assert.match(index, /UNIQUE/);
+  assert.match(
+    index,
+    /LEAST\(from_note, to_note\), GREATEST\(from_note, to_note\)/,
+  );
+});
+
+test("only an owner of one of the two notes is told a pair has a link", async () => {
+  const [mine, theirs] = await lbPair("oracle");
+  const link = await propose(person("dani"), mine, theirs);
+  const insert = `insert into public.links (hive_id, from_note, to_note, tier, score)
+                  values ($1, $2, $3, 3, 0.5)`;
+  const told = /this link was declined|these notes already have a link/;
+  const probe = async (what) => {
+    for (const [who, role] of [
+      [person("sara")],
+      [person("outsider")],
+      [await agentFor("sara")],
+      [passOf(person("dani"))],
+      [passOf(person("sara"))],
+      [null, "anon"],
+    ])
+      for (const [from, to] of [
+        [mine, theirs],
+        [theirs, mine],
+      ]) {
+        const r = await trial(who, insert, [hive, from, to], role);
+        assert.ok(r.error, `${what}: a stranger made a link`);
+        assert.doesNotMatch(r.error.message, told, what);
+      }
+  };
+  await probe("proposed");
+  assert.equal(await respond(person("ahmed"), link, false), "declined");
+  await probe("declined");
+  // A pair with no link at all answers a stranger the same way.
+  const [free1, free2] = await lbPair("oracle-free");
+  const none = await trial(person("sara"), insert, [hive, free1, free2]);
+  const some = await trial(person("sara"), insert, [hive, mine, theirs]);
+  assert.equal(none.error.message, some.error.message);
+});
+
+test("a proposer cannot stamp a link as ended", async () => {
+  const [mine, theirs] = await lbPair("stamp");
+  const link = (
+    await as(
+      person("dani"),
+      `insert into public.links (hive_id, from_note, to_note, tier, score, ended_at, ended_by)
+       values ($1, $2, $3, 3, 0.5, now(), $4) returning id`,
+      [hive, mine, theirs, members.ahmed],
+    )
+  )[0].id;
+  const row = await linkRow(link);
+  assert.equal(row.status, "proposed");
+  assert.equal(row.ended_at, null);
+  assert.equal(row.ended_by, null);
+});
+
+test("declining an accepted link is refused and the link stays", async () => {
+  const { mine, theirs, link } = await lbAccepted("keep");
+  const mark = await lastAudit();
+  for (const who of ["dani", "ahmed"])
+    await assert.rejects(
+      respond(person(who), link, false),
+      /^error: this link is accepted; unlink it instead$/,
+      who,
+    );
+  const row = await linkRow(link);
+  assert.equal(row.status, "accepted");
+  assert.equal(row.ended_at, null);
+  assert.equal(row.ended_by, null);
+  assert.equal(await canRead(person("dani"), theirs), true);
+  assert.equal(await canRead(person("ahmed"), mine), true);
+  assert.deepEqual(await linkAudits(mark), []);
+});
+
+test("declining twice changes nothing the second time", async () => {
+  const [mine, theirs] = await lbPair("twice");
+  const link = await propose(person("dani"), mine, theirs);
+  const mark = await lastAudit();
+  assert.equal(await respond(person("ahmed"), link, false), "declined");
+  const first = await linkRow(link);
+  assert.equal(await respond(person("ahmed"), link, false), "declined");
+  // The other owner's decline of it is the same no-op.
+  assert.equal(await respond(person("dani"), link, false), "declined");
+  assert.deepEqual(await linkRow(link), first);
+  assert.equal(first.ended_by, members.ahmed);
+  const audits = await linkAudits(mark);
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].action, "link.declined");
+  // And it still cannot be accepted.
+  await assert.rejects(respond(person("dani"), link, true), DECLINED);
+});
+
+test("a decline is stamped and leaves one audit row", async () => {
+  const [mine, theirs] = await lbPair("stamped");
+  const link = await propose(person("dani"), mine, theirs);
+  const mark = await lastAudit();
+  assert.equal(await respond(person("ahmed"), link, false), "declined");
+  const row = await linkRow(link);
+  assert.equal(row.status, "declined");
+  assert.ok(row.ended_at instanceof Date);
+  assert.equal(row.ended_by, members.ahmed);
+  assert.deepEqual(await linkAudits(mark), [
+    {
+      id: mark + 1,
+      hive_id: hive,
+      member_id: members.ahmed,
+      agent_id: null,
+      action: "link.declined",
+      note_id: theirs,
+      detail: { link, other_note: mine },
+    },
+  ]);
+
+  // The proposer may take their own proposal back: the same decline.
+  const [mine2, theirs2] = await lbPair("stamped-back");
+  const link2 = await propose(person("dani"), mine2, theirs2);
+  const mark2 = await lastAudit();
+  assert.equal(await respond(person("dani"), link2, false), "declined");
+  assert.equal((await linkRow(link2)).ended_by, members.dani);
+  const audits = await linkAudits(mark2);
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].member_id, members.dani);
+  assert.equal(audits[0].note_id, mine2);
+  assert.deepEqual(audits[0].detail, { link: link2, other_note: theirs2 });
+});
+
+test("the accept that completes a link leaves one audit row", async () => {
+  const [mine, theirs] = await lbPair("completes");
+  // Proposed by an agent: neither side has accepted.
+  const link = await propose(await agentFor("dani"), mine, theirs);
+  const mark = await lastAudit();
+  assert.equal(await respond(person("dani"), link, true), "proposed");
+  assert.equal(await respond(person("dani"), link, true), "proposed");
+  assert.deepEqual(await linkAudits(mark), []);
+
+  assert.equal(await respond(person("ahmed"), link, true), "accepted");
+  assert.deepEqual(await linkAudits(mark), [
+    {
+      id: mark + 1,
+      hive_id: hive,
+      member_id: members.ahmed,
+      agent_id: null,
+      action: "link.accepted",
+      note_id: theirs,
+      detail: { link, other_note: mine },
+    },
+  ]);
+  const row = await linkRow(link);
+  assert.equal(row.ended_at, null);
+  assert.equal(row.ended_by, null);
+  // Accepting an accepted link again says so and writes nothing.
+  assert.equal(await respond(person("dani"), link, true), "accepted");
+  assert.equal(await respond(person("ahmed"), link, true), "accepted");
+  assert.equal((await linkAudits(mark)).length, 1);
+  assert.deepEqual(await linkRow(link), row);
+});
+
+test("either owner unlinks, and the two notes close to each other at once", async () => {
+  const onMap = async (who, l) =>
+    (await map(who)).links.some((x) => x.from === l.mine && x.to === l.theirs);
+  for (const [tag, who, own, other] of [
+    ["unlink-from", "dani", "mine", "theirs"],
+    ["unlink-to", "ahmed", "theirs", "mine"],
+  ]) {
+    const l = await lbAccepted(tag);
+    assert.equal(await canRead(person("dani"), l.theirs), true, tag);
+    assert.equal(await canRead(person("ahmed"), l.mine), true, tag);
+    assert.equal(await onMap(person("dani"), l), true, tag);
+    assert.equal(await onMap(person("ahmed"), l), true, tag);
+
+    const mark = await lastAudit();
+    await unlink(person(who), l.link);
+
+    assert.equal(await canRead(person("dani"), l.theirs), false, tag);
+    assert.equal(await canRead(person("ahmed"), l.mine), false, tag);
+    assert.ok(!(await titles(person("dani"))).includes(`lb ${tag} ahmed a`));
+    assert.ok(!(await titles(person("ahmed"))).includes(`lb ${tag} dani a`));
+    assert.equal(await onMap(person("dani"), l), false, tag);
+    assert.equal(await onMap(person("ahmed"), l), false, tag);
+    // Each still reads their own.
+    assert.equal(await canRead(person("dani"), l.mine), true, tag);
+    assert.equal(await canRead(person("ahmed"), l.theirs), true, tag);
+
+    const row = await linkRow(l.link);
+    assert.equal(row.status, "declined", tag);
+    assert.ok(row.ended_at instanceof Date, tag);
+    assert.equal(row.ended_by, members[who], tag);
+    assert.deepEqual(
+      await linkAudits(mark),
+      [
+        {
+          id: mark + 1,
+          hive_id: hive,
+          member_id: members[who],
+          agent_id: null,
+          action: "link.unlinked",
+          note_id: l[own],
+          detail: { link: l.link, other_note: l[other] },
+        },
+      ],
+      tag,
+    );
+    // Unlinked is not accepted: a second unlink is refused and writes nothing.
+    for (const again of ["dani", "ahmed"])
+      await assert.rejects(unlink(person(again), l.link), NOT_ACCEPTED, tag);
+    assert.equal((await linkAudits(mark)).length, 1, tag);
+  }
+});
+
+test("only a person who owns one of the two notes unlinks, and only an accepted link", async () => {
+  const l = await lbAccepted("refused");
+  const mark = await lastAudit();
+  for (const name of ["dani", "ahmed"]) {
+    await assert.rejects(
+      unlink(await agentFor(name), l.link),
+      PEOPLE_UNLINK,
+      `${name}'s agent`,
+    );
+    await assert.rejects(
+      unlink(await agentFor(name, "self_hosted"), l.link),
+      PEOPLE_UNLINK,
+      `${name}'s self-hosted agent`,
+    );
+    await assert.rejects(
+      unlink(passOf(person(name)), l.link),
+      PASS_REFUSED,
+      `${name}'s app`,
+    );
+  }
+  // A claim of self-hosted with no agent behind it is not a person either.
+  await assert.rejects(unlink(selfHosted("dani"), l.link), PEOPLE_UNLINK);
+  // A member who owns neither note, a person of another hive, and a link that
+  // is not there get the same answer.
+  await assert.rejects(unlink(person("sara"), l.link), LINK_NOT_FOUND);
+  await assert.rejects(unlink(person("outsider"), l.link), LINK_NOT_FOUND);
+  await assert.rejects(
+    as(person("dani"), `select public.unlink(gen_random_uuid())`),
+    LINK_NOT_FOUND,
+  );
+  await assert.rejects(
+    as(person("dani"), `select public.unlink(null)`),
+    LINK_NOT_FOUND,
+  );
+  await assert.rejects(unlink(null, l.link), /permission denied/);
+
+  const row = await linkRow(l.link);
+  assert.equal(row.status, "accepted");
+  assert.equal(row.ended_at, null);
+  assert.equal(await canRead(person("ahmed"), l.mine), true);
+  assert.deepEqual(await linkAudits(mark), []);
+
+  const [p1, p2] = await lbPair("refused-proposed");
+  const proposed = await propose(person("dani"), p1, p2);
+  for (const who of ["dani", "ahmed"])
+    await assert.rejects(unlink(person(who), proposed), NOT_ACCEPTED);
+  // Sara is not told whether it is accepted.
+  await assert.rejects(unlink(person("sara"), proposed), LINK_NOT_FOUND);
+  assert.equal((await linkRow(proposed)).status, "proposed");
+
+  assert.equal(await respond(person("ahmed"), proposed, false), "declined");
+  const declined = await linkRow(proposed);
+  for (const who of ["dani", "ahmed"])
+    await assert.rejects(unlink(person(who), proposed), NOT_ACCEPTED);
+  assert.deepEqual(await linkRow(proposed), declined);
+});
+
+test("an unlinked pair cannot be proposed again, from either side", async () => {
+  const l = await lbAccepted("final");
+  await unlink(person("dani"), l.link);
+  await assert.rejects(propose(person("dani"), l.mine, l.theirs), DECLINED);
+  await assert.rejects(propose(person("ahmed"), l.theirs, l.mine), DECLINED);
+  await assert.rejects(
+    propose(await agentFor("ahmed"), l.theirs, l.mine),
+    DECLINED,
+  );
+  // Nor accepted again.
+  await assert.rejects(respond(person("ahmed"), l.link, true), DECLINED);
+  await assert.rejects(respond(person("dani"), l.link, true), DECLINED);
+  assert.equal(await canRead(person("ahmed"), l.mine), false);
+});
+
+test("unlinking two notes of one owner removes the link, and they can be linked again", async () => {
+  const one = await lbNote("dani", "own", "one");
+  const two = await lbNote("dani", "own", "two");
+  const link = await propose(person("dani"), one, two);
+  assert.equal((await linkRow(link)).status, "accepted");
+  // A second one is refused like any other pair.
+  await assert.rejects(propose(person("dani"), two, one), HAS_LINK);
+  // Declining it is not the way to end it.
+  await assert.rejects(
+    respond(person("dani"), link, false),
+    /unlink it instead/,
+  );
+  // Nobody else can end it.
+  await assert.rejects(unlink(person("ahmed"), link), LINK_NOT_FOUND);
+
+  const mark = await lastAudit();
+  await unlink(person("dani"), link);
+  assert.equal(await linkRow(link), undefined);
+  assert.deepEqual(await linkAudits(mark), [
+    {
+      id: mark + 1,
+      hive_id: hive,
+      member_id: members.dani,
+      agent_id: null,
+      action: "link.unlinked",
+      note_id: one,
+      detail: { link, other_note: two },
+    },
+  ]);
+  await assert.rejects(unlink(person("dani"), link), LINK_NOT_FOUND);
+
+  const again = await propose(person("dani"), two, one);
+  assert.notEqual(again, link);
+  assert.equal((await linkRow(again)).status, "accepted");
+});
+
+test("note_links lists a note's accepted links to each owner", async () => {
+  const l = await lbAccepted("list");
+  const own = await lbNote("dani", "list", "own");
+  const ownLink = await propose(person("dani"), l.mine, own);
+
+  // Dani, on Dani's note: Ahmed's note, and the other note of Dani's.
+  const dani = await noteLinks(person("dani"), l.mine);
+  assert.deepEqual(
+    dani.toSorted((x, y) => x.title.localeCompare(y.title)),
+    [
+      {
+        id: l.link,
+        note_id: l.theirs,
+        title: "lb list ahmed a",
+        owner: "Ahmed",
+        mine: false,
+      },
+      {
+        id: ownLink,
+        note_id: own,
+        title: "lb list dani own",
+        owner: "Dani",
+        mine: true,
+      },
+    ],
+  );
+  // Ahmed, on Ahmed's note: Dani's note.
+  assert.deepEqual(await noteLinks(person("ahmed"), l.theirs), [
+    {
+      id: l.link,
+      note_id: l.mine,
+      title: "lb list dani a",
+      owner: "Dani",
+      mine: false,
+    },
+  ]);
+  // Each on the other's note, which the link lets them open: their own note
+  // on the far side, and not the links that note has with anyone else.
+  assert.deepEqual(await noteLinks(person("ahmed"), l.mine), [
+    {
+      id: l.link,
+      note_id: l.theirs,
+      title: "lb list ahmed a",
+      owner: "Ahmed",
+      mine: true,
+    },
+  ]);
+  assert.deepEqual(await noteLinks(person("dani"), l.theirs), [
+    {
+      id: l.link,
+      note_id: l.mine,
+      title: "lb list dani a",
+      owner: "Dani",
+      mine: true,
+    },
+  ]);
+  // The other side of the same-owner link.
+  assert.deepEqual(await noteLinks(person("dani"), own), [
+    {
+      id: ownLink,
+      note_id: l.mine,
+      title: "lb list dani a",
+      owner: "Dani",
+      mine: true,
+    },
+  ]);
+
+  // After an unlink the list is empty for both.
+  await unlink(person("ahmed"), l.link);
+  assert.deepEqual(await noteLinks(person("ahmed"), l.theirs), []);
+  assert.deepEqual(await noteLinks(person("ahmed"), l.mine), []);
+  assert.deepEqual(
+    (await noteLinks(person("dani"), l.mine)).map((r) => r.id),
+    [ownLink],
+  );
+  await unlink(person("dani"), ownLink);
+  assert.deepEqual(await noteLinks(person("dani"), l.mine), []);
+});
+
+test("note_links lists nothing that is proposed or declined", async () => {
+  const [mine, theirs] = await lbPair("waiting");
+  const link = await propose(person("dani"), mine, theirs);
+  for (const state of ["proposed", "declined"]) {
+    assert.equal((await linkRow(link)).status, state);
+    assert.deepEqual(await noteLinks(person("dani"), mine), [], state);
+    assert.deepEqual(await noteLinks(person("dani"), theirs), [], state);
+    assert.deepEqual(await noteLinks(person("ahmed"), theirs), [], state);
+    assert.deepEqual(await noteLinks(person("ahmed"), mine), [], state);
+    if (state === "proposed") await respond(person("ahmed"), link, false);
+  }
+});
+
+test("note_links tells nothing to anyone who owns neither note", async () => {
+  // Both notes are open to the whole group, so Sara can read them: she still
+  // does not own a side of the link.
+  const mine = await lbNote("dani", "narrow", "a", { visibility: "group" });
+  const theirs = await lbNote("ahmed", "narrow", "a", { visibility: "group" });
+  const link = await propose(person("dani"), mine, theirs);
+  assert.equal(await respond(person("ahmed"), link, true), "accepted");
+  assert.equal((await noteLinks(person("dani"), mine)).length, 1);
+  assert.equal(await canRead(person("sara"), mine), true);
+
+  for (const note of [mine, theirs]) {
+    for (const [what, who] of [
+      ["a third member", person("sara")],
+      ["another hive", person("outsider")],
+      ["Dani's agent", await agentFor("dani")],
+      ["Ahmed's agent", await agentFor("ahmed")],
+      ["Dani's self-hosted agent", await agentFor("dani", "self_hosted")],
+      ["a self-hosted claim", selfHosted("dani")],
+      ["Dani's app", passOf(person("dani"))],
+      ["Ahmed's app", passOf(person("ahmed"))],
+    ])
+      assert.deepEqual(await noteLinks(who, note), [], what);
+    await assert.rejects(noteLinks(null, note), /permission denied/);
+  }
+  assert.deepEqual(
+    await as(person("dani"), `select * from public.note_links(null)`),
+    [],
+  );
+  assert.deepEqual(
+    await as(
+      person("dani"),
+      `select * from public.note_links(gen_random_uuid())`,
+    ),
+    [],
+  );
+});
+
+test("note_links does not name a note that is held", async () => {
+  const l = await lbAccepted("held");
+  assert.equal((await noteLinks(person("dani"), l.mine)).length, 1);
+  // Ahmed's note is held for review: Dani cannot read it, link or no link.
+  await asDbOwner(
+    null,
+    `update public.notes set quarantined = true where id = $1`,
+    [l.theirs],
+  );
+  assert.equal(await canRead(person("dani"), l.theirs), false);
+  for (const note of [l.mine, l.theirs]) {
+    const rows = await noteLinks(person("dani"), note);
+    assert.deepEqual(rows, [], JSON.stringify(rows));
+  }
+  // Ahmed reads both, and still sees the link from his side.
+  assert.deepEqual(
+    (await noteLinks(person("ahmed"), l.theirs)).map((r) => r.title),
+    ["lb held dani a"],
+  );
+  await release(person("ahmed"), l.theirs);
+  assert.deepEqual(
+    (await noteLinks(person("dani"), l.mine)).map((r) => r.title),
+    ["lb held ahmed a"],
+  );
+});
+
+test("note_links gives the 50 newest", async () => {
+  const hub = await lbNote("dani", "many", "hub");
+  await db.exec("reset role");
+  await db.query(`select set_config('request.jwt.claims', '', false)`);
+  await db.query(
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     select $1, $2, $3, 'lb/many/n-' || g || '.md', 'lb many ' || g
+       from generate_series(1, 52) g`,
+    [hive, members.dani, ws.dani],
+  );
+  // Odd ones point at the hub, even ones away from it. 51 and 52 share a time.
+  await db.query(
+    `insert into public.links (hive_id, from_note, to_note, tier, score, created_at)
+     select $1,
+            case when n.g % 2 = 1 then n.id else $2 end,
+            case when n.g % 2 = 1 then $2 else n.id end,
+            4, 0.1,
+            timestamptz '2001-01-01' + least(n.g, 51) * interval '1 second'
+       from (select id, substring(path from 'n-(\\d+)')::int as g
+               from public.notes where path like 'lb/many/n-%') n`,
+    [hive, hub],
+  );
+  const total = await db.query(
+    `select id from public.links
+      where status = 'accepted' and (from_note = $1 or to_note = $1)
+      order by created_at desc, id`,
+    [hub],
+  );
+  assert.equal(total.rows.length, 52);
+
+  const rows = await noteLinks(person("dani"), hub);
+  assert.equal(rows.length, 50);
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    total.rows.slice(0, 50).map((r) => r.id),
+  );
+  const numbers = rows.map((r) => Number(r.title.replace("lb many ", "")));
+  assert.deepEqual(
+    numbers.slice(0, 2).toSorted((x, y) => x - y),
+    [51, 52],
+  );
+  assert.deepEqual(
+    numbers.slice(2),
+    Array.from({ length: 48 }, (_, k) => 50 - k),
+  );
+  for (const r of rows) {
+    assert.equal(r.mine, true);
+    assert.equal(r.owner, "Dani");
+    assert.notEqual(r.note_id, hub);
+  }
+});
+
+test("unlink and note_links are for signed-in callers only", async () => {
+  const acl = (
+    await db.query(
+      `select p.proname as name, p.prosecdef as definer, p.proconfig as config,
+              pg_get_function_identity_arguments(p.oid) as args,
+              has_function_privilege('anon', p.oid, 'execute') as anon,
+              has_function_privilege('public', p.oid, 'execute') as everyone,
+              has_function_privilege('authenticated', p.oid, 'execute') as signed_in
+         from pg_proc p
+        where p.pronamespace = 'public'::regnamespace
+          and p.proname in ('unlink', 'note_links', 'respond_to_link')
+        order by 1`,
+    )
+  ).rows;
+  const signedInOnly = {
+    definer: true,
+    config: ['search_path=""'],
+    anon: false,
+    everyone: false,
+    signed_in: true,
+  };
+  assert.deepEqual(acl, [
+    { name: "note_links", args: "p_note uuid", ...signedInOnly },
+    {
+      name: "respond_to_link",
+      args: "p_link uuid, p_accept boolean",
+      ...signedInOnly,
+    },
+    { name: "unlink", args: "p_link uuid", ...signedInOnly },
+  ]);
+  const l = await lbAccepted("anon");
+  // No token, and a token that names a real owner but carries the role of a
+  // visitor.
+  for (const claims of [null, { sub: users.dani, role: "anon" }]) {
+    for (const [sql, params] of [
+      [`select public.unlink($1)`, [l.link]],
+      [`select * from public.note_links($1)`, [l.mine]],
+    ]) {
+      const r = await trial(claims, sql, params, "anon");
+      assert.match(r.error?.message ?? "(answered)", /permission denied/, sql);
+    }
+  }
+  assert.equal((await linkRow(l.link)).status, "accepted");
+});
+
 // ---------------------------------------------------------------- settings
 // What the settings screen leans on: `create_agent` and `revoke_agent` refuse
 // on their own, whatever the app sends. `add_member` is not callable at all:
@@ -3573,7 +4243,11 @@ test("a person sees the invitations waiting for their own confirmed address", as
   const me = asUser(await addUser("Invite-Mine@Example.com"));
   const before = await inviteState();
 
-  const rows = await myInvitations(me);
+  // The two were made within the same millisecond now and then, and the order then falls to
+  // the id: put the one from this hive first, whichever way they came back.
+  const rows = (await myInvitations(me)).sort(
+    (x, y) => (y.id === here) - (x.id === here),
+  );
   assert.deepEqual(
     rows.map((r) => Object.keys(r)),
     [
@@ -4512,6 +5186,19 @@ const caSetup = () =>
         [ca.hive, ca.lenaNote, ca.note],
       )
     )[0].id;
+    // Two more notes of kai's with a link between them, accepted at once: an
+    // accepted link for kai to list and to unlink, and a note that has no
+    // link with lena's.
+    ca.ownNote = await note(kai, "kai", "own/one.md", "ca own one");
+    const ownOther = await note(kai, "kai", "own/two.md", "ca own two");
+    ca.ownLink = (
+      await as(
+        kai,
+        `insert into public.links (hive_id, from_note, to_note, tier, score)
+         values ($1, $2, $3, 2, 0.5) returning id`,
+        [ca.hive, ca.ownNote, ownOther],
+      )
+    )[0].id;
     ca.filePath = `${members.kai}/${ws.kai}/outputs/ca/a.pdf`;
     await upload(kai, ca.filePath);
     await as(
@@ -4686,7 +5373,7 @@ test("an app pass reads and writes nothing", async () => {
     [
       `insert into public.links (hive_id, from_note, to_note, tier, score)
        values ($1, $2, $3, 2, 0.5) returning id`,
-      [ca.hive, ca.note, ca.lenaNote],
+      [ca.hive, ca.ownNote, ca.lenaNote],
     ],
     [
       `insert into public.files (hive_id, member_id, workspace_id, storage_path, name)
@@ -4816,6 +5503,8 @@ test("every function refuses an app pass except connector_login", async () => {
       [ca.link],
       true,
     ],
+    unlink: [`select public.unlink($1)`, [ca.ownLink], true],
+    note_links: [`select id from public.note_links($1)`, [ca.ownNote]],
     connect_app: [`select public.connect_app($1, $2)`, [apps.a, ws.kai], true],
   };
 
@@ -5606,6 +6295,7 @@ test("a token made for another audience is refused like an app pass", async () =
       [`select * from public.create_agent($1, 'x', 'other')`, [ws.kai]],
       [`select public.revoke_agent($1)`, [ca.tokenAgent]],
       [`select public.respond_to_link($1, true)`, [ca.link]],
+      [`select public.unlink($1)`, [ca.ownLink]],
       [`select public.connect_app($1, $2)`, [apps.a, ws.kai]],
       [`select public.note_visibility(${asRow})`, [row]],
       [`select public.invite_member($1, 'aud@ca.example.com', 'A')`, [ca.hive]],

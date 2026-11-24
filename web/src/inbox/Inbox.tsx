@@ -12,6 +12,7 @@ import { Shell } from "../shell/Shell";
 import { shortDate } from "../vault/format";
 import {
   acceptEffect,
+  declineQuestion,
   inboxCount,
   proposer,
   theirNote,
@@ -389,7 +390,7 @@ function LinkRow({
           >
             {asking ? (
               <>
-                <p className={s.ask}>Decline this link?</p>
+                <p className={s.ask}>{declineQuestion()}</p>
                 <button
                   type="button"
                   data-pick="decline"

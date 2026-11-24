@@ -314,11 +314,11 @@
 }
 
 .ask {
-  margin: 0 6px 0 0;
+  flex: 1 0 100%;
+  margin: 0;
   font-size: 13px;
   font-weight: 500;
   color: var(--fg);
-  white-space: nowrap;
 }
 
 .primary,
@@ -445,8 +445,8 @@
 }
 
 /* ---- The answer beside the words ----
-   From a card wide enough for both. The column is as wide as the decline question, so asking
-   it moves nothing but the buttons. */
+   From a card wide enough for both. The decline question takes its own line above the two
+   buttons, so the column keeps its width when it is asked. */
 
 @media (min-width: 900px) {
   .item {
@@ -460,7 +460,10 @@
 
   .actions {
     justify-content: flex-end;
-    flex-wrap: nowrap;
+  }
+
+  .ask {
+    text-align: right;
   }
 }
 

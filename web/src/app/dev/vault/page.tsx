@@ -4,7 +4,7 @@ import { DevVault } from "./DevVault";
 
 // A development page: the vault over the built-in fixture. Never served in production.
 //   ?fail=1   every write is refused
-//   ?slow=1   deleting a note takes over a second
+//   ?slow=1   deleting a note or ending a link takes over a second
 // A fixed clock keeps every render, and so every test and screenshot, the same.
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 

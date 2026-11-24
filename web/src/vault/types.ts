@@ -23,6 +23,14 @@ export type FolderRule = {
   visibility: Visibility | null;
   shared_with: string[];
 };
+/** An accepted link of the open note: the note on its other side, as the database described it. */
+export type NoteLink = {
+  id: string;
+  note_id: string;
+  title: string;
+  owner: string;
+  mine: boolean; // the caller owns that other note
+};
 export type Tab = { kind: "workspace"; id: string } | { kind: "shared" };
 export type VaultData = {
   hive: { id: string; name: string };
@@ -34,7 +42,9 @@ export type VaultData = {
   notes: VaultNote[];
   truncated: boolean;
   open:
-    null | { note: VaultNote; body: string; cut: boolean } | { missing: true };
+    | null
+    | { note: VaultNote; body: string; cut: boolean; links: NoteLink[] }
+    | { missing: true };
 };
 export type SharePreview = {
   follows: number;
@@ -53,5 +63,7 @@ export type VaultActions = {
   release(noteId: string): Promise<Result>;
   /** Removes the note for good. Only its owner, as a person, is allowed to. */
   deleteNote(noteId: string): Promise<Result>;
+  /** Ends an accepted link. The database decides whether the caller may. */
+  unlink(linkId: string): Promise<Result>;
   preview(workspaceId: string, path: string): Promise<SharePreview | null>;
 };
