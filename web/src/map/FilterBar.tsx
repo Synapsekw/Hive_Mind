@@ -18,6 +18,7 @@ import {
 import { chipFit } from "./chipFit";
 import type { Preview } from "./MapCanvas";
 import { Mark } from "./Legend";
+import { useCloseOnOtherOpen } from "./useDismiss";
 import type { MapModel, NodeKind } from "./types";
 import s from "./map.module.css";
 
@@ -150,6 +151,9 @@ export function FilterBar({
       document.removeEventListener("keydown", esc, true);
     };
   }, [open]);
+
+  // Only one popover on the map is open at a time.
+  useCloseOnOtherOpen(open !== null, id, () => closeRef.current(false));
 
   // A list that loses its entries (another arrangement) or the bar going away ends the preview.
   useEffect(() => () => onPreview(null), [onPreview]);

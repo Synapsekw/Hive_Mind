@@ -78,11 +78,21 @@ async function dotPoint(page: Page, dot: Locator) {
   };
 }
 
-const arrangeGroup = (page: Page) =>
-  page.getByRole("group", { name: "Arrange by" });
+/** The Group by button, named by its visible text: "Group by" plus the current choice. */
+const groupButton = (page: Page, current = "Folder") =>
+  page.getByRole("button", { name: `Group by ${current}`, exact: true });
 
-const arrangeButton = (page: Page, name: string) =>
-  arrangeGroup(page).getByRole("button", { name, exact: true });
+const groupMenu = (page: Page) => page.getByRole("menu", { name: "Group by" });
+
+const groupRow = (page: Page, name: string) =>
+  groupMenu(page).getByRole("menuitemradio", { name, exact: true });
+
+/** Opens the menu and chooses an entry the way a pointer user does. */
+async function groupBy(page: Page, from: string, name: string) {
+  await groupButton(page, from).click();
+  await groupRow(page, name).click();
+  await expect(groupButton(page, name)).toBeVisible();
+}
 
 /** The filter bar's open list; its name follows the arrangement (Folders, Clusters, Months, Topics). */
 const groups = (page: Page, name = "Folders") =>
@@ -644,24 +654,42 @@ test("a fresh note is drawn in the top colour of the theme's ramp", async ({
     expect(Math.abs(px[i]! - fresh[i]!)).toBeLessThanOrEqual(4);
 });
 
-test('"Arrange by" is visible in Rings and absent in Timeline and Orbit', async ({
+test('"Group by" is a menu, visible in Rings and absent in Timeline and Orbit', async ({
   page,
 }) => {
   await open(page);
-  await expect(arrangeGroup(page)).toBeVisible();
-  for (const name of ["Folder", "Links", "Time"])
-    await expect(arrangeButton(page, name)).toBeVisible();
-  await expect(arrangeButton(page, "Folder")).toHaveAttribute(
-    "aria-pressed",
+  await expect(groupButton(page)).toBeVisible();
+  await expect(groupButton(page)).toHaveAttribute("aria-haspopup", "menu");
+  await expect(groupButton(page)).toHaveAttribute("aria-expanded", "false");
+  await expect(groupMenu(page)).toHaveCount(0);
+  await groupButton(page).click();
+  await expect(groupButton(page)).toHaveAttribute("aria-expanded", "true");
+  await expect(groupMenu(page)).toBeVisible();
+  await expect(groupMenu(page).getByRole("menuitemradio")).toHaveText([
+    "Folder",
+    "Links",
+    "Time",
+  ]);
+  await expect(groupRow(page, "Folder")).toHaveAttribute(
+    "aria-checked",
     "true",
   );
+  await expect(groupRow(page, "Links")).toHaveAttribute(
+    "aria-checked",
+    "false",
+  );
+  await expect(groupRow(page, "Folder")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(groupMenu(page)).toHaveCount(0);
   for (const name of ["Timeline", "Orbit"]) {
     await viewButton(page, name).click();
     await expect(viewButton(page, name)).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    await expect(arrangeGroup(page)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Group by/ })).toHaveCount(
+      0,
+    );
     // Timeline and Orbit keep the plain "Topics" heading, and the hubs' kind entry says so too.
     await expect(listButton(page, "Topics")).toBeVisible();
     await expect(listButton(page, "Folders")).toHaveCount(0);
@@ -670,8 +698,113 @@ test('"Arrange by" is visible in Rings and absent in Timeline and Orbit', async 
     await listButton(page, "Kind").click();
   }
   await viewButton(page, "Rings").click();
+  await expect(groupButton(page)).toBeVisible();
   const kinds = await openList(page, "Kind");
   await expect(row(kinds, "Groups")).toBeVisible();
+});
+
+test("the Group by menu is styled: bordered in the line colour, the checked row ticked", async ({
+  page,
+}) => {
+  await open(page);
+  await groupButton(page).click();
+  const menu = groupMenu(page);
+  const style = await menu.evaluate((el) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--line)";
+    document.body.append(probe);
+    const line = getComputedStyle(probe).color;
+    probe.remove();
+    const cs = getComputedStyle(el);
+    return {
+      line,
+      width: cs.borderTopWidth,
+      color: cs.borderTopColor,
+      position: cs.position,
+    };
+  });
+  expect(style.width).toBe("1px");
+  expect(style.color).toBe(style.line);
+  expect(style.position).toBe("absolute");
+  const tick = groupRow(page, "Folder").locator("svg");
+  await expect(tick).toBeVisible();
+  const box = (await tick.boundingBox())!;
+  expect(box.width).toBeGreaterThan(4);
+  expect(box.height).toBeGreaterThan(4);
+  await expect(groupRow(page, "Links").locator("svg")).toHaveCount(0);
+});
+
+test("arrow keys, Home and End move between the Group by rows", async ({
+  page,
+}) => {
+  await open(page);
+  await groupButton(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(groupRow(page, "Folder")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(groupRow(page, "Links")).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(groupRow(page, "Time")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(groupRow(page, "Time")).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(groupRow(page, "Links")).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(groupRow(page, "Folder")).toBeFocused();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await expect(groupMenu(page)).toHaveCount(0);
+  await expect(groupButton(page, "Time")).toBeFocused();
+});
+
+test("Escape and a press outside close the Group by menu, focus back on the button", async ({
+  page,
+}) => {
+  await open(page);
+  await groupButton(page).click();
+  await expect(groupMenu(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(groupMenu(page)).toHaveCount(0);
+  await expect(groupButton(page)).toBeFocused();
+  await groupButton(page).click();
+  await expect(groupMenu(page)).toBeVisible();
+  await page.mouse.click(5, 5);
+  await expect(groupMenu(page)).toHaveCount(0);
+  await expect(groupButton(page)).toBeFocused();
+  // Choosing the current entry just closes.
+  await groupButton(page).click();
+  await groupRow(page, "Folder").click();
+  await expect(groupMenu(page)).toHaveCount(0);
+  await expect(groupButton(page)).toBeFocused();
+});
+
+test("only one popover is open at a time, and one Escape closes only that one", async ({
+  page,
+}) => {
+  await open(page);
+  const legend = page
+    .getByRole("group", { name: "Zoom", exact: true })
+    .getByRole("button", { name: "Legend", exact: true });
+  await legend.click();
+  await expect(groups(page, "Legend")).toBeVisible();
+  // Opening the menu by keyboard closes the Legend.
+  await groupButton(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(groupMenu(page)).toBeVisible();
+  await expect(groups(page, "Legend")).toHaveCount(0);
+  // Opening a filter list closes the menu.
+  await listButton(page, "Folders").click();
+  await expect(groups(page, "Folders")).toBeVisible();
+  await expect(groupMenu(page)).toHaveCount(0);
+  // And the menu closes the list; then one Escape closes only the menu.
+  await groupButton(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(groupMenu(page)).toBeVisible();
+  await expect(groups(page, "Folders")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(groupMenu(page)).toHaveCount(0);
+  await expect(groupButton(page)).toBeFocused();
+  await expect(groups(page, "Legend")).toHaveCount(0);
 });
 
 test("choosing Time regroups by month, moves the dots and sends no request", async ({
@@ -683,11 +816,9 @@ test("choosing Time regroups by month, moves the dots and sends no request", asy
   const seen: Request[] = [];
   page.on("request", (r) => seen.push(r));
 
-  await arrangeButton(page, "Time").click();
-  await expect(arrangeButton(page, "Time")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await groupBy(page, "Folder", "Time");
+  await expect(groupMenu(page)).toHaveCount(0);
+  await expect(groupButton(page, "Time")).toBeFocused();
   await expect(listButton(page, "Months")).toBeVisible();
   await expect(listButton(page, "Folders")).toHaveCount(0);
   const months = await openList(page, "Months");
@@ -698,7 +829,7 @@ test("choosing Time regroups by month, moves the dots and sends no request", asy
   await settle(page);
   expect(await positions(page)).not.toEqual(before);
 
-  await arrangeButton(page, "Links").click();
+  await groupBy(page, "Time", "Links");
   await expect(listButton(page, "Clusters")).toBeVisible();
   await settle(page);
   await page.waitForTimeout(300);
@@ -721,7 +852,7 @@ test("choosing Links clears a pinned group filter", async ({ page }) => {
     page.locator("[data-map-dot]:not([data-lit])").first(),
   ).toBeAttached();
 
-  await arrangeButton(page, "Links").click();
+  await groupBy(page, "Folder", "Links");
   await expect(listButton(page, "Clusters")).toBeVisible();
   // The old arrangement's choice is gone: no chip, everything lit.
   await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0);
@@ -737,7 +868,7 @@ test("a selected dot stays selected when the arrangement changes", async ({
   await expect(rail(page).getByRole("heading", { level: 2 })).toHaveText(
     HOSTILE_TITLE,
   );
-  await arrangeButton(page, "Time").click();
+  await groupBy(page, "Folder", "Time");
   await expect(listButton(page, "Months")).toBeVisible();
   await expect(rail(page).getByRole("heading", { level: 2 })).toHaveText(
     HOSTILE_TITLE,
@@ -790,36 +921,15 @@ test("choosing Rings after Orbit lets the map come to rest on Rings", async ({
   ).toBeAttached();
 });
 
-test("the arrange switch comes back after Timeline with its pill under the pressed button", async ({
+test("the Group by button comes back after Timeline with its choice kept", async ({
   page,
 }) => {
   await open(page);
-  await arrangeButton(page, "Time").click();
+  await groupBy(page, "Folder", "Time");
   await viewButton(page, "Timeline").click();
-  await expect(arrangeGroup(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Group by/ })).toHaveCount(0);
   await viewButton(page, "Rings").click();
-  await expect(arrangeGroup(page)).toBeVisible();
-  await expect(arrangeButton(page, "Time")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  const pill = arrangeGroup(page).locator("span[aria-hidden]").first();
-  await expect
-    .poll(
-      async () => {
-        const [a, b] = await Promise.all([
-          pill.boundingBox(),
-          arrangeButton(page, "Time").boundingBox(),
-        ]);
-        if (!a || !b) return Infinity;
-        return Math.max(
-          Math.abs(a.x - b.x),
-          Math.abs(a.x + a.width - (b.x + b.width)),
-        );
-      },
-      { timeout: 4000 },
-    )
-    .toBeLessThanOrEqual(2);
+  await expect(groupButton(page, "Time")).toBeVisible();
 });
 
 test("the top bar holds its controls at 1280 px with a dot selected", async ({
@@ -846,7 +956,7 @@ test("the top bar holds its controls at 1280 px with a dot selected", async ({
   }
   const boxes = [
     await page.getByRole("group", { name: "View" }).boundingBox(),
-    await arrangeGroup(page).boundingBox(),
+    await groupButton(page).boundingBox(),
     await page.getByPlaceholder("Search").boundingBox(),
   ];
   boxes.forEach((b) => expect(b).not.toBeNull());

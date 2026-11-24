@@ -1,6 +1,7 @@
 // The zoom control in the stage's bottom-right corner: zoom out, the zoom as a percentage, zoom
 // in and Fit. Real buttons; `data-map-overlay` keeps the camera from treating a press as a drag.
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
+import { useDismiss } from "./useDismiss";
 import s from "./map.module.css";
 
 export function ZoomControl({
@@ -27,35 +28,16 @@ export function ZoomControl({
   const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
 
-  // A press outside closes the legend; focus goes back to its button unless the press landed on
-  // something that takes focus itself. Escape is caught first, so the map's own Escape does not
-  // also clear the selection.
-  useEffect(() => {
-    if (!open) return;
-    const down = (e: PointerEvent) => {
-      const t = e.target;
-      if (!(t instanceof Element) || root.current?.contains(t)) return;
-      const takesFocus = !!t.closest(
-        "button, a, input, textarea, select, [tabindex]",
-      );
+  // Outside press, Escape, focus leaving, or another popover opening closes the legend.
+  useDismiss({
+    open,
+    root,
+    button,
+    onClose: (refocus) => {
       setOpen(false);
-      const btn = button.current;
-      if (!takesFocus) setTimeout(() => btn?.focus({ preventScroll: true }), 0);
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(false);
-      button.current?.focus();
-    };
-    document.addEventListener("pointerdown", down);
-    document.addEventListener("keydown", esc, true);
-    return () => {
-      document.removeEventListener("pointerdown", down);
-      document.removeEventListener("keydown", esc, true);
-    };
-  }, [open]);
+      if (refocus) button.current?.focus();
+    },
+  });
 
   return (
     <div
