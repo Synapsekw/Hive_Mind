@@ -11,6 +11,7 @@
 // or a failure there leaves the counts out and never fails the page.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ownHive } from "../own-hive";
+import { KINDS, type Kind, type TopicRow } from "../../topics/types";
 import type {
   Agent,
   AgentStatus,
@@ -43,6 +44,7 @@ const AGENT_COLUMNS =
   "id, member_id, workspace_id, name, provider, trust_tier, expires_at, revoked_at, last_used_at, created_at";
 const MAX_AGENTS = 200;
 const MAX_INVITATIONS = 100;
+const MAX_TOPICS = 2000;
 
 /** Only the error's code and message, never a payload. */
 function failed(what: string, res: Res): boolean {
@@ -117,6 +119,19 @@ function toInvitation(v: unknown): Invitation | null {
     name: display_name,
     createdAt: created_at,
     expiresAt: expires_at,
+  };
+}
+
+function toTopic(v: unknown): TopicRow | null {
+  if (!row(v)) return null;
+  const { id, type, canonical_name, note_entities } = v;
+  if (!str(id) || !str(canonical_name)) return null;
+  if (!(KINDS as readonly unknown[]).includes(type)) return null;
+  return {
+    id,
+    kind: type as Kind,
+    name: canonical_name,
+    notes: countOf(note_entities),
   };
 }
 
@@ -209,44 +224,63 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
     return ERROR;
   }
 
-  const [membersRes, workspacesRes, agentsRes, invitationsRes, deletion] =
-    (await Promise.all([
-      db
-        .from("members")
-        .select("id, display_name, role, user_id")
-        .eq("hive_id", hive.id)
-        .order("created_at", { ascending: true }),
-      db
-        .from("workspaces")
-        // One read: each workspace with the number of its notes, counted by the database over
-        // the index on (workspace_id, path).
-        .select("id, name, notes(count)")
-        .eq("hive_id", hive.id)
-        .order("created_at", { ascending: true }),
-      db
-        .from("agents")
-        .select(AGENT_COLUMNS)
-        // Agents still in use first, so the cap can only ever cut off old revoked ones.
-        .order("revoked_at", { ascending: true, nullsFirst: true })
-        .order("created_at", { ascending: false })
-        .limit(MAX_AGENTS),
-      db
-        .from("invitations")
-        .select("id, email, display_name, created_at, expires_at")
-        .eq("hive_id", hive.id)
-        .is("accepted_at", null)
-        .is("revoked_at", null)
-        .gt("expires_at", new Date(now).toISOString())
-        .order("created_at", { ascending: false })
-        .limit(MAX_INVITATIONS),
-      hive.role === "owner" ? preview(db, hive.id) : null,
-    ])) as [Res, Res, Res, Res, Deletion | null];
+  const [
+    membersRes,
+    workspacesRes,
+    agentsRes,
+    invitationsRes,
+    topicsRes,
+    deletion,
+  ] = (await Promise.all([
+    db
+      .from("members")
+      .select("id, display_name, role, user_id")
+      .eq("hive_id", hive.id)
+      .order("created_at", { ascending: true }),
+    db
+      .from("workspaces")
+      // One read: each workspace with the number of its notes, counted by the database over
+      // the index on (workspace_id, path).
+      .select("id, name, notes(count)")
+      .eq("hive_id", hive.id)
+      .order("created_at", { ascending: true }),
+    db
+      .from("agents")
+      .select(AGENT_COLUMNS)
+      // Agents still in use first, so the cap can only ever cut off old revoked ones.
+      .order("revoked_at", { ascending: true, nullsFirst: true })
+      .order("created_at", { ascending: false })
+      .limit(MAX_AGENTS),
+    db
+      .from("invitations")
+      .select("id, email, display_name, created_at, expires_at")
+      .eq("hive_id", hive.id)
+      .is("accepted_at", null)
+      .is("revoked_at", null)
+      .gt("expires_at", new Date(now).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(MAX_INVITATIONS),
+    hive.role === "owner"
+      ? db
+          .from("entities")
+          // The hive's topics (at most 2,000 by the database's cap), each with the number
+          // of notes attached to it that the owner can read.
+          .select("id, type, canonical_name, note_entities(count)")
+          .eq("hive_id", hive.id)
+          .is("note_entities.detached_at", null)
+          .order("type", { ascending: true })
+          .order("canonical_name", { ascending: true })
+          .limit(MAX_TOPICS)
+      : { data: [], error: null },
+    hive.role === "owner" ? preview(db, hive.id) : null,
+  ])) as [Res, Res, Res, Res, Res, Deletion | null];
   // Each is checked, so every failure is logged, not only the first.
   const bad = [
     failed("members query", membersRes),
     failed("workspaces query", workspacesRes),
     failed("agents query", agentsRes),
     failed("invitations query", invitationsRes),
+    failed("topics query", topicsRes),
   ];
   if (bad.some(Boolean)) return ERROR;
 
@@ -254,7 +288,8 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
   const workspaces = all(workspacesRes.data, toWorkspace);
   const everyAgent = all(agentsRes.data, toAgent(now));
   const invitations = all(invitationsRes.data, toInvitation);
-  if (!rows || !workspaces || !everyAgent || !invitations) {
+  const topics = all(topicsRes.data, toTopic);
+  if (!rows || !workspaces || !everyAgent || !invitations || !topics) {
     console.error("settings answer has an unexpected shape");
     return ERROR;
   }
@@ -281,6 +316,7 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
       agents,
       members,
       invitations,
+      topics,
     },
   };
 }

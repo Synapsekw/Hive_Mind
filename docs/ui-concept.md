@@ -291,6 +291,13 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   is client state until Import is pressed, then one request per batch, one after another. It
   uses no new colour or token.
 
+  For one of the person's own workspaces the vault has **Connect wiki links**, which turns the `[[wiki links]]` between that person's notes in the workspace into links.
+
+  Beside it, **Attach topics** puts each of the person's notes in that workspace under the
+  hive's topics it belongs to (by folder, tag, title, then text; at most five), and shows three
+  counts: attached, already attached, notes with no topic. A folder import runs it by itself as
+  its last stage. In a hive with no topics it says where topics come from.
+
 - **Gallery** — previews of generated documents; mine, shared with me, whole hive; a full-screen
   viewer for PDF, PPTX, XLSX and images. Built so far: a card grid with image thumbnails, the
   viewer for images and PDFs, download for every file and delete for your own; PPTX and XLSX
@@ -313,6 +320,13 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   with an agent still in use and one that still holds files, and the row says what to do first.
   The only workspace shows no Delete, and neither does any workspace while the hive is being
   deleted.
+
+  The owner also has **Topics**: the hive's customers, projects, vendors, products, people and
+  subjects, by kind, each with the number of notes under it and **Delete** (asked once; the
+  notes stay). **Find topics in my notes** reads the owner's own notes, never their text, and
+  lists the topics they name that the hive does not have yet, ticked by kind with subjects
+  unticked; **Save topics** adds the ticked ones.
+
   Owners also have a **Delete this hive** section. It shows how many members, notes and files
   the hive holds and a field for the hive's name; **Delete hive** is enabled only when the
   typed name matches exactly. Nothing is erased at once: the hive is marked, the page reloads,

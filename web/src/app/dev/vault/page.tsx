@@ -7,6 +7,8 @@ import { DevVault } from "./DevVault";
 //   ?slow=1   deleting a note or ending a link takes over a second; an import batch most of one
 //   ?failbatch=2    the import's second batch is refused (any number, or "all")
 //   ?failconnect=2  the second step of connecting wiki links is refused (any number, or "all")
+//   ?failattach=2   the second step of attaching topics is refused (any number, or "all")
+//   ?notopics=1     the hive has no topics: attaching finds nothing to attach to
 //   ?taken=1  a new workspace is refused: the name is in use
 //   ?limit=1  a new workspace is refused: the person has 20 already
 // A fixed clock keeps every render, and so every test and screenshot, the same.
@@ -42,6 +44,8 @@ export default async function DevVaultPage({
       importFlags={{
         failbatch: one(q.failbatch) ?? null,
         failconnect: one(q.failconnect) ?? null,
+        failattach: one(q.failattach) ?? null,
+        notopics: one(q.notopics) === "1",
         taken: one(q.taken) === "1",
         limit: one(q.limit) === "1",
       }}

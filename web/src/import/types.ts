@@ -1,6 +1,7 @@
 // What the folder import's two server actions answer, and the pair of them as the import screen
 // takes it. Types only: safe to import anywhere.
 import type { ImportNote } from "./plan";
+import type { AttachResult } from "../topics/types";
 
 export type Outcome = "created" | "updated" | "unchanged" | "failed";
 
@@ -18,6 +19,8 @@ export type ImportActions = {
   importBatch(workspaceId: string, notes: ImportNote[]): Promise<BatchResult>;
   /** One step of turning the workspace's wiki links into links, from the cursor `after`. */
   connect(workspaceId: string, after: string | null): Promise<ConnectResult>;
+  /** One step of attaching the workspace's notes to the hive's topics, from the cursor `after`. */
+  attach(workspaceId: string, after: string | null): Promise<AttachResult>;
 };
 
 /**

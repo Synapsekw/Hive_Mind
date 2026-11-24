@@ -20,6 +20,7 @@ import {
   unlinkName,
   unlinkQuestion,
 } from "../src/vault/sentences";
+import * as A from "../src/vault/attachText";
 import * as C from "../src/vault/connectText";
 import * as T from "../src/vault/importText";
 import { setLook } from "./look";
@@ -1885,8 +1886,11 @@ test("after the last batch the import connects the wiki links and counts them", 
   await expect(importButton(page)).toHaveAttribute("aria-disabled", "true");
   expect(await leavingAsks(page)).toBe(true);
 
+  // Connecting, then attaching, each take three slow steps: the end is a good while off.
   const done = panelNamed(page, T.FINISHED);
-  await expect(done.getByRole("heading", { name: T.FINISHED })).toBeFocused();
+  await expect(done.getByRole("heading", { name: T.FINISHED })).toBeFocused({
+    timeout: 15_000,
+  });
   await expect(done.getByText("Created 2", { exact: true })).toBeVisible();
   await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
   await expect(
@@ -2181,6 +2185,161 @@ test("only one of the two panels is open; an import at work disables both opener
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
 });
 
+test("attach is the third opener: only one panel is open, and one at work disables the others", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await attachButton(page).click();
+  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
+  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "true");
+  await connectButton(page).click();
+  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
+  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
+  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "false");
+  await attachButton(page).click();
+  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
+  await importButton(page).click();
+  await expect(panelNamed(page, T.IMPORT)).toBeVisible();
+  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
+  await attachButton(page).click();
+  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
+  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
+
+  // An import at work: the attach opener does nothing either.
+  await importButton(page).click();
+  await page
+    .getByLabel(T.FOLDER_INPUT)
+    .setInputFiles(folder("Thirty", many(30)));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const running = panelNamed(page, T.RUNNING);
+  await expect(running).toBeVisible();
+  for (const opener of [attachButton(page), connectButton(page)]) {
+    await expect(opener).toHaveAttribute("aria-disabled", "true");
+    await opener.evaluate((el: HTMLElement) => el.click());
+  }
+  await expect(running).toBeVisible();
+  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+});
+
+test("the attach panel at work: it cannot be closed, leaving asks, and it ends by itself with its counts", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await attachButton(page).click();
+  const ready = panelNamed(page, A.ATTACH);
+  await ready.getByRole("button", { name: A.START, exact: true }).click();
+  const running = panelNamed(page, A.ATTACHING);
+  await expect(
+    running.getByRole("heading", { name: A.ATTACHING }),
+  ).toBeFocused();
+  await expect(running).toHaveAttribute("aria-busy", "true");
+  await page.keyboard.press("Escape");
+  await running
+    .getByRole("button", { name: /^Close/ })
+    .evaluate((el: HTMLElement) => el.click());
+  for (const opener of [
+    attachButton(page),
+    connectButton(page),
+    importButton(page),
+  ]) {
+    await expect(opener).toHaveAttribute("aria-disabled", "true");
+    await opener.evaluate((el: HTMLElement) => el.click());
+  }
+  await expect(running).toBeVisible();
+  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+  expect(await leavingAsks(page)).toBe(true);
+
+  // Nothing above depends on which step is in flight: the run ends by itself.
+  const done = panelNamed(page, A.ATTACHED);
+  await expect(done.getByRole("heading", { name: A.ATTACHED })).toBeFocused({
+    timeout: 15_000,
+  });
+  await expect(
+    done.getByText("Attached to a topic 54", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Already attached 18", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Notes with no topic 18", { exact: true }),
+  ).toBeVisible();
+  await expect(done.getByRole("alert")).toHaveCount(0);
+  expect((await attachCalls(page)).length).toBe(3);
+  expect(await leavingAsks(page)).toBe(false);
+  for (const opener of [
+    attachButton(page),
+    connectButton(page),
+    importButton(page),
+  ])
+    await expect(opener).not.toHaveAttribute("aria-disabled", "true");
+});
+
+test("Stop in the attach panel keeps the counts so far", async ({ page }) => {
+  await open(page, "?slow=1");
+  await attachButton(page).click();
+  await panelNamed(page, A.ATTACH)
+    .getByRole("button", { name: A.START, exact: true })
+    .click();
+  const running = panelNamed(page, A.ATTACHING);
+  await expect(running.getByRole("status")).toHaveText(
+    A.attachProgress(40, 90),
+  );
+  // Nothing between the wait and the click: the step on its way is the second.
+  await running.getByRole("button", { name: T.STOP, exact: true }).click();
+  await expect(
+    running.getByRole("button", { name: T.STOPPING }),
+  ).toHaveAttribute("aria-disabled", "true");
+  const done = panelNamed(page, A.ATTACH_STOPPED);
+  await expect(
+    done.getByRole("heading", { name: A.ATTACH_STOPPED }),
+  ).toBeFocused({ timeout: 15_000 });
+  await expect(
+    done.getByText("Attached to a topic 48", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Already attached 16", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Notes with no topic 16", { exact: true }),
+  ).toBeVisible();
+  await expect(done.getByRole("alert")).toHaveCount(0);
+  expect((await attachCalls(page)).length).toBe(2);
+  expect(await leavingAsks(page)).toBe(false);
+});
+
+test("Stop during the import's attaching stage keeps the notes and links and says where to finish", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await pick(page, folder("Field notes", { "a.md": "[[b]]", "b.md": "B" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const attaching = panelNamed(page, A.ATTACHING);
+  await expect(
+    attaching.getByRole("heading", { name: A.ATTACHING }),
+  ).toBeFocused({ timeout: 15_000 });
+  await expect(attaching).toHaveAttribute("aria-busy", "true");
+  await expect(attaching.getByRole("status")).toHaveText(
+    A.attachProgress(40, 90),
+  );
+  await attaching.getByRole("button", { name: T.STOP, exact: true }).click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Created 2", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
+  await expect(done.getByText(A.AFTER_IMPORT_UNFINISHED)).toBeVisible();
+  expect((await attachCalls(page)).length).toBe(2);
+  expect(await leavingAsks(page)).toBe(false);
+});
+
 test("opening another workspace closes a connect panel that is not running", async ({
   page,
 }) => {
@@ -2217,4 +2376,92 @@ test("at 390 px both openers and the connect panel stay inside the window", asyn
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   expect((await scrolls(page)).across).toBe(false);
+});
+
+// ---- Attach topics ----
+
+const attachButton = (page: Page) =>
+  page.getByRole("button", { name: A.ATTACH, exact: true });
+const attachCalls = async (page: Page) =>
+  ((await calls(page)) as { name: string; args: unknown[] }[])
+    .filter((c) => c.name === "attach")
+    .map((c) => c.args);
+
+test("after connecting the wiki links the import attaches topics and counts them", async ({
+  page,
+}) => {
+  await open(page);
+  await pick(page, folder("Field notes", { "a.md": "[[b]]", "b.md": "B" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
+  await expect(
+    done.getByText("Attached to a topic 54", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Already attached 18", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Notes with no topic 18", { exact: true }),
+  ).toBeVisible();
+  await expect(done.getByText(A.AFTER_IMPORT_UNFINISHED)).toHaveCount(0);
+  expect(await attachCalls(page)).toEqual([
+    ["imported-1", null],
+    ["imported-1", "40"],
+    ["imported-1", "80"],
+  ]);
+  const names = ((await calls(page)) as { name: string }[]).map((c) => c.name);
+  expect(names.indexOf("attach")).toBeGreaterThan(names.lastIndexOf("connect"));
+});
+
+test("an import into a hive with no topics says where topics come from", async ({
+  page,
+}) => {
+  await open(page, "?notopics=1");
+  await pick(page, folder("Field notes", { "a.md": "A" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText(A.NO_TOPICS)).toBeVisible();
+  await expect(done.getByText(/Attached to a topic/)).toHaveCount(0);
+  expect(await attachCalls(page)).toEqual([["imported-1", null]]);
+});
+
+test("an import whose topics could not be attached says where to finish", async ({
+  page,
+}) => {
+  await open(page, "?failattach=all");
+  await pick(page, folder("Field notes", { "a.md": "A" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText(A.AFTER_IMPORT_UNFINISHED)).toBeVisible();
+  expect(await attachCalls(page)).toHaveLength(3);
+});
+
+test("Attach topics on one's own workspace: one sentence, Start, progress, then the counts", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "false");
+  await attachButton(page).click();
+  const panel = panelNamed(page, A.ATTACH);
+  await expect(panel.getByRole("heading", { name: A.ATTACH })).toBeFocused();
+  await expect(panel.getByText(A.ATTACH_INTRO)).toBeVisible();
+  expect(await nameless(page, "vault-attach")).toEqual([]);
+  await panel.getByRole("button", { name: A.START, exact: true }).click();
+  const done = panelNamed(page, A.ATTACHED);
+  await expect(done.getByRole("heading", { name: A.ATTACHED })).toBeFocused();
+  await expect(
+    done.getByText("Attached to a topic 54", { exact: true }),
+  ).toBeVisible();
+  await done.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(attachButton(page)).toBeFocused();
+  // Not on "Shared with me".
+  await page.getByRole("link", { name: "Shared with me" }).click();
+  await expect(attachButton(page)).toHaveCount(0);
 });

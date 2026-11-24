@@ -18,6 +18,8 @@ import type {
   Sent,
   WorkspaceDeleted,
 } from "../../settings/types";
+import type { Proposal, ScanResult, TopicsSaved } from "../../topics/types";
+import { deleteTopicIn, saveTopicsIn, scanTopicsIn } from "./topics";
 import {
   createIn,
   deleteWorkspaceIn,
@@ -78,4 +80,27 @@ export async function deleteWorkspace(id: string): Promise<WorkspaceDeleted> {
     ok: false,
     reason: "failed",
   });
+}
+
+export async function scanTopics(
+  workspaceId: string,
+  after: string | null,
+): Promise<ScanResult> {
+  return withSession<ScanResult>((db) => scanTopicsIn(db, workspaceId, after), {
+    ok: false,
+  });
+}
+
+/** `hiveId` is the hive the settings page was showing; the page binds it. */
+export async function saveTopics(
+  hiveId: string,
+  picks: Proposal[],
+): Promise<TopicsSaved> {
+  return withSession<TopicsSaved>((db) => saveTopicsIn(db, hiveId, picks), {
+    ok: false,
+  });
+}
+
+export async function deleteTopic(id: string): Promise<Result> {
+  return withSession<Result>((db) => deleteTopicIn(db, id), { ok: false });
 }

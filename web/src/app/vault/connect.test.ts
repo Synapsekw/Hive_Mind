@@ -571,7 +571,9 @@ describe("connectBatchIn", () => {
     expect(await connectBatchIn(t.db, W1, null)).toEqual({ ok: false });
     expect(reads(t, "notes")).toHaveLength(1);
     expect(t.calls.some((c) => c.table === "links")).toBe(false);
-    expect(log).toHaveBeenCalledWith("connect refused: workspace too large");
+    expect(log).toHaveBeenCalledWith(
+      "connect index query refused: workspace too large",
+    );
   });
 
   it("refuses a workspace of more than 20,000 notes when there is no count, and writes nothing", async () => {
@@ -585,7 +587,9 @@ describe("connectBatchIn", () => {
     // The 21st page is the one too many.
     expect(reads(t, "notes")).toHaveLength(21);
     expect(t.calls.some((c) => c.table === "links")).toBe(false);
-    expect(log).toHaveBeenCalledWith("connect refused: workspace too large");
+    expect(log).toHaveBeenCalledWith(
+      "connect index query refused: workspace too large",
+    );
   });
 
   it("refuses after 40 requests, however small the pages come back", async () => {
@@ -600,7 +604,9 @@ describe("connectBatchIn", () => {
     expect(await connectBatchIn(t.db, W1, null)).toEqual({ ok: false });
     expect(reads(t, "notes")).toHaveLength(40);
     expect(ranges(t, "notes")[39]).toEqual([39, 1038]);
-    expect(log).toHaveBeenCalledWith("connect refused: workspace too large");
+    expect(log).toHaveBeenCalledWith(
+      "connect index query refused: workspace too large",
+    );
   });
 
   it("reads the links the notes already have in pages, with the count asked once", async () => {
@@ -705,7 +711,9 @@ describe("connectBatchIn", () => {
       expect(inserts(t)).toEqual([]);
     }
     expect(log).toHaveBeenCalledTimes(2);
-    expect(log).toHaveBeenCalledWith("connect refused: too many links");
+    expect(log).toHaveBeenCalledWith(
+      "connect links query refused: too many links",
+    );
   });
 
   it("inserts 450 pairs in three chunks of 200, 200 and 50", async () => {

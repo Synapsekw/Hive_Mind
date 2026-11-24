@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   FIXTURE_DELETE_AFTER,
   fixtureDeletion,
+  fixtureHeads,
 } from "../../../settings/fixture";
 import { Settings } from "../../../settings/Settings";
 import { AccountProvider } from "../../../shell/AccountContext";
@@ -210,6 +211,39 @@ export function DevSettings({
         workspaces: d.workspaces.filter((w) => w.id !== id),
         agents: d.agents.filter((a) => a.workspaceId !== id),
       }));
+      return { ok: true };
+    },
+    scanTopics: async (workspaceId, after) => {
+      record("scanTopics", [workspaceId, after]);
+      await wait();
+      if (fail) return { ok: false };
+      // Everything on the first workspace's first page; the others hold nothing.
+      const first = data.workspaces[0]?.id === workspaceId && after === null;
+      return { ok: true, heads: first ? fixtureHeads() : [], next: null };
+    },
+    saveTopics: async (picks) => {
+      record("saveTopics", [picks]);
+      await wait();
+      if (fail) return { ok: false };
+      setData((d) => ({
+        ...d,
+        topics: [
+          ...d.topics,
+          ...picks.map((p, i) => ({
+            id: `00000000-0000-4000-8000-0000000b${String(100 + d.topics.length + i)}`,
+            kind: p.kind,
+            name: p.name,
+            notes: 0,
+          })),
+        ],
+      }));
+      return { ok: true, saved: picks.length };
+    },
+    deleteTopic: async (id) => {
+      record("deleteTopic", [id]);
+      await wait();
+      if (fail) return { ok: false };
+      setData((d) => ({ ...d, topics: d.topics.filter((x) => x.id !== id) }));
       return { ok: true };
     },
   };

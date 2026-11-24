@@ -17,6 +17,7 @@ import { DeletionDate } from "../shell/ClosingBanner";
 import { Shell } from "../shell/Shell";
 import { shortDate } from "../vault/format";
 import { TokenDialog } from "./TokenDialog";
+import { Topics } from "./Topics";
 import {
   CANCEL_DELETION,
   CLOSING_HELP,
@@ -525,6 +526,16 @@ export function Settings({
               onSay={setSaid}
               onDeleted={() => router.refresh()}
             />
+            {data.isOwner && (
+              <Topics
+                topics={data.topics}
+                workspaces={data.workspaces}
+                actions={actions}
+                closing={closing !== null}
+                onSay={setSaid}
+                onChanged={() => router.refresh()}
+              />
+            )}
             <section aria-labelledby="settings-members" className={s.section}>
               <div className={s.sectionHead}>
                 <div className={s.headText}>

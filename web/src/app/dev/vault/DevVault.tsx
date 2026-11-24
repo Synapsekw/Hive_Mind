@@ -13,8 +13,13 @@
 // Connecting wiki links answers from memory too: 90 notes, 40 a step, each step 7 links made, 2
 // already there and 1 pointing at no note. `failconnect` refuses a step by its number ("2"), or
 // every step ("all"); with `slow` a step takes as long as a batch.
+// Attaching topics answers the same way over the same 90 notes: each step's notes are 3 in 5
+// attached, 1 in 5 already attached and 1 in 5 with no topic (24, 8 and 8 of 40; 6, 2 and 2 of
+// 10), 12 topics in the hive. `failattach` works as `failconnect`;
+// `notopics` answers that the hive has none.
 import { useMemo, useRef, useState } from "react";
 import { fixturePreview } from "../../../vault/fixture";
+import type { AttachResult } from "../../../topics/types";
 import type {
   BatchResult,
   ConnectResult,
@@ -43,6 +48,8 @@ const CONNECT_STEP = 40;
 export type ImportFlags = {
   failbatch: string | null;
   failconnect: string | null;
+  failattach: string | null;
+  notopics: boolean;
   taken: boolean;
   limit: boolean;
 };
@@ -74,6 +81,7 @@ export function DevVault({
   const imported = useRef(new Map<string, string>());
   const batchNo = useRef(0);
   const connectNo = useRef(0);
+  const attachNo = useRef(0);
   const [deleted, setDeleted] = useState<readonly string[]>([]);
   const [unlinked, setUnlinked] = useState<readonly string[]>([]);
   // The sample data without the notes deleted and the links ended here; asking for a deleted
@@ -204,6 +212,42 @@ export function DevVault({
         already: scanned > 0 ? 2 : 0,
         missing: scanned > 0 ? 1 : 0,
         failed: 0,
+      };
+    },
+    attach: async (workspaceId, after): Promise<AttachResult> => {
+      record("attach", [workspaceId, after]);
+      attachNo.current += 1;
+      const no = attachNo.current;
+      if (slow) await wait(SLOW_BATCH);
+      if (
+        importFlags.failattach === "all" ||
+        importFlags.failattach === String(no)
+      )
+        return { ok: false };
+      const empty = { attached: 0, already: 0, none: 0, failed: 0 };
+      if (importFlags.notopics)
+        return {
+          ok: true,
+          next: null,
+          total: 0,
+          scanned: 0,
+          ...empty,
+          topics: 0,
+        };
+      // The cursor is how many notes were read before this step.
+      const from = after === null ? 0 : Number(after);
+      if (!Number.isInteger(from) || from < 0) return { ok: false };
+      const scanned = Math.max(0, Math.min(CONNECT_STEP, CONNECT_NOTES - from));
+      return {
+        ok: true,
+        next: scanned === CONNECT_STEP ? String(from + scanned) : null,
+        total: CONNECT_NOTES,
+        scanned,
+        attached: (scanned * 3) / 5,
+        already: scanned / 5,
+        none: scanned / 5,
+        failed: 0,
+        topics: 12,
       };
     },
   };

@@ -16,6 +16,8 @@ import type { ImportActions } from "../import/types";
 import { Shell } from "../shell/Shell";
 import { Connect } from "./Connect";
 import { CONNECT } from "./connectText";
+import { Attach } from "./Attach";
+import { ATTACH } from "./attachText";
 import { Folders } from "./Folders";
 import { Import } from "./Import";
 import { IMPORT } from "./importText";
@@ -100,19 +102,24 @@ export function Vault({
   }, [servedOpen]);
   // Deletes on their way, by note: a second request for the same note joins the first.
   const deleting = useRef(new Map<string, Promise<boolean>>());
-  // The panel under the bar: the import, connecting wiki links, or neither; never both. While
-  // either is at work it cannot be closed and the other cannot be opened.
-  const [panel, setPanel] = useState<"import" | "connect" | null>(null);
+  // The panel under the bar: the import, connecting wiki links, attaching topics, or none; never
+  // two. While one is at work it cannot be closed and the others cannot be opened.
+  const [panel, setPanel] = useState<"import" | "connect" | "attach" | null>(
+    null,
+  );
   const [panelBusy, setPanelBusy] = useState(false);
-  // The workspace the connect panel was opened on: it keeps it, whatever tab is opened meanwhile.
+  // The workspace the connect and attach panels were opened on: they keep it, whatever tab is
+  // opened meanwhile.
   const [connectIn, setConnectIn] = useState<{
     id: string;
     name: string;
   } | null>(null);
   const importOpener = useRef<HTMLButtonElement>(null);
   const connectOpener = useRef<HTMLButtonElement>(null);
+  const attachOpener = useRef<HTMLButtonElement>(null);
   const importing = panel === "import";
   const connecting = panel === "connect" && connectIn !== null;
+  const attaching = panel === "attach" && connectIn !== null;
   function closeImport() {
     setPanel(null);
     importOpener.current?.focus();
@@ -122,6 +129,10 @@ export function Vault({
     // Its opener is not there on "Shared with me", reached while a run was in flight: the
     // import's is, so the focus never falls to the page.
     (connectOpener.current ?? importOpener.current)?.focus();
+  }
+  function closeAttach() {
+    setPanel(null);
+    (attachOpener.current ?? importOpener.current)?.focus();
   }
   const main = useRef<HTMLElement>(null);
   // Where the focus goes once a deleted note has left the page.
@@ -284,8 +295,10 @@ export function Vault({
   // A new tab starts from "All notes" with nothing filtered.
   if (local.tab !== tabKey) {
     setLocal(fresh(data, tabKey));
-    // The connect panel belongs to the workspace it was opened on. A run goes on to its counts.
-    if (panel === "connect" && !panelBusy) setPanel(null);
+    // The connect and attach panels belong to the workspace they were opened on. A run goes on
+    // to its counts.
+    if ((panel === "connect" || panel === "attach") && !panelBusy)
+      setPanel(null);
   }
 
   const shared = data.tab.kind === "shared";
@@ -425,6 +438,26 @@ export function Vault({
                   {CONNECT}
                 </button>
               )}
+              {ownWorkspace && (
+                <button
+                  ref={attachOpener}
+                  type="button"
+                  className={s.secondary}
+                  aria-expanded={attaching}
+                  aria-controls={attaching ? "vault-attach" : undefined}
+                  aria-disabled={panelBusy || undefined}
+                  onClick={() => {
+                    if (panelBusy) return;
+                    if (attaching) closeAttach();
+                    else {
+                      setConnectIn(ownWorkspace);
+                      setPanel("attach");
+                    }
+                  }}
+                >
+                  {ATTACH}
+                </button>
+              )}
             </div>
           )}
           <label className={s.filter}>
@@ -475,6 +508,14 @@ export function Vault({
             workspace={connectIn}
             connect={importer.connect}
             onClose={closeConnect}
+            onBusy={setPanelBusy}
+          />
+        )}
+        {importer && attaching && connectIn && (
+          <Attach
+            workspace={connectIn}
+            attach={importer.attach}
+            onClose={closeAttach}
             onBusy={setPanelBusy}
           />
         )}

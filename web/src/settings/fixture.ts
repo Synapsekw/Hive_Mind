@@ -8,7 +8,9 @@ import type {
   Deletion,
   Invitation,
   Member,
+  NoteHead,
   SettingsData,
+  TopicRow,
   Workspace,
 } from "./types";
 
@@ -81,6 +83,49 @@ const INVITATIONS: Invitation[] = [
   },
 ];
 
+const TOPICS: TopicRow[] = [
+  {
+    id: "00000000-0000-4000-8000-0000000000a1",
+    kind: "client",
+    name: "Zain",
+    notes: 198,
+  },
+  {
+    id: "00000000-0000-4000-8000-0000000000a2",
+    kind: "vendor",
+    name: "Terra Drone",
+    notes: 0,
+  },
+];
+
+/** The heads the dev page's scan answers: one new customer, one known, a tag on five notes. */
+export function fixtureHeads(): NoteHead[] {
+  const tagged = Array.from({ length: 5 }, (_, i) => ({
+    path: `Sessions/s${i}.md`,
+    title: `Session ${i}`,
+    type: "session",
+    aliases: [],
+    tags: ["flare-stack"],
+  }));
+  return [
+    {
+      path: "Employers/Orbit/_Index.md",
+      title: "Orbit Aerospace",
+      type: "client-entity",
+      aliases: [],
+      tags: [],
+    },
+    {
+      path: "Employers/Zain/_Index.md",
+      title: "Zain",
+      type: "client-entity",
+      aliases: [],
+      tags: [],
+    },
+    ...tagged,
+  ];
+}
+
 /**
  * The sample settings, as the owner Danijel sees them. `member` is Ahmed's view: not the owner,
  * the "you" mark on Ahmed, and no invitations, which only the owner can read. `none` has no
@@ -97,6 +142,7 @@ export function fixtureSettings(
     agents: opts.none ? [] : AGENTS.map((a) => ({ ...a })),
     members: MEMBERS.map((m) => ({ ...m, isMe: m.id === me })),
     invitations: opts.member ? [] : INVITATIONS.map((i) => ({ ...i })),
+    topics: opts.member ? [] : TOPICS.map((x) => ({ ...x })),
   };
 }
 

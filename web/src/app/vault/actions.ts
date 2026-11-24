@@ -12,7 +12,9 @@ import type {
   WorkspaceMade,
 } from "../../import/types";
 import { createServerSupabase } from "../../lib/supabase/server";
+import type { AttachResult } from "../../topics/types";
 import type { Result, SharePreview } from "../../vault/types";
+import { attachBatchIn } from "./attach";
 import { connectBatchIn } from "./connect";
 import { createImportWorkspaceIn, importBatchIn } from "./import";
 import {
@@ -113,5 +115,19 @@ export async function connectWikiLinks(
 ): Promise<ConnectResult> {
   return withSession<ConnectResult>({ ok: false }, (db) =>
     connectBatchIn(db, workspaceId, after),
+  );
+}
+
+/**
+ * One step of attaching a workspace's notes to the hive's topics: the 40 notes after the
+ * cursor. The arguments are checked in `attach.ts`; the hive and the member come from the
+ * workspace's row.
+ */
+export async function attachTopics(
+  workspaceId: string,
+  after: string | null,
+): Promise<AttachResult> {
+  return withSession<AttachResult>({ ok: false }, (db) =>
+    attachBatchIn(db, workspaceId, after),
   );
 }

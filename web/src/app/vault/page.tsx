@@ -4,6 +4,7 @@ import { Vault } from "../../vault/Vault";
 import { loadInboxCount } from "../inbox/load-inbox";
 import {
   connectWikiLinks,
+  attachTopics,
   createImportWorkspace,
   deleteNote,
   importBatch,
@@ -60,6 +61,7 @@ export default async function VaultPage({
         createWorkspace: createImportWorkspace.bind(null, result.data.hive.id),
         importBatch,
         connect: connectWikiLinks,
+        attach: attachTopics,
       }}
       inbox={inbox}
     />
