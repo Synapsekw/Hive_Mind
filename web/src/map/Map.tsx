@@ -226,7 +226,8 @@ export function HiveMap({
         on[n.i]! &&
         n.kind !== "root" &&
         (sel === n.i ||
-          (names && n.kind === "hub" && view !== "timeline") ||
+          // Rings names its groups outside the circle, so its hubs carry no label of their own.
+          (names && n.kind === "hub" && view === "orbit") ||
           (!!selNode && near.has(n.i) && selNode.nb.length <= 14) ||
           (!!query && hits <= 14) ||
           ((view === "timeline" || kind === "agent") && n.kind === "agent"));

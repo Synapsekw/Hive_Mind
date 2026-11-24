@@ -81,7 +81,9 @@ Positions stay inside the 1000 x 760 box the camera fits, centre (500, 380).
   factor so it lands on 350, and the dots are drawn smaller by the same factor (not below 2.5
   screen pixels at 100% zoom). The layout returns that factor with the positions.
 - Guides: faint circles at the hub radius, the first item arc and the agent ring. The "Notes",
-  "Files" and "Agents" ring labels are dropped; the agent ring keeps "Agents".
+  "Files" and "Agents" ring labels are dropped (an "Agents" label collided with group names; the
+  legend names agents).
+- Hubs carry no label in Rings: the group names outside the circle replace them.
 - Group names are drawn outside the outermost arc of each sector, aligned away from the circle
   (left of centre: right-aligned; right of centre: left-aligned; near top and bottom: centred),
   as "<name> · <count>", cut to 44 characters. They take part in the existing no-overlap label
@@ -89,19 +91,23 @@ Positions stay inside the 1000 x 760 box the camera fits, centre (500, 380).
 
 ## 5. Colour and light
 
-One rule: **brightness means freshness.** Notes and files are drawn in the theme's `brand` colour.
+One rule, in Rings only: **brightness means freshness.** Notes and files are drawn in the theme's
+`brand` colour. Timeline and Orbit keep the colour per topic they have today.
 
 - Freshness level 0 to 7 from the age of the last change: 2 days or less is 7; otherwise
   `floor(7.4 * e^(-days / 26))`, kept within 0 to 6.
 - Fill opacity by level: 0.11, 0.15, 0.23, 0.33, 0.45, 0.60, 0.76, 0.94.
 - Levels 6 and 7 glow; level 7's glow breathes with the other ambient motion (about 12 frames a
   second, paused when off-screen, still under reduced motion).
-- Every dot keeps a thin outline in `brand` so an old note is still a visible shape. The outline's
-  opacity is one constant, chosen as the smallest value at which the outline has at least 3:1
-  contrast against the map card in all 18 themes, both modes and all three reaches; the theme
-  contrast test checks it.
-- An item the member cannot read stays hollow (outline only). A file stays a diamond, a note a
-  circle. Dots no longer dim for "not mine".
+- Every dot keeps a thin outline in `brand` at 45% opacity, so an old note is still a visible
+  shape but reads as a soft disc, not a ring.
+- Known gap: an old note's outline does not reach 3:1 contrast against the map card. On the light
+  glass card `brand` at full opacity already falls below 3:1 in 14 theme, mode and reach
+  combinations (worst 2.60), so no opacity can meet it without changing theme colours. Freshness
+  is also given as a date in the peek card and the detail panel, and every dot is a real button
+  in the hidden list.
+- An item the member cannot read stays hollow: card-colour fill and a full-strength 1.6 px
+  outline. A file stays a diamond, a note a circle. In Rings dots no longer dim for "not mine".
 - Hubs and the legend dock's group swatches keep the theme's group hues (hue = group index modulo
   8), so the "dot colours" setting under Appearance still has an effect.
 - Filtered-out dots dim to 10% and the soft dim to 32%, as today; the hot, focused and selected
@@ -149,7 +155,7 @@ Units 1 and 2 share nothing. Units 4 and 5 touch different files and both need u
 - Unit: freshness levels at the boundaries; each arrangement's groups, order, cap and names; link
   clusters on a small fixed graph, including a hub and an unreadable cluster; Rings geometry
   (freshest innermost, files after notes, everything inside the box, the scale factor at 5,000
-  items, no two items closer than the spacing); the outline contrast across themes.
+  items, no two items closer than the spacing).
 - Browser: the map opens on Rings; the view switch has exactly three views; each arrangement
   regroups the dots and the dock; the group filter clears and the selection survives an
   arrangement switch; no "At the hive" panel; the 5,000-item performance checks.
