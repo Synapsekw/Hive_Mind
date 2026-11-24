@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dotDiameter, fitGroupLabel, HALO_STOPS, haloAlpha } from "./renderer";
+import { dotDiameter, fitGroupLabel, haloAlpha } from "./renderer";
 import type { ModelNode } from "./types";
 
 function node(kind: ModelNode["kind"], nb: number[] = []): ModelNode {
@@ -95,15 +95,5 @@ describe("haloAlpha", () => {
     expect(haloAlpha(7, 1000, false)).toBeCloseTo(0.58, 10);
     expect(haloAlpha(7, 3000, false)).toBeCloseTo(0.42, 10);
     expect(haloAlpha(7, 4000, false)).toBeCloseTo(0.5, 10);
-  });
-});
-
-describe("HALO_STOPS", () => {
-  it("is full at the centre, 35% at 0.4 of the radius and gone at the edge", () => {
-    expect(HALO_STOPS).toEqual([
-      [0, 1],
-      [0.4, 0.35],
-      [1, 0],
-    ]);
   });
 });

@@ -72,7 +72,7 @@ export type Palette = {
 const TAU = Math.PI * 2;
 const SQ2 = Math.SQRT2;
 const LABEL_MAX = 220;
-/** Opacity of the thin brand outline around a readable dot in Rings (times its dim). */
+/** Opacity of the thin outline, in the dot's own colour, around a readable dot in Rings (times its dim). */
 export const OUTLINE_ALPHA = 0.45;
 /** A locked dot's stroke in Rings, in screen px (other views keep 1.2). */
 const LOCKED_W = 1.6;
@@ -98,8 +98,9 @@ export function readPalette(el: Element): Palette {
     edge: v("--edge"),
     accent: v("--acc"),
     fresh: Array.from({ length: 8 }, (_, i) => v(`--fresh-${i}`)),
-    glow: v("--glow-colour"),
-    hub: v("--hub"),
+    // A missing token falls back to the accent: parseColour throws on an empty string.
+    glow: v("--glow-colour") || v("--acc"),
+    hub: v("--hub") || v("--acc"),
     haloBlend: v("--halo-blend") === "source-over" ? "source-over" : "lighter",
   };
 }
@@ -886,7 +887,7 @@ function groupPaths(
 
 /**
  * Fills one group: hubs with their soft breathing glow, locked dots hollow. `outline` is the
- * opacity of a 1 px brand outline around readable dots (0: none).
+ * opacity of a 1 px outline, in the dot's own colour, around readable dots (0: none).
  */
 function fillGroup(
   F: Frame,
@@ -953,7 +954,7 @@ const outlineOf = (d: number, a: number) =>
   d >= OUTLINE_MIN ? OUTLINE_ALPHA * a : 0;
 
 /** The halo's fade: [fraction of the radius, share of the peak opacity]. */
-export const HALO_STOPS: readonly (readonly [number, number])[] = [
+const HALO_STOPS: readonly (readonly [number, number])[] = [
   [0, 1],
   [0.4, 0.35],
   [1, 0],
@@ -977,6 +978,9 @@ export function haloAlpha(level: number, time: number, still: boolean): number {
 }
 
 const sprites = new Map<string, HTMLCanvasElement>();
+
+/** Paper paints its halos at 0.42 at the peak where the dark themes add light at 0.5. */
+const HALO_PAINTED = 0.84;
 
 /** The halo of one colour, drawn once: a radial fade on a small canvas, stamped with drawImage. */
 function haloSprite(colour: string): HTMLCanvasElement {
@@ -1009,7 +1013,7 @@ function stampHalo(
 ) {
   if (a <= 0 || r <= 0) return;
   const { ctx, pal } = F;
-  ctx.globalAlpha = a;
+  ctx.globalAlpha = pal.haloBlend === "source-over" ? a * HALO_PAINTED : a;
   ctx.globalCompositeOperation = pal.haloBlend;
   ctx.drawImage(haloSprite(colour), x - r, y - r, 2 * r, 2 * r);
   ctx.globalCompositeOperation = "source-over";
@@ -1178,11 +1182,13 @@ function drawDots(F: Frame) {
     };
     dotCaches.set(scene, dc);
   }
-  if (F.fresh && F.c.glow) {
-    // Every halo first, so none covers a neighbour's dot.
+  if (F.fresh) {
+    // Every halo first, so none covers a neighbour's dot. Hubs are few, so they keep theirs
+    // when too many notes are fresh for note halos.
     for (const b of dc.batches) {
       if (!b.halo.length) continue;
       const hub = b.kind === "hub";
+      if (!hub && !F.c.glow) continue;
       const peak = hub ? 0.3 : haloAlpha(b.level, F.f.time, F.still);
       if (!hub && b.level === 7 && !F.still) F.ambient = true;
       for (const i of b.halo) {
@@ -1322,7 +1328,7 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
     );
     return;
   }
-  if (F.fresh && F.c.glow)
+  if (F.fresh)
     stampHalo(
       F,
       F.pal.hub,
