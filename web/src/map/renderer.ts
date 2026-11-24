@@ -80,6 +80,8 @@ const LOCKED_W = 1.6;
 const MIN_DOT = 2.5;
 /** Dots smaller than this on screen get no outline (it would swallow the fill). */
 const OUTLINE_MIN = 4;
+/** Above this many dots at freshness levels 6 and 7 the halos are skipped (too many to stamp per frame while dots move). */
+const GLOW_MAX = 400;
 
 /** The theme's colours, read once per theme change (getComputedStyle is not free). */
 export function readPalette(el: Element): Palette {
@@ -108,7 +110,7 @@ type SceneCache = {
   edges: Path2D;
   litEdges: WeakMap<boolean[], Path2D>;
   filtered: WeakMap<boolean[], boolean>;
-  /** Rings draws halos under fresh dots. */
+  /** At most GLOW_MAX dots at freshness levels 6 and 7: only then do the fresh ones get a halo. */
   glow: boolean;
   /** Per group: does any of its nodes stay lit (its name at full, else faint)? */
   groupOn: WeakMap<boolean[], boolean[]>;
@@ -137,11 +139,13 @@ function cacheFor(scene: Scene): SceneCache {
     edges.moveTo(e[i]!, e[i + 1]!);
     edges.lineTo(e[i + 2]!, e[i + 3]!);
   }
+  let fresh = 0;
+  for (const v of scene.fresh) if (v >= 6) fresh++;
   const out: SceneCache = {
     edges,
     litEdges: new WeakMap(),
     filtered: new WeakMap(),
-    glow: true,
+    glow: fresh <= GLOW_MAX,
     groupOn: new WeakMap(),
   };
   caches.set(scene, out);
