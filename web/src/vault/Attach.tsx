@@ -53,7 +53,7 @@ export function Attach({
     heading.current?.focus();
   }, [stage.kind]);
 
-  // Leaving while links are still being made asks first.
+  // Leaving while notes are still being attached to topics asks first.
   useEffect(() => {
     if (!running) return;
     const warn = (e: BeforeUnloadEvent) => {
@@ -78,7 +78,7 @@ export function Attach({
     busy.current = false;
     onBusy(false);
     setStage({ kind: "done", tally, end });
-    // Links were made on the server: read the page again, once.
+    // Topics were attached on the server: read the page again, once.
     router.refresh();
   }
 

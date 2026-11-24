@@ -2261,13 +2261,13 @@ test("the attach panel at work: it cannot be closed, leaving asks, and it ends b
     timeout: 15_000,
   });
   await expect(
-    done.getByText("Attached to a topic 27", { exact: true }),
+    done.getByText("Attached to a topic 54", { exact: true }),
   ).toBeVisible();
   await expect(
-    done.getByText("Already attached 9", { exact: true }),
+    done.getByText("Already attached 18", { exact: true }),
   ).toBeVisible();
   await expect(
-    done.getByText("Notes with no topic 12", { exact: true }),
+    done.getByText("Notes with no topic 18", { exact: true }),
   ).toBeVisible();
   await expect(done.getByRole("alert")).toHaveCount(0);
   expect((await attachCalls(page)).length).toBe(3);
@@ -2300,13 +2300,13 @@ test("Stop in the attach panel keeps the counts so far", async ({ page }) => {
     done.getByRole("heading", { name: A.ATTACH_STOPPED }),
   ).toBeFocused({ timeout: 15_000 });
   await expect(
-    done.getByText("Attached to a topic 18", { exact: true }),
+    done.getByText("Attached to a topic 48", { exact: true }),
   ).toBeVisible();
   await expect(
-    done.getByText("Already attached 6", { exact: true }),
+    done.getByText("Already attached 16", { exact: true }),
   ).toBeVisible();
   await expect(
-    done.getByText("Notes with no topic 8", { exact: true }),
+    done.getByText("Notes with no topic 16", { exact: true }),
   ).toBeVisible();
   await expect(done.getByRole("alert")).toHaveCount(0);
   expect((await attachCalls(page)).length).toBe(2);
@@ -2398,13 +2398,13 @@ test("after connecting the wiki links the import attaches topics and counts them
   const done = panelNamed(page, T.FINISHED);
   await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
   await expect(
-    done.getByText("Attached to a topic 27", { exact: true }),
+    done.getByText("Attached to a topic 54", { exact: true }),
   ).toBeVisible();
   await expect(
-    done.getByText("Already attached 9", { exact: true }),
+    done.getByText("Already attached 18", { exact: true }),
   ).toBeVisible();
   await expect(
-    done.getByText("Notes with no topic 12", { exact: true }),
+    done.getByText("Notes with no topic 18", { exact: true }),
   ).toBeVisible();
   await expect(done.getByText(A.AFTER_IMPORT_UNFINISHED)).toHaveCount(0);
   expect(await attachCalls(page)).toEqual([
@@ -2457,7 +2457,7 @@ test("Attach topics on one's own workspace: one sentence, Start, progress, then 
   const done = panelNamed(page, A.ATTACHED);
   await expect(done.getByRole("heading", { name: A.ATTACHED })).toBeFocused();
   await expect(
-    done.getByText("Attached to a topic 27", { exact: true }),
+    done.getByText("Attached to a topic 54", { exact: true }),
   ).toBeVisible();
   await done.getByRole("button", { name: "Close", exact: true }).click();
   await expect(attachButton(page)).toBeFocused();

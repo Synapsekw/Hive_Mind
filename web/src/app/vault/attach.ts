@@ -158,13 +158,16 @@ export async function attachBatchIn(
   }
 
   const ready = prepare(topics);
+  // Notes that already have an attached pair, and notes that gained one in this step.
+  const has = new Set<string>();
+  const gained = new Set<string>();
   const missing: { note_id: string; entity_id: string; confidence: number }[] =
     [];
   for (const note of notes) {
     const of = seen.get(note.id) ?? new Map<string, boolean>();
     const attached = [...of.values()].filter(Boolean).length;
     let room = MAX_TOPICS_PER_NOTE - attached;
-    let added = 0;
+    if (attached > 0) has.add(note.id);
     const hits = topicsFor(
       {
         path: note.path,
@@ -175,39 +178,41 @@ export async function attachBatchIn(
       ready,
     );
     for (const hit of hits) {
-      const there = of.get(hit.id);
-      if (there === true) counts.already += 1;
-      if (there !== undefined || room <= 0) continue;
+      if (of.has(hit.id) || room <= 0) continue;
       missing.push({
         note_id: note.id,
         entity_id: hit.id,
         confidence: hit.confidence,
       });
       room -= 1;
-      added += 1;
     }
-    if (attached + added === 0) counts.none += 1;
   }
 
   for (let at = 0; at < missing.length; at += CHUNK) {
     const chunk = missing.slice(at, at + CHUNK);
     const res = (await db.from("note_entities").insert(chunk)) as Res;
     if (!failed("attach pairs insert", res, true)) {
-      counts.attached += chunk.length;
+      for (const pair of chunk) gained.add(pair.note_id);
       continue;
     }
     if (says(res, SAYS_FROZEN)) return REFUSED;
     // Find the pairs the database refused; the others still go in.
     for (const pair of chunk) {
       const one = (await db.from("note_entities").insert([pair])) as Res;
-      if (!one.error) counts.attached += 1;
-      else if (one.error.code === UNIQUE_VIOLATION) counts.already += 1;
+      if (!one.error) gained.add(pair.note_id);
+      else if (one.error.code === UNIQUE_VIOLATION) has.add(pair.note_id);
       else {
         failed("attach pair insert", one, true);
         if (says(one, SAYS_FROZEN)) return REFUSED;
         counts.failed += 1;
       }
     }
+  }
+  // Each note of the step is counted once: it gained a pair, or it already has one, or it has none.
+  for (const note of notes) {
+    if (gained.has(note.id)) counts.attached += 1;
+    else if (has.has(note.id)) counts.already += 1;
+    else counts.none += 1;
   }
   return answer();
 }

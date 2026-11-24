@@ -144,6 +144,17 @@ const pairs = (t: { tables: Record<string, Row[]> }) =>
     .note_entities!.map((p) => `${p.note_id}>${p.entity_id}@${p.confidence}`)
     .sort();
 
+/** Attached, already and none count the step's notes, so they add up to what it read. */
+const adds = (out: unknown) => {
+  const o = out as {
+    scanned: number;
+    attached: number;
+    already: number;
+    none: number;
+  };
+  return o.attached + o.already + o.none === o.scanned;
+};
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("attachBatchIn", () => {
@@ -200,17 +211,19 @@ describe("attachBatchIn", () => {
         note(3, "c.md", { body: "nothing here" }),
       ],
     });
-    expect(await attachBatchIn(t.db, W1, null)).toEqual({
+    const out = await attachBatchIn(t.db, W1, null);
+    expect(out).toEqual({
       ok: true,
       next: null,
       total: 3,
       scanned: 3,
-      attached: 3,
+      attached: 2,
       already: 0,
       none: 1,
       failed: 0,
       topics: 2,
     });
+    expect(adds(out)).toBe(true);
     expect(pairs(t)).toEqual(
       [
         `${nid(1)}>${ZAIN}@0.9`,
@@ -240,6 +253,7 @@ describe("attachBatchIn", () => {
     });
     const out = await attachBatchIn(t.db, W1, null);
     expect(out).toMatchObject({ ok: true, attached: 0, already: 1, none: 0 });
+    expect(adds(out)).toBe(true);
     expect(t.tables.note_entities).toHaveLength(2);
     expect(t.calls.some((c) => op(c, "insert"))).toBe(false);
   });
@@ -256,11 +270,9 @@ describe("attachBatchIn", () => {
         },
       ],
     });
-    expect(await attachBatchIn(t.db, W1, null)).toMatchObject({
-      attached: 0,
-      already: 0,
-      none: 1,
-    });
+    const out = await attachBatchIn(t.db, W1, null);
+    expect(out).toMatchObject({ attached: 0, already: 0, none: 1 });
+    expect(adds(out)).toBe(true);
   });
 
   it("reads 40 notes a step in path order and hands back the last path as the cursor", async () => {
@@ -283,6 +295,7 @@ describe("attachBatchIn", () => {
       attached: 5,
       next: null,
     });
+    expect(adds(first) && adds(second)).toBe(true);
     expect(t.tables.note_entities).toHaveLength(45);
   });
 
@@ -300,9 +313,86 @@ describe("attachBatchIn", () => {
           : undefined;
       },
     });
-    expect(await attachBatchIn(t.db, W1, null)).toMatchObject({
-      attached: 1,
-      failed: 1,
+    // Note 1's only pair failed, so it has no topic; note 2's went in.
+    const out = await attachBatchIn(t.db, W1, null);
+    expect(out).toMatchObject({ attached: 1, already: 0, none: 1, failed: 1 });
+    expect(adds(out)).toBe(true);
+  });
+
+  it("counts a note that had one topic and gains a second as attached", async () => {
+    const t = fake({
+      notes: [note(1, "sources/zain/a.md", { title: "Terra Drone" })],
+      pairs: [
+        {
+          note_id: nid(1),
+          entity_id: ZAIN,
+          confidence: 0.9,
+          detached_at: null,
+        },
+      ],
+    });
+    const out = await attachBatchIn(t.db, W1, null);
+    expect(out).toMatchObject({ attached: 1, already: 0, none: 0 });
+    expect(adds(out)).toBe(true);
+    expect(t.tables.note_entities).toHaveLength(2);
+  });
+
+  describe("a note with many topics", () => {
+    const names = [
+      "Quartz",
+      "Basalt",
+      "Granite",
+      "Marble",
+      "Oak Lane",
+      "Elm Lane",
+      "Ash Lane",
+      "Fir Lane",
+      "Yew Lane",
+    ];
+    const id = (i: number) => nid(0x100 + i);
+    const entities: Row[] = names.map((n, i) => ({
+      id: id(i),
+      hive_id: HIVE,
+      type: "subject",
+      canonical_name: n,
+      aliases: [],
+    }));
+    const pair = (note_id: string, i: number) => ({
+      note_id,
+      entity_id: id(i),
+      confidence: 0.5,
+      detached_at: null,
+    });
+
+    it("at 5 attached topics counts as already and inserts nothing", async () => {
+      const t = fake({
+        entities,
+        notes: [note(1, "a.md", { body: "Quartz and Basalt" })],
+        pairs: [4, 5, 6, 7, 8].map((i) => pair(nid(1), i)),
+      });
+      const out = await attachBatchIn(t.db, W1, null);
+      expect(out).toMatchObject({ attached: 0, already: 1, none: 0 });
+      expect(adds(out)).toBe(true);
+      expect(t.calls.some((c) => op(c, "insert"))).toBe(false);
+      expect(t.tables.note_entities).toHaveLength(5);
+    });
+
+    it("at 3 attached topics with 4 new hits gains exactly 2 pairs", async () => {
+      const t = fake({
+        entities,
+        notes: [note(1, "a.md", { body: "Quartz Basalt Granite Marble" })],
+        pairs: [4, 5, 6].map((i) => pair(nid(1), i)),
+      });
+      const out = await attachBatchIn(t.db, W1, null);
+      expect(out).toMatchObject({ attached: 1, already: 0, none: 0 });
+      expect(adds(out)).toBe(true);
+      expect(t.tables.note_entities).toHaveLength(5);
+      expect(
+        t.tables
+          .note_entities!.filter((p) => p.confidence === 0.5)
+          .map((p) => p.entity_id)
+          .slice(3),
+      ).toEqual([id(1), id(2)]);
     });
   });
 

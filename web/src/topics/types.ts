@@ -31,7 +31,11 @@ export type Proposal = { kind: Kind; name: string; aliases: string[] };
 export type Candidate = Proposal & { notes: number };
 export type Hit = { id: string; confidence: number };
 
-/** One attach step. `none`: notes of this step left with no topic. `topics`: the hive's topics. */
+/**
+ * One attach step. `attached`, `already` and `none` count NOTES and add up to `scanned`: a note
+ * that gained a topic in this step, one that already had one, one left with none. `failed`
+ * counts pairs that could not be saved. `topics`: the hive's topics.
+ */
 export type AttachResult =
   | {
       ok: true;

@@ -5,7 +5,7 @@ import { num } from "./importText";
 
 export const ATTACH = "Attach topics";
 export const ATTACH_INTRO =
-  "Puts each of your notes in this workspace under the hive's topics it belongs to, by its folder, tags, title and text. Only your own notes are attached. A topic you removed from a note stays removed.";
+  "Puts each of your notes in this workspace under the hive's topics it belongs to, by its folder, tags, title and text. Only your own notes are attached.";
 export const START = "Attach";
 export const ATTACHING = "Attaching topics";
 export const ATTACHED = "Topics attached";

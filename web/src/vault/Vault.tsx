@@ -102,13 +102,14 @@ export function Vault({
   }, [servedOpen]);
   // Deletes on their way, by note: a second request for the same note joins the first.
   const deleting = useRef(new Map<string, Promise<boolean>>());
-  // The panel under the bar: the import, connecting wiki links, attaching topics, or none; never two. While
-  // either is at work it cannot be closed and the other cannot be opened.
+  // The panel under the bar: the import, connecting wiki links, attaching topics, or none; never
+  // two. While one is at work it cannot be closed and the others cannot be opened.
   const [panel, setPanel] = useState<"import" | "connect" | "attach" | null>(
     null,
   );
   const [panelBusy, setPanelBusy] = useState(false);
-  // The workspace the connect panel was opened on: it keeps it, whatever tab is opened meanwhile.
+  // The workspace the connect and attach panels were opened on: they keep it, whatever tab is
+  // opened meanwhile.
   const [connectIn, setConnectIn] = useState<{
     id: string;
     name: string;
@@ -118,7 +119,6 @@ export function Vault({
   const attachOpener = useRef<HTMLButtonElement>(null);
   const importing = panel === "import";
   const connecting = panel === "connect" && connectIn !== null;
-  // The panel keeps the workspace it was opened on in the same `connectIn` state.
   const attaching = panel === "attach" && connectIn !== null;
   function closeImport() {
     setPanel(null);
@@ -295,7 +295,8 @@ export function Vault({
   // A new tab starts from "All notes" with nothing filtered.
   if (local.tab !== tabKey) {
     setLocal(fresh(data, tabKey));
-    // The connect panel belongs to the workspace it was opened on. A run goes on to its counts.
+    // The connect and attach panels belong to the workspace they were opened on. A run goes on
+    // to its counts.
     if ((panel === "connect" || panel === "attach") && !panelBusy)
       setPanel(null);
   }

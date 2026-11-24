@@ -13,8 +13,9 @@
 // Connecting wiki links answers from memory too: 90 notes, 40 a step, each step 7 links made, 2
 // already there and 1 pointing at no note. `failconnect` refuses a step by its number ("2"), or
 // every step ("all"); with `slow` a step takes as long as a batch.
-// Attaching topics answers the same way over the same 90 notes: each step 9 attached, 3 already
-// attached and 4 with no topic, 12 topics in the hive. `failattach` works as `failconnect`;
+// Attaching topics answers the same way over the same 90 notes: each step's notes are 3 in 5
+// attached, 1 in 5 already attached and 1 in 5 with no topic (24, 8 and 8 of 40; 6, 2 and 2 of
+// 10), 12 topics in the hive. `failattach` works as `failconnect`;
 // `notopics` answers that the hive has none.
 import { useMemo, useRef, useState } from "react";
 import { fixturePreview } from "../../../vault/fixture";
@@ -242,9 +243,9 @@ export function DevVault({
         next: scanned === CONNECT_STEP ? String(from + scanned) : null,
         total: CONNECT_NOTES,
         scanned,
-        attached: scanned > 0 ? 9 : 0,
-        already: scanned > 0 ? 3 : 0,
-        none: scanned > 0 ? 4 : 0,
+        attached: (scanned * 3) / 5,
+        already: scanned / 5,
+        none: scanned / 5,
         failed: 0,
         topics: 12,
       };

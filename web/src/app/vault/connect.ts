@@ -99,7 +99,7 @@ export async function paged(
     out.push(...rows(res));
     if (count !== null && got >= count) return out;
   }
-  console.error(`connect refused: ${tooMany}`);
+  console.error(`${what} refused: ${tooMany}`);
   return null;
 }
 
