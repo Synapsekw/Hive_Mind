@@ -71,7 +71,7 @@ function Folder({
 
 export function Folders(p: Props) {
   return (
-    <nav aria-label="Folders" className={s.folders}>
+    <nav aria-label="Folders">
       <ul className={s.tree}>
         <li>
           <div className={s.folderRow}>

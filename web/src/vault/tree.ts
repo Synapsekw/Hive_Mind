@@ -11,7 +11,11 @@ export type TreeNode = {
 };
 
 export type Scope =
-  { kind: "all" } | { kind: "folder"; path: string } | { kind: "held" };
+  | { kind: "all" }
+  | { kind: "folder"; path: string }
+  | { kind: "held" }
+  | { kind: "topic"; id: string }
+  | { kind: "untopiced" };
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -67,6 +71,8 @@ export function notesIn(
     .filter((n) => {
       if (scope.kind === "held" && !n.quarantined) return false;
       if (scope.kind === "folder" && !isBelow(n.path, scope.path)) return false;
+      if (scope.kind === "topic" && !n.topics.includes(scope.id)) return false;
+      if (scope.kind === "untopiced" && n.topics.length > 0) return false;
       return (
         q === "" ||
         n.title.toLowerCase().includes(q) ||
