@@ -16,6 +16,7 @@ vi.mock("next/headers", () => ({ cookies: mocks.cookies }));
 import { continueWithLink, join, setPassword, skipPassword } from "./actions";
 
 type Cookie = { name: string; value: string; maxAge: number; path: string };
+const HIVE = "00000000-0000-4000-8000-000000000a01";
 
 /** The browser's cookies as the actions see them; `sets` is what they sent back. */
 function jar(has: Record<string, string> = {}) {
@@ -38,7 +39,9 @@ const PASSWORD = "correct horse battery";
 const TOKEN = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8";
 const INVITATION = "00000000-0000-4000-8000-00000000d001";
 
-function client(opts: { verifyError?: unknown; rpcError?: unknown } = {}) {
+function client(
+  opts: { verifyError?: unknown; rpcError?: unknown; rpcData?: unknown } = {},
+) {
   let now: string | null = null;
   const verifyOtp = vi.fn(async (_a: unknown) => {
     if (opts.verifyError)
@@ -52,7 +55,7 @@ function client(opts: { verifyError?: unknown; rpcError?: unknown } = {}) {
   }));
   const signOut = vi.fn(async (_o?: unknown) => ({ error: null }));
   const rpc = vi.fn(async (_n: string, _a?: unknown) => ({
-    data: null,
+    data: opts.rpcError ? null : (opts.rpcData ?? null),
     error: opts.rpcError ?? null,
   }));
   mocks.createServerSupabase.mockResolvedValue({
@@ -249,6 +252,76 @@ describe("join", () => {
       p_invitation: INVITATION,
     });
     expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it("makes the joined hive the chosen one: the id the database answered, a year, every page", async () => {
+    client({ rpcData: HIVE });
+    const c = jar();
+    expect(await join(INVITATION)).toEqual({ ok: true, next: "/" });
+    expect(c.sets).toEqual([
+      {
+        name: "hm_hive",
+        value: HIVE,
+        httpOnly: true,
+        sameSite: "lax",
+        secure: false,
+        path: "/",
+        maxAge: 31536000,
+      },
+    ]);
+  });
+
+  it("marks that cookie Secure in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    client({ rpcData: HIVE });
+    const c = jar();
+    await join(INVITATION);
+    expect(c.sets[0]).toMatchObject({ name: "hm_hive", secure: true });
+  });
+
+  it("chooses the joined hive for a new person too, and still leads on to the password page", async () => {
+    client({ rpcData: HIVE });
+    const c = jar(NEW);
+    expect(await join(INVITATION)).toEqual({
+      ok: true,
+      next: "/join/password",
+    });
+    expect(c.sets).toHaveLength(1);
+    expect(c.sets[0]).toMatchObject({ name: "hm_hive", value: HIVE });
+  });
+
+  it.each([
+    ["nothing", null],
+    ["a word", "joined"],
+    ["an address", "/evil"],
+  ])(
+    "has joined but sets no cookie when the database answers %s",
+    async (_n, rpcData) => {
+      client({ rpcData });
+      const c = jar();
+      expect(await join(INVITATION)).toEqual({ ok: true, next: "/" });
+      expect(c.sets).toEqual([]);
+    },
+  );
+
+  it("has still joined when the cookie cannot be set", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    client({ rpcData: HIVE });
+    const c = jar();
+    c.store.set.mockImplementation(() => {
+      throw new Error("cookies are read-only here");
+    });
+    expect(await join(INVITATION)).toEqual({ ok: true, next: "/" });
+  });
+
+  it("sets no cookie when the database refuses or the id is not one", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    client({ rpcError: { message: "invitation not found", code: "P0001" } });
+    const c = jar();
+    expect(await join(INVITATION)).toEqual({ ok: false });
+    client({ rpcData: HIVE });
+    expect(await join("x")).toEqual({ ok: false });
+    expect(c.sets).toEqual([]);
   });
 
   it("sends a new person on to the password page, decided from the cookie on the server", async () => {

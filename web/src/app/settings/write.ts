@@ -221,6 +221,7 @@ export async function inviteIn(
   email: unknown,
   name: unknown,
   fetchFn: Fetch,
+  shownHive?: unknown,
 ): Promise<Invited> {
   const cleanedEmail = cleanEmail(email);
   const cleanedName = cleanName(name);
@@ -231,6 +232,16 @@ export async function inviteIn(
   // The hive the person uses, so the one they see on `/settings`.
   const hive = await ownHive(db, uid);
   if (hive === "error" || hive === null) return FAILED;
+  // The page names the hive it was showing. When the person has since switched to another hive
+  // in a second tab, this tab still shows the first one: inviting into the other hive would
+  // put a person where the owner never meant them, so it is refused instead.
+  if (
+    shownHive !== undefined &&
+    !(isUuid(shownHive) && shownHive.toLowerCase() === hive.id.toLowerCase())
+  ) {
+    console.error("invite refused: the page showed another hive");
+    return FAILED;
+  }
 
   const res = (await db.rpc("invite_member", {
     p_hive: hive.id,

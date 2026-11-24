@@ -293,7 +293,7 @@ describe("deleteIn", () => {
       ["eq", ["user_id", "u-me"]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
-      ["limit", [1]],
+      ["limit", [50]],
     ]);
     // The id is the one the auth server answered with, asked for once.
     expect(t.getUser).toHaveBeenCalledTimes(1);

@@ -69,7 +69,7 @@ describe("loadMap", () => {
       ["eq", ["user_id", USER]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
-      ["limit", [1]],
+      ["limit", [50]],
     ]);
     expect(t.rpc).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledWith("map_graph", { p_hive: HIVE });

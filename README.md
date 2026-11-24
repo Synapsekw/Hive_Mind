@@ -73,6 +73,14 @@ account. All theme colours come from one generated stylesheet,
 `web/src/theme/themes.generated.css`; after changing `web/src/theme/themes.json` or the theme
 code, regenerate it with `pnpm --filter @hive-mind/web themes`.
 
+The hive's name at the top of the left rail opens the list of your hives, each with your role
+there and a tick on the one you are in; choose another to switch. **New hive** in the same list
+starts one: enter the hive's name and your name in it (1 to 60 characters each) and choose
+**Create**. You become its owner; a person can own at most 5 hives. If you are in no hive yet,
+the home page offers the same form. Agents and connected apps belong to the hive they were
+created in. A hive cannot be renamed, deleted or left yet. The cap, the database's own name
+checks and the audit entry need the `hive_cap` migration on the database.
+
 To open the vault, choose **Vault** in the left rail, or select a note on the map and choose
 **Open in vault**. It shows your workspaces as tabs, then "Shared with me" for notes colleagues
 have shared with you. Choose a note or a folder and use the sharing pill to change who can read
