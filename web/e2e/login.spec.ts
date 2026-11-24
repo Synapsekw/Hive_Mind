@@ -3,7 +3,7 @@ import { setLook } from "./look";
 
 test.use({ viewport: { width: 1366, height: 768 } });
 
-const LOOKS = [undefined, "aurora.light.vivid.classic"] as const;
+const LOOKS = [undefined, "paper"] as const;
 
 const radius = (page: Page, selector: string) =>
   page

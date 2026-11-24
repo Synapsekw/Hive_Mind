@@ -28,8 +28,9 @@ const menu = (page: Page) => page.getByRole("group", { name: "Account" });
 const button = (page: Page) =>
   menu(page).getByRole("button", { name: /^Appearance/ });
 
-/** The panel proper: the reset scope inside the menu (the menu is a reset scope itself). */
-const panel = (page: Page) => menu(page).locator('[data-scope="reset"]');
+/** The panel proper: the Theme radiogroup inside the menu. */
+const panel = (page: Page) =>
+  page.getByRole("radiogroup", { name: "Theme", exact: true });
 
 /** Opens the account popover, then the Appearance panel inside it. */
 async function openPanel(page: Page) {
@@ -49,29 +50,26 @@ function watch(page: Page) {
 
 test("with no cookie the page has the default look", async ({ page }) => {
   await open(page);
-  expect(await attrs(page)).toMatchObject({
-    theme: "hive",
-    mode: "dark",
-    reach: "tinted",
-    dots: "theme",
-  });
+  expect(await attrs(page)).toMatchObject({ theme: "honey", mode: "dark" });
+  expect(await attrs(page)).not.toHaveProperty("reach");
+  expect(await attrs(page)).not.toHaveProperty("dots");
 });
 
 test("the cookie's look is in the first HTML response", async ({
   page,
   context,
 }) => {
-  await setLook(context, "aurora.light.vivid.classic");
+  await setLook(context, "paper");
   const res = await page.goto("/dev/map");
   const html = await res!.text();
   const tag = html.match(/<html[^>]*>/)![0];
   for (const [k, v] of [
-    ["theme", "aurora"],
+    ["theme", "paper"],
     ["mode", "light"],
-    ["reach", "vivid"],
-    ["dots", "classic"],
   ])
     expect(tag).toContain(`data-${k}="${v}"`);
+  expect(tag).not.toContain("data-reach");
+  expect(tag).not.toContain("data-dots");
 });
 
 test("a tampered cookie gives the default look and is not echoed", async ({
@@ -84,12 +82,9 @@ test("a tampered cookie gives the default look and is not echoed", async ({
   const html = await res!.text();
   expect(html).not.toContain("alert(1)");
   expect(html).not.toContain("<script>alert");
-  expect(await attrs(page)).toMatchObject({
-    theme: "hive",
-    mode: "dark",
-    reach: "tinted",
-    dots: "theme",
-  });
+  expect(await attrs(page)).toMatchObject({ theme: "honey", mode: "dark" });
+  expect(await attrs(page)).not.toHaveProperty("reach");
+  expect(await attrs(page)).not.toHaveProperty("dots");
 });
 
 test("the panel is closed until its button opens it", async ({ page }) => {
@@ -100,10 +95,7 @@ test("the panel is closed until its button opens it", async ({ page }) => {
   await button(page).click();
   await expect(button(page)).toHaveAttribute("aria-expanded", "true");
   await expect(panel(page)).toBeVisible();
-  await expect(page.getByText("Dot colours", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText("How far the colour reaches", { exact: true }),
-  ).toBeVisible();
+  await expect(panel(page).getByRole("radio")).toHaveCount(8);
 });
 
 test("each choice applies at once, sets the cookie and makes no request", async ({
@@ -116,30 +108,22 @@ test("each choice applies at once, sets the cookie and makes no request", async 
 
   await group(page, "Theme").getByRole("radio", { name: "Aurora" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "aurora");
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
   expect(await cssVar(page, "--brand")).not.toBe(before);
-  expect(await lookCookie(page)).toBe("aurora.dark.tinted.theme");
+  expect(await lookCookie(page)).toBe("aurora");
 
-  await group(page, "Mode").getByRole("radio", { name: "Light" }).click();
+  await group(page, "Theme").getByRole("radio", { name: "Paper" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
   await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
-  await group(page, "Dot colours")
-    .getByRole("radio", { name: "Classic" })
-    .click();
-  await expect(page.locator("html")).toHaveAttribute("data-dots", "classic");
-  await group(page, "How far the colour reaches")
-    .getByRole("radio", { name: "Vivid" })
-    .click();
-  await expect(page.locator("html")).toHaveAttribute("data-reach", "vivid");
-  expect(await lookCookie(page)).toBe("aurora.light.vivid.classic");
+  expect(await lookCookie(page)).toBe("paper");
 
   await page.waitForTimeout(500);
   expect(requests()).toEqual([]);
 
   await page.reload({ waitUntil: "networkidle" });
   expect(await attrs(page)).toMatchObject({
-    theme: "aurora",
+    theme: "paper",
     mode: "light",
-    reach: "vivid",
-    dots: "classic",
   });
 });
 
@@ -149,17 +133,17 @@ test("arrow keys move within a group and Escape returns to the account button", 
   await open(page);
   await openPanel(page);
   const themes = group(page, "Theme");
-  const hive = themes.getByRole("radio", { name: "Hive" });
-  await expect(hive).toHaveAttribute("aria-checked", "true");
-  await expect(hive).toHaveAttribute("tabindex", "0");
-  await hive.focus();
+  const honey = themes.getByRole("radio", { name: "Honey" });
+  await expect(honey).toHaveAttribute("aria-checked", "true");
+  await expect(honey).toHaveAttribute("tabindex", "0");
+  await honey.focus();
   await page.keyboard.press("ArrowRight");
-  const keystone = themes.getByRole("radio", { name: "Keystone" });
-  await expect(keystone).toBeFocused();
-  await expect(keystone).toHaveAttribute("aria-checked", "true");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "keystone");
+  const abyss = themes.getByRole("radio", { name: "Abyss" });
+  await expect(abyss).toBeFocused();
+  await expect(abyss).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "abyss");
   await page.keyboard.press("ArrowLeft");
-  await expect(hive).toBeFocused();
+  await expect(honey).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(menu(page)).toHaveCount(0);
@@ -172,7 +156,7 @@ test("in light mode the popover's text is not white", async ({
   page,
   context,
 }) => {
-  await setLook(context, "keystone.light.tinted.theme");
+  await setLook(context, "paper");
   await open(page);
   await openPanel(page);
   const color = await panel(page).evaluate((el) => getComputedStyle(el).color);
@@ -189,8 +173,8 @@ test("changing the theme keeps the selected dot", async ({ page }) => {
     .getByRole("heading", { level: 2 });
   await expect(title).toHaveText(HOSTILE_TITLE);
   await openPanel(page);
-  await group(page, "Theme").getByRole("radio", { name: "Sunset" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "sunset");
+  await group(page, "Theme").getByRole("radio", { name: "Ember" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "ember");
   await expect(title).toHaveText(HOSTILE_TITLE);
 });
 
@@ -208,12 +192,9 @@ test("text is set in self-hosted Inter, with no font service", async ({
   ).toEqual([]);
 });
 
-test("the rail is the chrome scope and marks the current page", async ({
-  page,
-}) => {
+test("the rail marks the current page", async ({ page }) => {
   await open(page);
   const rail = page.getByRole("complementary", { name: "Navigation" });
-  await expect(rail).toHaveAttribute("data-scope", "chrome");
   await expect(rail.getByRole("link", { name: "Map" })).toHaveAttribute(
     "aria-current",
     "page",
@@ -236,10 +217,10 @@ test("a tab that changed its own look still follows another tab's later change",
   await openPanel(page);
   await group(page, "Theme").getByRole("radio", { name: "Aurora" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "aurora");
-  // The other tab, still holding the default theme, changes the mode and rewrites the cookie.
+  // The other tab, still holding the default theme, picks Paper and rewrites the cookie.
   await openPanel(other);
-  await group(other, "Mode").getByRole("radio", { name: "Light" }).click();
-  expect(await lookCookie(other)).toBe("hive.light.tinted.theme");
+  await group(other, "Theme").getByRole("radio", { name: "Paper" }).click();
+  expect(await lookCookie(other)).toBe("paper");
   await other.close();
 
   await page.evaluate(() =>
@@ -249,9 +230,9 @@ test("a tab that changed its own look still follows another tab's later change",
   );
   // The page, the panel and the cookie agree again: every attribute follows the cookie.
   await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "hive");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
   await expect(
-    group(page, "Theme").getByRole("radio", { name: "Hive" }),
+    group(page, "Theme").getByRole("radio", { name: "Paper" }),
   ).toHaveAttribute("aria-checked", "true");
 });
 
@@ -260,13 +241,12 @@ test("a look changed in another tab is followed after a server refresh", async (
   context,
 }) => {
   await open(page);
-  // The other tab, same browser: it changes the theme and the mode, which rewrites the cookie.
+  // The other tab, same browser: it picks Paper, which rewrites the cookie.
   const other = await context.newPage();
   await open(other);
   await openPanel(other);
-  await group(other, "Theme").getByRole("radio", { name: "Aurora" }).click();
-  await group(other, "Mode").getByRole("radio", { name: "Light" }).click();
-  expect(await lookCookie(other)).toBe("aurora.light.tinted.theme");
+  await group(other, "Theme").getByRole("radio", { name: "Paper" }).click();
+  expect(await lookCookie(other)).toBe("paper");
   await other.close();
 
   // The first tab refreshes from the server, as the map's Refresher does on focus. /dev/map has
@@ -277,26 +257,17 @@ test("a look changed in another tab is followed after a server refresh", async (
       window as unknown as { nd: { router: { refresh(): void } } }
     ).nd.router.refresh(),
   );
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "aurora");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
   await openPanel(page);
   await expect(
-    group(page, "Theme").getByRole("radio", { name: "Aurora" }),
-  ).toHaveAttribute("aria-checked", "true");
-  await expect(
-    group(page, "Mode").getByRole("radio", { name: "Light" }),
+    group(page, "Theme").getByRole("radio", { name: "Paper" }),
   ).toHaveAttribute("aria-checked", "true");
 
-  // A following change keeps the other tab's fields.
-  await group(page, "How far the colour reaches")
-    .getByRole("radio", { name: "Vivid" })
-    .click();
-  expect(await lookCookie(page)).toBe("aurora.light.vivid.theme");
-  expect(await attrs(page)).toMatchObject({
-    theme: "aurora",
-    mode: "light",
-    reach: "vivid",
-    dots: "theme",
-  });
+  // A following change replaces the other tab's choice.
+  await group(page, "Theme").getByRole("radio", { name: "Ember" }).click();
+  expect(await lookCookie(page)).toBe("ember");
+  expect(await attrs(page)).toMatchObject({ theme: "ember", mode: "dark" });
 });
 
 test("in forced colours the swatches stay visible and the choice is outlined", async ({
@@ -316,7 +287,7 @@ test("in forced colours the swatches stay visible and the choice is outlined", a
           image: cs.backgroundImage,
         };
       });
-  const chosen = await style("Hive");
+  const chosen = await style("Honey");
   expect(chosen.outline).not.toBe("none");
   expect(chosen.width).toBeGreaterThan(0);
   expect(chosen.image).toContain("gradient");
