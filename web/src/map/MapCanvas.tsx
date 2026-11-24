@@ -30,7 +30,7 @@ import type { Scene } from "./scene";
 import { nodeKey } from "./select";
 import { staggerDelay } from "./stagger";
 import { ease, tweenPositions } from "./tween";
-import type { Filter, MapModel, View } from "./types";
+import type { MapModel, NodeKind, View } from "./types";
 import {
   reducedMotion,
   useCamera,
@@ -44,7 +44,11 @@ import s from "./map.module.css";
 export type { CameraApi } from "./useCamera";
 
 /** What the legend dock is pointing at: its matching dots stay, the rest drop to the soft dim. */
-export type Preview = Partial<Pick<Filter, "topic" | "kind" | "member">>;
+export type Preview = {
+  topic?: number | null;
+  kind?: NodeKind | null;
+  member?: string | null;
+};
 
 /** The canvas's `data-preview`: `topic:0`, `kind:note`, `member:<id>`, or empty. */
 export function previewTag(p: Preview | null): string {

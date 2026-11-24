@@ -230,7 +230,15 @@ export function HiveMap({
   // filed by, so the search does not light whole groups by it.
   const groupNames = view !== "rings" || arrange === "folder";
   const on = useMemo(
-    () => lit(model, { topic, kind, member, q, sel, groupNames }),
+    () =>
+      lit(model, {
+        topics: topic === null ? [] : [topic],
+        kinds: kind === null ? [] : [kind],
+        members: member === null ? [] : [member],
+        q,
+        sel,
+        groupNames,
+      }),
     [model, topic, kind, member, q, sel, groupNames],
   );
   const hits = query ? on.filter(Boolean).length : 0;
@@ -342,9 +350,9 @@ export function HiveMap({
   const soft = useMemo(() => {
     if (preview) {
       const keep = lit(model, {
-        topic: preview.topic ?? null,
-        kind: preview.kind ?? null,
-        member: preview.member ?? null,
+        topics: preview.topic != null ? [preview.topic] : [],
+        kinds: preview.kind != null ? [preview.kind] : [],
+        members: preview.member != null ? [preview.member] : [],
         q: "",
         sel: null,
       });
