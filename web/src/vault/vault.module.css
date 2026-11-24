@@ -1194,3 +1194,67 @@
   opacity: 0;
   cursor: pointer;
 }
+
+/* ---- Import a folder ----
+   The button sits before the filter; the panel is a reset popover in the card's flow, under
+   the tabs, like the delete question. It scrolls inside itself when its lists are long. */
+.importOpen {
+  margin-left: auto;
+}
+
+.importPanel {
+  flex: none;
+  margin-top: 0;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.importPanel .quiet {
+  margin-left: auto;
+}
+
+.importPanel .groupName {
+  padding: 0;
+}
+
+.importPanel .options {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+/* A label over its field. */
+.importField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.importField > .search {
+  flex: none;
+  font-family: inherit;
+}
+
+.importPaths {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.importProgress {
+  width: 100%;
+  max-width: 360px;
+  height: 6px;
+  accent-color: var(--acc);
+}
+
+/* A link drawn as a button. */
+.importLink {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}

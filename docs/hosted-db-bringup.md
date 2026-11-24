@@ -55,6 +55,9 @@ deleted is in [Hive deletion](#hive-deletion).
   03:17 UTC). Checked: a call without the secret or with a wrong one gets 401; one run started
   through the job's own command answered `{"ok":true,"purged":0,"failed":0}`. Not yet seen on
   this project: a real erase, since no hive has been due.
+- Migration `20261124110155_workspace_cap` is **not applied yet**. It lets a member have at
+  most 20 workspaces and requires a workspace name of 1 to 60 characters after trimming. Until
+  it is applied the database enforces neither.
 - The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
   the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
   still the build from before its signing code moved to `_shared/`; behaviour is the same.

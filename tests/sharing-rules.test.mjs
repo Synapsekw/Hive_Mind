@@ -8861,12 +8861,23 @@ test("a large hive is erased over several calls, each within a budget of rows", 
      select $1, $2, 'test.bulk' from generate_series(1, 3000) i`,
     [h.id, h.memberMember],
   );
-  await asDbOwner(
-    null,
-    `insert into public.workspaces (hive_id, member_id, name)
-     select $1, $2, 'bulk ' || i from generate_series(1, 150) i`,
-    [h.id, h.memberMember],
+  // More than a member may have today (20261124110155_workspace_cap.sql):
+  // rows from before the limit, put there with its trigger switched off.
+  await db.exec(
+    `alter table public.workspaces disable trigger zzzz_workspace_cap`,
   );
+  try {
+    await asDbOwner(
+      null,
+      `insert into public.workspaces (hive_id, member_id, name)
+       select $1, $2, 'bulk ' || i from generate_series(1, 150) i`,
+      [h.id, h.memberMember],
+    );
+  } finally {
+    await db.exec(
+      `alter table public.workspaces enable trigger zzzz_workspace_cap`,
+    );
+  }
   await asDbOwner(
     null,
     `insert into public.notifications (hive_id, member_id, kind)
@@ -9645,4 +9656,241 @@ test("nobody truncates a hive's tables through the API", async () => {
       }
   }
   assert.deepEqual(await hdSnapshot(h.id), before);
+});
+
+// ---------------------------------------------------------------------------
+// Workspaces: a name of 1 to 60 characters and at most 20 for one member
+// (20261124110155_workspace_cap.sql). The app makes a workspace when a person
+// imports a folder of notes.
+// ---------------------------------------------------------------------------
+const WS_NO_NAME = /a workspace needs a name/;
+const WS_LONG_NAME = /that workspace name is too long/;
+const WS_CAP = /you already have 20 workspaces/;
+const WS_POLICY = /row-level security/;
+// A person with a hive of their own: one member, one workspace ("Main").
+let wsPeople = 0;
+const wsPerson = async () => {
+  const who = await hivePerson();
+  const hiveId = await startHive(who, `Workspaces ${++wsPeople}`);
+  const [mine] = await membershipsOf(who.sub);
+  return { who, hive: hiveId, member: mine.id };
+};
+const addSpace = (p, name, who = p.who) =>
+  as(
+    who,
+    `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, $3) returning id, name`,
+    [p.hive, p.member, name],
+  ).then((r) => r[0]);
+const spacesOf = async (member) =>
+  (
+    await db.query(
+      `select name from public.workspaces where member_id = $1 order by name`,
+      [member],
+    )
+  ).rows.map((r) => r.name);
+const fillSpaces = async (p) => {
+  for (let n = 2; n <= 20; n++) await addSpace(p, `Space ${n}`);
+};
+const notTheLimit = (e) => {
+  assert.doesNotMatch(String(e), WS_CAP);
+  return true;
+};
+
+test("a workspace needs a name of 1 to 60 characters, stored trimmed", async () => {
+  const p = await wsPerson();
+  for (const name of ["", "   ", ALL_SPACE, null])
+    await assert.rejects(addSpace(p, name), WS_NO_NAME, JSON.stringify(name));
+  await assert.rejects(addSpace(p, "x".repeat(61)), WS_LONG_NAME);
+  // Counted in characters, after trimming.
+  const sixty = "é".repeat(60);
+  assert.equal((await addSpace(p, ` ${sixty}\t`)).name, sixty);
+  assert.equal(
+    (await addSpace(p, `${ALL_SPACE}Research notes${ALL_SPACE}`)).name,
+    "Research notes",
+  );
+  // Only white space is trimmed: a v at either end stays, and so does the
+  // white space inside.
+  assert.equal((await addSpace(p, "vault  v")).name, "vault  v");
+  assert.deepEqual(
+    await spacesOf(p.member),
+    ["Main", "Research notes", "vault  v", sixty].sort(),
+  );
+
+  // A name that differs only by the white space around it is the same name.
+  await assert.rejects(addSpace(p, " Research notes "), /unique|duplicate/);
+
+  // A new name is held to the same rules, whoever gives it. A person cannot
+  // rename a workspace at all: there is no update policy.
+  const rename = (to, from) =>
+    asDbOwner(
+      null,
+      `update public.workspaces set name = $1 where member_id = $2 and name = $3 returning name`,
+      [to, p.member, from],
+    );
+  assert.deepEqual(await rename("  Renamed ", "Research notes"), [
+    { name: "Renamed" },
+  ]);
+  await assert.rejects(rename(" \n ", "Renamed"), WS_NO_NAME);
+  await assert.rejects(rename("y".repeat(61), "Renamed"), WS_LONG_NAME);
+  assert.deepEqual(
+    await as(
+      p.who,
+      `update public.workspaces set name = 'Mine now' where member_id = $1 returning name`,
+      [p.member],
+    ),
+    [],
+  );
+  assert.deepEqual(
+    await spacesOf(p.member),
+    ["Main", "Renamed", "vault  v", sixty].sort(),
+  );
+});
+
+test("a member has at most 20 workspaces; other members are not affected", async () => {
+  const p = await wsPerson();
+  await fillSpaces(p);
+  assert.equal((await spacesOf(p.member)).length, 20);
+
+  await assert.rejects(addSpace(p, "One too many"), WS_CAP);
+  await assert.rejects(addSpace(p, "One too many"), WS_CAP);
+  // The trigger binds the database's owner as well.
+  await assert.rejects(
+    asDbOwner(
+      null,
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'One too many')`,
+      [p.hive, p.member],
+    ),
+    WS_CAP,
+  );
+  // A name that is wrong is said before the limit.
+  await assert.rejects(addSpace(p, " "), WS_NO_NAME);
+  await assert.rejects(addSpace(p, "x".repeat(61)), WS_LONG_NAME);
+  assert.equal((await spacesOf(p.member)).length, 20);
+
+  // Another member of the same hive still makes theirs.
+  const guest = await hivePerson();
+  const guestMember = await addMember(p.hive, guest.sub, "Guest");
+  const g = { who: guest, hive: p.hive, member: guestMember };
+  assert.equal((await addSpace(g, "Guest notes")).name, "Guest notes");
+  // And so does the same person as a member of another hive: the limit is a
+  // member's, not a person's.
+  const second = await startHive(p.who, `Workspaces ${wsPeople} again`);
+  const elsewhere = (await membershipsOf(p.who.sub)).find(
+    (m) => m.hive_id === second,
+  );
+  assert.deepEqual(elsewhere.workspaces, ["Main"]);
+  assert.equal(
+    (await addSpace({ ...p, hive: second, member: elsewhere.id }, "Second"))
+      .name,
+    "Second",
+  );
+
+  // A name can still change at the limit, and a deleted workspace makes room
+  // for one.
+  await asDbOwner(
+    null,
+    `update public.workspaces set name = 'Space two' where member_id = $1 and name = 'Space 2'`,
+    [p.member],
+  );
+  await as(
+    p.who,
+    `delete from public.workspaces where member_id = $1 and name = 'Space 3'`,
+    [p.member],
+  );
+  assert.equal((await addSpace(p, "Room again")).name, "Room again");
+  await assert.rejects(addSpace(p, "One too many"), WS_CAP);
+  const names = await spacesOf(p.member);
+  assert.equal(names.length, 20);
+  assert.ok(names.includes("Space two") && !names.includes("Space 3"));
+});
+
+test("nobody learns from the limit how many workspaces somebody else has", async () => {
+  const p = await wsPerson();
+  await fillSpaces(p);
+  const guest = await hivePerson();
+  await addMember(p.hive, guest.sub, "Guest");
+  const other = await wsPerson();
+  // A colleague and a stranger naming the member who is at the limit get the
+  // policy's answer, the one they get for a member who is not.
+  for (const who of [guest, other.who])
+    await assert.rejects(addSpace(p, "Not mine", who), WS_POLICY);
+  await assert.rejects(addSpace(other, "Not mine", guest), WS_POLICY);
+  // A visitor and a signed-in token with nobody behind it are not told either.
+  await assert.rejects(addSpace(p, "Not mine", null), notTheLimit);
+  await assert.rejects(
+    addSpace(p, "Not mine", { role: "authenticated" }),
+    notTheLimit,
+  );
+  assert.equal((await spacesOf(p.member)).length, 20);
+});
+
+test("an agent and an app pass still cannot make a workspace", async () => {
+  const count = async () =>
+    (await db.query(`select count(*)::int as n from public.workspaces`)).rows[0]
+      .n;
+  const before = await count();
+  const mine = { hive, member: members.sara };
+  for (const tier of ["vendor", "self_hosted"])
+    await assert.rejects(
+      addSpace(mine, "By an agent", await agentFor("sara", tier)),
+      WS_POLICY,
+    );
+  await assert.rejects(
+    addSpace(mine, "By an app", passOf(person("sara"))),
+    WS_POLICY,
+  );
+  await assert.rejects(
+    addSpace(mine, "By a visitor", null),
+    /row-level security|permission denied/,
+  );
+  assert.equal(await count(), before);
+  // The person themselves still can.
+  const made = await addSpace(mine, "By Sara", person("sara"));
+  assert.equal(made.name, "By Sara");
+  await as(person("sara"), `delete from public.workspaces where id = $1`, [
+    made.id,
+  ]);
+});
+
+test("a hive that is being deleted, and a workspace across two hives, answer as before", async () => {
+  const h = await hdHive();
+  const o = await hdHive();
+  const owner = { who: h.owner, hive: h.id, member: h.ownerMember };
+  // The owner has "Main" and "Spare": 18 more makes 20.
+  for (let n = 3; n <= 20; n++) await addSpace(owner, `Space ${n}`);
+  await assert.rejects(addSpace(owner, "One too many"), WS_CAP);
+
+  // Across two hives: the member's hive is not the row's. Said before the
+  // name and before the limit.
+  for (const name of ["Astride", "", "x".repeat(61)])
+    await assert.rejects(
+      asDbOwner(
+        null,
+        `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, $3)`,
+        [o.id, h.ownerMember, name],
+      ),
+      /a workspace belongs to its member's hive/,
+      JSON.stringify(name),
+    );
+
+  await requestDeletion(h.owner, h.id, h.name);
+  // Closing: the freeze answers, whatever the name and at the limit.
+  for (const name of ["One too many", "", "x".repeat(61)])
+    await assert.rejects(addSpace(owner, name), FROZEN, JSON.stringify(name));
+  await assert.rejects(
+    asDbOwner(null, `update public.workspaces set name = '' where id = $1`, [
+      h.spareSpace,
+    ]),
+    FROZEN,
+  );
+  await assert.rejects(
+    addSpace({ who: h.member, hive: h.id, member: h.memberMember }, "New"),
+    FROZEN,
+  );
+  assert.equal((await spacesOf(h.ownerMember)).length, 20);
+
+  // Cancelled: the workspace's own rules answer again.
+  await cancelDeletion(h.owner, h.id);
+  await assert.rejects(addSpace(owner, "One too many"), WS_CAP);
+  await assert.rejects(addSpace(owner, ""), WS_NO_NAME);
 });

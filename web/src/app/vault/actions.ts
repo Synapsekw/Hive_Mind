@@ -5,8 +5,11 @@
 // before any query, and lets the database decide. No session, no Supabase configuration or an
 // unexpected failure answers `{ ok: false }` / `null`.
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ImportNote } from "../../import/plan";
+import type { BatchResult, WorkspaceMade } from "../../import/types";
 import { createServerSupabase } from "../../lib/supabase/server";
 import type { Result, SharePreview } from "../../vault/types";
+import { createImportWorkspaceIn, importBatchIn } from "./import";
 import {
   deleteNoteIn,
   previewIn,
@@ -65,5 +68,32 @@ export async function preview(
 ): Promise<SharePreview | null> {
   return withSession<SharePreview | null>(null, (db) =>
     previewIn(db, workspaceId, path),
+  );
+}
+
+/**
+ * A new workspace for a folder import. `hiveId` is the hive the vault was showing; the page
+ * binds it, so the browser sends it back sealed. The workspace is made in that hive, under the
+ * person's own member there, or not at all. The arguments are checked in `import.ts`.
+ */
+export async function createImportWorkspace(
+  hiveId: string,
+  name: string,
+): Promise<WorkspaceMade> {
+  return withSession<WorkspaceMade>({ ok: false, reason: "failed" }, (db) =>
+    createImportWorkspaceIn(db, hiveId, name),
+  );
+}
+
+/**
+ * One batch of a folder import: at most 25 notes and 3 MB, checked again in `import.ts`
+ * whatever the browser checked. The hive and the member come from the workspace's own row.
+ */
+export async function importBatch(
+  workspaceId: string,
+  notes: ImportNote[],
+): Promise<BatchResult> {
+  return withSession<BatchResult>({ ok: false }, (db) =>
+    importBatchIn(db, workspaceId, notes),
   );
 }

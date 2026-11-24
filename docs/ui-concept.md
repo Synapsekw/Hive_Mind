@@ -214,6 +214,27 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   yours?", and those two can be linked again later. Afterwards the page refreshes; if the open
   note was a colleague's that you could read only through that link, it is gone and the vault
   shows its "not found" state.
+  **Import a folder** in the vault's header opens a panel in place, not a new page, for a
+  folder of markdown notes. It goes through five steps:
+  1. **Pick.** The browser's folder picker; the files are read in the browser.
+  2. **Summary**, before anything is saved: notes found, other files skipped, notes skipped
+     for being over 1 MB. Frontmatter that cannot be read is kept as text and reported in the result. More than
+     2,000 notes stops here: the panel says so and asks for a subfolder.
+  3. **Destination.** "New workspace", with a name field filled in with the folder's name, or
+     one of the person's workspaces in this hive. A refusal shows one line: the name rule (1
+     to 60 characters), a name already in use, or 20 workspaces already.
+  4. **Progress**, as "120 of 480 notes", with **Stop**. Stop ends after the batch in flight;
+     what was saved stays.
+  5. **Result.** Five counts (created, updated, unchanged, skipped, failed) with the paths of
+     anything skipped or failed. The vault refreshes once, and the new workspace's tab can be
+     opened from the panel.
+
+  Every imported note arrives private; the panel has no sharing choice. Images, PDFs and other
+  files are not imported. Controls are labelled, progress is announced politely, focus moves
+  to the result's heading, and Escape closes the panel when no import is running. The panel
+  is client state until Import is pressed, then one request per batch, one after another. It
+  uses no new colour or token.
+
 - **Gallery** — previews of generated documents; mine, shared with me, whole hive; a full-screen
   viewer for PDF, PPTX, XLSX and images. Built so far: a card grid with image thumbnails, the
   viewer for images and PDFs, download for every file and delete for your own; PPTX and XLSX
@@ -252,6 +273,7 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 | No hive yet              | The home page's empty state with the New hive form          |
 | Hive switcher            | Popover from the hive's name: hives, role, tick, New hive   |
 | Hive being deleted       | Banner on every screen with the date; an owner can cancel   |
+| Import a folder          | Panel in the vault: pick, summary, destination, progress    |
 | Token revoked or expired | Inbox item with a regenerate action                         |
 | Write rejected           | Inbox item with the attempted path and the reason           |
 | Synthesis failed         | Entity page shows the last good version with a retry        |

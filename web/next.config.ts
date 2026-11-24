@@ -18,7 +18,16 @@ export const FRAME_HEADERS = [
  */
 export const JOIN_HEADERS = [{ key: "Referrer-Policy", value: "no-referrer" }];
 
+/**
+ * The largest request a server action takes. A folder import sends its notes in batches of at
+ * most 3 MB (`BATCH_BYTES` in `src/import/plan.ts`); the default of 1 MB would refuse them.
+ */
+export const ACTION_BODY_LIMIT = "4mb";
+
 const nextConfig: NextConfig = {
+  experimental: {
+    serverActions: { bodySizeLimit: ACTION_BODY_LIMIT },
+  },
   async headers() {
     // `/:path*` is every path, the root included. A path that matches both rules gets both
     // sets of headers; the second rule names no header of the first, so it undoes nothing.

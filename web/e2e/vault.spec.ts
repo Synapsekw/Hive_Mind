@@ -1,3 +1,5 @@
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { expect, test, type Page, type Request } from "@playwright/test";
 import {
   fixturePreview,
@@ -18,6 +20,7 @@ import {
   unlinkName,
   unlinkQuestion,
 } from "../src/vault/sentences";
+import * as T from "../src/vault/importText";
 import { setLook } from "./look";
 
 // The fixture's content does not depend on `now`, only its dates do.
@@ -1289,3 +1292,432 @@ for (const look of LOOKS)
       if (size.width >= 1100) expect(page_.down).toBe(false);
     });
   }
+
+// ---- Import a folder ----
+
+/** Builds a folder of files under this test's output directory and answers its path. */
+function folder(name: string, files: Record<string, string | number>) {
+  const dir = test.info().outputPath(name);
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true });
+    writeFileSync(
+      join(dir, path),
+      typeof content === "number" ? Buffer.alloc(content, "a") : content,
+    );
+  }
+  return dir;
+}
+
+/** `n` small notes, n001.md onwards, so path order is the order they are sent in. */
+const many = (n: number) =>
+  Object.fromEntries(
+    Array.from({ length: n }, (_, i) => [
+      `n${String(i + 1).padStart(4, "0")}.md`,
+      `note ${i + 1}`,
+    ]),
+  );
+
+const importButton = (page: Page) =>
+  page.getByRole("button", { name: T.IMPORT, exact: true });
+const importPanel = (page: Page) =>
+  page.getByRole("region", { name: /Import|Ready/ });
+const panelNamed = (page: Page, name: string) =>
+  page.getByRole("region", { name, exact: true });
+
+async function pick(page: Page, dir: string) {
+  await importButton(page).click();
+  await page.getByLabel(T.FOLDER_INPUT).setInputFiles(dir);
+}
+
+type ImportCall = {
+  name: string;
+  args: [string, { path: string; title: string; body: string }[]] | [string];
+};
+const importCalls = async (page: Page) =>
+  ((await calls(page)) as ImportCall[]).filter(
+    (c) => c.name === "createWorkspace" || c.name === "importBatch",
+  );
+const sentPaths = async (page: Page) =>
+  (await importCalls(page))
+    .filter((c) => c.name === "importBatch")
+    .map((c) => (c.args[1] as { path: string }[]).map((n) => n.path));
+
+const MIXED = {
+  "a.md": "# A",
+  "sub/b.md": "---\ntitle: B\n---\nbody",
+  "sub/Loud.MD": "upper case",
+  "img.png": "not a note",
+  "sub/paper.pdf": "not a note",
+  ".trash/old.md": "hidden",
+  "big.md": 1_000_001,
+};
+
+test("the import panel opens in place, and Escape or Close puts the focus back", async ({
+  page,
+}) => {
+  await open(page);
+  const urls = watch(page);
+  await importButton(page).click();
+  const panel = panelNamed(page, T.IMPORT);
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("heading", { name: T.IMPORT })).toBeFocused();
+  await expect(importButton(page)).toHaveAttribute("aria-expanded", "true");
+  await expect(panel.getByRole("button", { name: T.CHOOSE })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(importButton(page)).toBeFocused();
+  await importButton(page).click();
+  await panel.getByRole("button", { name: /^Close/ }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(importButton(page)).toBeFocused();
+  expect(urls()).toEqual([]);
+  expect(await calls(page)).toEqual([]);
+});
+
+test("the summary counts the notes and what is left out, before anything is sent", async ({
+  page,
+}) => {
+  await open(page);
+  await pick(page, folder("Field notes", MIXED));
+  const panel = panelNamed(page, T.READY);
+  await expect(panel.getByRole("heading", { name: T.READY })).toBeFocused();
+  await expect(panel.getByText(T.found(3))).toBeVisible();
+  await expect(panel.getByText(T.otherSkipped(2))).toBeVisible();
+  await expect(panel.getByText(T.hiddenSkipped(1))).toBeVisible();
+  await expect(panel.getByText(T.tooLargeSkipped(1))).toBeVisible();
+  await expect(
+    panel.getByRole("region", { name: T.SKIPPED_PATHS }).getByRole("listitem"),
+  ).toHaveText(["big.md"]);
+  expect(await calls(page)).toEqual([]);
+});
+
+test("a new workspace is named after the folder; only the markdown notes are sent", async ({
+  page,
+}) => {
+  await open(page);
+  await pick(page, folder("Field notes", MIXED));
+  const panel = importPanel(page);
+  await expect(
+    panel.getByRole("radio", { name: T.NEW_WORKSPACE }),
+  ).toBeChecked();
+  await expect(panel.getByLabel(T.WORKSPACE_NAME)).toHaveValue("Field notes");
+  await panel.getByRole("button", { name: T.START, exact: true }).click();
+
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByRole("heading", { name: T.FINISHED })).toBeFocused();
+  await expect(done.getByText("Created 3", { exact: true })).toBeVisible();
+  await expect(done.getByText("Updated 0", { exact: true })).toBeVisible();
+  await expect(done.getByText("Unchanged 0", { exact: true })).toBeVisible();
+  await expect(done.getByText("Skipped 1", { exact: true })).toBeVisible();
+  await expect(done.getByText("Failed 0", { exact: true })).toBeVisible();
+  await expect(
+    done.getByRole("region", { name: T.SKIPPED_PATHS }).getByRole("listitem"),
+  ).toHaveText(["big.md"]);
+
+  const made = await importCalls(page);
+  expect(made[0]).toEqual({ name: "createWorkspace", args: ["Field notes"] });
+  expect(made.slice(1).map((c) => [c.name, c.args[0]])).toEqual([
+    ["importBatch", "imported-1"],
+  ]);
+  expect((await sentPaths(page)).flat().sort()).toEqual(
+    ["a.md", "sub/Loud.MD", "sub/b.md"].sort(),
+  );
+
+  // The new workspace has a tab, and the panel opens it.
+  const link = done.getByRole("link", { name: T.openWorkspace("Field notes") });
+  await expect(link).toHaveAttribute("href", "/dev/vault?ws=imported-1");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workspaces" })
+      .getByRole("link", { name: "Field notes" }),
+  ).toBeVisible();
+  await link.click();
+  await expect(page).toHaveURL(/\?ws=imported-1$/);
+  await expect(done).toHaveCount(0);
+});
+
+test("importing into an existing workspace makes none; a second import changes nothing", async ({
+  page,
+}) => {
+  await open(page);
+  const dir = folder("Field notes", { "a.md": "A", "b/c.md": "C" });
+  await pick(page, dir);
+  const panel = importPanel(page);
+  await panel.getByRole("radio", { name: T.EXISTING_WORKSPACE }).check();
+  const select = panel.getByLabel(T.WORKSPACE, { exact: true });
+  // The open workspace is offered first.
+  await expect(select).toHaveValue(DATA.workspaces[0]!.id);
+  await select.selectOption({ label: "Operations" });
+  await panel.getByRole("button", { name: T.START, exact: true }).click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Created 2", { exact: true })).toBeVisible();
+  const operations = DATA.workspaces[1]!.id;
+  expect((await importCalls(page)).map((c) => [c.name, c.args[0]])).toEqual([
+    ["importBatch", operations],
+  ]);
+  await expect(
+    done.getByRole("link", { name: T.openWorkspace("Operations") }),
+  ).toHaveAttribute("href", `/dev/vault?ws=${operations}`);
+
+  // Again, the same folder into the same workspace.
+  await page.getByLabel(T.FOLDER_INPUT).setInputFiles(dir);
+  await panel.getByRole("radio", { name: T.EXISTING_WORKSPACE }).check();
+  await panel.getByLabel(T.WORKSPACE, { exact: true }).selectOption({
+    label: "Operations",
+  });
+  await panel.getByRole("button", { name: T.START, exact: true }).click();
+  await expect(done.getByText("Unchanged 2", { exact: true })).toBeVisible();
+  await expect(done.getByText("Created 0", { exact: true })).toBeVisible();
+});
+
+test("a name that is empty or too long is refused before anything is asked", async ({
+  page,
+}) => {
+  await open(page);
+  await pick(page, folder("Field notes", { "a.md": "A" }));
+  const panel = importPanel(page);
+  const name = panel.getByLabel(T.WORKSPACE_NAME);
+  const start = panel.getByRole("button", { name: T.START, exact: true });
+  for (const bad of ["", "   ", "x".repeat(61)]) {
+    await name.fill(bad);
+    await start.click();
+    await expect(panel.getByRole("alert")).toHaveText(T.NAME_PROBLEM);
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+  }
+  expect(await calls(page)).toEqual([]);
+  // Typing takes the line away; 60 characters, spaces around them aside, is a name.
+  await name.fill(` ${"x".repeat(60)} `);
+  await expect(panel.getByRole("alert")).toHaveCount(0);
+  await start.click();
+  await expect(panelNamed(page, T.FINISHED)).toBeVisible();
+  expect((await importCalls(page))[0]).toEqual({
+    name: "createWorkspace",
+    args: ["x".repeat(60)],
+  });
+});
+
+for (const [flag, line] of [
+  ["taken", T.NAME_TAKEN],
+  ["limit", T.WORKSPACE_LIMIT],
+  ["fail", T.WORKSPACE_FAILED],
+] as const)
+  test(`a workspace that cannot be made (${flag}) says why and imports nothing`, async ({
+    page,
+  }) => {
+    await open(page, `?${flag}=1`);
+    await pick(page, folder("Field notes", { "a.md": "A" }));
+    const panel = importPanel(page);
+    await panel.getByRole("button", { name: T.START, exact: true }).click();
+    await expect(panel.getByRole("alert")).toHaveText(line);
+    await expect(panel.getByLabel(T.WORKSPACE_NAME)).toHaveValue("Field notes");
+    expect((await importCalls(page)).map((c) => c.name)).toEqual([
+      "createWorkspace",
+    ]);
+    // The panel can be closed again.
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+  });
+
+test("a folder of more than 2,000 notes is refused; 2,000 is not", async ({
+  page,
+}) => {
+  await open(page);
+  const dir = folder("Big", many(2001));
+  await pick(page, dir);
+  const panel = importPanel(page);
+  await expect(panel.getByRole("alert")).toHaveText(T.TOO_MANY);
+  await expect(
+    panel.getByRole("button", { name: T.START, exact: true }),
+  ).toHaveCount(0);
+  await expect(panel.getByRole("radiogroup")).toHaveCount(0);
+  await expect(
+    panel.getByRole("button", { name: T.CHOOSE_ANOTHER }),
+  ).toBeVisible();
+  rmSync(join(dir, "n2001.md"));
+  await page.getByLabel(T.FOLDER_INPUT).setInputFiles(dir);
+  await expect(panel.getByText(T.found(2000))).toBeVisible();
+  await expect(panel.getByRole("alert")).toHaveCount(0);
+  await expect(
+    panel.getByRole("button", { name: T.START, exact: true }),
+  ).toBeVisible();
+  expect(await calls(page)).toEqual([]);
+});
+
+test("a folder without notes says so and offers no import", async ({
+  page,
+}) => {
+  await open(page);
+  await pick(page, folder("Pictures", { "a.png": "x", ".git/config": "x" }));
+  const panel = importPanel(page);
+  await expect(panel.getByRole("alert")).toHaveText(T.NO_NOTES);
+  await expect(
+    panel.getByRole("button", { name: T.START, exact: true }),
+  ).toHaveCount(0);
+});
+
+test("a browser that gives no folder paths is told so plainly", async ({
+  page,
+}) => {
+  await open(page);
+  await importButton(page).click();
+  // Loose files have no path inside a folder, as in a browser without folder picking.
+  await page.getByLabel(T.FOLDER_INPUT).evaluate((el) => {
+    el.removeAttribute("webkitdirectory");
+  });
+  await page
+    .getByLabel(T.FOLDER_INPUT)
+    .setInputFiles([
+      { name: "a.md", mimeType: "text/markdown", buffer: Buffer.from("A") },
+    ]);
+  await expect(panelNamed(page, T.IMPORT).getByRole("alert")).toHaveText(
+    T.UNSUPPORTED,
+  );
+  expect(await calls(page)).toEqual([]);
+});
+
+test("notes go a batch at a time, in order, with the progress said; leaving asks first", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await pick(page, folder("Sixty", many(60)));
+  const panel = importPanel(page);
+  await panel.getByRole("button", { name: T.START, exact: true }).click();
+  const running = panelNamed(page, T.RUNNING);
+  const status = running.getByRole("status");
+  await expect(status).toHaveText(T.progress(0, 60));
+  await expect(status).toHaveText(T.progress(25, 60));
+  // While it runs: no closing, by Escape, by Close or by the button that opened it.
+  await page.keyboard.press("Escape");
+  await running
+    .getByRole("button", { name: /^Close/ })
+    .evaluate((el: HTMLElement) => el.click());
+  await importButton(page).evaluate((el: HTMLElement) => el.click());
+  await expect(running).toBeVisible();
+  expect(
+    await page.evaluate(() => {
+      const e = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(e);
+      return e.defaultPrevented;
+    }),
+  ).toBe(true);
+  await expect(status).toHaveText(T.progress(50, 60));
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Created 60", { exact: true })).toBeVisible();
+  const sent = await sentPaths(page);
+  expect(sent.map((b) => b.length)).toEqual([25, 25, 10]);
+  expect(sent.flat()).toEqual(Object.keys(many(60)));
+  // Once it is over, leaving asks nothing.
+  expect(
+    await page.evaluate(() => {
+      const e = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(e);
+      return e.defaultPrevented;
+    }),
+  ).toBe(false);
+});
+
+test("a refused batch fails its notes and the import goes on", async ({
+  page,
+}) => {
+  await open(page, "?failbatch=2");
+  await pick(page, folder("Sixty", many(60)));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Created 35", { exact: true })).toBeVisible();
+  await expect(done.getByText("Failed 25", { exact: true })).toBeVisible();
+  const failed = done
+    .getByRole("region", { name: T.FAILED_PATHS })
+    .getByRole("listitem");
+  await expect(failed).toHaveCount(25);
+  await expect(failed.first()).toHaveText("n0026.md");
+  await expect(failed.last()).toHaveText("n0050.md");
+  expect((await sentPaths(page)).length).toBe(3);
+});
+
+test("three refused batches in a row stop the import; the list of failures is cut at 50", async ({
+  page,
+}) => {
+  await open(page, "?failbatch=all");
+  await pick(page, folder("Hundred", many(100)));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const done = panelNamed(page, T.STOPPED);
+  await expect(done.getByRole("heading", { name: T.STOPPED })).toBeFocused();
+  await expect(done.getByRole("alert")).toHaveText(T.HALTED);
+  await expect(done.getByText("Failed 75", { exact: true })).toBeVisible();
+  await expect(done.getByText(T.notSent(25))).toBeVisible();
+  const failed = done
+    .getByRole("region", { name: T.FAILED_PATHS })
+    .getByRole("listitem");
+  await expect(failed).toHaveCount(51);
+  await expect(failed.last()).toHaveText(T.andMore(25));
+  expect((await sentPaths(page)).length).toBe(3);
+});
+
+test("Stop ends the import after the batch on its way; what was saved stays", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await pick(page, folder("Sixty", many(60)));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const running = panelNamed(page, T.RUNNING);
+  await expect(running.getByRole("status")).toHaveText(T.progress(0, 60));
+  await running.getByRole("button", { name: T.STOP, exact: true }).click();
+  await expect(
+    running.getByRole("button", { name: T.STOPPING }),
+  ).toHaveAttribute("aria-disabled", "true");
+  const done = panelNamed(page, T.STOPPED);
+  await expect(done.getByText("Created 25", { exact: true })).toBeVisible();
+  await expect(done.getByText(T.notSent(35))).toBeVisible();
+  await expect(done.getByRole("alert")).toHaveCount(0);
+  expect((await sentPaths(page)).map((b) => b.length)).toEqual([25]);
+  await expect(
+    done.getByRole("link", { name: T.openWorkspace("Sixty") }),
+  ).toBeVisible();
+});
+
+test("at 390 px the import panel and its controls stay inside the window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await open(page, "?failbatch=1");
+  await importButton(page).scrollIntoViewIfNeeded();
+  expect(await importButton(page).evaluate(inView)).toBe(true);
+  await pick(
+    page,
+    folder("A folder with quite a long name", {
+      ...many(30),
+      "a/very/deeply/nested/folder/with-a-long-file-name-that-must-wrap-in-a-narrow-window.md":
+        "x",
+    }),
+  );
+  const panel = importPanel(page);
+  for (const control of [
+    panel.getByRole("radio", { name: T.NEW_WORKSPACE }),
+    panel.getByRole("radio", { name: T.EXISTING_WORKSPACE }),
+    panel.getByLabel(T.WORKSPACE_NAME),
+    panel.getByRole("button", { name: T.START, exact: true }),
+    panel.getByRole("button", { name: T.CHOOSE_ANOTHER }),
+    panel.getByRole("button", { name: /^Close/ }),
+  ]) {
+    await control.scrollIntoViewIfNeeded();
+    const box = (await control.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  expect((await scrolls(page)).across).toBe(false);
+  await panel.getByRole("button", { name: T.START, exact: true }).click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Failed 25", { exact: true })).toBeVisible();
+  const link = done.getByRole("link", { name: /^Open / });
+  await link.scrollIntoViewIfNeeded();
+  expect(await link.evaluate(inView)).toBe(true);
+  expect((await scrolls(page)).across).toBe(false);
+  const box = (await done.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
+});

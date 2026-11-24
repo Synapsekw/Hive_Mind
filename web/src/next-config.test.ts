@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import nextConfig from "../next.config";
+import { BATCH_BYTES } from "./import/plan";
 
 describe("next.config: no page of the site may be framed", () => {
   it("adds both headers to every route", async () => {
@@ -41,5 +42,18 @@ describe("next.config: no page of the site may be framed", () => {
     );
     expect(keys.filter((k) => k === "content-security-policy")).toHaveLength(1);
     expect(keys.filter((k) => k === "x-frame-options")).toHaveLength(1);
+  });
+});
+
+describe("next.config: a batch of a folder import fits in a server action", () => {
+  it("raises the body limit of server actions to 4 MB", () => {
+    expect(nextConfig.experimental?.serverActions).toEqual({
+      bodySizeLimit: "4mb",
+    });
+  });
+
+  it("leaves room above the largest batch the import sends", () => {
+    expect(BATCH_BYTES).toBe(3_000_000);
+    expect(4 * 1024 * 1024 - BATCH_BYTES).toBeGreaterThan(1_000_000);
   });
 });
