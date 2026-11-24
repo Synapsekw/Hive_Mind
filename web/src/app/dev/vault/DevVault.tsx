@@ -10,10 +10,14 @@
 // answers "unchanged". `failbatch` refuses a batch by its number ("2"), or every batch ("all");
 // `taken` and `limit` refuse a new workspace with that reason; with `slow` a batch takes most
 // of a second.
+// Connecting wiki links answers from memory too: 90 notes, 40 a step, each step 7 links made, 2
+// already there and 1 pointing at no note. `failconnect` refuses a step by its number ("2"), or
+// every step ("all"); with `slow` a step takes as long as a batch.
 import { useMemo, useRef, useState } from "react";
 import { fixturePreview } from "../../../vault/fixture";
 import type {
   BatchResult,
+  ConnectResult,
   ImportActions,
   Outcome,
 } from "../../../import/types";
@@ -32,8 +36,13 @@ const SLOW_WAIT = 1200;
 /** How long an import batch takes with `slow`. */
 const SLOW_BATCH = 900;
 
+/** Connecting wiki links: every workspace answers as one of 90 notes, read 40 a step. */
+const CONNECT_NOTES = 90;
+const CONNECT_STEP = 40;
+
 export type ImportFlags = {
   failbatch: string | null;
+  failconnect: string | null;
   taken: boolean;
   limit: boolean;
 };
@@ -64,6 +73,7 @@ export function DevVault({
   >([]);
   const imported = useRef(new Map<string, string>());
   const batchNo = useRef(0);
+  const connectNo = useRef(0);
   const [deleted, setDeleted] = useState<readonly string[]>([]);
   const [unlinked, setUnlinked] = useState<readonly string[]>([]);
   // The sample data without the notes deleted and the links ended here; asking for a deleted
@@ -161,6 +171,32 @@ export function DevVault({
                 : "updated";
           return { path: n.path, outcome };
         }),
+      };
+    },
+    connect: async (workspaceId, after): Promise<ConnectResult> => {
+      record("connect", [workspaceId, after]);
+      connectNo.current += 1;
+      const no = connectNo.current;
+      if (slow) await wait(SLOW_BATCH);
+      if (
+        importFlags.failconnect === "all" ||
+        importFlags.failconnect === String(no)
+      )
+        return { ok: false };
+      // The cursor is how many notes were read before this step.
+      const from = after === null ? 0 : Number(after);
+      if (!Number.isInteger(from) || from < 0) return { ok: false };
+      const scanned = Math.max(0, Math.min(CONNECT_STEP, CONNECT_NOTES - from));
+      const to = from + scanned;
+      return {
+        ok: true,
+        next: scanned === CONNECT_STEP ? String(to) : null,
+        total: CONNECT_NOTES,
+        scanned,
+        linked: scanned > 0 ? 7 : 0,
+        already: scanned > 0 ? 2 : 0,
+        missing: scanned > 0 ? 1 : 0,
+        failed: 0,
       };
     },
   };

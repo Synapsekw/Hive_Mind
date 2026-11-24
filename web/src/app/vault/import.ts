@@ -21,8 +21,11 @@ import {
 import type { BatchResult, Outcome, WorkspaceMade } from "../../import/types";
 import { isUuid } from "./validate";
 
-type Db = Pick<SupabaseClient, "from" | "auth">;
-type Res = { data: unknown; error: { code?: string; message: string } | null };
+export type Db = Pick<SupabaseClient, "from" | "auth">;
+export type Res = {
+  data: unknown;
+  error: { code?: string; message: string } | null;
+};
 
 /** The longest title a note is stored with, in characters. */
 export const MAX_TITLE_CHARS = 1000;
@@ -41,20 +44,20 @@ const FAILED: WorkspaceMade = { ok: false, reason: "failed" };
  * Logs a failure and says whether there was one. `quiet` is for the two reads whose request
  * names paths: what the API says about such a request may quote it, so only the code is kept.
  */
-function failed(what: string, res: Res, quiet = false): boolean {
+export function failed(what: string, res: Res, quiet = false): boolean {
   if (!res.error) return false;
   if (quiet) console.error(`${what} failed`, res.error.code);
   else console.error(`${what} failed`, res.error.code, res.error.message);
   return true;
 }
 
-async function userId(db: Db): Promise<string | null> {
+export async function userId(db: Db): Promise<string | null> {
   const { data } = await db.auth.getUser();
   const id = data.user?.id;
   return isUuid(id) ? id : null;
 }
 
-const rows = (res: Res): Record<string, unknown>[] =>
+export const rows = (res: Res): Record<string, unknown>[] =>
   Array.isArray(res.data)
     ? res.data.filter(
         (r): r is Record<string, unknown> =>
@@ -242,6 +245,49 @@ async function foldersAt(
 }
 
 /**
+ * The workspace's hive and member when the workspace is the signed-in person's own, else null.
+ * `wsId` is a uuid in lower case. The hive and the member come from the workspace's own row,
+ * which row-level security answers only to its owner, and that member is then read as one of
+ * the person's own. The import and the connecting of wiki links both start here.
+ */
+export async function ownWorkspace(
+  db: Db,
+  wsId: string,
+  uid: string,
+): Promise<{ hiveId: string; memberId: string } | null> {
+  const ws = (await db
+    .from("workspaces")
+    .select("id, hive_id, member_id")
+    .eq("id", wsId)
+    .limit(1)) as Res;
+  if (failed("import workspace query", ws)) return null;
+  const space = rows(ws)[0];
+  if (!space || !isUuid(space.hive_id) || !isUuid(space.member_id)) return null;
+  if (typeof space.id !== "string" || space.id.toLowerCase() !== wsId)
+    return null;
+  const hiveId = space.hive_id;
+  const memberId = space.member_id;
+  const member = (await db
+    .from("members")
+    .select("id, hive_id")
+    .eq("id", memberId)
+    .eq("user_id", uid)
+    .limit(1)) as Res;
+  if (failed("import member query", member)) return null;
+  const own = rows(member)[0];
+  if (
+    !own ||
+    own.id !== memberId ||
+    typeof own.hive_id !== "string" ||
+    own.hive_id.toLowerCase() !== hiveId.toLowerCase()
+  ) {
+    console.error("import refused: the workspace is not the person's own");
+    return null;
+  }
+  return { hiveId, memberId };
+}
+
+/**
  * One batch of an import into one of the person's workspaces: at most 25 notes and 3 MB. It
  * answers one outcome per path, in the order sent, or `{ ok: false }` when the batch is
  * malformed, there is no session, or the workspace or its notes cannot be read; then nothing
@@ -264,39 +310,9 @@ export async function importBatchIn(
   const uid = await userId(db);
   if (!uid) return REFUSED;
   const wsId = workspaceId.toLowerCase();
-
-  // The hive and the member come from the workspace's own row, which row-level security
-  // answers only to its owner, and that member is then read as one of the person's own.
-  const ws = (await db
-    .from("workspaces")
-    .select("id, hive_id, member_id")
-    .eq("id", wsId)
-    .limit(1)) as Res;
-  if (failed("import workspace query", ws)) return REFUSED;
-  const space = rows(ws)[0];
-  if (!space || !isUuid(space.hive_id) || !isUuid(space.member_id))
-    return REFUSED;
-  if (typeof space.id !== "string" || space.id.toLowerCase() !== wsId)
-    return REFUSED;
-  const hiveId = space.hive_id;
-  const memberId = space.member_id;
-  const member = (await db
-    .from("members")
-    .select("id, hive_id")
-    .eq("id", memberId)
-    .eq("user_id", uid)
-    .limit(1)) as Res;
-  if (failed("import member query", member)) return REFUSED;
-  const own = rows(member)[0];
-  if (
-    !own ||
-    own.id !== memberId ||
-    typeof own.hive_id !== "string" ||
-    own.hive_id.toLowerCase() !== hiveId.toLowerCase()
-  ) {
-    console.error("import refused: the workspace is not the person's own");
-    return REFUSED;
-  }
+  const own = await ownWorkspace(db, wsId, uid);
+  if (own === null) return REFUSED;
+  const { hiveId, memberId } = own;
 
   const outcome = new Map<string, Outcome>();
   const live = batch.filter((c) => {

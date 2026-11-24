@@ -16,4 +16,23 @@ export type ImportActions = {
   /** Bound to the shown hive on the server. */
   createWorkspace(name: string): Promise<WorkspaceMade>;
   importBatch(workspaceId: string, notes: ImportNote[]): Promise<BatchResult>;
+  /** One step of turning the workspace's wiki links into links, from the cursor `after`. */
+  connect(workspaceId: string, after: string | null): Promise<ConnectResult>;
 };
+
+/**
+ * One step of connecting a workspace's wiki links. `next` is the cursor for the step after, null
+ * when the workspace is done. `total` is the workspace's notes; `scanned` this step's.
+ */
+export type ConnectResult =
+  | {
+      ok: true;
+      next: string | null;
+      total: number;
+      scanned: number;
+      linked: number;
+      already: number;
+      missing: number;
+      failed: number;
+    }
+  | { ok: false };

@@ -869,3 +869,47 @@ script `scripts/import-vault.mjs` (section 3), which remains for unattended runs
 - **A closed tab stops the import where it was.** What was saved stays; run the import again to
   finish.
 - There is no choosing of subfolders; pick the subfolder itself.
+
+## 14. Connecting wiki links
+
+A person turns the `[[wiki links]]` between their own notes in one workspace into links: by
+itself at the end of a folder import, and from "Connect wiki links" in the vault. No model is
+used and nothing leaves the project.
+
+**Who decides.** The database, with rules that were already there. The step is a server action
+signed in as the person; it adds no rule of its own.
+
+- `links_insert` lets a person insert a link only from a note of their own.
+- `links_before_insert` accepts a link at once only when both notes have one owner, and refuses
+  a second link for a pair, in either direction.
+- A hive that is being deleted refuses the insert, as it refuses every write (section 12).
+
+**What the step reads and writes.**
+
+- Only notes of the workspace's owner in that workspace: every read filters on the workspace and
+  on the member read from the workspace's own row. A colleague's note can be neither read nor
+  linked, so this feature never proposes a link to anyone.
+- A link carries `tier` 2 and `score` 0.8. Nothing is updated or deleted.
+- The answer is numbers and the next cursor, which is a path of the person's own note. No note
+  text, title or database message is returned.
+- Only an error's code is logged; every request of the step names ids or a path, so its message
+  is never logged.
+
+**Limits, checked on the server before any query.**
+
+- The workspace is a uuid; the cursor is null or 1 to 4,000 characters with no NUL.
+- 40 notes a step; at most 2,000 distinct references a note; links are inserted 200 at a time.
+- The workspace's index of paths and the links of the step's notes are read in pages, at most
+  20,000 rows each; a workspace over that is refused.
+- The filter that names the step's notes is built only from ids checked as uuids.
+
+**Known gaps.**
+
+- **An unlink does not last.** Unlinking two of one's own notes deletes the row, so the next run
+  makes the link again while the text still says `[[…]]`.
+- **A reference removed from the text does not remove its link.**
+- **Notes an agent writes later are not scanned by themselves.**
+- **A path over 4,000 characters** (not possible through the import, which stores at most 500)
+  stops a run that reaches it as the 40th note of a step.
+- Any member can run it on their own workspaces as often as they like; each run is bounded as
+  above and writes nothing that is already there.
