@@ -77,7 +77,7 @@ component CSS never names a theme.
 **The ramp.** Each theme sets three colours, old, middle and fresh; eight steps are mixed between
 them (`--fresh-0` to `--fresh-7`, old to fresh). In Rings a note takes its colour from this ramp
 by how recently it changed (section 3). Notes at the fresh end also get a soft halo in the
-theme's glow colour, drawn under a crisp dot.
+theme's glow colour, drawn under a crisp dot (see section 3 for the limit).
 
 **Topic colours.** The eight topic colours are generated: take the hue midway between the theme's
 accent and its glow colour (in OKLCH), fan eight hues across 160° around it, and alternate two
@@ -107,7 +107,9 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
   one empty arc, agents on a ring beyond them. The whole picture shrinks to fit the card. Every
   dot takes a colour from the theme's ramp by how recently it changed: an old note sits at the dim
   end, a note changed in the last two days at the bright end, with a soft halo under it that
-  breathes. Hubs take the theme's hub colour. A readable dot has a thin outline; the contrast of
+  breathes. Halos are drawn only while at most 400 notes are at the two freshest levels; above that
+  the dots keep their ramp colours and are drawn without halos, so nothing breathes there. This is a
+  deliberate guard for the frame budget. Hubs take the theme's hub colour. A readable dot has a thin outline; the contrast of
   the faintest dots against the card is a known gap, accepted for now.
 - **Quiet at rest:** Rings draws no ring labels and does not label hubs. At rest it draws only the
   spokes from the index to the hubs, and group names are drawn on the canvas on one circle outside
@@ -314,7 +316,9 @@ drawn on demand; ambient motion (hub breathing, orbit turn) is throttled to abou
 12 fps and pauses when the map is off-screen or the tab hidden. A browser check (`e2e/map-perf.spec.ts`)
 keeps the 95th-percentile frame of a one-second wheel zoom on 5,000 items under 34 ms, and the same
 limit holds for the glide after choosing another arrangement and after switching Rings to
-Timeline; neither glide may have a frame of a second or more. In development, `/dev/map?items=N`
+Timeline; neither glide may have a frame of a second or more. Halos are skipped when more than 400 notes
+are at the two freshest levels, because stamping a halo per fresh note on every frame while all
+the dots move broke the 34 ms limit at 5,000 items. In development, `/dev/map?items=N`
 builds a map of N items to test this.
 
 Three views of one graph, and three arrangements of Rings, must be **one load and zero further
