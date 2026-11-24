@@ -25,9 +25,11 @@ sign-ups afterwards, is in [Invitation email](#invitation-email).
   `supabase db query --linked -f <file>` and recorded under that version. The Edge Function
   `invite-email` is deployed, with JWT verification off, and its secrets `RESEND_API_KEY`,
   `HIVE_INVITE_FROM` and `HIVE_SITE_URL` are set. An invitation was sent, opened and joined by
-  hand on 2026-11-24, with and without another account signed in. Still open from
-  [Invitation email](#invitation-email): the project's own mail settings (SMTP through Resend,
-  the code length and its lifetime), and "Allow new users to sign up" is still on.
+  hand on 2026-11-24, with and without another account signed in. The project's own mail goes
+  through Resend (SMTP), "Confirm email" is on, the email code is 10 digits and lives 86400
+  seconds, the minimum password length is 10, and **"Allow new users to sign up" is off**: an
+  uninvited address is refused with `signup_disabled`, and an invitation still goes out and can
+  be joined (checked 2026-11-24).
 - Migration `20261123123845_note_delete_audit` is applied (2026-11-23) and recorded under that
   version. It adds the `notes_deleted_audit` trigger, which writes a deleted note to the audit
   log.
