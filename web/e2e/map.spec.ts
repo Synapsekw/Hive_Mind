@@ -1535,3 +1535,56 @@ test("Escape closes a list opened by mouse even when nothing has focus, and keep
   await expect(list).toHaveCount(0);
   await expect(dot).toHaveAttribute("aria-pressed", "true");
 });
+
+test("the open-popover event closes each popover without moving focus", async ({
+  page,
+}) => {
+  await open(page);
+  const elsewhere = () =>
+    page.evaluate(() =>
+      document.dispatchEvent(
+        new CustomEvent("hv-popover-open", { detail: "someone-else" }),
+      ),
+    );
+  const legend = page
+    .getByRole("group", { name: "Zoom", exact: true })
+    .getByRole("button", { name: "Legend", exact: true });
+  const cases: [string, Locator, Locator][] = [
+    ["Legend", legend, groups(page, "Legend")],
+    ["Group by", groupButton(page), groupMenu(page)],
+    ["Kind list", listButton(page, "Kind"), groups(page, "Kind")],
+  ];
+  for (const [name, button, pop] of cases) {
+    await button.click();
+    await expect(pop, name).toBeVisible();
+    // Focus on <body>: no focus-out, press or Escape can close it, only the event.
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+    await expect(pop, name).toBeVisible();
+    await elsewhere();
+    await expect(pop, name).toHaveCount(0);
+    // Nothing gave focus back to the button.
+    await page.waitForTimeout(100);
+    await expect(button, name).not.toBeFocused();
+  }
+});
+
+test("Escape closes the Group by menu and keeps the selected dot; alone it clears the selection", async ({
+  page,
+}) => {
+  await open(page);
+  await settle(page);
+  const dot = page.locator('[data-map-dot][aria-label^="<img src=x"]');
+  await pick(page, dot);
+  await expect(dot).toHaveAttribute("aria-pressed", "true");
+  await groupButton(page).click();
+  await expect(groupMenu(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(groupMenu(page)).toHaveCount(0);
+  await expect(dot).toHaveAttribute("aria-pressed", "true");
+  // With nothing open, the map's own Escape clears the selection.
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-map-dot][aria-pressed="true"]')).toHaveCount(
+    0,
+  );
+});

@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, type RefObject } from "react";
 const OPENED = "hv-popover-open";
 
 /** Tells every open popover that the one called `id` opened, so the others close. */
-export function announceOpen(id: string) {
+function announceOpen(id: string) {
   document.dispatchEvent(new CustomEvent(OPENED, { detail: id }));
 }
 
