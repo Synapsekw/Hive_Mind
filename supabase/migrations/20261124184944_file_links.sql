@@ -36,8 +36,17 @@ language sql immutable set search_path = '' as $$
                lower(btrim(split_part(coalesce(p_mime, ''), ';', 1))) as m) x
 $$;
 
+-- Not a generated column: hive_frozen compares to_jsonb(OLD) with to_jsonb(NEW)
+-- in a before-trigger, where a generated column is not yet computed, so it
+-- would refuse the foreign key's set-null on files.note_id during an erase.
+-- A trigger sets it instead. The backfill is an update, which the freeze
+-- refuses on the files of a hive that is being deleted (even for the database
+-- owner), so the freeze trigger is off for the backfill only, in this one
+-- transaction.
 alter table public.files add column kind text;
+alter table public.files disable trigger zz_hive_frozen;
 update public.files set kind = public.file_kind(name, mime);
+alter table public.files enable trigger zz_hive_frozen;
 alter table public.files alter column kind set not null;
 
 create function public.files_set_kind() returns trigger
@@ -89,11 +98,13 @@ create policy file_references_select on public.file_references for select to aut
   using (exists (select 1 from public.files f where f.id = file_id)
          and exists (select 1 from public.notes n where n.id = note_id));
 create policy file_references_insert on public.file_references for insert to authenticated
-  with check (exists (select 1 from public.files f where f.id = file_id)
-              and exists (select 1 from public.notes n
-                           where n.id = note_id
+  with check (exists (select 1 from public.files f
+                       where f.id = file_references.file_id
+                         and exists (select 1 from public.notes n
+                           where n.id = file_references.note_id
                              and n.member_id in (select public.my_member_ids())
-                             and public.agent_write_ok(n.workspace_id)));
+                             and n.hive_id = f.hive_id
+                             and public.agent_write_ok(n.workspace_id))));
 create policy file_references_delete on public.file_references for delete to authenticated
   using (public.jwt_agent_id() is null
          and exists (select 1 from public.notes n
@@ -159,10 +170,11 @@ $$;
 create trigger files_deleted_audit before delete on public.files
   for each row execute function public.files_deleted_audit();
 
+revoke all on function public.files_set_kind() from public, anon, authenticated;
+
 -- No update and no truncate through the API; rows come in and go out only.
 revoke all on public.file_references from anon, authenticated;
 grant select, insert, delete on public.file_references to authenticated;
 
 revoke all on function public.files_deleted_audit() from public, anon, authenticated;
-revoke all on function public.files_set_kind() from public, anon, authenticated;
 revoke all on function public.file_references_before_insert() from public, anon, authenticated;

@@ -120,5 +120,6 @@ export async function setupHive() {
     users,
     addNote,
     saveFile,
+    addMember,
   };
 }
