@@ -99,8 +99,18 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
 | View     | What it shows                                                                                     |
 | -------- | ------------------------------------------------------------------------------------------------- |
 | Rings    | Opening view. The index at the centre, a hub per group, the group's items on arcs outward from it |
-| Timeline | Agent writes per day on top; every note under the day it last changed                             |
+| Timeline | Agent writes per column on top; every note under the column of the date it was written            |
 | Orbit    | The same dots on a slowly rotating sphere, agents on an outer ring                                |
+
+- **Timeline:** 14 columns, the last one the current day, week, month, quarter or year. The scale
+  is picked in the browser from the oldest created date among the notes and files it lays out:
+  days when everything was written within the last 14 days, else the first of week (Monday to
+  Sunday, UTC), month, quarter and year in which the oldest fits; anything older than 14 years
+  sits in the first column. Labels: days as dates ending in "Today"; weeks by the Monday they
+  start on and "This week"; months by short name with the year on January and on the first
+  column, and "This month"; quarters as "Q4 2026"; years as "2026". A hub sits under its topic's
+  newest created date. A payload without a created date uses the last change. Rings freshness
+  and the "today" counts still go by last change.
 
 - **Rings:** the groups sit in sectors around the circle, and each item is placed by how recently
   it changed: the freshest notes on the arc nearest the hub, older ones further out, files after

@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { expect, test, type Page, type Request } from "@playwright/test";
 import {
@@ -1468,6 +1468,72 @@ test("importing into an existing workspace makes none; a second import changes n
   await panel.getByRole("button", { name: T.START, exact: true }).click();
   await expect(done.getByText("Unchanged 2", { exact: true })).toBeVisible();
   await expect(done.getByText("Created 0", { exact: true })).toBeVisible();
+});
+
+test("each note travels with its dates; importing again with only a date corrected counts as updated", async ({
+  page,
+}) => {
+  await open(page);
+  const dir = folder("Journal", {
+    "field.md": "---\ndate: 2024-03-14\n---\nA",
+    "2022-05-06 standup.md": "B",
+    "plain.md": "C",
+  });
+  // The files' own time, which is all `plain.md` has to go by.
+  const touch = (name: string, iso: string) =>
+    utimesSync(join(dir, name), new Date(iso), new Date(iso));
+  const FIRST = "2025-01-02T03:04:05.000Z";
+  for (const name of ["field.md", "2022-05-06 standup.md", "plain.md"])
+    touch(name, FIRST);
+
+  const run = async () => {
+    const panel = importPanel(page);
+    await panel.getByRole("radio", { name: T.EXISTING_WORKSPACE }).check();
+    await panel.getByLabel(T.WORKSPACE, { exact: true }).selectOption({
+      label: "Operations",
+    });
+    await panel.getByRole("button", { name: T.START, exact: true }).click();
+  };
+  const sentDates = async () => {
+    const batches = (await importCalls(page)).filter(
+      (c) => c.name === "importBatch",
+    );
+    const notes = batches.at(-1)!.args[1] as {
+      path: string;
+      written_at?: string;
+      modified_at?: string;
+    }[];
+    return Object.fromEntries(
+      notes.map((n) => [n.path, [n.written_at, n.modified_at]]),
+    );
+  };
+
+  await pick(page, dir);
+  await run();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Created 3", { exact: true })).toBeVisible();
+  // A field first, then the file's name, then the file's time; a day alone is noon UTC.
+  expect(await sentDates()).toEqual({
+    "field.md": ["2024-03-14T12:00:00.000Z", FIRST],
+    "2022-05-06 standup.md": ["2022-05-06T12:00:00.000Z", FIRST],
+    "plain.md": [FIRST, FIRST],
+  });
+
+  // The same folder again, the text of every note as it was: two files have another time.
+  const SECOND = "2025-02-03T04:05:06.000Z";
+  touch("field.md", SECOND);
+  touch("plain.md", SECOND);
+  await page.getByLabel(T.FOLDER_INPUT).setInputFiles(dir);
+  await run();
+  await expect(done.getByText("Updated 2", { exact: true })).toBeVisible();
+  await expect(done.getByText("Unchanged 1", { exact: true })).toBeVisible();
+  await expect(done.getByText("Created 0", { exact: true })).toBeVisible();
+  await expect(done.getByText("Failed 0", { exact: true })).toBeVisible();
+  expect(await sentDates()).toEqual({
+    "field.md": ["2024-03-14T12:00:00.000Z", SECOND],
+    "2022-05-06 standup.md": ["2022-05-06T12:00:00.000Z", FIRST],
+    "plain.md": [SECOND, SECOND],
+  });
 });
 
 test("a name that is empty or too long is refused before anything is asked", async ({

@@ -1,5 +1,7 @@
 // A deterministic sample hive for the dev page and the tests: about 300 items across 10 topics,
-// 3 members, 4 agents, files, links and locked nodes. Dates are relative to `now`.
+// 3 members, 4 agents, files, links and locked nodes. Dates are relative to `now`: everything was
+// written and last changed within the last 14 days, so the Timeline shows days. With `old` the
+// items were written over the last 1,000 days (and last changed as before), so it shows quarters.
 import type { MapNode, MapPayload } from "./types";
 
 const TOPICS: [string, number][] = [
@@ -66,7 +68,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 export function fixturePayload(
   now: number,
-  opts: { items?: number } = {},
+  opts: { items?: number; old?: boolean } = {},
 ): MapPayload {
   let seed = 7;
   const rnd = () => {
@@ -101,7 +103,15 @@ export function fixturePayload(
           suffix;
         const byAgent = rnd() < 0.6;
         const id = `00000000-0000-4000-9000-${String(round * 100_000 + ti * 1000 + j).padStart(12, "0")}`;
-        const updated = now - Math.floor(Math.pow(rnd(), 2.2) * 20 * DAY);
+        // Most changes are recent; the tail is held at 13 days so the sample fits 14 day columns.
+        const updated =
+          now - Math.min(13 * DAY, Math.floor(Math.pow(rnd(), 2.2) * 20 * DAY));
+        // Written when last changed, or with `old` up to 1,000 days before that. No random
+        // number is drawn for it, so everything else is the same sample either way.
+        const back = ((round * 17 + ti * 37 + j * 101) % 211) / 210;
+        const created = opts.old
+          ? updated - Math.floor(back * 1000 * DAY)
+          : updated;
         const path = `${topic}/${slug(title)}${file ? "" : ".md"}`;
         nodes.push({
           id,
@@ -109,6 +119,7 @@ export function fixturePayload(
           topic,
           member_id: member,
           updated_at: iso(updated),
+          created_at: iso(created),
           locked,
           title: locked ? null : title,
           path: locked ? null : path,
@@ -138,6 +149,7 @@ export function fixturePayload(
     topic: "Ops handbook",
     member_id: ME,
     updated_at: iso(now - 2 * 60 * MIN),
+    created_at: iso(now - 2 * 60 * MIN),
     locked: false,
     title: HOSTILE_TITLE,
     path: "Ops handbook/hostile-title.md",

@@ -14,7 +14,14 @@ import {
   useState,
 } from "react";
 import { activity, agentStatus, buildModel } from "./graph";
-import { layout, orbit, ringsLayout, type RingsLayout } from "./layouts";
+import {
+  layout,
+  orbit,
+  ringsLayout,
+  timelineScale,
+  type RingsLayout,
+} from "./layouts";
+import type { Scale } from "./timescale";
 import {
   GROUP_HEADING,
   grouping,
@@ -47,6 +54,8 @@ type Entry = {
   model: MapModel;
   timeline: [number, number][] | null;
   timelineAt: number;
+  /** The scale `timeline` was laid out on; the scene takes its labels and agent row from it. */
+  scale: Scale | null;
   rings: RingsLayout | null;
   orbit: [number, number, number][] | null;
   orbitFlat: [number, number][] | null;
@@ -105,6 +114,7 @@ export function HiveMap({
         model: buildModel(parsed, groups()),
         timeline: null,
         timelineAt: 0,
+        scale: null,
         rings: null,
         orbit: null,
         orbitFlat: null,
@@ -174,7 +184,10 @@ export function HiveMap({
   let flatPos: [number, number][];
   if (view === "timeline") {
     if (!cache.timeline || cache.timelineAt !== now) {
-      cache.timeline = layout("timeline", model, now);
+      // One pass over the items for the scale, then the same scale for the positions and, in
+      // the scene below, for the column labels and the agent row.
+      cache.scale = timelineScale(model, now);
+      cache.timeline = layout("timeline", model, now, cache.scale);
       cache.timelineAt = now;
     }
     flatPos = cache.timeline;
@@ -216,6 +229,7 @@ export function HiveMap({
         act,
         now,
         view === "rings" ? cache.rings : null,
+        view === "timeline" ? cache.scale : null,
       ),
     [model, view, pos, act, now, cache],
   );

@@ -22,6 +22,8 @@ export type MapNode = {
   topic: string;
   member_id: string;
   updated_at: string;
+  /** When it was written. Absent from an older database: the map then uses `updated_at`. */
+  created_at?: string | null;
   locked: boolean;
   // null on a locked node:
   title: string | null;
@@ -48,6 +50,7 @@ export type ModelNode = {
   title: string; // "Private note" / "Private file" when locked
   path: string | null;
   updatedAt: number; // epoch ms; 0 for root and hubs
+  createdAt: number; // epoch ms; `updatedAt` when the payload has no usable created date
   byAgent: boolean;
   nb: number[]; // neighbours
 };
@@ -82,3 +85,6 @@ export type Activity = {
   perMember: { id: string; name: string; count: number }[]; // most first
   days: { day: number; member: string; count: number }[]; // agent writes, last 14 days
 };
+
+/** Agent-written notes and files per Timeline column and member, by created date. */
+export type AgentColumn = { column: number; member: string; count: number };

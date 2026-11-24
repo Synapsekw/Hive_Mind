@@ -35,6 +35,10 @@ export type ImportNote = {
   title: string;
   body: string;
   frontmatter: Record<string, unknown>;
+  /** When the note was written, as an ISO text (`dates.ts`); left out when nothing says. */
+  written_at?: string;
+  /** When the note's file last changed, as an ISO text; left out when nothing says. */
+  modified_at?: string;
 };
 
 /** The parts of a path that could be a file's inside a folder, or null: no backslash, no NUL, no
@@ -117,7 +121,8 @@ export function textBytes(text: string): number {
 
 /**
  * What a note weighs in a request: the bytes of its JSON text, so the quotes, newlines and
- * control characters that are escaped on the way count as what they become.
+ * control characters that are escaped on the way count as what they become. Its two dates
+ * count when it carries them.
  */
 export function noteBytes(note: ImportNote): number {
   return textBytes(
@@ -126,6 +131,8 @@ export function noteBytes(note: ImportNote): number {
       title: note.title,
       body: note.body,
       frontmatter: note.frontmatter,
+      written_at: note.written_at,
+      modified_at: note.modified_at,
     }),
   );
 }

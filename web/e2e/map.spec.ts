@@ -1145,6 +1145,94 @@ test("in Timeline and Orbit the group list is named Topics", async ({
   }
 });
 
+/** The Timeline's guide texts (axis names, then the 14 column labels), from the canvas. */
+async function timelineGuides(page: Page): Promise<string[]> {
+  await viewButton(page, "Timeline").click();
+  const canvas = page.locator("[data-map-canvas]");
+  await expect(canvas).toHaveAttribute("data-view", "timeline");
+  await expect(canvas).toHaveAttribute("data-guides", /\|/);
+  return ((await canvas.getAttribute("data-guides")) ?? "").split("|");
+}
+
+test("recent notes keep the Timeline on days, ending at Today", async ({
+  page,
+}) => {
+  await open(page);
+  const guides = await timelineGuides(page);
+  expect(guides).toHaveLength(3 + 14);
+  expect(guides[0]).toBe("Agent writes by day");
+  expect(guides[guides.length - 1]).toBe("Today");
+  // The first column carries its month, the ones between are bare dates.
+  expect(guides[3]).toMatch(/^\d{1,2} [A-Z][a-z]{2}$/);
+  for (const g of guides.slice(4, -1))
+    expect(g).toMatch(/^\d{1,2}( [A-Z][a-z]{2})?$/);
+  // Rings has no column labels.
+  await viewButton(page, "Rings").click();
+  await expect(page.locator("[data-map-canvas]")).toHaveAttribute(
+    "data-guides",
+    "",
+  );
+});
+
+test("old notes widen the Timeline's scale and spread over its columns", async ({
+  page,
+}) => {
+  const seen: Request[] = [];
+  await page.goto("/dev/map?old=1", { waitUntil: "networkidle" });
+  await expect(page.getByRole("main", { name: "Hive map" })).toBeVisible();
+  page.on("request", (r) => seen.push(r));
+  const guides = await timelineGuides(page);
+  expect(guides).toHaveLength(3 + 14);
+  expect(guides).not.toContain("Today");
+  expect(guides[0]).toBe("Agent writes by quarter");
+  const year = new Date().getUTCFullYear();
+  const quarter = Math.floor(new Date().getUTCMonth() / 3) + 1;
+  for (const g of guides.slice(3)) expect(g).toMatch(/^Q[1-4] \d{4}$/);
+  // The last column is the current quarter.
+  expect(guides[guides.length - 1]).toBe(`Q${quarter} ${year}`);
+
+  // The notes sit under many columns, not all under the current one.
+  await settle(page);
+  await expect(
+    page.locator('ul[aria-label="Items on the map"][data-view="timeline"]'),
+  ).toBeAttached({ timeout: 5000 });
+  const columns = await page
+    .locator('[data-map-dot]:is([data-kind="note"], [data-kind="file"])')
+    .evaluateAll(
+      (els) =>
+        new Set(
+          els.map((e) =>
+            Math.floor((Number(e.getAttribute("data-x")) - 250) / 51),
+          ),
+        ).size,
+    );
+  expect(columns).toBeGreaterThan(8);
+
+  // Picking the scale and laying out asked the server for nothing.
+  const bad = seen.filter(
+    (r) =>
+      r.url().includes("/rest/") ||
+      r.url().includes("/auth/") ||
+      ["document", "fetch", "xhr"].includes(r.resourceType()),
+  );
+  expect(bad.map((r) => `${r.resourceType()} ${r.url()}`)).toEqual([]);
+});
+
+test("a note's peek and the side panel show when it was written and when it changed", async ({
+  page,
+}) => {
+  await open(page);
+  const dot = page.locator('[data-map-dot][aria-label^="<img src=x"]');
+  await dot.focus();
+  const peek = page.locator("[data-map-peek]");
+  await expect(peek).toContainText(/Written\s*2 h ago/);
+  await expect(peek).toContainText(/Changed\s*2 h ago/);
+  await page.keyboard.press("Enter");
+  const facts = rail(page).locator("dl");
+  await expect(facts).toContainText(/Written\s*\d{1,2} [A-Z][a-z]{2}/);
+  await expect(facts).toContainText(/Changed\s*\d{1,2} [A-Z][a-z]{2}/);
+});
+
 test("choosing a filter clears the selection", async ({ page }) => {
   await open(page);
   await pick(page, page.locator('[data-map-dot][aria-label^="<img src=x"]'));

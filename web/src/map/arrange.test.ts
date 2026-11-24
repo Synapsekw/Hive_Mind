@@ -165,6 +165,29 @@ describe("grouping by time", () => {
     expect(none.names).toEqual(["Last 2 weeks", "Earlier"]);
     expect(sizes(none)).toEqual([1, 1]);
   });
+
+  it("groups by the created date, not the last change", () => {
+    const today = new Date(NOW).toISOString();
+    const nodes = [
+      // Written in March 2025 and changed today: March 2025.
+      node("old", {
+        created_at: "2025-03-14T12:00:00.000Z",
+        updated_at: today,
+      }),
+      // Written today: the last two weeks.
+      node("new", { created_at: today, updated_at: today }),
+      // No usable created date: the last change decides.
+      node("absent", { updated_at: new Date(NOW - 50 * DAY).toISOString() }),
+      node("null", {
+        created_at: null,
+        updated_at: new Date(NOW - 50 * DAY).toISOString(),
+      }),
+      node("bad", { created_at: "nope", updated_at: today }),
+    ];
+    const g = grouping({ nodes, links: [] }, "time", NOW);
+    expect(g.names).toEqual(["Last 2 weeks", "October 2026", "March 2025"]);
+    expect(g.of).toEqual([2, 0, 1, 1, 0]);
+  });
 });
 
 describe("grouping by links", () => {

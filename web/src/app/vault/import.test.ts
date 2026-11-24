@@ -14,6 +14,10 @@ const OTHER_HIVE = "00000000-0000-4000-8000-000000000a02";
 const ME = "00000000-0000-4000-8000-000000000001";
 const AHMED = "00000000-0000-4000-8000-000000000002";
 const UID = "00000000-0000-4000-8000-0000000000aa";
+/** A "now" for the checks that take one; the tests that do not pass it use dates long past. */
+const NOW = Date.UTC(2026, 10, 24, 9, 30);
+const WRITTEN = "2025-03-14T12:00:00.000Z";
+const MODIFIED = "2025-06-01T08:15:30.250Z";
 const W1 = "00000000-0000-4000-8000-000000000b01";
 const NEW_WS = "00000000-0000-4000-8000-000000000b09";
 
@@ -484,6 +488,112 @@ describe("cleanBatch", () => {
       ["fits.md", true],
     ]);
   });
+
+  it("takes the two dates as ISO texts of its own making", () => {
+    const [a, b, c] = cleanBatch(
+      [
+        note("a.md", {
+          written_at: "2025-03-14T12:00:00.000Z",
+          modified_at: "2025-06-01T08:15:30.250Z",
+        }),
+        note("b.md", { written_at: "2025-03-14" }),
+        note("c.md", { modified_at: "2025-06-01T10:15:30+02:00" }),
+      ],
+      NOW,
+    )!;
+    expect(a!.note).toEqual({
+      ...note("a.md"),
+      written_at: "2025-03-14T12:00:00.000Z",
+      modified_at: "2025-06-01T08:15:30.250Z",
+    });
+    expect(b!.note).toEqual({
+      ...note("b.md"),
+      written_at: "2025-03-14T12:00:00.000Z",
+    });
+    expect(Object.keys(b!.note)).not.toContain("modified_at");
+    expect(c!.note).toEqual({
+      ...note("c.md"),
+      modified_at: "2025-06-01T08:15:30.000Z",
+    });
+    // A note without dates has neither key.
+    expect(
+      Object.keys(cleanBatch([note("d.md")], NOW)![0]!.note).sort(),
+    ).toEqual(["body", "frontmatter", "path", "title"]);
+    expect(
+      Object.keys(
+        cleanBatch(
+          [{ ...note("d.md"), written_at: undefined, modified_at: undefined }],
+          NOW,
+        )![0]!.note,
+      ).sort(),
+    ).toEqual(["body", "frontmatter", "path", "title"]);
+  });
+
+  it("refuses a batch whose date is not a text", () => {
+    for (const key of ["written_at", "modified_at"])
+      for (const v of [
+        1_741_953_600_000,
+        null,
+        true,
+        ["2025-03-14"],
+        { at: "2025-03-14" },
+        new Date(0),
+      ])
+        expect(
+          cleanBatch([note("ok.md"), { ...note("a.md"), [key]: v }], NOW),
+          `${key}: ${String(v)}`,
+        ).toBeNull();
+  });
+
+  it("drops a date it cannot use and keeps the note", () => {
+    for (const v of [
+      "soon",
+      "",
+      "2025-02-30",
+      "1989-12-31",
+      new Date(NOW + 1).toISOString(),
+      "2031-01-01",
+      "2025-03-14T12:00:00.000Z' or '1'='1",
+      "2025-03-14".padEnd(41, " "),
+      "x".repeat(100_000),
+    ]) {
+      const [c] = cleanBatch(
+        [note("a.md", { written_at: v, modified_at: v })],
+        NOW,
+      )!;
+      expect(c, v.slice(0, 50)).toEqual({
+        note: note("a.md"),
+        dir: null,
+        storable: true,
+      });
+      expect(Object.keys(c!.note).sort()).toEqual([
+        "body",
+        "frontmatter",
+        "path",
+        "title",
+      ]);
+    }
+    // One of the two can be dropped by itself.
+    expect(
+      cleanBatch(
+        [note("a.md", { written_at: "2025-03-14", modified_at: "2031-01-01" })],
+        NOW,
+      )![0]!.note,
+    ).toEqual({ ...note("a.md"), written_at: "2025-03-14T12:00:00.000Z" });
+  });
+
+  it("never keeps a last change before the written date", () => {
+    expect(
+      cleanBatch(
+        [note("a.md", { written_at: "2025-03-14", modified_at: "2020-01-01" })],
+        NOW,
+      )![0]!.note,
+    ).toEqual({
+      ...note("a.md"),
+      written_at: "2025-03-14T12:00:00.000Z",
+      modified_at: "2025-03-14T12:00:00.000Z",
+    });
+  });
 });
 
 describe("importBatchIn", () => {
@@ -630,7 +740,12 @@ describe("importBatchIn", () => {
       ["limit", [1]],
     ]);
     expect(t.calls[2]!.ops).toEqual([
-      ["select", ["id, path, title, body, frontmatter, folder_id"]],
+      [
+        "select",
+        [
+          "id, path, title, body, frontmatter, folder_id, created_at, updated_at",
+        ],
+      ],
       ["eq", ["workspace_id", W1]],
       // Every path quoted, and a quote inside one escaped.
       ["filter", ["path", "in", '("a.md","quo\\"te, (x)/b\'s.md")']],
@@ -1012,6 +1127,387 @@ describe("importBatchIn", () => {
       ),
     ).toEqual([["long.md", "failed"]]);
     expect(shape(none)).toEqual(["workspaces.select", "members.select"]);
+  });
+
+  describe("the two dates", () => {
+    const dated = (path: string, extra: Partial<ImportNote> = {}) =>
+      note(path, { written_at: WRITTEN, modified_at: MODIFIED, ...extra });
+    /** A note as the database answers it, its dates in the database's own way of writing. */
+    const stored = (path: string, extra: Row = {}): Row => ({
+      id: "00000000-0000-4000-8000-00000000e001",
+      workspace_id: W1,
+      path,
+      title: note(path).title,
+      body: note(path).body,
+      frontmatter: {},
+      folder_id: null,
+      version: 3,
+      created_at: "2025-03-14T12:00:00+00:00",
+      updated_at: "2025-06-01T08:15:30.25+00:00",
+      ...extra,
+    });
+    const writes = (t: { calls: Call[] }) =>
+      t.calls.filter((c) => kind(c) !== "select");
+
+    it("refuses a batch whose date is not a text, without a query", async () => {
+      const t = fake();
+      for (const extra of [
+        { written_at: 1_741_953_600_000 },
+        { modified_at: 1_741_953_600_000 },
+        { written_at: null },
+        { modified_at: ["2025-03-14"] },
+      ])
+        expect(
+          await importBatchIn(t.db, W1, [
+            note("ok.md"),
+            { ...note("a.md"), ...extra },
+          ]),
+        ).toEqual({ ok: false });
+      expect(t.from).not.toHaveBeenCalled();
+      expect(t.auth.getUser).not.toHaveBeenCalled();
+    });
+
+    it("imports a note whose date is unparseable or in the future, without the date", async () => {
+      const t = fake();
+      const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+      const r = await importBatchIn(t.db, W1, [
+        note("soon.md", { written_at: "soon", modified_at: "later" }),
+        note("future.md", { written_at: tomorrow, modified_at: tomorrow }),
+        note("half.md", { written_at: WRITTEN, modified_at: tomorrow }),
+      ]);
+      expect(outcomes(r)).toEqual([
+        ["soon.md", "created"],
+        ["future.md", "created"],
+        ["half.md", "created"],
+      ]);
+      const sent = op(writes(t)[0]!, "insert")![0] as Row[];
+      expect(sent.map((n) => Object.keys(n).sort())).toEqual([
+        [
+          "body",
+          "folder_id",
+          "frontmatter",
+          "hive_id",
+          "member_id",
+          "path",
+          "title",
+          "workspace_id",
+        ],
+        [
+          "body",
+          "folder_id",
+          "frontmatter",
+          "hive_id",
+          "member_id",
+          "path",
+          "title",
+          "workspace_id",
+        ],
+        [
+          "body",
+          "created_at",
+          "folder_id",
+          "frontmatter",
+          "hive_id",
+          "member_id",
+          "path",
+          "title",
+          "updated_at",
+          "workspace_id",
+        ],
+      ]);
+      // With no last change, the written date stands for it.
+      expect(sent[2]).toMatchObject({
+        created_at: WRITTEN,
+        updated_at: WRITTEN,
+      });
+    });
+
+    it("stores a new note with both dates, as texts the server made", async () => {
+      const t = fake();
+      const r = await importBatchIn(t.db, W1, [
+        note("a.md", {
+          written_at: "2025-03-14",
+          modified_at: "2025-06-01T10:15:30.250+02:00",
+        }),
+        note("b.md"),
+      ]);
+      expect(outcomes(r)).toEqual([
+        ["a.md", "created"],
+        ["b.md", "created"],
+      ]);
+      expect(shape(t)).toEqual([
+        "workspaces.select",
+        "members.select",
+        "notes.select",
+        "notes.insert",
+      ]);
+      expect(op(t.calls[3]!, "insert")).toEqual([
+        [
+          {
+            hive_id: HIVE,
+            member_id: ME,
+            workspace_id: W1,
+            path: "a.md",
+            title: "a",
+            body: "text of a.md\n",
+            frontmatter: {},
+            folder_id: null,
+            created_at: WRITTEN,
+            updated_at: MODIFIED,
+          },
+          {
+            hive_id: HIVE,
+            member_id: ME,
+            workspace_id: W1,
+            path: "b.md",
+            title: "b",
+            body: "text of b.md\n",
+            frontmatter: {},
+            folder_id: null,
+          },
+        ],
+      ]);
+    });
+
+    it("corrects only the dates of a note whose content is the same, and says updated", async () => {
+      // As a note imported before dates were carried: both stamped with the moment of import.
+      const t = fake({
+        notes: [
+          stored("a.md", {
+            created_at: "2026-11-20T10:00:00.123456+00:00",
+            updated_at: "2026-11-20T10:00:00.123456+00:00",
+          }),
+        ],
+      });
+      expect(outcomes(await importBatchIn(t.db, W1, [dated("a.md")]))).toEqual([
+        ["a.md", "updated"],
+      ]);
+      expect(writes(t)).toHaveLength(1);
+      expect(writes(t)[0]!.ops).toEqual([
+        ["update", [{ created_at: WRITTEN, updated_at: MODIFIED }]],
+        ["eq", ["id", "00000000-0000-4000-8000-00000000e001"]],
+        ["select", ["id"]],
+      ]);
+    });
+
+    it("corrects the dates when only one of them differs, or a stored one cannot be read", async () => {
+      for (const extra of [
+        { created_at: "2025-03-15T12:00:00+00:00" },
+        { updated_at: "2025-06-01T08:15:30.251+00:00" },
+        { created_at: null },
+        { updated_at: "not a date" },
+        { created_at: undefined },
+      ]) {
+        const t = fake({ notes: [stored("a.md", extra)] });
+        expect(
+          outcomes(await importBatchIn(t.db, W1, [dated("a.md")])),
+          JSON.stringify(extra),
+        ).toEqual([["a.md", "updated"]]);
+        expect(op(writes(t)[0]!, "update")).toEqual([
+          { created_at: WRITTEN, updated_at: MODIFIED },
+        ]);
+      }
+    });
+
+    it("sends only the dates the note carries", async () => {
+      const t = fake({
+        notes: [stored("a.md", { created_at: "2026-11-20T10:00:00+00:00" })],
+      });
+      expect(
+        outcomes(
+          await importBatchIn(t.db, W1, [
+            note("a.md", { written_at: WRITTEN }),
+          ]),
+        ),
+      ).toEqual([["a.md", "updated"]]);
+      expect(op(writes(t)[0]!, "update")).toEqual([{ created_at: WRITTEN }]);
+
+      const other = fake({
+        notes: [stored("a.md", { updated_at: "2026-11-20T10:00:00+00:00" })],
+      });
+      expect(
+        outcomes(
+          await importBatchIn(other.db, W1, [
+            note("a.md", { modified_at: MODIFIED }),
+          ]),
+        ),
+      ).toEqual([["a.md", "updated"]]);
+      expect(op(writes(other)[0]!, "update")).toEqual([
+        { updated_at: MODIFIED },
+      ]);
+    });
+
+    it("leaves a note alone when its content and its dates are the same", async () => {
+      const t = fake({
+        notes: [stored("a.md"), stored("b.md", { id: NEW_WS })],
+      });
+      expect(
+        outcomes(
+          await importBatchIn(t.db, W1, [
+            dated("a.md"),
+            // The same moments, written another way.
+            note("b.md", {
+              written_at: "2025-03-14T14:00:00+02:00",
+              modified_at: "2025-06-01 08:15:30.250",
+            }),
+          ]),
+        ),
+      ).toEqual([
+        ["a.md", "unchanged"],
+        ["b.md", "unchanged"],
+      ]);
+      expect(writes(t)).toEqual([]);
+      expect(t.tables.notes!.every((n) => n.version === 3)).toBe(true);
+    });
+
+    it("compares only the dates that were sent", async () => {
+      const t = fake({
+        notes: [stored("a.md", { updated_at: "2026-11-20T10:00:00+00:00" })],
+      });
+      expect(
+        outcomes(
+          await importBatchIn(t.db, W1, [
+            note("a.md", { written_at: WRITTEN }),
+          ]),
+        ),
+      ).toEqual([["a.md", "unchanged"]]);
+      // A note sent without dates is as before: whatever is stored, nothing is written.
+      expect(outcomes(await importBatchIn(t.db, W1, [note("a.md")]))).toEqual([
+        ["a.md", "unchanged"],
+      ]);
+      expect(writes(t)).toEqual([]);
+    });
+
+    it("sends both dates with changed content, in the one update", async () => {
+      const LATER = "2025-07-02T10:00:00.000Z";
+      const t = fake({
+        notes: [stored("a.md"), stored("b.md", { id: NEW_WS })],
+      });
+      const r = await importBatchIn(t.db, W1, [
+        dated("a.md", { body: "new text\n", modified_at: LATER }),
+        // No written date: only the last change travels.
+        note("b.md", {
+          body: "new text\n",
+          modified_at: "2025-07-02T12:00:00+02:00",
+        }),
+      ]);
+      expect(outcomes(r)).toEqual([
+        ["a.md", "updated"],
+        ["b.md", "updated"],
+      ]);
+      // One update for each note, and no other write.
+      expect(shape(t)).toEqual([
+        "workspaces.select",
+        "members.select",
+        "notes.select",
+        "notes.update",
+        "notes.update",
+      ]);
+      expect(writes(t).map((c) => op(c, "update"))).toEqual([
+        [
+          {
+            title: "a",
+            body: "new text\n",
+            frontmatter: {},
+            folder_id: null,
+            created_at: WRITTEN,
+            updated_at: LATER,
+          },
+        ],
+        [
+          {
+            title: "b",
+            body: "new text\n",
+            frontmatter: {},
+            folder_id: null,
+            // The text the server made, not the one that was sent.
+            updated_at: LATER,
+          },
+        ],
+      ]);
+    });
+
+    it("sends no last change with changed content when the note carries none", async () => {
+      const t = fake({
+        notes: [stored("a.md"), stored("b.md", { id: NEW_WS })],
+      });
+      const r = await importBatchIn(t.db, W1, [
+        note("a.md", { body: "new text\n", written_at: WRITTEN }),
+        // One that cannot be used is as none.
+        note("b.md", { body: "new text\n", modified_at: "2999-01-01" }),
+      ]);
+      expect(outcomes(r)).toEqual([
+        ["a.md", "updated"],
+        ["b.md", "updated"],
+      ]);
+      // The database stamps the last change itself.
+      expect(writes(t).map((c) => op(c, "update"))).toEqual([
+        [
+          {
+            title: "a",
+            body: "new text\n",
+            frontmatter: {},
+            folder_id: null,
+            created_at: WRITTEN,
+          },
+        ],
+        [{ title: "b", body: "new text\n", frontmatter: {}, folder_id: null }],
+      ]);
+    });
+
+    it("answers unchanged when an edited file is imported a second time", async () => {
+      const t = fake({ notes: [stored("a.md")] });
+      const edited = [
+        dated("a.md", {
+          body: "new text\n",
+          modified_at: "2025-07-02T10:00:00.000Z",
+        }),
+      ];
+      expect(outcomes(await importBatchIn(t.db, W1, edited))).toEqual([
+        ["a.md", "updated"],
+      ]);
+      t.calls.length = 0;
+      expect(outcomes(await importBatchIn(t.db, W1, edited))).toEqual([
+        ["a.md", "unchanged"],
+      ]);
+      expect(writes(t)).toEqual([]);
+    });
+
+    it("logs and returns no path, title or text when the update of changed content is refused", async () => {
+      const log = quiet();
+      const t = fake({
+        notes: [stored("a.md")],
+        fail: (c) =>
+          kind(c) === "update"
+            ? no("this hive is being deleted", "P0001")
+            : undefined,
+      });
+      const r = await importBatchIn(t.db, W1, [
+        dated("a.md", { title: "A secret title", body: "secret text\n" }),
+      ]);
+      expect(r).toEqual({
+        ok: true,
+        outcomes: [{ path: "a.md", outcome: "failed" }],
+      });
+      expect(log).toHaveBeenCalledTimes(1);
+      for (const line of log.mock.calls)
+        expect(line.join(" ")).not.toMatch(/a\.md|secret|text of/);
+    });
+
+    it("says failed for a date correction the database refuses or that changes no row", async () => {
+      const log = quiet();
+      for (const said of [no("this hive is being deleted", "P0001"), ok([])]) {
+        const t = fake({
+          notes: [stored("a.md", { created_at: "2026-11-20T10:00:00+00:00" })],
+          fail: (c) => (kind(c) === "update" ? said : undefined),
+        });
+        const r = await importBatchIn(t.db, W1, [dated("a.md")]);
+        expect(outcomes(r)).toEqual([["a.md", "failed"]]);
+        expect(JSON.stringify(r)).not.toContain("being deleted");
+      }
+      for (const line of log.mock.calls)
+        expect(line.join(" ")).not.toMatch(/a\.md|text of/);
+    });
   });
 
   it("ignores rows the read answers that were not asked for or are malformed", async () => {

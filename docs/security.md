@@ -848,7 +848,12 @@ script `scripts/import-vault.mjs` (section 3), which remains for unattended runs
   - at most 1 MB per note;
   - every path clean and ending in `.md`: no `..`, no leading slash, no backslash, no empty
     part, and no path twice in one batch;
-  - a title and frontmatter of the right shape, the frontmatter a plain object.
+  - a title and frontmatter of the right shape, the frontmatter a plain object;
+  - a note's two dates (when it was written, when its file last changed) are data from a file:
+    one that is not a text refuses the batch; a text is kept only when it is at most 40
+    characters and parses to a time from 1990-01-01 up to now, else it is dropped and the note
+    is imported without it. The database is sent an ISO text the server formatted itself,
+    never the text that arrived, and decides what a person may set (section 15).
 - **2,000 notes per import is checked in the browser only.** It is a convenience limit, not a
   security one: a person who goes around the browser can send more batches, each still within
   the limits above and each still writing only into their own workspaces.
@@ -913,3 +918,58 @@ signed in as the person; it adds no rule of its own.
   stops a run that reaches it as the 40th note of a step.
 - Any member can run it on their own workspaces as often as they like; each run is bounded as
   above and writes nothing that is already there.
+
+## 15. A note's dates
+
+A note has two dates: `created_at`, when it was written, and `updated_at`, when it last changed.
+The map places a note by the first and orders by the second. An imported note carries the dates
+of its file (section 13), so the dates can be set, and the database decides by whom (migration
+`20261124153504_note_dates`, in the trigger `notes_before_write`). A file has one date,
+`created_at`, and nobody sets it (the trigger `files_keep_date`, below).
+
+**Who may set them.**
+
+- **A person, on their own notes.** A signed-in session with no agent, no app pass and no
+  self-hosted claim. Row-level security still decides whose notes a person writes.
+  - A value in the future is cut back to now.
+  - **A value before 1990-01-01 00:00 UTC is raised to it.** The import accepts no earlier date
+    either (section 13).
+  - `updated_at` is never before `created_at`: it is raised to it.
+  - An update that sends no date changes no date.
+- **An agent or a connected app cannot.** On a new note both dates are the real moment,
+  whatever was sent. On an update `created_at` keeps its old value, and so does `updated_at`
+  unless the content changes. The same holds for a token made for another audience.
+- **A change of title, text or fields stamps `updated_at` as now**, as before, with one
+  exception for a person.
+  - **A person may send the date of the change with it.** When their update changes content
+    and sends an `updated_at` other than the stored one, that value is kept, within the same
+    limits: not before `created_at`, not before 1990-01-01, not after now. The import needs
+    this: it stores an edited file's text and its last-modified time in one update, so
+    importing again finds the note unchanged.
+  - With no `updated_at`, the stored one or null, a person's change is stamped now.
+  - For an agent, an app, a self-hosted claim and the server it is always now, whatever was
+    sent.
+  - Either way the version goes up and `written_by_agent` is set as before.
+- A person's change of the dates alone is not a change of content: no new version, and
+  `written_by_agent` stays.
+- **Nobody sets a file's date through the API.** The trigger `files_keep_date` on `files`
+  makes `created_at` the real moment on insert, whatever was sent, and keeps its old value on
+  update. This holds for a person as well as for an agent, an app and a self-hosted claim.
+- The server with no person behind the call (the database's owner, the service key) is not
+  checked, as before, for a note or for a file. Nobody reaches that through the API: row-level
+  security refuses a note or a file written by a caller who is no member.
+
+**What it means.**
+
+- **A person can backdate their own notes**, as far as 1990, and the last change of a note
+  with it, also while changing its text. It moves only their own notes on the map. The audit
+  log keeps the real time of every entry, and a note's history still lists every version.
+- `map_graph` gives every item its `created_at`, a locked one too. It says no more than
+  `updated_at`, which a locked item already carried.
+- No MCP tool sets a date, and none could: the database ignores an agent's dates.
+
+**Known gaps.**
+
+- A date is not proof of when a note was written: it is what its owner, or the file they
+  imported, says.
+- The map's 5,000 items are still picked by last change, whatever date a note was written.

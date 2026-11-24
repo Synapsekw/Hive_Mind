@@ -5,7 +5,8 @@
 // (row-level security and its triggers); nothing here decides it. The rules are those of
 // `scripts/import-vault.mjs`: one note per path, private, never deleted, sharing never set,
 // and a note that is already there is updated only when its title, text, fields or folder
-// changed. Only an error's code and message are logged, never a path or a note's text, and
+// changed. A note may carry the date it was written and the date its file last changed; a note
+// that differs only in those has only those corrected. Only an error's code and message are logged, never a path or a note's text, and
 // what the database said is never returned.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -18,6 +19,7 @@ import {
   textBytes,
   type ImportNote,
 } from "../../import/plan";
+import { cleanDate } from "../../import/dates";
 import type { BatchResult, Outcome, WorkspaceMade } from "../../import/types";
 import { isUuid } from "./validate";
 
@@ -170,9 +172,13 @@ type Checked = {
 
 /**
  * The batch rebuilt from known keys only, or null when anything about it is malformed: then
- * nothing is read or written.
+ * nothing is read or written. A note's dates are data from a file: only a text of at most 40
+ * characters that parses to a time from 1990 up to `now` is kept, as an ISO text made here.
  */
-export function cleanBatch(raw: unknown): Checked[] | null {
+export function cleanBatch(
+  raw: unknown,
+  now: number = Date.now(),
+): Checked[] | null {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > BATCH_NOTES)
     return null;
   const out: Checked[] = [];
@@ -180,7 +186,7 @@ export function cleanBatch(raw: unknown): Checked[] | null {
   let total = 0;
   for (const item of raw as unknown[]) {
     if (!isPlainObject(item)) return null;
-    const { path, title, body, frontmatter } = item;
+    const { path, title, body, frontmatter, written_at, modified_at } = item;
     if (!isNotePath(path) || seen.has(path)) return null;
     seen.add(path);
     if (typeof title !== "string" || title.length < 1) return null;
@@ -189,7 +195,20 @@ export function cleanBatch(raw: unknown): Checked[] | null {
     if (body.length > MAX_NOTE_BYTES || textBytes(body) > MAX_NOTE_BYTES)
       return null;
     if (!isPlainObject(frontmatter) || !isJson(frontmatter, 0)) return null;
+    // The two dates may be left out. One that is there and is not a text is malformed; a text
+    // that is no usable date is dropped and the note is still imported.
+    if (written_at !== undefined && typeof written_at !== "string") return null;
+    if (modified_at !== undefined && typeof modified_at !== "string")
+      return null;
+    const written = cleanDate(written_at, now);
+    let modified = cleanDate(modified_at, now);
+    // Never a last change before the written date: both are ISO texts made here, in UTC, so
+    // they compare as texts.
+    if (written !== null && modified !== null && modified < written)
+      modified = written;
     const note: ImportNote = { path, title, body, frontmatter };
+    if (written !== null) note.written_at = written;
+    if (modified !== null) note.modified_at = modified;
     total += noteBytes(note);
     if (total > BATCH_BYTES) return null;
     out.push({
@@ -214,6 +233,12 @@ function stable(v: unknown): string {
         )
       : x,
   );
+}
+
+/** True when a date that was sent is the moment the database holds; a date not sent is. */
+function sameMoment(sent: string | undefined, held: unknown): boolean {
+  if (sent === undefined) return true;
+  return typeof held === "string" && Date.parse(held) === Date.parse(sent);
 }
 
 /** A list of texts as the API's `in` filter takes it: each one quoted, quotes and backslashes escaped. */
@@ -331,7 +356,9 @@ export async function importBatchIn(
   // The notes already at these paths.
   const found = (await db
     .from("notes")
-    .select("id, path, title, body, frontmatter, folder_id")
+    .select(
+      "id, path, title, body, frontmatter, folder_id, created_at, updated_at",
+    )
     .eq("workspace_id", wsId)
     .filter("path", "in", inList(live.map((c) => c.note.path)))) as Res;
   if (failed("import notes query", found, true) || !Array.isArray(found.data))
@@ -381,7 +408,10 @@ export async function importBatchIn(
       continue;
     }
     const old = existing.get(note.path);
+    const written = note.written_at;
     if (!old) {
+      // With no last change of its own, a new note last changed when it was written.
+      const lastChange = note.modified_at ?? written;
       toCreate.push({
         hive_id: hiveId,
         member_id: memberId,
@@ -391,6 +421,10 @@ export async function importBatchIn(
         body: note.body,
         frontmatter: note.frontmatter,
         folder_id: folderId,
+        // The database lets a person set these, cuts a future one back to now and never
+        // keeps a last change before the written date.
+        ...(written ? { created_at: written } : {}),
+        ...(lastChange ? { updated_at: lastChange } : {}),
       });
       continue;
     }
@@ -399,19 +433,34 @@ export async function importBatchIn(
       old.body === note.body &&
       stable(old.frontmatter) === stable(note.frontmatter) &&
       (old.folder_id ?? null) === folderId;
-    if (same) {
+    const sameDates =
+      sameMoment(note.written_at, old.created_at) &&
+      sameMoment(note.modified_at, old.updated_at);
+    if (same && sameDates) {
       outcome.set(note.path, "unchanged");
       continue;
     }
     const id = old.id as string;
+    // Only the dates that were sent are written. With changed content the last change goes in
+    // the same update, so the note holds the file's time and the same import again finds
+    // nothing to do; with none sent, the database stamps the last change itself.
+    const dates = {
+      ...(written ? { created_at: written } : {}),
+      ...(note.modified_at ? { updated_at: note.modified_at } : {}),
+    };
     const res = (await db
       .from("notes")
-      .update({
-        title: note.title,
-        body: note.body,
-        frontmatter: note.frontmatter,
-        folder_id: folderId,
-      })
+      .update(
+        same
+          ? dates
+          : {
+              title: note.title,
+              body: note.body,
+              frontmatter: note.frontmatter,
+              folder_id: folderId,
+              ...dates,
+            },
+      )
       .eq("id", id)
       .select("id")) as Res;
     const changed =

@@ -1,6 +1,7 @@
 // One pure function per view, from the model to positions in the 1000 x 760 box (orbit: 3D).
 // Ported from the prototype's geometry in docs/ui/map.dc.html (`build()`).
-import { BOX, dayIndex, DAYS } from "./graph";
+import { BOX } from "./graph";
+import { COLUMNS, columnOf, pickScale, type Scale } from "./timescale";
 import type { MapModel } from "./types";
 
 type P2 = [number, number];
@@ -210,7 +211,22 @@ const ITEM_Y_MAX = 745;
 const AGENT_Y0 = 70;
 const AGENT_Y_MAX = 300;
 
-function timeline(model: MapModel, p: Parts, now: number): P2[] {
+/**
+ * The Timeline's scale for a model: picked from the oldest created date among the notes and
+ * files it lays out, in one pass. The layout, the column labels and the agent row all take this
+ * one scale.
+ */
+export function timelineScale(model: MapModel, now: number): Scale {
+  let oldest = 0;
+  for (const n of model.nodes) {
+    if (n.kind !== "note" && n.kind !== "file") continue;
+    const t = n.createdAt;
+    if (t > 0 && Number.isFinite(t) && (oldest === 0 || t < oldest)) oldest = t;
+  }
+  return pickScale(oldest, now);
+}
+
+function timeline(model: MapModel, p: Parts, scale: Scale): P2[] {
   const out = new Array<P2>(model.nodes.length);
   out[0] = [30, 330];
   const A = p.agents.length;
@@ -220,12 +236,13 @@ function timeline(model: MapModel, p: Parts, now: number): P2[] {
     out[id] = [30, AGENT_Y0 + agentStep * t];
   });
 
-  // Items stack under their day in rows of four; a crowded column packs its rows tighter.
+  // Items stack under the column of the date they were written, in rows of four; a crowded
+  // column packs its rows tighter.
   const colOf = new Map<number, number>();
-  const colTotal = new Array<number>(DAYS).fill(0);
+  const colTotal = new Array<number>(COLUMNS).fill(0);
   for (const n of model.nodes) {
     if (n.kind !== "note" && n.kind !== "file") continue;
-    const c = dayIndex(n.updatedAt, now);
+    const c = columnOf(scale, n.createdAt);
     colOf.set(n.i, c);
     colTotal[c]!++;
   }
@@ -233,7 +250,7 @@ function timeline(model: MapModel, p: Parts, now: number): P2[] {
     const rows = Math.ceil(t / 4);
     return rows > 1 ? Math.min(11, (ITEM_Y_MAX - ITEM_Y0) / (rows - 1)) : 11;
   });
-  const colN = new Array<number>(DAYS).fill(0);
+  const colN = new Array<number>(COLUMNS).fill(0);
   for (const [id, c] of colOf) {
     const k = colN[c]!++;
     out[id] = [
@@ -242,13 +259,13 @@ function timeline(model: MapModel, p: Parts, now: number): P2[] {
     ];
   }
 
-  // A hub sits under the day of its topic's most recent item.
-  const hubN = new Array<number>(DAYS).fill(0);
+  // A hub sits under the column of its topic's most recently written item.
+  const hubN = new Array<number>(COLUMNS).fill(0);
   p.items.forEach((list, i) => {
     let latest = 0;
     for (const id of list)
-      latest = Math.max(latest, model.nodes[id]!.updatedAt);
-    const c = dayIndex(latest, now);
+      latest = Math.max(latest, model.nodes[id]!.createdAt);
+    const c = columnOf(scale, latest);
     const k = hubN[c]!++;
     out[p.hubs[i]!] = [
       X0 + c * CW + 10 + (k % 3) * 14,
@@ -267,17 +284,23 @@ function inBox(pos: P2[]): P2[] {
   );
 }
 
-/** Flat positions in the 1000 x 760 box, one per model node. */
+/**
+ * Flat positions in the 1000 x 760 box, one per model node. The Timeline takes its scale from
+ * the caller, who hands the same one to the scene; without one it works it out (`timelineScale`).
+ */
 export function layout(
   view: "rings" | "timeline",
   model: MapModel,
   now: number,
+  scale?: Scale,
 ): [number, number][] {
   switch (view) {
     case "rings":
       return ringsLayout(model).pos;
     case "timeline":
-      return inBox(timeline(model, parts(model), now));
+      return inBox(
+        timeline(model, parts(model), scale ?? timelineScale(model, now)),
+      );
   }
 }
 

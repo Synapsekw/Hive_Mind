@@ -237,6 +237,8 @@ function Facts({
         <dd>{topic}</dd>
         <dt>Owner</dt>
         <dd>{owner}</dd>
+        <dt>Written</dt>
+        <dd>{date(n.createdAt, now)}</dd>
         <dt>Changed</dt>
         <dd>{date(n.updatedAt, now)}</dd>
       </dl>
