@@ -190,10 +190,8 @@ export function FilterBar({
 
   const swatch = (hue: number): CSSProperties =>
     ({
-      // In Rings a theme with honey rings colours every group alike, as its hubs.
-      "--c": rings
-        ? `var(--rings-hub, var(--hue-${hue + 1}))`
-        : `var(--hue-${hue + 1})`,
+      // In Rings every group is drawn alike, as its hubs are.
+      "--c": rings ? "var(--hub)" : `var(--hue-${hue + 1})`,
     }) as CSSProperties;
 
   const hubName = heading === "Topics" ? "Topics" : "Groups";

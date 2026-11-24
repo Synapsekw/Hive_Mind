@@ -3,8 +3,8 @@
 // scene as batched Path2Ds; a frame is a few dozen fills and strokes. Colours
 // come from the theme's tokens (readPalette), never from literals; transparency is always
 // `globalAlpha`. Line widths and radii are divided by the scale, so they keep their screen size.
+import { css, parseColour } from "../theme/colour";
 import type { Cam } from "./camera";
-import { FRESH_ALPHA } from "./freshness";
 import { size } from "./nodeShape";
 import { orbitAlpha, type OrbitProjection } from "./orbit3d";
 import type { Scene } from "./scene";
@@ -59,10 +59,14 @@ export type Palette = {
   lineHi: string;
   edge: string;
   accent: string;
-  /** The hubs' colour in Rings when the theme asks for honey rings, else null (group hues). */
-  ringsHub: string | null;
-  /** How much stronger the theme wants the fresh dots' glow in Rings (1 = as drawn by default). */
-  ringsGlow: number;
+  /** Rings: a note's colour by freshness level, 0 (oldest) to 7. */
+  fresh: string[];
+  /** The colour of the halo under a fresh note. */
+  glow: string;
+  /** A hub's colour in Rings. */
+  hub: string;
+  /** How a halo meets what is under it: added light in dark themes, painted in the light one. */
+  haloBlend: GlobalCompositeOperation;
 };
 
 const TAU = Math.PI * 2;
@@ -76,8 +80,6 @@ const LOCKED_W = 1.6;
 const MIN_DOT = 2.5;
 /** Dots smaller than this on screen get no outline (it would swallow the fill). */
 const OUTLINE_MIN = 4;
-/** Above this many dots at freshness levels 6 and 7 the glow is skipped (shadow blur is slow). */
-const GLOW_MAX = 400;
 
 /** The theme's colours, read once per theme change (getComputedStyle is not free). */
 export function readPalette(el: Element): Palette {
@@ -93,8 +95,10 @@ export function readPalette(el: Element): Palette {
     lineHi: v("--line-hi"),
     edge: v("--edge"),
     accent: v("--acc"),
-    ringsHub: v("--rings-hub") || null,
-    ringsGlow: Number(v("--rings-glow")) || 1,
+    fresh: Array.from({ length: 8 }, (_, i) => v(`--fresh-${i}`)),
+    glow: v("--glow-colour"),
+    hub: v("--hub"),
+    haloBlend: v("--halo-blend") === "source-over" ? "source-over" : "lighter",
   };
 }
 
@@ -104,7 +108,7 @@ type SceneCache = {
   edges: Path2D;
   litEdges: WeakMap<boolean[], Path2D>;
   filtered: WeakMap<boolean[], boolean>;
-  /** At most GLOW_MAX dots at freshness levels 6 and 7: the fresh ones may glow. */
+  /** Rings draws halos under fresh dots. */
   glow: boolean;
   /** Per group: does any of its nodes stay lit (its name at full, else faint)? */
   groupOn: WeakMap<boolean[], boolean[]>;
@@ -133,13 +137,11 @@ function cacheFor(scene: Scene): SceneCache {
     edges.moveTo(e[i]!, e[i + 1]!);
     edges.lineTo(e[i + 2]!, e[i + 3]!);
   }
-  let fresh = 0;
-  for (const v of scene.fresh) if (v >= 6) fresh++;
   const out: SceneCache = {
     edges,
     litEdges: new WeakMap(),
     filtered: new WeakMap(),
-    glow: fresh <= GLOW_MAX,
+    glow: true,
     groupOn: new WeakMap(),
   };
   caches.set(scene, out);
@@ -314,9 +316,9 @@ const hueOf = (F: Frame, topic: number) =>
   F.pal.hue[F.model.topics[topic]?.hue ?? -1] ?? F.pal.fg2;
 const colourOf = (F: Frame, n: ModelNode) =>
   n.topic >= 0 ? hueOf(F, n.topic) : F.pal.fg2;
-/** A hub's colour: its group's hue, or in Rings the theme's honey when it asks for it. */
+/** A hub's colour: the theme's hub colour in Rings, its group's hue elsewhere. */
 const hubColour = (F: Frame, topic: number) =>
-  F.fresh && F.pal.ringsHub ? F.pal.ringsHub : hueOf(F, topic);
+  F.fresh ? F.pal.hub : hueOf(F, topic);
 const strong = (F: Frame, i: number) =>
   i === F.f.hot || i === F.f.focusRing || i === F.f.sel;
 const alphaOf = (F: Frame, i: number) =>
@@ -895,15 +897,18 @@ function fillGroup(
   const { ctx, pal, px, still, f, T } = F;
   if (kind === "hub") {
     const [outer, mid, inner] = paths as [Path2D, Path2D, Path2D];
-    if (!still) F.ambient = true;
+    if (!still && !F.fresh) F.ambient = true;
     ctx.fillStyle = colour;
-    ctx.shadowColor = colour;
-    ctx.shadowBlur =
-      glow ||
-      (still ? 14 : 19 + 5 * Math.sin(TAU * (f.time / 5000 + topic / T)));
-    ctx.globalAlpha = 0.35 * alpha;
-    ctx.fill(outer);
-    ctx.shadowBlur = 0;
+    if (!F.fresh) {
+      // Timeline and Orbit keep the soft breathing blur.
+      ctx.shadowColor = colour;
+      ctx.shadowBlur =
+        glow ||
+        (still ? 14 : 19 + 5 * Math.sin(TAU * (f.time / 5000 + topic / T)));
+      ctx.globalAlpha = 0.35 * alpha;
+      ctx.fill(outer);
+      ctx.shadowBlur = 0;
+    }
     ctx.globalAlpha = alpha;
     ctx.fill(outer);
     ctx.fillStyle = pal.bg;
@@ -931,7 +936,7 @@ function fillGroup(
     ctx.shadowBlur = 0;
     if (outline > 0) {
       ctx.globalAlpha = outline;
-      ctx.strokeStyle = pal.brand;
+      ctx.strokeStyle = colour;
       ctx.lineWidth = px;
       ctx.stroke(p);
     }
@@ -939,29 +944,82 @@ function fillGroup(
   ctx.shadowBlur = 0;
 }
 
-/**
- * The glow of a freshness level: 8 px at level 6, 14 px breathing at level 7, else none; times
- * the theme's own strength for Rings.
- */
-function freshGlow(F: Frame, level: number): number {
-  if (!F.c.glow || level < 6) return 0;
-  const k = F.pal.ringsGlow;
-  if (level === 6) return 8 * k;
-  if (F.still) return 14 * k;
-  F.ambient = true;
-  return (14 + 4 * Math.sin((TAU * F.f.time) / 4000)) * k;
-}
-
 /** Outline opacity for a readable dot drawn `d` px wide on screen at dim `a`. */
 const outlineOf = (d: number, a: number) =>
   d >= OUTLINE_MIN ? OUTLINE_ALPHA * a : 0;
+
+/** The halo's fade: [fraction of the radius, share of the peak opacity]. */
+export const HALO_STOPS: readonly (readonly [number, number])[] = [
+  [0, 1],
+  [0.4, 0.35],
+  [1, 0],
+];
+/** A halo is this many dot radii wide (radius, not diameter). */
+const HALO_REACH = 6.5;
+/** A hub's and the index's halo, in their own radii. */
+const HUB_REACH = 2.75;
+const ROOT_REACH = 3.8;
+const HALO_PX = 128;
+
+/**
+ * A halo's peak opacity by freshness level: none below 6, 0.3 at 6, 0.5 at 7, where it breathes
+ * between 0.42 and 0.58 every four seconds unless the map is still.
+ */
+export function haloAlpha(level: number, time: number, still: boolean): number {
+  if (level < 6) return 0;
+  if (level === 6) return 0.3;
+  if (still) return 0.5;
+  return 0.5 + 0.08 * Math.sin((TAU * time) / 4000);
+}
+
+const sprites = new Map<string, HTMLCanvasElement>();
+
+/** The halo of one colour, drawn once: a radial fade on a small canvas, stamped with drawImage. */
+function haloSprite(colour: string): HTMLCanvasElement {
+  const hit = sprites.get(colour);
+  if (hit) return hit;
+  const c = document.createElement("canvas");
+  c.width = c.height = HALO_PX;
+  const g = c.getContext("2d")!;
+  const base = parseColour(colour);
+  const r = HALO_PX / 2;
+  const fade = g.createRadialGradient(r, r, 0, r, r, r);
+  for (const [at, share] of HALO_STOPS)
+    fade.addColorStop(at, css({ ...base, a: share }));
+  g.fillStyle = fade;
+  g.fillRect(0, 0, HALO_PX, HALO_PX);
+  // A handful of colours per theme; a theme change leaves the old ones to be collected.
+  if (sprites.size > 16) sprites.clear();
+  sprites.set(colour, c);
+  return c;
+}
+
+/** Stamps a halo of radius `r` (in drawing units) at (x, y), at opacity `a`. */
+function stampHalo(
+  F: Frame,
+  colour: string,
+  x: number,
+  y: number,
+  r: number,
+  a: number,
+) {
+  if (a <= 0 || r <= 0) return;
+  const { ctx, pal } = F;
+  ctx.globalAlpha = a;
+  ctx.globalCompositeOperation = pal.haloBlend;
+  ctx.drawImage(haloSprite(colour), x - r, y - r, 2 * r, 2 * r);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+}
 
 type Batch = {
   topic: number; // hubs: their group; notes and files: -1 (brand colour)
   kind: Kind;
   alpha: number;
-  level: number; // freshness, for the glow; 0 for hubs and locked dots
+  level: number; // freshness, for the halo; 0 for hubs and locked dots
+  tone: number; // Rings: the ramp step the dots are filled with (7 for hot, focused, selected)
   outline: number;
+  halo: number[]; // Rings: the nodes of this batch that get a halo (level 6 or 7, hubs), else []
   paths: Path2D[];
 };
 type DotCache = {
@@ -999,23 +1057,47 @@ function freshBatches(F: Frame, fresh: Uint8Array): Batch[] {
       const kind = kindOf(n);
       const dim = alphaOf(F, i);
       if (kind === "hub") {
-        const g = own.get(dim);
-        if (g) g.n.push(i);
-        else {
-          const h = { topic, kind, alpha: dim, level: 0, outline: 0, n: [i] };
-          own.set(dim, h);
-          hubs.push(h);
+        let g = own.get(dim);
+        if (!g) {
+          g = {
+            topic,
+            kind,
+            alpha: dim,
+            level: 0,
+            tone: 0,
+            outline: 0,
+            halo: [],
+            n: [],
+          };
+          own.set(dim, g);
+          hubs.push(g);
         }
+        g.n.push(i);
+        g.halo.push(i);
         continue;
       }
       const locked = kind === "lnote" || kind === "lfile";
       const level = locked ? 0 : fresh[i]!;
-      const alpha = locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim;
+      // The ramp carries freshness now; opacity only dims for a filter or a selection.
+      const tone = strong(F, i) ? 7 : level;
       const outline = locked ? 0 : outlineOf(diam(F, n), dim);
-      const key = `${kind}|${level}|${alpha}|${outline}`;
-      const g = dots.get(key);
-      if (g) g.n.push(i);
-      else dots.set(key, { topic: -1, kind, alpha, level, outline, n: [i] });
+      const key = `${kind}|${level}|${tone}|${dim}|${outline}`;
+      let g = dots.get(key);
+      if (!g) {
+        g = {
+          topic: -1,
+          kind,
+          alpha: dim,
+          level,
+          tone,
+          outline,
+          halo: [],
+          n: [],
+        };
+        dots.set(key, g);
+      }
+      g.n.push(i);
+      if (level >= 6) g.halo.push(i);
     }
   });
   // Older dots first so fresher ones draw over them, hubs on top.
@@ -1039,7 +1121,16 @@ function topicBatches(F: Frame): Batch[] {
       const g = groups.get(key);
       if (g) g.n.push(i);
       else
-        groups.set(key, { topic, kind, alpha, level: 0, outline: 0, n: [i] });
+        groups.set(key, {
+          topic,
+          kind,
+          alpha,
+          level: 0,
+          tone: 0,
+          outline: 0,
+          halo: [],
+          n: [i],
+        });
     }
     // Plain dots first, hubs on top.
     for (const g of [...groups.values()].sort(
@@ -1083,6 +1174,27 @@ function drawDots(F: Frame) {
     };
     dotCaches.set(scene, dc);
   }
+  if (F.fresh && F.c.glow) {
+    // Every halo first, so none covers a neighbour's dot.
+    for (const b of dc.batches) {
+      if (!b.halo.length) continue;
+      const hub = b.kind === "hub";
+      const peak = hub ? 0.3 : haloAlpha(b.level, F.f.time, F.still);
+      if (!hub && b.level === 7 && !F.still) F.ambient = true;
+      for (const i of b.halo) {
+        const [x, y] = P(F, i);
+        const r = (diam(F, F.model.nodes[i]!) / 2) * depthOf(F, i) * F.px;
+        stampHalo(
+          F,
+          hub ? F.pal.hub : F.pal.glow,
+          x,
+          y,
+          r * (hub ? HUB_REACH : HALO_REACH),
+          peak * b.alpha,
+        );
+      }
+    }
+  }
   for (const b of dc.batches)
     if (b.topic >= 0)
       fillGroup(
@@ -1098,10 +1210,12 @@ function drawDots(F: Frame) {
       fillGroup(
         F,
         b.kind,
-        F.pal.brand,
+        b.kind === "lnote" || b.kind === "lfile"
+          ? F.pal.accent
+          : F.pal.fresh[b.tone]!,
         b.alpha,
         b.paths,
-        freshGlow(F, b.level),
+        0,
         -1,
         b.outline,
       );
@@ -1148,6 +1262,15 @@ function drawRoot(F: Frame, s0: number, glow: number) {
   const turn = still ? 0 : (TAU * (f.time % 30_000)) / 30_000;
   const p = new Path2D();
   hex(p, x, y, (diam(F, n) / 2) * scale * px, turn);
+  if (F.fresh)
+    stampHalo(
+      F,
+      pal.glow,
+      x,
+      y,
+      (diam(F, n) / 2) * scale * px * ROOT_REACH,
+      0.4 * alphaOf(F, scene.root),
+    );
   ctx.globalAlpha = alphaOf(F, scene.root);
   ctx.fillStyle = pal.fg;
   if (glow) {
@@ -1167,17 +1290,29 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
   const kind = kindOf(n);
   const paths = groupPaths(F, kind, [i], scale);
   if (F.fresh && kind !== "hub") {
-    // Rings: brand colour, brighter when fresher; hot, focused and selected at full.
+    // Rings: the ramp colour of its freshness; hot, focused and selected take the fresh end.
     const dim = alphaOf(F, i);
     const locked = kind === "lnote" || kind === "lfile";
     const level = locked ? 0 : (F.fresh[i] ?? 0);
+    if (F.c.glow && level >= 6) {
+      const [x, y] = P(F, i);
+      if (level === 7 && !F.still) F.ambient = true;
+      stampHalo(
+        F,
+        F.pal.glow,
+        x,
+        y,
+        (diam(F, n) / 2) * scale * depthOf(F, i) * F.px * HALO_REACH,
+        haloAlpha(level, F.f.time, F.still) * dim,
+      );
+    }
     fillGroup(
       F,
       kind,
-      F.pal.brand,
-      locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim,
+      locked ? F.pal.accent : F.pal.fresh[strong(F, i) ? 7 : level]!,
+      dim,
       paths,
-      glow || freshGlow(F, level),
+      glow,
       n.topic,
       locked ? 0 : outlineOf(diam(F, n) * scale, dim),
     );
