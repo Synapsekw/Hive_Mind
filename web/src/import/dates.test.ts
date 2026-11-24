@@ -223,6 +223,13 @@ describe("dateInPath", () => {
     );
     expect(dateInPath("2026-11-23.md", NOW)).toBe(noon(2026, 11, 23));
   });
+
+  it("stops at a date that names today, and does not go on to the folders", () => {
+    expect(dateInPath("2023-01-05/2026-11-24.md", NOW)).toBeNull();
+    expect(dateInPath("2026-11-24 2023-01-05.md", NOW)).toBeNull();
+    // A date further ahead is still skipped, and the next one tried.
+    expect(dateInPath("2023-01-05/2026-11-26.md", NOW)).toBe(noon(2023, 1, 5));
+  });
 });
 
 describe("noteDates", () => {
@@ -324,6 +331,108 @@ describe("noteDates", () => {
     );
     expect(written({}, "2024-05-06.md")).toBe(iso(noon(2024, 5, 6)));
     expect(written({}, "note.md")).toBe(iso(FILE));
+  });
+
+  describe("a date without a time that names today", () => {
+    const AT_9 = Date.UTC(2026, 10, 24, 9);
+    const MEETING = "2023-01-05 meeting.md";
+
+    it("ends the search before noon UTC: the file's time, not an older source", () => {
+      expect(noteDates({ created: "2026-11-24" }, MEETING, FILE, AT_9)).toEqual(
+        { written_at: iso(FILE), modified_at: iso(FILE) },
+      );
+      // A later field is not tried either.
+      expect(
+        noteDates(
+          { created: "2026-11-24", date: "2025-03-14" },
+          "note.md",
+          FILE,
+          AT_9,
+        ).written_at,
+      ).toBe(iso(FILE));
+      // The same for a date in the file name: the folder's date is not taken.
+      expect(
+        noteDates({}, "2023-01-05/2026-11-24.md", FILE, AT_9).written_at,
+      ).toBe(iso(FILE));
+      // And for a field that fell through to a name of today.
+      expect(
+        noteDates({ created: "soon" }, "2023-01-05/2026-11-24.md", FILE, AT_9)
+          .written_at,
+      ).toBe(iso(FILE));
+    });
+
+    it("gives no written date when the file's time is unusable", () => {
+      for (const time of [undefined, Number.NaN, 0, AT_9 + 1])
+        expect(
+          noteDates({ created: "2026-11-24" }, MEETING, time, AT_9),
+          String(time),
+        ).toEqual({ written_at: null, modified_at: null });
+    });
+
+    it("is that day itself from noon UTC on", () => {
+      expect(
+        noteDates({ created: "2026-11-24" }, MEETING, FILE, noon(2026, 11, 24)),
+      ).toEqual({
+        written_at: iso(noon(2026, 11, 24)),
+        modified_at: iso(noon(2026, 11, 24)),
+      });
+    });
+
+    it("ends the search for tomorrow's UTC day once it is that day somewhere", () => {
+      // 23:00 UTC on the 24th is already the 25th in UTC+14.
+      const at23 = Date.UTC(2026, 10, 24, 23);
+      expect(noteDates({ created: "2026-11-25" }, MEETING, FILE, at23)).toEqual(
+        { written_at: iso(FILE), modified_at: iso(FILE) },
+      );
+      expect(
+        noteDates({ created: "2026-11-25" }, MEETING, undefined, at23),
+      ).toEqual({ written_at: null, modified_at: null });
+      // From 10:00 UTC on, exactly; a millisecond before, it is a future date.
+      const at10 = Date.UTC(2026, 10, 24, 10);
+      expect(
+        noteDates({ created: "2026-11-25" }, MEETING, FILE, at10).written_at,
+      ).toBe(iso(FILE));
+      expect(
+        noteDates({ created: "2026-11-25" }, MEETING, FILE, at10 - 1)
+          .written_at,
+      ).toBe(iso(noon(2023, 1, 5)));
+    });
+
+    it("skips a date further ahead and tries the next source", () => {
+      expect(
+        noteDates({ created: "2026-11-26" }, MEETING, FILE, AT_9).written_at,
+      ).toBe(iso(noon(2023, 1, 5)));
+      expect(
+        noteDates(
+          { created: "2026-11-26", date: "2025-03-14" },
+          MEETING,
+          FILE,
+          AT_9,
+        ).written_at,
+      ).toBe(iso(noon(2025, 3, 14)));
+    });
+
+    it("leaves a date with a time, a number and a Date as they were", () => {
+      // In the future, however near: skipped, and the name's date is used.
+      for (const v of [
+        "2026-11-24T10:00:00Z",
+        "2026-11-24 12:00",
+        AT_9 + 1,
+        new Date(noon(2026, 11, 24)),
+      ])
+        expect(
+          noteDates({ created: v }, MEETING, FILE, AT_9).written_at,
+          String(v),
+        ).toBe(iso(noon(2023, 1, 5)));
+      expect(
+        noteDates({ created: "2026-11-24T08:00:00Z" }, MEETING, FILE, AT_9)
+          .written_at,
+      ).toBe("2026-11-24T08:00:00.000Z");
+      // A past date without a time is that day, whatever the hour.
+      expect(
+        noteDates({ created: "2026-11-23" }, MEETING, FILE, AT_9).written_at,
+      ).toBe(iso(noon(2026, 11, 23)));
+    });
   });
 
   it("gives the file's time as the last change", () => {

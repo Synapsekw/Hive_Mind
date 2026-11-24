@@ -441,22 +441,24 @@ export async function importBatchIn(
       continue;
     }
     const id = old.id as string;
+    // Only the dates that were sent are written. With changed content the last change goes in
+    // the same update, so the note holds the file's time and the same import again finds
+    // nothing to do; with none sent, the database stamps the last change itself.
+    const dates = {
+      ...(written ? { created_at: written } : {}),
+      ...(note.modified_at ? { updated_at: note.modified_at } : {}),
+    };
     const res = (await db
       .from("notes")
       .update(
         same
-          ? // Only the dates differ: only the dates that were sent are written.
-            {
-              ...(written ? { created_at: written } : {}),
-              ...(note.modified_at ? { updated_at: note.modified_at } : {}),
-            }
-          : // The database stamps the last change of changed content itself.
-            {
+          ? dates
+          : {
               title: note.title,
               body: note.body,
               frontmatter: note.frontmatter,
               folder_id: folderId,
-              ...(written ? { created_at: written } : {}),
+              ...dates,
             },
       )
       .eq("id", id)

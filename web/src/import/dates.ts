@@ -59,13 +59,24 @@ function bare(text: string): string {
   return s;
 }
 
-function parseText(text: string): number | null {
+/** A time, and whether it stands for a whole day: a date that was written with no time of day. */
+type Parsed = { t: number; wholeDay: boolean };
+
+const moment = (t: number | null): Parsed | null =>
+  t === null ? null : { t, wholeDay: false };
+
+function parseText(text: string): Parsed | null {
   if (text.length > MAX_TEXT) return null;
   const m = DATE_TEXT.exec(bare(text));
   if (!m) return null;
   const noon = day(Number(m[1]), Number(m[3]), Number(m[4]));
   if (noon === null) return null;
-  if (m[5] === undefined) return noon;
+  if (m[5] === undefined) return { t: noon, wholeDay: true };
+  return moment(timeOfDay(m, noon));
+}
+
+/** The moment of a matched date-time on the day whose noon is given, or null when it is none. */
+function timeOfDay(m: RegExpExecArray, noon: number): number | null {
   // A time of day is written only after the dashed form.
   if (m[2] !== "-") return null;
   const hour = Number(m[5]);
@@ -88,16 +99,16 @@ function parseText(text: string): number | null {
   );
 }
 
-function parseValue(v: unknown, depth: number): number | null {
+function parseValue(v: unknown, depth: number): Parsed | null {
   if (typeof v === "string") return parseText(v);
   if (typeof v === "number") {
     if (!Number.isFinite(v)) return null;
     const t = Math.round(Math.abs(v) < 1e11 ? v * 1000 : v);
-    return Math.abs(t) <= MAX_TIME ? t : null;
+    return moment(Math.abs(t) <= MAX_TIME ? t : null);
   }
   if (v instanceof Date) {
     const t = v.getTime();
-    return Number.isFinite(t) ? t : null;
+    return moment(Number.isFinite(t) ? t : null);
   }
   if (Array.isArray(v) && v.length > 0 && depth < MAX_LIST_DEPTH)
     return parseValue(v[0], depth + 1);
@@ -113,7 +124,7 @@ function parseValue(v: unknown, depth: number): number | null {
  */
 export function parseDate(v: unknown): number | null {
   try {
-    return parseValue(v, 0);
+    return parseValue(v, 0)?.t ?? null;
   } catch {
     return null;
   }
@@ -124,12 +135,24 @@ function usable(t: number | null, now: number): t is number {
   return t !== null && t >= EARLIEST && t <= now;
 }
 
+/** How far ahead of UTC a clock on Earth can be: 14 hours. */
+const FURTHEST_AHEAD = 14 * 3_600_000;
+const HALF_DAY = 12 * 3_600_000;
+
+/** What a source answers for a whole day that is today somewhere: the search ends there. */
+const TODAY = Symbol("today");
+type Found = number | typeof TODAY | null;
+
 /**
- * The first usable date in a path: in the file name first, then in the folders from the deepest
- * up. A match that is not a real date, or is before 1990 or after `now`, is skipped and the
- * next is tried. Null when there is none.
+ * True for a whole day, given by its noon UTC, that is still ahead of `now` at noon UTC but has
+ * already begun somewhere on Earth. Such a day is neither used (it would be in the future) nor
+ * skipped for an older source (it is not wrong): the note was written today.
  */
-export function dateInPath(path: string, now: number): number | null {
+function isToday(noon: number, now: number): boolean {
+  return noon > now && noon - HALF_DAY <= now + FURTHEST_AHEAD;
+}
+
+function findInPath(path: string, now: number): Found {
   if (typeof path !== "string" || path.length > MAX_PATH) return null;
   const parts = path.split("/");
   for (let i = parts.length - 1; i >= 0; i--) {
@@ -139,6 +162,7 @@ export function dateInPath(path: string, now: number): number | null {
     while ((m = each.exec(part))) {
       const t = day(Number(m[2]), Number(m[4]), Number(m[5]));
       if (usable(t, now)) return t;
+      if (t !== null && isToday(t, now)) return TODAY;
       // On from the digit after this match's first, so a date that overlaps it is still found.
       each.lastIndex = m.index + m[1]!.length + 1;
     }
@@ -146,8 +170,22 @@ export function dateInPath(path: string, now: number): number | null {
   return null;
 }
 
-/** The first usable date among a note's fields, by the names above in their order. */
-function dateInFields(frontmatter: unknown, now: number): number | null {
+/**
+ * The first usable date in a path: in the file name first, then in the folders from the deepest
+ * up. A match that is not a real date, or is before 1990 or after `now`, is skipped and the
+ * next is tried. A date that names today but is still ahead of `now` at 12:00 UTC ends the
+ * search: nothing after it is tried. Null when there is none.
+ */
+export function dateInPath(path: string, now: number): number | null {
+  const found = findInPath(path, now);
+  return found === TODAY ? null : found;
+}
+
+/**
+ * The first usable date among a note's fields, by the names above in their order; `TODAY` when
+ * a field before any usable one holds a date with no time of day that names today.
+ */
+function dateInFields(frontmatter: unknown, now: number): Found {
   if (
     typeof frontmatter !== "object" ||
     frontmatter === null ||
@@ -159,13 +197,15 @@ function dateInFields(frontmatter: unknown, now: number): number | null {
   for (const name of FIELDS)
     for (const key of keys) {
       if (key.length !== name.length || key.toLowerCase() !== name) continue;
-      let t: number | null = null;
+      let found: Parsed | null = null;
       try {
-        t = parseDate(fields[key]);
+        found = parseValue(fields[key], 0);
       } catch {
         // A field that cannot be read is no date.
       }
-      if (usable(t, now)) return t;
+      if (found === null) continue;
+      if (usable(found.t, now)) return found.t;
+      if (found.wholeDay && isToday(found.t, now)) return TODAY;
     }
   return null;
 }
@@ -174,6 +214,11 @@ function dateInFields(frontmatter: unknown, now: number): number | null {
  * The two dates of an imported note as ISO texts, or null where none is usable. Written: a date
  * field, then a date in the file name or its folders, then the file's last-modified time.
  * Last changed: the file's last-modified time, never before the written date.
+ *
+ * A date with no time of day is 12:00 UTC, which before noon UTC on that very day is still
+ * ahead. Such a date (one that is today somewhere on Earth) ends the search: the written date
+ * is then the file's last-modified time, or none, and never an older source's. So the day a
+ * note lands on does not depend on the hour it was imported at.
  */
 export function noteDates(
   frontmatter: unknown,
@@ -186,13 +231,14 @@ export function noteDates(
       typeof lastModified === "number" && usable(lastModified, now)
         ? Math.round(lastModified)
         : null;
-    let written: number | null = null;
+    let found: Found = null;
     try {
-      written = dateInFields(frontmatter, now);
+      found = dateInFields(frontmatter, now);
     } catch {
       // Fields that cannot be read hold no date; the other sources are still tried.
     }
-    written ??= dateInPath(path, now) ?? file;
+    found ??= findInPath(path, now);
+    const written = found === TODAY ? file : (found ?? file);
     const modified =
       file !== null && written !== null && file < written ? written : file;
     return {

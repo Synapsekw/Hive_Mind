@@ -37,6 +37,11 @@ agent writes, both are the real moment, as today. For an imported note:
 - A candidate is usable only when it is a real calendar date from 1990-01-01 up to now. An
   unusable candidate is skipped and the next source is tried. With no usable source the note
   keeps the moment of import, as today.
+- A date without a time of day that names today (its 12:00 UTC is still ahead, but its 00:00 UTC
+  is at most 14 hours ahead, so the day has begun somewhere on Earth) ends the search: the
+  written date is then the file's last-modified time if that is usable, else none, and no later
+  source is tried, so the day a note lands on does not depend on the hour of the import. A date
+  without a time of day further ahead than that is skipped like any other future date.
 
 ### Import
 
@@ -44,18 +49,30 @@ agent writes, both are the real moment, as today. For an imported note:
   again (shape and range) and drops what is unusable.
 - A new note is stored with them. A note that is already there and differs only in its dates
   has only its dates corrected and counts as "Updated"; its version does not change.
-- A note whose text changed is updated as today; the database stamps its last change as now.
+- A note whose text changed is updated in one update that carries the file's last-modified
+  time, and the database keeps it as the note's last change (below). So importing the same
+  file again answers "unchanged". Without a usable time the last change is now.
 - So importing the same folder into the same workspace again fixes notes imported before this
   change. Nothing is duplicated; links stay.
 
 ### Who may set dates (database)
 
 - A person (a signed-in session with no agent and no app pass) may set `created_at` and
-  `updated_at` of their own notes. The database cuts a future value back to now and never lets
-  `updated_at` be before `created_at`.
+  `updated_at` of their own notes. The database cuts a future value back to now, raises a value
+  before 1990-01-01 00:00 UTC to it, and never lets `updated_at` be before `created_at`.
 - An agent or a connected app: `created_at` and `updated_at` are the real moment on insert,
   whatever was sent, and `created_at` cannot be changed afterwards (the old value is kept).
-- A content change stamps `updated_at` as now for everyone, as today.
+- A content change stamps `updated_at` as now, as today, with one exception: a person may send
+  the date of the change with it. When a person's update changes content and sends an
+  `updated_at` other than the stored one, that value is kept, held between the later of
+  `created_at` and 1990-01-01 and now. With no `updated_at`, the stored one or null it is now.
+  For an agent, an app, a self-hosted claim and the server it is always now. The version goes
+  up either way.
+- A file's `created_at` is set by nobody through the API: for an agent, an app and a signed-in
+  person it is the real moment on insert and keeps its old value on update (a trigger of its
+  own on `files`). The map shows it, so it must not be writable.
+- The server with no person behind the call (the service key) is not checked, for notes or
+  files.
 - Today nothing checks these columns at all; this closes that.
 
 ### The map
@@ -84,7 +101,7 @@ agent writes, both are the real moment, as today. For an imported note:
 ## Architecture
 
 - Migration `note_dates`: replaces `notes_before_write` (date rules added, nothing else changed)
-  and `map_graph` (one more field).
+  and `map_graph` (one more field), and adds the trigger `files_keep_date` on files.
 - `web/src/import/dates.ts`: pure; `noteDates(frontmatter, path, lastModified, now)`.
 - `web/src/import/plan.ts`, `web/src/vault/Import.tsx`, `web/src/app/vault/import.ts`: the two
   dates travel with a note and are stored.
@@ -118,7 +135,8 @@ depend only on two names: the note fields `written_at` / `modified_at` in an imp
 - Database (node:test): a person's insert keeps past dates, a future one is cut to now,
   `updated_at` before `created_at` is raised to it; an agent's and an app's dates are ignored on
   insert and `created_at` is kept on update; a person's date-only update keeps the version; a
-  content change stamps now; `map_graph` carries `created_at` for a note and a file.
+  content change stamps now, or for a person the past date they send; nobody sets a file's date
+  through the API; `map_graph` carries `created_at` for a note and a file.
 - Unit (Vitest): date sources and their order, every format, invalid and future values, the
   range; the server's check and the date-only update; the scale for each unit and its edges,
   labels, columns; grouping by created date; the fallback without `created_at`.

@@ -20,7 +20,8 @@
 --       * A person: a signed-in session with none of the above. They may set
 --         both dates of their own notes (row-level security still decides
 --         whose notes they write). A value in the future is cut back to now,
---         and updated_at is never before created_at: it is raised to it. On
+--         a value before 1990-01-01 00:00 UTC is raised to it, and
+--         updated_at is never before created_at: it is raised to it. On
 --         update this is looked at only when the update changes one of the
 --         two dates, so an update that sends no date (sharing, a move)
 --         changes no date. A date set to null keeps its old value.
@@ -31,9 +32,24 @@
 --         security refuses a note written or changed by a caller with no
 --         member. The tests (old rows put in directly) and server scripts
 --         rely on it.
---     A change of title, body or frontmatter stamps updated_at as now for
---     every caller, as before. A person's update of the dates alone changes
---     no content, so it makes no new version and leaves written_by_agent.
+--     A change of title, body or frontmatter stamps updated_at as now, as
+--     before, with one exception: a person may send the date of the change
+--     with it. When their update changes content and sends an updated_at
+--     other than the stored one, that value is kept, held between the later
+--     of created_at and 1990-01-01 and now. A folder import needs this: it
+--     stores an edited file's text and its last-modified time in one update,
+--     so importing again finds the note unchanged. With no updated_at, the
+--     stored one or null, the change is stamped now. For an agent, an app, a
+--     self-hosted claim and the server it is always now. The version goes up
+--     and written_by_agent is set either way. A person's update of the dates
+--     alone changes no content, so it makes no new version and leaves
+--     written_by_agent.
+--   - public.files_keep_date and its trigger on public.files: new. A file
+--     has one date, created_at, and the map now shows it, so nobody sets it
+--     through the API. For an agent, an app's pass, a self-hosted claim and
+--     a signed-in person it is now on insert, whatever was sent, and keeps
+--     its old value on update. The server with no person behind the call is
+--     not checked, as for notes. files_before_insert is unchanged.
 --   - public.map_graph: replaced. It is the definition of
 --     20261123150712_connected_apps.sql with one more field on every item:
 --     'created_at' (a note's created_at; a file's created_at, which is also
@@ -43,7 +59,8 @@
 --     their order are unchanged.
 --
 --   What it leaves alone: no table, column, index, policy or grant changes
---   (create or replace keeps each function's owner and grants), no stored row
+--   (create or replace keeps each function's owner and grants; the one new
+--   function is a trigger function, which nobody can call), no stored row
 --   is rewritten, and the audit log still records the real time of every
 --   entry.
 
@@ -60,6 +77,8 @@ declare
                   or public.jwt_is_self_hosted();
   -- A signed-in person: may set the two dates, within the rules below.
   person boolean;
+  -- The floor: no date a person sets is before this.
+  earliest constant timestamptz := timestamptz '1990-01-01 00:00:00+00';
 begin
   person := not limited and (select auth.uid()) is not null;
 
@@ -81,7 +100,9 @@ begin
       new.created_at := now();
       new.updated_at := now();
     elsif person then
-      new.created_at := least(coalesce(new.created_at, now()), now());
+      new.created_at := greatest(
+        least(coalesce(new.created_at, now()), now()), earliest);
+      -- created_at is at or after the floor by now, so updated_at is too.
       new.updated_at := least(
         greatest(coalesce(new.updated_at, now()), new.created_at), now());
     end if;
@@ -105,11 +126,26 @@ begin
   if limited then
     new.created_at := old.created_at;
   elsif person and new.created_at is distinct from old.created_at then
-    new.created_at := least(coalesce(new.created_at, old.created_at), now());
+    -- Null keeps the old value, which is not touched; a value that was sent
+    -- is held between the floor and now.
+    -- (greatest and least skip a null, so null is handled first.)
+    if new.created_at is null then
+      new.created_at := old.created_at;
+    else
+      new.created_at := greatest(least(new.created_at, now()), earliest);
+    end if;
   end if;
   if new.title <> old.title or new.body <> old.body or new.frontmatter <> old.frontmatter then
     new.version := old.version + 1;
-    new.updated_at := now();
+    if person and new.updated_at is distinct from old.updated_at then
+      -- A person sent the date of this change (an import sends the file's
+      -- last-modified time with the new text). Null: now.
+      new.updated_at := least(
+        greatest(coalesce(new.updated_at, now()), new.created_at, earliest),
+        now());
+    else
+      new.updated_at := now();
+    end if;
     new.written_by_agent := agent;
   else
     new.version := old.version;
@@ -117,13 +153,46 @@ begin
       new.updated_at := old.updated_at;
     elsif person and (new.updated_at is distinct from old.updated_at
                       or new.created_at is distinct from old.created_at) then
-      new.updated_at := least(
-        greatest(coalesce(new.updated_at, old.updated_at), new.created_at), now());
+      -- Null keeps the old value; a value that was sent is not before the
+      -- floor.
+      if new.updated_at is null then
+        new.updated_at := old.updated_at;
+      elsif new.updated_at is distinct from old.updated_at then
+        new.updated_at := greatest(new.updated_at, earliest);
+      end if;
+      new.updated_at := least(greatest(new.updated_at, new.created_at), now());
     end if;
   end if;
   return new;
 end
 $$;
+
+-- A file has one date, created_at, and the map shows it. Nobody sets it
+-- through the API: for an agent, an app, a self-hosted claim and a signed-in
+-- person it is the real moment on insert and keeps its old value on update.
+-- The server with no person behind the call is left alone, as for notes.
+-- A trigger of its own beside files_before_insert, which is unchanged. By
+-- name it fires after that one and before zz_hive_frozen; it reads and sets
+-- created_at only, so neither is affected.
+create function public.files_keep_date() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if public.jwt_agent_id() is not null
+     or public.jwt_oauth_client() is not null
+     or public.jwt_is_self_hosted()
+     or (select auth.uid()) is not null then
+    if tg_op = 'INSERT' then
+      new.created_at := now();
+    else
+      new.created_at := old.created_at;
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+create trigger files_keep_date before insert or update on public.files
+  for each row execute function public.files_keep_date();
 
 -- ---------------------------------------------------------------- map_graph
 

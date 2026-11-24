@@ -1378,18 +1378,69 @@ describe("importBatchIn", () => {
       expect(writes(t)).toEqual([]);
     });
 
-    it("sends the written date with changed content, and never the last change", async () => {
+    it("sends both dates with changed content, in the one update", async () => {
+      const LATER = "2025-07-02T10:00:00.000Z";
       const t = fake({
         notes: [stored("a.md"), stored("b.md", { id: NEW_WS })],
       });
       const r = await importBatchIn(t.db, W1, [
-        dated("a.md", { body: "new text\n" }),
-        note("b.md", { body: "new text\n", modified_at: MODIFIED }),
+        dated("a.md", { body: "new text\n", modified_at: LATER }),
+        // No written date: only the last change travels.
+        note("b.md", {
+          body: "new text\n",
+          modified_at: "2025-07-02T12:00:00+02:00",
+        }),
       ]);
       expect(outcomes(r)).toEqual([
         ["a.md", "updated"],
         ["b.md", "updated"],
       ]);
+      // One update for each note, and no other write.
+      expect(shape(t)).toEqual([
+        "workspaces.select",
+        "members.select",
+        "notes.select",
+        "notes.update",
+        "notes.update",
+      ]);
+      expect(writes(t).map((c) => op(c, "update"))).toEqual([
+        [
+          {
+            title: "a",
+            body: "new text\n",
+            frontmatter: {},
+            folder_id: null,
+            created_at: WRITTEN,
+            updated_at: LATER,
+          },
+        ],
+        [
+          {
+            title: "b",
+            body: "new text\n",
+            frontmatter: {},
+            folder_id: null,
+            // The text the server made, not the one that was sent.
+            updated_at: LATER,
+          },
+        ],
+      ]);
+    });
+
+    it("sends no last change with changed content when the note carries none", async () => {
+      const t = fake({
+        notes: [stored("a.md"), stored("b.md", { id: NEW_WS })],
+      });
+      const r = await importBatchIn(t.db, W1, [
+        note("a.md", { body: "new text\n", written_at: WRITTEN }),
+        // One that cannot be used is as none.
+        note("b.md", { body: "new text\n", modified_at: "2999-01-01" }),
+      ]);
+      expect(outcomes(r)).toEqual([
+        ["a.md", "updated"],
+        ["b.md", "updated"],
+      ]);
+      // The database stamps the last change itself.
       expect(writes(t).map((c) => op(c, "update"))).toEqual([
         [
           {
@@ -1402,6 +1453,45 @@ describe("importBatchIn", () => {
         ],
         [{ title: "b", body: "new text\n", frontmatter: {}, folder_id: null }],
       ]);
+    });
+
+    it("answers unchanged when an edited file is imported a second time", async () => {
+      const t = fake({ notes: [stored("a.md")] });
+      const edited = [
+        dated("a.md", {
+          body: "new text\n",
+          modified_at: "2025-07-02T10:00:00.000Z",
+        }),
+      ];
+      expect(outcomes(await importBatchIn(t.db, W1, edited))).toEqual([
+        ["a.md", "updated"],
+      ]);
+      t.calls.length = 0;
+      expect(outcomes(await importBatchIn(t.db, W1, edited))).toEqual([
+        ["a.md", "unchanged"],
+      ]);
+      expect(writes(t)).toEqual([]);
+    });
+
+    it("logs and returns no path, title or text when the update of changed content is refused", async () => {
+      const log = quiet();
+      const t = fake({
+        notes: [stored("a.md")],
+        fail: (c) =>
+          kind(c) === "update"
+            ? no("this hive is being deleted", "P0001")
+            : undefined,
+      });
+      const r = await importBatchIn(t.db, W1, [
+        dated("a.md", { title: "A secret title", body: "secret text\n" }),
+      ]);
+      expect(r).toEqual({
+        ok: true,
+        outcomes: [{ path: "a.md", outcome: "failed" }],
+      });
+      expect(log).toHaveBeenCalledTimes(1);
+      for (const line of log.mock.calls)
+        expect(line.join(" ")).not.toMatch(/a\.md|secret|text of/);
     });
 
     it("says failed for a date correction the database refuses or that changes no row", async () => {
