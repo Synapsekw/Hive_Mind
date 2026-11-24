@@ -29,7 +29,8 @@ an existing file.
 ## UI
 
 - **D07** [[2026-11-20-decision-07-brain-dashboard-is-the-map]] — one dot per note, six views; other layouts rejected
-- **D13** [[2026-11-22-decision-13-keystone-glass-look-with-themes]] — Keystone glass look, 17 themes, light mode, theme-driven dot colours
+- **D13** [[2026-11-22-decision-13-keystone-glass-look-with-themes]] — Keystone glass look, 17 themes, light mode, theme-driven dot colours (superseded by D16)
+- **D16** [[2026-11-24-decision-16-eight-hand-tuned-themes-replace-keystone-glass]] — eight hand-tuned themes on flat surfaces replace the generated set; no mode, reach or dot-colour switches
 
 ## Workflow
 
