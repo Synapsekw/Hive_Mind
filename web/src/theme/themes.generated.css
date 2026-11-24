@@ -6,7 +6,6 @@
   --surface: #0c0c0d;
   --glass: #0c0c0d;
   --glass2: #0c0c0d;
-  --panel-solid: #0c0c0d;
   --glow: none;
   --card-tint: radial-gradient(circle at 50% 52%, rgba(255, 182, 64, 0.070) 0%, transparent 58%);
   --fg: #f3efe8;
@@ -17,9 +16,8 @@
   --line-hi: #565555;
   --fill: rgba(243, 239, 232, 0.060);
   --fill-on: #1e1a12;
-  --sel: rgba(245, 181, 68, 0.140);
+  --sel: rgba(245, 181, 68, 0.100);
   --brand: #f5b544;
-  --brand-2: #f5b544;
   --acc: #f5b544;
   --grad: #f5b544;
   --on-brand: #0e0e10;
@@ -55,7 +53,6 @@
   --surface: #0c0c0d;
   --glass: #0c0c0d;
   --glass2: #0c0c0d;
-  --panel-solid: #0c0c0d;
   --glow: none;
   --card-tint: radial-gradient(circle at 50% 52%, rgba(255, 182, 64, 0.070) 0%, transparent 58%);
   --fg: #f3efe8;
@@ -66,9 +63,8 @@
   --line-hi: #565555;
   --fill: rgba(243, 239, 232, 0.060);
   --fill-on: #1e1a12;
-  --sel: rgba(245, 181, 68, 0.140);
+  --sel: rgba(245, 181, 68, 0.100);
   --brand: #f5b544;
-  --brand-2: #f5b544;
   --acc: #f5b544;
   --grad: #f5b544;
   --on-brand: #0e0e10;
@@ -104,7 +100,6 @@
   --surface: #050b13;
   --glass: #050b13;
   --glass2: #050b13;
-  --panel-solid: #050b13;
   --glow: none;
   --card-tint: radial-gradient(circle at 50% 52%, rgba(53, 230, 216, 0.070) 0%, transparent 58%);
   --fg: #e3f1f6;
@@ -115,9 +110,8 @@
   --line-hi: #475662;
   --fill: rgba(227, 241, 246, 0.060);
   --fill-on: #0b2230;
-  --sel: rgba(63, 224, 208, 0.140);
+  --sel: rgba(63, 224, 208, 0.100);
   --brand: #3fe0d0;
-  --brand-2: #3fe0d0;
   --acc: #3fe0d0;
   --grad: #3fe0d0;
   --on-brand: #0e0e10;
@@ -153,7 +147,6 @@
   --surface: #0f0808;
   --glass: #0f0808;
   --glass2: #0f0808;
-  --panel-solid: #0f0808;
   --glow: none;
   --card-tint: radial-gradient(circle at 50% 52%, rgba(255, 90, 42, 0.080) 0%, transparent 58%);
   --fg: #f6ece8;
@@ -164,9 +157,8 @@
   --line-hi: #5d4e4b;
   --fill: rgba(246, 236, 232, 0.060);
   --fill-on: #2a1410;
-  --sel: rgba(255, 106, 61, 0.140);
+  --sel: rgba(255, 106, 61, 0.100);
   --brand: #ff6a3d;
-  --brand-2: #ff6a3d;
   --acc: #ff6a3d;
   --grad: #ff6a3d;
   --on-brand: #0e0e10;
@@ -202,7 +194,6 @@
   --surface: #070f0d;
   --glass: #070f0d;
   --glass2: #070f0d;
-  --panel-solid: #070f0d;
   --glow: none;
   --card-tint: radial-gradient(circle at 50% 52%, rgba(86, 240, 166, 0.060) 0%, transparent 58%);
   --fg: #e8f4ef;
@@ -213,9 +204,8 @@
   --line-hi: #4b5a5b;
   --fill: rgba(232, 244, 239, 0.060);
   --fill-on: #0f2a22;
-  --sel: rgba(94, 242, 168, 0.140);
+  --sel: rgba(94, 242, 168, 0.100);
   --brand: #5ef2a8;
-  --brand-2: #5ef2a8;
   --acc: #5ef2a8;
   --grad: #5ef2a8;
   --on-brand: #0e0e10;
@@ -251,7 +241,6 @@
   --surface: #0d0f12;
   --glass: #0d0f12;
   --glass2: #0d0f12;
-  --panel-solid: #0d0f12;
   --glow: none;
   --card-tint: radial-gradient(circle at 50% 52%, rgba(207, 224, 255, 0.050) 0%, transparent 58%);
   --fg: #eef0f4;
@@ -262,9 +251,8 @@
   --line-hi: #56595e;
   --fill: rgba(238, 240, 244, 0.060);
   --fill-on: #1b1e24;
-  --sel: rgba(223, 230, 245, 0.140);
+  --sel: rgba(223, 230, 245, 0.100);
   --brand: #dfe6f5;
-  --brand-2: #dfe6f5;
   --acc: #dfe6f5;
   --grad: #dfe6f5;
   --on-brand: #0e0e10;
@@ -300,7 +288,6 @@
   --surface: #0c0815;
   --glass: #0c0815;
   --glass2: #0c0815;
-  --panel-solid: #0c0815;
   --glow: none;
   --card-tint: radial-gradient(circle at 50% 52%, rgba(208, 92, 255, 0.080) 0%, transparent 58%);
   --fg: #f1ebfb;
@@ -311,9 +298,8 @@
   --line-hi: #584f6a;
   --fill: rgba(241, 235, 251, 0.060);
   --fill-on: #22143a;
-  --sel: rgba(199, 125, 255, 0.140);
+  --sel: rgba(199, 125, 255, 0.100);
   --brand: #c77dff;
-  --brand-2: #c77dff;
   --acc: #c77dff;
   --grad: #c77dff;
   --on-brand: #0e0e10;
@@ -349,7 +335,6 @@
   --surface: #0a1830;
   --glass: #0a1830;
   --glass2: #0a1830;
-  --panel-solid: #0a1830;
   --glow: none;
   --card-tint: linear-gradient(rgba(127, 180, 255, 0.070) 1px, transparent 1px) 0 0 / 28px 28px, linear-gradient(90deg, rgba(127, 180, 255, 0.070) 1px, transparent 1px) 0 0 / 28px 28px, radial-gradient(circle at 50% 52%, rgba(143, 192, 255, 0.080) 0%, transparent 58%);
   --fg: #e6efff;
@@ -360,9 +345,8 @@
   --line-hi: #4f6283;
   --fill: rgba(230, 239, 255, 0.060);
   --fill-on: #132a52;
-  --sel: rgba(127, 180, 255, 0.140);
+  --sel: rgba(127, 180, 255, 0.100);
   --brand: #7fb4ff;
-  --brand-2: #7fb4ff;
   --acc: #7fb4ff;
   --grad: #7fb4ff;
   --on-brand: #0e0e10;
@@ -398,7 +382,6 @@
   --surface: #f8f6f1;
   --glass: #f8f6f1;
   --glass2: #f8f6f1;
-  --panel-solid: #f8f6f1;
   --glow: none;
   --card-tint: radial-gradient(circle at 50% 52%, rgba(245, 165, 36, 0.100) 0%, transparent 58%);
   --fg: #1d1a16;
@@ -409,9 +392,8 @@
   --line-hi: #aaa59a;
   --fill: rgba(29, 26, 22, 0.060);
   --fill-on: #e6e0d3;
-  --sel: rgba(184, 84, 11, 0.140);
+  --sel: rgba(184, 84, 11, 0.100);
   --brand: #b8540b;
-  --brand-2: #b8540b;
   --acc: #b8540b;
   --grad: #b8540b;
   --on-brand: #ffffff;

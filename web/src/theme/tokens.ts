@@ -95,7 +95,6 @@ export function tokens(id: string): Tokens {
     "--surface": t.card,
     "--glass": t.card,
     "--glass2": t.card,
-    "--panel-solid": t.card,
     // Kept so the cards' `background: var(--glow), var(--glass)` stays valid; nothing glows there.
     "--glow": "none",
     "--card-tint": g
@@ -109,9 +108,8 @@ export function tokens(id: string): Tokens {
     "--line-hi": css(quantize(mix(fromHex(t.line), fromHex(t.text), 0.25))),
     "--fill": alpha(t.text, 0.06),
     "--fill-on": t.activeBg,
-    "--sel": alpha(t.accent, 0.14),
+    "--sel": alpha(t.accent, 0.1),
     "--brand": t.accent,
-    "--brand-2": t.accent,
     "--acc": t.accent,
     // One colour now; the name stays so the rules that fill with it are not edited.
     "--grad": t.accent,

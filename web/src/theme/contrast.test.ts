@@ -22,6 +22,17 @@ describe.each(THEMES.map((t) => t.id))("contrast in %s", (id) => {
       for (const on of [bg, card])
         expect(ratio(fg, on), fg).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--fg2", card)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio("--fg2", bg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("the accent, used as link text, reaches 4.5:1 on the card", () => {
+    expect(ratio("--acc", card)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("text and muted text reach 4.5:1 on the selection fill", () => {
+    const sel = over(parseColour(t["--sel"]!), card);
+    for (const fg of ["--fg", "--muted"])
+      expect(ratio(fg, sel), fg).toBeGreaterThanOrEqual(4.5);
   });
 
   it("muted text reaches 4.5:1 on the active fill", () => {
