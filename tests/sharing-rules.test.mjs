@@ -5466,6 +5466,7 @@ test("every function refuses an app pass except connector_login", async () => {
     "jwt_is_self_hosted", // the caller's own trust_tier claim
     "jwt_oauth_client", // the caller's own client_id and aud claims
     "note_topic", // cuts a path given as the argument
+    "file_kind", // a name and a type given as arguments
   ];
   // Signs in by the token in its argument, for anyone, as it does for anon:
   // the caller's identity plays no part, so a pass gains nothing from it.
@@ -5590,12 +5591,15 @@ test("every function refuses an app pass except connector_login", async () => {
   // Made for an agent: a person is refused for another reason, so the proof
   // for an app pass is its own check below.
   const forAgents = ["session_end"];
+  // Made for a person: an app pass is refused before any file is looked up.
+  const forPeople = ["file_set_home"];
 
   const known = [
     ...pure,
     ...byToken,
     ...forApps,
     ...forAgents,
+    ...forPeople,
     ...Object.keys(calls),
   ];
   // A function added later must be put in one of the groups above, and the
@@ -5655,6 +5659,12 @@ test("every function refuses an app pass except connector_login", async () => {
       `${name} answered an app pass`,
     );
   }
+
+  const homed = await trial(
+    pass,
+    `select public.file_set_home(gen_random_uuid(), null)`,
+  );
+  assert.match(homed.error?.message ?? "(no error)", APP_REFUSED);
 
   const ended = await trial(pass, `select public.session_end('t', 's')`);
   assert.match(
@@ -6924,6 +6934,7 @@ const HD_TABLES = {
 const HD_OPEN = [
   "audit_log",
   "deleted_hives",
+  "file_references", // rows go with their file or note; the insert trigger refuses a closing hive
   "hives",
   "notifications",
   "sessions", // written only by the session functions, none of which writes a note into a closing hive
