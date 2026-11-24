@@ -41,6 +41,7 @@ const TOOLS = [
   "hive_write",
   "hive_append",
   "hive_propose_link",
+  "hive_end_session",
 ];
 
 const b64urlToBytes = (s) =>
@@ -310,7 +311,7 @@ test("4. initialize answers as the hive-mind server, in JSON and without a sessi
   assert.equal(db.rest().length, 0);
 });
 
-test("5. tools/list answers the six shared tools, on a fresh server per request", async () => {
+test("5. tools/list answers the seven shared tools, on a fresh server per request", async () => {
   const db = stub();
   // No initialize first: every request stands alone.
   const res = await handle(
