@@ -100,6 +100,8 @@ const AMBIENT_MS = 83;
 const AMBIENT_PULSE_MS = 33;
 /** The largest hit radius any shape can have, in screen px (the hot index, x1.7). */
 const MAX_REACH = 24;
+/** The smallest hit radius in the flat views, in screen px. */
+const MIN_REACH = 6;
 const THEME_ATTRS = ["data-theme", "data-mode", "data-dots", "data-reach"];
 const GLIDE_MS = 900;
 /** A move within one view (the timeline's columns as the day turns): no wave. */
@@ -417,6 +419,7 @@ export function MapCanvas(props: Props): JSX.Element {
         grow: growing,
         layerAlpha,
         orbit: proj,
+        labelsOn: p.labelsOn,
       },
       pal.current,
     );
@@ -587,7 +590,7 @@ export function MapCanvas(props: Props): JSX.Element {
   }, [props.cameraRef, api, orbitZoomBy, request, cam, size]);
 
   // Zoom-driven labels, worked out once a pan or zoom settles (never per frame).
-  const { model, pos, lit, view, labelsOn, labels } = props;
+  const { model, scene, pos, lit, view, labelsOn, labels } = props;
   useEffect(() => {
     const { sw, sh, w, h } = size.current;
     const k = cam.current.k;
@@ -631,7 +634,15 @@ export function MapCanvas(props: Props): JSX.Element {
     };
     const hit = (a: Box, b: Box) =>
       a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
-    const placed = [...labels].map(box);
+    // The group names (Rings) are placed first too, aligned as the renderer draws them.
+    const groups = scene.groupLabels.map((g): Box => {
+      const [sx, sy] = toScreen(c, g.x, g.y, w, h);
+      const wd = g.text.length * 7 + 4;
+      const x0 =
+        g.align === "left" ? sx : g.align === "right" ? sx - wd : sx - wd / 2;
+      return [x0, sy - 10, x0 + wd, sy + 10];
+    });
+    const placed = [...groups, ...[...labels].map(box)];
     const keep = new Set<number>();
     for (const i of zoomed) {
       if (labels.has(i)) continue;
@@ -645,6 +656,7 @@ export function MapCanvas(props: Props): JSX.Element {
   }, [
     camera.settled,
     model,
+    scene,
     pos,
     lit,
     view,
@@ -691,12 +703,14 @@ export function MapCanvas(props: Props): JSX.Element {
     if (sc <= 0) return null;
     const bx = (clientX - r.left - c.tx) / sc;
     const by = (clientY - r.top - c.ty) / sc;
-    // Within 8 px of the dot, or within its drawn radius for the larger shapes.
+    // Within 6 px of the dot, or within its drawn radius for the larger shapes. Rings packs
+    // a big hive tighter (dots 13.5 * scale apart), so the reach follows the drawn size.
     const reach = (i: number) => {
       const n = p.model.nodes[i];
-      if (!n) return 8 / sc;
-      const r = (dotDiameter(n) / 2) * (i === p.hot ? 1.7 : 1);
-      return Math.max(8, r) / sc;
+      if (!n) return MIN_REACH / sc;
+      const r =
+        (dotDiameter(n, p.scene.dotScale) / 2) * (i === p.hot ? 1.7 : 1);
+      return Math.max(MIN_REACH, r) / sc;
     };
     return hitTest(grid, bx, by, MAX_REACH / sc, (i) => {
       if (!eligible(i)) return false;

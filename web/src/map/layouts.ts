@@ -42,8 +42,7 @@ function parts(model: MapModel): Parts {
     else if (n.kind !== "root") items[n.topic]!.push(n.i);
   }
   const total = items.reduce((s, l) => s + l.length, 0);
-  // The 0.28 rad left at twelve o'clock keeps hubs clear of the ring labels there.
-  const usable = TAU - 0.28 - T * GAP;
+  const usable = TAU - T * GAP;
   const min = T > 0 ? Math.min(MIN_SECTOR, usable / T) : 0;
   const spare = usable - T * min;
   const widths = spread(
@@ -52,7 +51,8 @@ function parts(model: MapModel): Parts {
     ),
     T > 0 ? Math.min(MIN_HUB_SECTOR, usable / T) : 0,
   );
-  let a = -TAU / 4 + 0.14;
+  // The first sector starts at twelve o'clock; sectors go clockwise.
+  let a = -TAU / 4 + GAP / 2;
   const sec = widths.map((w) => {
     const s = { a0: a, w, mid: a + w / 2 };
     a += w + GAP;
@@ -84,41 +84,119 @@ function spread(w: number[], floor: number): number[] {
   }
 }
 
-function rings(model: MapModel, p: Parts): P2[] {
-  const out = new Array<P2>(model.nodes.length);
-  out[0] = [CX, CY];
-  const A = p.agents.length;
-  p.agents.forEach((id, t) => {
-    out[id] = polar(300, -TAU / 4 + ((t + 0.5) * TAU) / A);
+export type RingsLayout = {
+  pos: [number, number][];
+  scale: number; // 1, or less when the rings were shrunk into the box
+  hubR: number; // radius of the hub ring, after scaling
+  firstR: number; // radius of the first item arc, after scaling
+  agentR: number; // radius of the agent ring, after scaling
+  labels: {
+    text: string;
+    x: number;
+    y: number;
+    align: "left" | "right" | "centre";
+  }[];
+};
+
+const HUB_R = 120;
+const FIRST_R = 165;
+const ARC_STEP = 15;
+const ALONG = 13.5;
+const AGENT_PAST = 30;
+const AGENT_MIN = 300;
+const AGENT_MAX = 350;
+const LABEL_PAST = 34;
+const NAME_MAX = 44;
+
+/** Newest first, ties by id, so the order never depends on the payload's. */
+function byFreshness(model: MapModel, list: number[]): number[] {
+  return list.sort((a, b) => {
+    const x = model.nodes[a]!;
+    const y = model.nodes[b]!;
+    const d = y.updatedAt - x.updatedAt;
+    if (d !== 0) return d;
+    const ia = x.id ?? "";
+    const ib = y.id ?? "";
+    return ia < ib ? -1 : ia > ib ? 1 : 0;
   });
-  const place = (list: number[], s: Sector, r0: number) => {
-    let k = 0;
+}
+
+const cut = (name: string) =>
+  name.length > NAME_MAX ? `${name.slice(0, NAME_MAX - 1).trimEnd()}…` : name;
+
+/**
+ * Rings: the index at the centre, one hub per group, each group's items on arcs outward in its
+ * sector (freshest notes first, files after one empty arc), the agents on a ring past the
+ * outermost arc. Everything shrinks by one factor when the agent ring would pass 350.
+ */
+export function ringsLayout(model: MapModel): RingsLayout {
+  const p = parts(model);
+  // Unscaled first: a radius and an angle per node.
+  const r = new Float64Array(model.nodes.length);
+  const an = new Float64Array(model.nodes.length);
+  const lastR: number[] = [];
+  /** Fills arcs from arc `k0` outward; returns the first arc left unused. */
+  const place = (list: number[], s: Sector, k0: number): number => {
+    let k = k0;
     let idx = 0;
     while (idx < list.length) {
-      const r = r0 + 15 * k;
-      const cap = Math.max(1, Math.floor((s.w * r) / 13.5));
+      const rad = FIRST_R + ARC_STEP * k;
+      const cap = Math.max(1, Math.floor((s.w * rad) / ALONG));
       const m = Math.min(cap, list.length - idx);
-      for (let c = 0; c < m; c++)
-        out[list[idx + c]!] = polar(r, s.a0 + ((c + 0.5) * s.w) / cap);
+      for (let c = 0; c < m; c++) {
+        const id = list[idx + c]!;
+        r[id] = rad;
+        an[id] = s.a0 + ((c + 0.5) * s.w) / cap;
+      }
       idx += m;
       k++;
     }
+    return k;
   };
   p.items.forEach((list, i) => {
     const s = p.sec[i]!;
-    out[p.hubs[i]!] = polar(120, s.mid);
-    place(
-      list.filter((id) => model.nodes[id]!.kind === "note"),
-      s,
-      165,
-    );
-    place(
-      list.filter((id) => model.nodes[id]!.kind === "file"),
-      s,
-      245,
-    );
+    r[p.hubs[i]!] = HUB_R;
+    an[p.hubs[i]!] = s.mid;
+    const of = (kind: "note" | "file") =>
+      byFreshness(
+        model,
+        list.filter((id) => model.nodes[id]!.kind === kind),
+      );
+    const kNotes = place(of("note"), s, 0);
+    const kEnd = place(of("file"), s, kNotes > 0 ? kNotes + 1 : 0);
+    lastR.push(FIRST_R + ARC_STEP * Math.max(0, kEnd - 1));
   });
-  return out;
+  const outer = lastR.length ? Math.max(...lastR) : 0;
+  const agentR = Math.max(AGENT_MIN, outer + AGENT_PAST);
+  const scale = Math.min(1, AGENT_MAX / agentR);
+  const A = p.agents.length;
+  p.agents.forEach((id, t) => {
+    r[id] = agentR;
+    an[id] = -TAU / 4 + ((t + 0.5) * TAU) / A;
+  });
+
+  const pos = new Array<P2>(model.nodes.length);
+  for (let i = 0; i < model.nodes.length; i++)
+    pos[i] = i === 0 ? [CX, CY] : polar(r[i]! * scale, an[i]!);
+  const labels = model.topics.map((t, i): RingsLayout["labels"][number] => {
+    const s = p.sec[i]!;
+    const [x, y] = polar((lastR[i]! + LABEL_PAST) * scale, s.mid);
+    const c = Math.cos(s.mid);
+    return {
+      text: `${cut(t.name)} · ${p.items[i]!.length}`,
+      x,
+      y,
+      align: c > 0.25 ? "left" : c < -0.25 ? "right" : "centre",
+    };
+  });
+  return {
+    pos: inBox(pos),
+    scale,
+    hubR: HUB_R * scale,
+    firstR: FIRST_R * scale,
+    agentR: agentR * scale,
+    labels,
+  };
 }
 
 const X0 = 250;
@@ -191,12 +269,11 @@ export function layout(
   model: MapModel,
   now: number,
 ): [number, number][] {
-  const p = parts(model);
   switch (view) {
     case "rings":
-      return inBox(rings(model, p));
+      return ringsLayout(model).pos;
     case "timeline":
-      return inBox(timeline(model, p, now));
+      return inBox(timeline(model, parts(model), now));
   }
 }
 

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { grouping } from "./arrange";
 import { buildModel } from "./graph";
-import { layout, orbit } from "./layouts";
+import { layout, orbit, ringsLayout } from "./layouts";
 import { fixturePayload } from "./fixture";
-import type { MapNode, MapPayload } from "./types";
+import type { MapModel, MapNode, MapPayload } from "./types";
 
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 const FLAT: ("rings" | "timeline")[] = ["rings", "timeline"];
@@ -122,19 +123,151 @@ describe("rings on a small hive", () => {
       angles[0]! + 2 * Math.PI - angles[angles.length - 1]!,
     ).toBeGreaterThanOrEqual(0.4 - 1e-9);
   });
+});
 
-  it("keeps hubs clear of the ring labels at twelve o'clock", () => {
-    const nodes: MapNode[] = [];
-    [17, 7, 1, 1, 1].forEach((c, t) => {
-      for (let j = 0; j < c; j++) nodes.push(note(`s${t}-${j}`, `Small ${t}`));
-    });
-    const model = buildModel(base(nodes));
-    const pos = layout("rings", model, NOW);
-    for (const n of model.nodes.filter((x) => x.kind === "hub")) {
-      const [x, y] = pos[n.i]!;
-      // The labels sit straight above the centre; no hub sits in a 60-wide band there.
-      if (y < 380) expect(Math.abs(x - 500)).toBeGreaterThanOrEqual(30);
+const radius = ([x, y]: [number, number]) => Math.hypot(x - 500, y - 380);
+
+/** Items (notes and files) of each group, as node indices. */
+function sectors(model: MapModel): number[][] {
+  const out: number[][] = model.topics.map(() => []);
+  for (const n of model.nodes)
+    if (n.kind === "note" || n.kind === "file") out[n.topic]!.push(n.i);
+  return out;
+}
+
+const RINGS_CASES: [string, MapModel][] = [
+  ["60 items", buildModel(fixturePayload(NOW, { items: 60 }))],
+  ["300 items", buildModel(fixturePayload(NOW))],
+  ["5,000 items", buildModel(fixturePayload(NOW, { items: 5000 }))],
+  [
+    "12 groups",
+    buildModel(base(twelve), grouping(base(twelve), "folder", NOW, 12)),
+  ],
+];
+
+describe.each(RINGS_CASES)("ringsLayout on %s", (_name, model) => {
+  const r = ringsLayout(model);
+
+  it("puts the freshest notes innermost in every group", () => {
+    for (const list of sectors(model)) {
+      const notes = list
+        .map((i) => model.nodes[i]!)
+        .filter((n) => n.kind === "note")
+        .sort(
+          (a, b) =>
+            b.updatedAt - a.updatedAt ||
+            (a.id! < b.id! ? -1 : a.id! > b.id! ? 1 : 0),
+        );
+      for (let k = 1; k < notes.length; k++)
+        expect(radius(r.pos[notes[k]!.i]!)).toBeGreaterThanOrEqual(
+          radius(r.pos[notes[k - 1]!.i]!) - 1e-9,
+        );
     }
+  });
+
+  it("puts every file outside every note of its group", () => {
+    for (const list of sectors(model)) {
+      const notes = list.filter((i) => model.nodes[i]!.kind === "note");
+      const files = list.filter((i) => model.nodes[i]!.kind === "file");
+      if (!notes.length || !files.length) continue;
+      const outerNote = Math.max(...notes.map((i) => radius(r.pos[i]!)));
+      const innerFile = Math.min(...files.map((i) => radius(r.pos[i]!)));
+      expect(innerFile).toBeGreaterThan(outerNote);
+    }
+  });
+
+  it("keeps items at least 13.5 apart, scaled", () => {
+    const min = 13.5 * r.scale - 0.01;
+    for (const list of sectors(model))
+      for (let a = 0; a < list.length; a++)
+        for (let b = a + 1; b < list.length; b++) {
+          const p = r.pos[list[a]!]!;
+          const q = r.pos[list[b]!]!;
+          const d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+          if (d < min) expect(d).toBeGreaterThanOrEqual(min);
+        }
+  });
+
+  it("gives one label per group, its count and the side of the circle", () => {
+    const counts = sectors(model).map((l) => l.length);
+    expect(r.labels).toHaveLength(model.topics.length);
+    r.labels.forEach((l, t) => {
+      expect(l.text.endsWith(` · ${counts[t]}`)).toBe(true);
+      const c = (l.x - 500) / Math.hypot(l.x - 500, l.y - 380);
+      expect(l.align).toBe(c > 0.25 ? "left" : c < -0.25 ? "right" : "centre");
+    });
+  });
+
+  it("keeps every position inside the box and the agent ring within 350", () => {
+    for (const [x, y] of r.pos) {
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThanOrEqual(1000);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(y).toBeLessThanOrEqual(760);
+    }
+    expect(r.agentR).toBeLessThanOrEqual(350 + 1e-9);
+    expect(r.hubR).toBeCloseTo(120 * r.scale, 9);
+    expect(r.firstR).toBeCloseTo(165 * r.scale, 9);
+    for (const n of model.nodes)
+      if (n.kind === "agent")
+        expect(radius(r.pos[n.i]!)).toBeCloseTo(r.agentR, 6);
+  });
+
+  it("is what layout gives for rings", () => {
+    expect(layout("rings", model, NOW)).toEqual(r.pos);
+  });
+});
+
+describe("ringsLayout scale", () => {
+  it("keeps 60 items at full size with the agent ring at 300 or more", () => {
+    const r = ringsLayout(buildModel(fixturePayload(NOW, { items: 60 })));
+    expect(r.scale).toBe(1);
+    expect(r.agentR).toBeGreaterThanOrEqual(300);
+    expect(r.hubR).toBe(120);
+    expect(r.firstR).toBe(165);
+  });
+
+  it("shrinks 5,000 items so the agent ring lands on 350", () => {
+    const r = ringsLayout(buildModel(fixturePayload(NOW, { items: 5000 })));
+    expect(r.scale).toBeLessThan(1);
+    expect(Math.abs(r.agentR - 350)).toBeLessThanOrEqual(0.01);
+  });
+
+  it("works on an empty hive", () => {
+    const r = ringsLayout(
+      buildModel({
+        members: [],
+        agents: [],
+        nodes: [],
+        links: [],
+        truncated: false,
+      }),
+    );
+    expect(r.pos[0]).toEqual([500, 380]);
+    expect(r.labels).toEqual([]);
+    expect(r.scale).toBe(1);
+    expect(r.agentR).toBe(300);
+  });
+
+  it("works for 1 to 12 groups", () => {
+    for (let g = 1; g <= 12; g++) {
+      const nodes = twelve.filter((n) => Number(n.topic.split(" ")[1]) < g);
+      const p = base(nodes);
+      const model = buildModel(p, grouping(p, "folder", NOW, 12));
+      expect(model.topics).toHaveLength(g);
+      const r = ringsLayout(model);
+      expect(r.labels).toHaveLength(g);
+      for (const [x, y] of r.pos)
+        expect(Number.isFinite(x) && Number.isFinite(y)).toBe(true);
+    }
+  });
+
+  it("cuts a long group name to 44 characters", () => {
+    const long =
+      "A folder name that runs on for far longer than any label should";
+    const r = ringsLayout(buildModel(base([note("x", long)])));
+    const label = r.labels[0]!.text;
+    expect(label).toBe(`${long.slice(0, 43).trimEnd()}… · 1`);
   });
 });
 

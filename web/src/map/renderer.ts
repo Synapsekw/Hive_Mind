@@ -4,6 +4,7 @@
 // come from the theme's tokens (readPalette), never from literals; transparency is always
 // `globalAlpha`. Line widths and radii are divided by the scale, so they keep their screen size.
 import type { Cam } from "./camera";
+import { FRESH_ALPHA } from "./freshness";
 import { size } from "./nodeShape";
 import { orbitAlpha, type OrbitProjection } from "./orbit3d";
 import type { Scene } from "./scene";
@@ -34,6 +35,8 @@ export type FrameState = {
   layerAlpha?: number;
   /** Orbit only: this frame's projection of the 3D positions (orbit3d.ts). */
   orbit?: OrbitProjection | null;
+  /** The "Labels" switch: off hides the group names too. */
+  labelsOn?: boolean;
 };
 
 export type Pulse = {
@@ -61,6 +64,19 @@ export type Palette = {
 const TAU = Math.PI * 2;
 const SQ2 = Math.SQRT2;
 const LABEL_MAX = 220;
+/**
+ * The opacity of every readable dot's thin brand outline, so an old, faint note is still a
+ * visible shape. Meant to be the smallest step with 3:1 contrast against the map card in every
+ * theme, mode and reach; even at 1 the light glass card falls short in some themes, so it stays
+ * at 1 until that is settled.
+ */
+export const OUTLINE_ALPHA = 1;
+/** The smallest note or file drawn, in screen px, however far Rings shrank the drawing. */
+const MIN_DOT = 2.5;
+/** Dots smaller than this on screen get no outline (it would swallow the fill). */
+const OUTLINE_MIN = 4;
+/** Above this many dots at freshness levels 6 and 7 the glow is skipped (shadow blur is slow). */
+const GLOW_MAX = 400;
 
 /** The theme's colours, read once per theme change (getComputedStyle is not free). */
 export function readPalette(el: Element): Palette {
@@ -85,6 +101,10 @@ type SceneCache = {
   edges: Path2D;
   litEdges: WeakMap<boolean[], Path2D>;
   filtered: WeakMap<boolean[], boolean>;
+  /** At most GLOW_MAX dots at freshness levels 6 and 7: the fresh ones may glow. */
+  glow: boolean;
+  /** Per group: does any of its nodes stay lit under this filter (its name shows)? */
+  groupOn: WeakMap<boolean[], boolean[]>;
 };
 
 const caches = new WeakMap<Scene, SceneCache>();
@@ -110,10 +130,14 @@ function cacheFor(scene: Scene): SceneCache {
     edges.moveTo(e[i]!, e[i + 1]!);
     edges.lineTo(e[i + 2]!, e[i + 3]!);
   }
+  let fresh = 0;
+  for (const v of scene.fresh) if (v >= 6) fresh++;
   const out: SceneCache = {
     edges,
     litEdges: new WeakMap(),
     filtered: new WeakMap(),
+    glow: fresh <= GLOW_MAX,
+    groupOn: new WeakMap(),
   };
   caches.set(scene, out);
   return out;
@@ -124,6 +148,15 @@ function isFiltered(c: SceneCache, lit: boolean[]): boolean {
   if (v === undefined) {
     v = lit.some((on) => !on);
     c.filtered.set(lit, v);
+  }
+  return v;
+}
+
+function groupsOn(c: SceneCache, scene: Scene, lit: boolean[]): boolean[] {
+  let v = c.groupOn.get(lit);
+  if (!v) {
+    v = scene.byTopic.map((nodes) => nodes.some((i) => lit[i]));
+    c.groupOn.set(lit, v);
   }
   return v;
 }
@@ -214,6 +247,13 @@ type Frame = {
   flipX: number;
   /** Orbit: perspective per node (dots grow near, shrink far), else null. */
   depth: Float32Array | null;
+  /** The scene's dot scale (Rings shrinks dots with the drawing); 1 in Orbit. */
+  dotScale: number;
+  /**
+   * Freshness per node: notes and files are drawn in the brand colour, brighter when fresher.
+   * Null in Orbit, which keeps the group hues.
+   */
+  fresh: Uint8Array | null;
 };
 
 const CENTRE: [number, number] = [500, 380];
@@ -235,10 +275,12 @@ const alphaOf = (F: Frame, i: number) =>
 const theirs = (n: ModelNode) =>
   !n.mine && !n.locked && (n.kind === "note" || n.kind === "file");
 
-/** A dot's drawn diameter in screen px. */
-export function dotDiameter(n: ModelNode): number {
-  return size(n);
+/** A dot's drawn diameter in screen px, shrunk by `scale`; notes and files never below 2.5. */
+export function dotDiameter(n: ModelNode, scale = 1): number {
+  const d = size(n) * scale;
+  return n.kind === "note" || n.kind === "file" ? Math.max(MIN_DOT, d) : d;
 }
+const diam = (F: Frame, n: ModelNode) => dotDiameter(n, F.dotScale);
 
 const kindOf = (n: ModelNode): Kind =>
   n.kind === "hub"
@@ -308,6 +350,8 @@ export function drawFrame(
     ambient: false,
     flipX: 760,
     depth: null,
+    dotScale: scene.dotScale,
+    fresh: scene.fresh,
   };
 
   drawLayer(F);
@@ -397,6 +441,8 @@ function drawOrbit(
     ambient: false,
     flipX: cssW * 0.76,
     depth: o.p,
+    dotScale: 1,
+    fresh: null,
   };
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.lineCap = "round";
@@ -744,7 +790,7 @@ function groupPaths(
     return p;
   };
   const rad = (i: number) =>
-    (dotDiameter(model.nodes[i]!) / 2) * scale * depthOf(F, i) * px;
+    (diam(F, model.nodes[i]!) / 2) * scale * depthOf(F, i) * px;
   if (kind === "hub")
     return [
       at((i) => rad(i) + 1.5 * px),
@@ -756,7 +802,10 @@ function groupPaths(
   return [at(rad)];
 }
 
-/** Fills one group: hubs with their soft breathing glow, locked dots hollow. */
+/**
+ * Fills one group: hubs with their soft breathing glow, locked dots hollow. `outline` is the
+ * opacity of a 1 px brand outline around readable dots (0: none).
+ */
 function fillGroup(
   F: Frame,
   kind: Kind,
@@ -765,6 +814,7 @@ function fillGroup(
   paths: Path2D[],
   glow: number,
   topic: number,
+  outline = 0,
 ) {
   const { ctx, pal, px, still, f, T } = F;
   if (kind === "hub") {
@@ -802,14 +852,36 @@ function fillGroup(
   } else {
     ctx.fillStyle = colour;
     ctx.fill(p);
+    ctx.shadowBlur = 0;
+    if (outline > 0) {
+      ctx.globalAlpha = outline;
+      ctx.strokeStyle = pal.brand;
+      ctx.lineWidth = px;
+      ctx.stroke(p);
+    }
   }
   ctx.shadowBlur = 0;
 }
 
+/** The glow of a freshness level: 8 px at level 6, 14 px breathing at level 7, else none. */
+function freshGlow(F: Frame, level: number): number {
+  if (!F.c.glow || level < 6) return 0;
+  if (level === 6) return 8;
+  if (F.still) return 14;
+  F.ambient = true;
+  return 14 + 4 * Math.sin((TAU * F.f.time) / 4000);
+}
+
+/** Outline opacity for a readable dot drawn `d` px wide on screen at dim `a`. */
+const outlineOf = (d: number, a: number) =>
+  d >= OUTLINE_MIN ? OUTLINE_ALPHA * a : 0;
+
 type Batch = {
-  topic: number;
+  topic: number; // hubs: their group; notes and files: -1 (brand colour)
   kind: Kind;
   alpha: number;
+  level: number; // freshness, for the glow; 0 for hubs and locked dots
+  outline: number;
   paths: Path2D[];
 };
 type DotCache = {
@@ -826,9 +898,10 @@ type DotCache = {
 const dotCaches = new WeakMap<Scene, DotCache>();
 
 /**
- * The dots, batched per topic, kind and alpha. The batches (keys and paths) are cached per
- * scene, positions, filter, soft set, hot, selection, focus and scale, so a frame that only
- * breathes is a few dozen fills.
+ * The dots: notes and files batched per kind, freshness level, alpha and outline, in the brand
+ * colour, freshest on top; then the hubs per group in their hue. The batches (keys and paths)
+ * are cached per scene, positions, filter, soft set, hot, selection, focus and scale, so a frame
+ * that only breathes is a few dozen fills.
  */
 function drawDots(F: Frame) {
   const { scene, model, f, s } = F;
@@ -844,30 +917,41 @@ function drawDots(F: Frame) {
     dc.grow !== (f.grow?.nodes ?? null) ||
     dc.s !== s
   ) {
-    const batches: Batch[] = [];
+    type Group = Omit<Batch, "paths"> & { n: number[] };
+    const dots = new Map<string, Group>();
+    const hubs: Group[] = [];
     scene.byTopic.forEach((nodes, topic) => {
-      const groups = new Map<string, { kind: Kind; a: number; n: number[] }>();
+      const own = new Map<number, Group>();
       for (const i of nodes) {
         if (special(F, i)) continue;
         const n = model.nodes[i]!;
         const kind = kindOf(n);
-        const a = alphaOf(F, i) * (theirs(n) ? 0.72 : 1);
-        const key = `${kind}|${a}`;
-        const g = groups.get(key);
+        const dim = alphaOf(F, i);
+        if (kind === "hub") {
+          const g = own.get(dim);
+          if (g) g.n.push(i);
+          else {
+            const h = { topic, kind, alpha: dim, level: 0, outline: 0, n: [i] };
+            own.set(dim, h);
+            hubs.push(h);
+          }
+          continue;
+        }
+        const locked = kind === "lnote" || kind === "lfile";
+        const level = locked ? 0 : scene.fresh[i]!;
+        const alpha = locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim;
+        const outline = locked ? 0 : outlineOf(diam(F, n), dim);
+        const key = `${kind}|${level}|${alpha}|${outline}`;
+        const g = dots.get(key);
         if (g) g.n.push(i);
-        else groups.set(key, { kind, a, n: [i] });
+        else dots.set(key, { topic: -1, kind, alpha, level, outline, n: [i] });
       }
-      // Plain dots first, hubs on top.
-      for (const g of [...groups.values()].sort(
-        (x, y) => +(x.kind === "hub") - +(y.kind === "hub"),
-      ))
-        batches.push({
-          topic,
-          kind: g.kind,
-          alpha: g.a,
-          paths: groupPaths(F, g.kind, g.n, 1),
-        });
     });
+    // Older dots first so fresher ones draw over them, hubs on top.
+    const batches: Batch[] = [
+      ...[...dots.values()].sort((x, y) => x.level - y.level),
+      ...hubs,
+    ].map(({ n, ...g }) => ({ ...g, paths: groupPaths(F, g.kind, n, 1) }));
     dc = {
       pos: f.pos,
       lit: f.lit,
@@ -882,7 +966,19 @@ function drawDots(F: Frame) {
     dotCaches.set(scene, dc);
   }
   for (const b of dc.batches)
-    fillGroup(F, b.kind, hueOf(F, b.topic), b.alpha, b.paths, 0, b.topic);
+    if (b.topic >= 0)
+      fillGroup(F, b.kind, hueOf(F, b.topic), b.alpha, b.paths, 0, b.topic);
+    else
+      fillGroup(
+        F,
+        b.kind,
+        F.pal.brand,
+        b.alpha,
+        b.paths,
+        freshGlow(F, b.level),
+        -1,
+        b.outline,
+      );
 }
 
 /** Agents: a ring with a centre point. */
@@ -892,7 +988,7 @@ function drawAgent(F: Frame, i: number, s0: number, glow: number) {
   const scale = s0 * depthOf(F, i);
   const [x, y] = P(F, i);
   const a = alphaOf(F, i);
-  const r = (size(n) / 2) * scale * px;
+  const r = (diam(F, n) / 2) * scale * px;
   ctx.globalAlpha = a;
   if (glow) {
     ctx.shadowColor = pal.fg2;
@@ -924,7 +1020,7 @@ function drawRoot(F: Frame, s0: number, glow: number) {
   if (!still) F.ambient = true;
   const turn = still ? 0 : (TAU * (f.time % 30_000)) / 30_000;
   const p = new Path2D();
-  hex(p, x, y, (dotDiameter(n) / 2) * scale * px, turn);
+  hex(p, x, y, (diam(F, n) / 2) * scale * px, turn);
   ctx.globalAlpha = alphaOf(F, scene.root);
   ctx.fillStyle = pal.fg;
   if (glow) {
@@ -942,12 +1038,30 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
   if (n.kind === "agent") return drawAgent(F, i, scale, glow);
   if (n.kind === "root") return drawRoot(F, scale, glow);
   const kind = kindOf(n);
+  const paths = groupPaths(F, kind, [i], scale);
+  if (F.fresh && kind !== "hub") {
+    // The flat views: brand colour, brighter when fresher; hot, focused and selected at full.
+    const dim = alphaOf(F, i);
+    const locked = kind === "lnote" || kind === "lfile";
+    const level = locked ? 0 : (F.fresh[i] ?? 0);
+    fillGroup(
+      F,
+      kind,
+      F.pal.brand,
+      locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim,
+      paths,
+      glow || freshGlow(F, level),
+      n.topic,
+      locked ? 0 : outlineOf(diam(F, n) * scale, dim),
+    );
+    return;
+  }
   fillGroup(
     F,
     kind,
     colourOf(F, n),
     alphaOf(F, i) * (theirs(n) && i !== F.f.hot ? 0.72 : 1),
-    groupPaths(F, kind, [i], scale),
+    paths,
     glow,
     n.topic,
   );
@@ -965,13 +1079,7 @@ function drawHot(F: Frame) {
   ctx.globalAlpha = 1;
   ctx.fillStyle = pal.bg;
   ctx.beginPath();
-  ctx.arc(
-    x,
-    y,
-    ((dotDiameter(n) / 2) * 1.7 * depthOf(F, f.hot) + 2) * px,
-    0,
-    TAU,
-  );
+  ctx.arc(x, y, ((diam(F, n) / 2) * 1.7 * depthOf(F, f.hot) + 2) * px, 0, TAU);
   ctx.fill();
   drawOne(F, f.hot, 1.7, 14);
 }
@@ -983,7 +1091,7 @@ function drawRings(F: Frame) {
     const n = model.nodes[i];
     if (!n) return;
     const [x, y] = P(F, i);
-    const r = (dotDiameter(n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
+    const r = (diam(F, n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = colour;
     ctx.lineWidth = w * px;
@@ -1022,6 +1130,22 @@ function drawLabels(F: Frame) {
     }
   }
 
+  // Group names outside the circle, aligned away from it; a group the filter leaves empty
+  // loses its name.
+  if (scene.groupLabels.length && f.labelsOn !== false) {
+    const on = groupsOn(F.c, scene, f.lit);
+    ctx.font = `600 12px ${fam}`;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = pal.fg;
+    scene.groupLabels.forEach((g, t) => {
+      if (!on[t]) return;
+      ctx.textAlign =
+        g.align === "centre" ? "center" : g.align === "left" ? "left" : "right";
+      ctx.fillText(g.text, sx(g.x), sy(g.y) + 0.5);
+    });
+    ctx.textAlign = "left";
+  }
+
   for (const i of f.labels) {
     const n = model.nodes[i];
     if (!n) continue;
@@ -1034,7 +1158,7 @@ function drawLabels(F: Frame) {
     const font = `${weight} 12px ${fam}`;
     ctx.font = font;
     const m = fit(ctx, font, n.title, LABEL_MAX - 12);
-    const r = (dotDiameter(n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
+    const r = (diam(F, n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
     const w = m.w + 12;
     const lx = bx > F.flipX ? x - r - 6 - w : x + r + 6;
     const a = alphaOf(F, i);
