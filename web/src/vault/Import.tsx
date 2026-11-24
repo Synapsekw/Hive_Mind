@@ -25,6 +25,8 @@ import {
   nextChunk,
   type Tally,
 } from "./importFiles";
+import { runConnect, type ConnectEnd, type ConnectTally } from "./connectRun";
+import * as c from "./connectText";
 import * as t from "./importText";
 import s from "./vault.module.css";
 
@@ -36,6 +38,13 @@ type Stage =
   | { kind: "pick"; problem: string | null }
   | { kind: "ready"; refused: string | null }
   | { kind: "running"; done: number; total: number; stopping: boolean }
+  // The workspace's wiki links, after the last batch. `total` is null until a step has answered.
+  | {
+      kind: "connecting";
+      done: number;
+      total: number | null;
+      stopping: boolean;
+    }
   | {
       kind: "done";
       tally: Tally;
@@ -43,6 +52,8 @@ type Stage =
       unsent: number;
       end: "finished" | "stopped" | "halted";
       workspace: { id: string; name: string };
+      /** How connecting the wiki links went; null when the import did not get that far. */
+      links: { tally: ConnectTally; end: ConnectEnd } | null;
     };
 
 const REFUSALS = {
@@ -108,7 +119,7 @@ export function Import({
   // A workspace made here, kept so pressing Import again does not ask for it twice.
   const made = useRef<{ id: string; name: string } | null>(null);
 
-  const running = stage.kind === "running";
+  const running = stage.kind === "running" || stage.kind === "connecting";
 
   useEffect(() => {
     alive.current = true;
@@ -264,6 +275,32 @@ export function Import({
       }
     }
 
+    // Every note was answered and the workspace holds some of them: connect its wiki links,
+    // over the whole workspace, so links to notes that were already there are found too.
+    let links: { tally: ConnectTally; end: ConnectEnd } | null = null;
+    if (
+      end === "finished" &&
+      alive.current &&
+      tally.created + tally.updated + tally.unchanged > 0
+    ) {
+      setStage({
+        kind: "connecting",
+        done: 0,
+        total: null,
+        stopping: stop.current,
+      });
+      links = await runConnect(actions.connect, workspace.id, {
+        progress: (done, total) =>
+          setStage({
+            kind: "connecting",
+            done,
+            total,
+            stopping: stop.current,
+          }),
+        stop: () => stop.current || !alive.current,
+      });
+    }
+
     onBusy(false);
     setStage({
       kind: "done",
@@ -272,6 +309,7 @@ export function Import({
       unsent: paths.length - handled(tally),
       end,
       workspace,
+      links,
     });
     router.refresh();
   }
@@ -292,6 +330,7 @@ export function Import({
   let title = t.IMPORT;
   if (stage.kind === "ready") title = t.READY;
   if (stage.kind === "running") title = t.RUNNING;
+  if (stage.kind === "connecting") title = c.CONNECTING;
   if (stage.kind === "done")
     title = stage.end === "finished" ? t.FINISHED : t.STOPPED;
 
@@ -480,16 +519,21 @@ export function Import({
         </>
       )}
 
-      {stage.kind === "running" && (
+      {(stage.kind === "running" || stage.kind === "connecting") && (
         <>
+          {/* Without a total yet, the bar says only that something is under way. */}
           <progress
             className={s.importProgress}
-            aria-label={t.RUNNING}
-            value={stage.done}
-            max={Math.max(1, stage.total)}
+            aria-label={title}
+            value={stage.total === null ? undefined : stage.done}
+            max={Math.max(1, stage.total ?? 1)}
           />
           <p role="status" className={s.sentence}>
-            {t.progress(stage.done, stage.total)}
+            {stage.kind === "running"
+              ? t.progress(stage.done, stage.total)
+              : stage.total === null
+                ? ""
+                : c.connectProgress(stage.done, stage.total)}
           </p>
           <p className={s.sentence} data-quiet>
             {stage.stopping ? `${t.STOPPING}. ${t.KEEPS}` : t.KEEPS}
@@ -527,12 +571,24 @@ export function Import({
                 skipped: plan.tooLarge.length,
                 failed: stage.tally.failed.length,
               })
-              .map((c) => (
-                <span key={c.label}>
-                  {c.label} <strong>{c.value}</strong>
+              .map((n) => (
+                <span key={n.label}>
+                  {n.label} <strong>{n.value}</strong>
                 </span>
               ))}
           </p>
+          {stage.links && (
+            <p className={s.facts}>
+              {c.connectCounts(stage.links.tally).map((n) => (
+                <span key={n.label}>
+                  {n.label} <strong>{n.value}</strong>
+                </span>
+              ))}
+            </p>
+          )}
+          {stage.links && stage.links.end !== "finished" && (
+            <p className={s.sentence}>{c.AFTER_IMPORT_UNFINISHED}</p>
+          )}
           {stage.unsent > 0 && (
             <p className={s.sentence}>
               {t.notSent(stage.unsent)} {t.AGAIN}

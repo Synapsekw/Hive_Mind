@@ -14,6 +14,8 @@ import {
 } from "react";
 import type { ImportActions } from "../import/types";
 import { Shell } from "../shell/Shell";
+import { Connect } from "./Connect";
+import { CONNECT } from "./connectText";
 import { Folders } from "./Folders";
 import { Import } from "./Import";
 import { IMPORT } from "./importText";
@@ -98,13 +100,26 @@ export function Vault({
   }, [servedOpen]);
   // Deletes on their way, by note: a second request for the same note joins the first.
   const deleting = useRef(new Map<string, Promise<boolean>>());
-  // The import panel: open or not, and whether notes are being sent (it cannot be closed then).
-  const [importing, setImporting] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
+  // The panel under the bar: the import, connecting wiki links, or neither; never both. While
+  // either is at work it cannot be closed and the other cannot be opened.
+  const [panel, setPanel] = useState<"import" | "connect" | null>(null);
+  const [panelBusy, setPanelBusy] = useState(false);
+  // The workspace the connect panel was opened on: it keeps it, whatever tab is opened meanwhile.
+  const [connectIn, setConnectIn] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const importOpener = useRef<HTMLButtonElement>(null);
+  const connectOpener = useRef<HTMLButtonElement>(null);
+  const importing = panel === "import";
+  const connecting = panel === "connect" && connectIn !== null;
   function closeImport() {
-    setImporting(false);
+    setPanel(null);
     importOpener.current?.focus();
+  }
+  function closeConnect() {
+    setPanel(null);
+    connectOpener.current?.focus();
   }
   const main = useRef<HTMLElement>(null);
   // Where the focus goes once a deleted note has left the page.
@@ -265,10 +280,18 @@ export function Vault({
   const tabKey = data.tab.kind === "shared" ? "shared" : data.tab.id;
   const [local, setLocal] = useState<Local>(() => fresh(data, tabKey));
   // A new tab starts from "All notes" with nothing filtered.
-  if (local.tab !== tabKey) setLocal(fresh(data, tabKey));
+  if (local.tab !== tabKey) {
+    setLocal(fresh(data, tabKey));
+    // The connect panel belongs to the workspace it was opened on. A run goes on to its counts.
+    if (panel === "connect" && !panelBusy) setPanel(null);
+  }
 
   const shared = data.tab.kind === "shared";
   const wsId = data.tab.kind === "workspace" ? data.tab.id : null;
+  // A workspace tab is always one of the person's own.
+  const ownWorkspace = wsId
+    ? (data.workspaces.find((w) => w.id === wsId) ?? null)
+    : null;
   const tree = useMemo(
     () => buildTree(data.notes, data.folders),
     [data.notes, data.folders],
@@ -364,21 +387,43 @@ export function Vault({
             hrefShared={hrefShared}
           />
           {importer && (
-            <button
-              ref={importOpener}
-              type="button"
-              className={`${s.secondary} ${s.importOpen}`}
-              aria-expanded={importing}
-              aria-controls={importing ? "vault-import" : undefined}
-              aria-disabled={importBusy || undefined}
-              onClick={() => {
-                if (importBusy) return;
-                if (importing) closeImport();
-                else setImporting(true);
-              }}
-            >
-              {IMPORT}
-            </button>
+            <div className={s.openers}>
+              <button
+                ref={importOpener}
+                type="button"
+                className={s.secondary}
+                aria-expanded={importing}
+                aria-controls={importing ? "vault-import" : undefined}
+                aria-disabled={panelBusy || undefined}
+                onClick={() => {
+                  if (panelBusy) return;
+                  if (importing) closeImport();
+                  else setPanel("import");
+                }}
+              >
+                {IMPORT}
+              </button>
+              {ownWorkspace && (
+                <button
+                  ref={connectOpener}
+                  type="button"
+                  className={s.secondary}
+                  aria-expanded={connecting}
+                  aria-controls={connecting ? "vault-connect" : undefined}
+                  aria-disabled={panelBusy || undefined}
+                  onClick={() => {
+                    if (panelBusy) return;
+                    if (connecting) closeConnect();
+                    else {
+                      setConnectIn(ownWorkspace);
+                      setPanel("connect");
+                    }
+                  }}
+                >
+                  {CONNECT}
+                </button>
+              )}
+            </div>
           )}
           <label className={s.filter}>
             <span className={s.srOnly}>Filter notes</span>
@@ -420,7 +465,15 @@ export function Vault({
             actions={importer}
             hrefWorkspace={hrefWorkspace}
             onClose={closeImport}
-            onBusy={setImportBusy}
+            onBusy={setPanelBusy}
+          />
+        )}
+        {importer && connecting && connectIn && (
+          <Connect
+            workspace={connectIn}
+            connect={importer.connect}
+            onClose={closeConnect}
+            onBusy={setPanelBusy}
           />
         )}
         <div className={s.cols} data-shared={shared || undefined}>

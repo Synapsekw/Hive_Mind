@@ -20,6 +20,7 @@ import {
   unlinkName,
   unlinkQuestion,
 } from "../src/vault/sentences";
+import * as C from "../src/vault/connectText";
 import * as T from "../src/vault/importText";
 import { setLook } from "./look";
 
@@ -1601,8 +1602,11 @@ test("notes go a batch at a time, in order, with the progress said; leaving asks
     }),
   ).toBe(true);
   await expect(status).toHaveText(T.progress(50, 60));
+  // The last batch, then the wiki links: three slow steps more.
   const done = panelNamed(page, T.FINISHED);
-  await expect(done.getByText("Created 60", { exact: true })).toBeVisible();
+  await expect(done.getByText("Created 60", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
   const sent = await sentPaths(page);
   expect(sent.map((b) => b.length)).toEqual([25, 25, 10]);
   expect(sent.flat()).toEqual(Object.keys(many(60)));
@@ -1676,6 +1680,14 @@ test("Stop ends the import after the batch on its way; what was saved stays", as
   await expect(done.getByText(T.notSent(35))).toBeVisible();
   await expect(done.getByRole("alert")).toHaveCount(0);
   expect((await sentPaths(page)).map((b) => b.length)).toEqual([25]);
+  // A stopped import does not go on to the wiki links.
+  await expect(done.getByText(/Links made/)).toHaveCount(0);
+  await expect(done.getByText(C.AFTER_IMPORT_UNFINISHED)).toHaveCount(0);
+  expect(
+    ((await calls(page)) as { name: string }[]).filter(
+      (c) => c.name === "connect",
+    ),
+  ).toEqual([]);
   await expect(
     done.getByRole("link", { name: T.openWorkspace("Sixty") }),
   ).toBeVisible();
@@ -1720,4 +1732,377 @@ test("at 390 px the import panel and its controls stay inside the window", async
   expect((await scrolls(page)).across).toBe(false);
   const box = (await done.boundingBox())!;
   expect(box.x + box.width).toBeLessThanOrEqual(390);
+});
+
+// ---- Connect wiki links ----
+
+const connectButton = (page: Page) =>
+  page.getByRole("button", { name: C.CONNECT, exact: true });
+const connectCalls = async (page: Page) =>
+  ((await calls(page)) as { name: string; args: unknown[] }[])
+    .filter((c) => c.name === "connect")
+    .map((c) => c.args);
+const leavingAsks = (page: Page) =>
+  page.evaluate(() => {
+    const e = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(e);
+    return e.defaultPrevented;
+  });
+
+/**
+ * What a screen reader needs of a panel, checked by hand (the project carries no axe): the
+ * region is named by an element that exists, every control in it has a name, no id is used
+ * twice, and nothing on the page points at an element that is not there.
+ */
+const nameless = (page: Page, id: string) =>
+  page.evaluate((panelId) => {
+    const problems: string[] = [];
+    const panel = document.getElementById(panelId);
+    if (!panel) return [`no #${panelId}`];
+    const named = (el: Element) => {
+      const by = el.getAttribute("aria-labelledby");
+      const text = by
+        ? by
+            .split(/\s+/)
+            .map((i) => document.getElementById(i)?.textContent ?? "")
+            .join(" ")
+        : (el.getAttribute("aria-label") ?? el.textContent ?? "");
+      return text.trim().length > 0;
+    };
+    if (!panel.getAttribute("aria-labelledby") || !named(panel))
+      problems.push("the region has no name");
+    for (const el of panel.querySelectorAll(
+      "button, a, progress, h2, [role]",
+    )) {
+      if (el.getAttribute("role") === "status") continue;
+      if (!named(el)) problems.push(`no name: ${el.outerHTML.slice(0, 80)}`);
+    }
+    const ids = [...document.querySelectorAll("[id]")].map((el) => el.id);
+    for (const i of new Set(ids))
+      if (ids.filter((x) => x === i).length > 1)
+        problems.push(`id twice: ${i}`);
+    for (const el of document.querySelectorAll(
+      "[aria-controls], [aria-labelledby], [aria-describedby]",
+    ))
+      for (const attr of [
+        "aria-controls",
+        "aria-labelledby",
+        "aria-describedby",
+      ])
+        for (const i of (el.getAttribute(attr) ?? "").split(/\s+/))
+          if (i && !document.getElementById(i))
+            problems.push(`${attr} points at nothing: ${i}`);
+    return problems;
+  }, id);
+
+test("after the last batch the import connects the wiki links and counts them", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await pick(page, folder("Field notes", { "a.md": "[[b]]", "b.md": "B" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const connecting = panelNamed(page, C.CONNECTING);
+  await expect(
+    connecting.getByRole("heading", { name: C.CONNECTING }),
+  ).toBeFocused();
+  await expect(connecting).toHaveAttribute("aria-busy", "true");
+  await expect(connecting.getByRole("status")).toHaveText(
+    C.connectProgress(40, 90),
+  );
+  // Still at work: no closing, and leaving asks first.
+  await page.keyboard.press("Escape");
+  await connecting
+    .getByRole("button", { name: /^Close/ })
+    .evaluate((el: HTMLElement) => el.click());
+  await expect(connecting).toBeVisible();
+  await expect(importButton(page)).toHaveAttribute("aria-disabled", "true");
+  expect(await leavingAsks(page)).toBe(true);
+
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByRole("heading", { name: T.FINISHED })).toBeFocused();
+  await expect(done.getByText("Created 2", { exact: true })).toBeVisible();
+  await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
+  await expect(
+    done.getByText("Already linked 6", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Pointing at no note 3", { exact: true }),
+  ).toBeVisible();
+  await expect(done.getByText(/Could not be saved/)).toHaveCount(0);
+  await expect(done.getByText(C.AFTER_IMPORT_UNFINISHED)).toHaveCount(0);
+  expect(await leavingAsks(page)).toBe(false);
+  // The whole workspace, from the start, after the notes were sent.
+  expect(await connectCalls(page)).toEqual([
+    ["imported-1", null],
+    ["imported-1", "40"],
+    ["imported-1", "80"],
+  ]);
+  const names = ((await calls(page)) as { name: string }[]).map((c) => c.name);
+  expect(names.indexOf("connect")).toBeGreaterThan(
+    names.lastIndexOf("importBatch"),
+  );
+});
+
+test("an import whose every batch was refused connects nothing", async ({
+  page,
+}) => {
+  await open(page, "?failbatch=all");
+  await pick(page, folder("Two", { "a.md": "A", "b.md": "B" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Failed 2", { exact: true })).toBeVisible();
+  await expect(done.getByText(/Links made/)).toHaveCount(0);
+  expect(await connectCalls(page)).toEqual([]);
+});
+
+test("an import whose links could not be connected says where to finish", async ({
+  page,
+}) => {
+  await open(page, "?failconnect=all");
+  await pick(page, folder("Two", { "a.md": "A", "b.md": "B" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  // The notes are in: the import itself finished.
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Created 2", { exact: true })).toBeVisible();
+  await expect(done.getByText("Links made 0", { exact: true })).toBeVisible();
+  await expect(done.getByText(C.AFTER_IMPORT_UNFINISHED)).toBeVisible();
+  await expect(done.getByRole("alert")).toHaveCount(0);
+  expect(await connectCalls(page)).toEqual([
+    ["imported-1", null],
+    ["imported-1", null],
+    ["imported-1", null],
+  ]);
+});
+
+test("Connect wiki links is offered on one's own workspace, not on Shared with me", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(connectButton(page)).toBeVisible();
+  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
+  await page.goto("/dev/vault?tab=shared", { waitUntil: "networkidle" });
+  await expect(importButton(page)).toBeVisible();
+  await expect(connectButton(page)).toHaveCount(0);
+});
+
+test("the connect panel: Start, progress, counts; it cannot be closed while it runs", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  const urls = watch(page);
+  await connectButton(page).click();
+  const ready = panelNamed(page, C.CONNECT);
+  await expect(ready.getByRole("heading", { name: C.CONNECT })).toBeFocused();
+  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "true");
+  await expect(connectButton(page)).toHaveAttribute(
+    "aria-controls",
+    "vault-connect",
+  );
+  await expect(ready.getByText(C.CONNECT_INTRO)).toBeVisible();
+  await expect(
+    ready.getByText(DATA.workspaces[0]!.name, { exact: true }),
+  ).toBeVisible();
+  expect(await nameless(page, "vault-connect")).toEqual([]);
+  // Nothing is asked until Start.
+  expect(await calls(page)).toEqual([]);
+  expect(urls()).toEqual([]);
+
+  await ready.getByRole("button", { name: C.START, exact: true }).click();
+  const running = panelNamed(page, C.CONNECTING);
+  await expect(
+    running.getByRole("heading", { name: C.CONNECTING }),
+  ).toBeFocused();
+  await expect(running).toHaveAttribute("aria-busy", "true");
+  const status = running.getByRole("status");
+  await expect(status).toHaveText(C.connectProgress(40, 90));
+  // While it runs: no closing, by Escape, by Close or by either opener.
+  await page.keyboard.press("Escape");
+  await running
+    .getByRole("button", { name: /^Close/ })
+    .evaluate((el: HTMLElement) => el.click());
+  for (const opener of [connectButton(page), importButton(page)]) {
+    await expect(opener).toHaveAttribute("aria-disabled", "true");
+    await opener.evaluate((el: HTMLElement) => el.click());
+  }
+  await expect(running).toBeVisible();
+  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
+  expect(await leavingAsks(page)).toBe(true);
+  await expect(status).toHaveText(C.connectProgress(80, 90));
+
+  const done = panelNamed(page, C.CONNECTED);
+  await expect(done.getByRole("heading", { name: C.CONNECTED })).toBeFocused();
+  await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
+  await expect(
+    done.getByText("Already linked 6", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Pointing at no note 3", { exact: true }),
+  ).toBeVisible();
+  await expect(done.getByText(/Could not be saved/)).toHaveCount(0);
+  await expect(done.getByRole("alert")).toHaveCount(0);
+  expect(await nameless(page, "vault-connect")).toEqual([]);
+  expect(await leavingAsks(page)).toBe(false);
+  for (const opener of [connectButton(page), importButton(page)])
+    await expect(opener).not.toHaveAttribute("aria-disabled", "true");
+  const ws = DATA.workspaces[0]!.id;
+  expect(await calls(page)).toEqual([
+    { name: "connect", args: [ws, null] },
+    { name: "connect", args: [ws, "40"] },
+    { name: "connect", args: [ws, "80"] },
+  ]);
+
+  // Close, by the button under the counts, by the one in the corner, and by Escape.
+  await done.getByRole("button", { name: T.CLOSE, exact: true }).click();
+  await expect(done).toHaveCount(0);
+  await expect(connectButton(page)).toBeFocused();
+  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
+  await connectButton(page).click();
+  await ready.getByRole("button", { name: /^Close:/ }).click();
+  await expect(ready).toHaveCount(0);
+  await expect(connectButton(page)).toBeFocused();
+  await connectButton(page).click();
+  await expect(ready.getByRole("heading", { name: C.CONNECT })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(ready).toHaveCount(0);
+  await expect(connectButton(page)).toBeFocused();
+});
+
+test("Stop ends connecting after the step on its way, with the counts so far", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await connectButton(page).click();
+  await panelNamed(page, C.CONNECT)
+    .getByRole("button", { name: C.START, exact: true })
+    .click();
+  const running = panelNamed(page, C.CONNECTING);
+  await running.getByRole("button", { name: T.STOP, exact: true }).click();
+  await expect(
+    running.getByRole("button", { name: T.STOPPING }),
+  ).toHaveAttribute("aria-disabled", "true");
+  const done = panelNamed(page, C.CONNECT_STOPPED);
+  await expect(
+    done.getByRole("heading", { name: C.CONNECT_STOPPED }),
+  ).toBeFocused();
+  await expect(done.getByText("Links made 7", { exact: true })).toBeVisible();
+  await expect(
+    done.getByText("Already linked 2", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    done.getByText("Pointing at no note 1", { exact: true }),
+  ).toBeVisible();
+  await expect(done.getByRole("alert")).toHaveCount(0);
+  expect((await connectCalls(page)).length).toBe(1);
+});
+
+test("a refused step is tried again from where it was", async ({ page }) => {
+  await open(page, "?failconnect=2");
+  await connectButton(page).click();
+  await panelNamed(page, C.CONNECT)
+    .getByRole("button", { name: C.START, exact: true })
+    .click();
+  const done = panelNamed(page, C.CONNECTED);
+  await expect(done.getByText("Links made 21", { exact: true })).toBeVisible();
+  expect((await connectCalls(page)).map((a) => a[1])).toEqual([
+    null,
+    "40",
+    "40",
+    "80",
+  ]);
+});
+
+test("three refused steps in a row stop connecting and say so", async ({
+  page,
+}) => {
+  await open(page, "?failconnect=all");
+  await connectButton(page).click();
+  await panelNamed(page, C.CONNECT)
+    .getByRole("button", { name: C.START, exact: true })
+    .click();
+  const done = panelNamed(page, C.CONNECT_STOPPED);
+  await expect(
+    done.getByRole("heading", { name: C.CONNECT_STOPPED }),
+  ).toBeFocused();
+  await expect(done.getByRole("alert")).toHaveText(C.CONNECT_HALTED);
+  await expect(done.getByText("Links made 0", { exact: true })).toBeVisible();
+  expect((await connectCalls(page)).length).toBe(3);
+  expect(await nameless(page, "vault-connect")).toEqual([]);
+});
+
+test("only one of the two panels is open; an import at work disables both openers", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await connectButton(page).click();
+  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
+  await importButton(page).click();
+  await expect(panelNamed(page, T.IMPORT)).toBeVisible();
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
+  await expect(importButton(page)).toHaveAttribute("aria-expanded", "true");
+  await connectButton(page).click();
+  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
+  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
+  await expect(importButton(page)).toHaveAttribute("aria-expanded", "false");
+
+  // An import at work: the connect opener does nothing either.
+  await importButton(page).click();
+  await page
+    .getByLabel(T.FOLDER_INPUT)
+    .setInputFiles(folder("Thirty", many(30)));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  const running = panelNamed(page, T.RUNNING);
+  await expect(running).toBeVisible();
+  for (const opener of [connectButton(page), importButton(page)]) {
+    await expect(opener).toHaveAttribute("aria-disabled", "true");
+    await opener.evaluate((el: HTMLElement) => el.click());
+  }
+  await expect(running).toBeVisible();
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+});
+
+test("opening another workspace closes a connect panel that is not running", async ({
+  page,
+}) => {
+  await open(page);
+  await connectButton(page).click();
+  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Workspaces" })
+    .getByRole("link", { name: "Operations" })
+    .click();
+  await expect(page).toHaveURL(/\?ws=/);
+  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
+  await connectButton(page).click();
+  await expect(
+    panelNamed(page, C.CONNECT).getByText("Operations", { exact: true }),
+  ).toBeVisible();
+});
+
+test("at 390 px both openers and the connect panel stay inside the window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await open(page);
+  for (const opener of [importButton(page), connectButton(page)]) {
+    await opener.scrollIntoViewIfNeeded();
+    expect(await opener.evaluate(inView)).toBe(true);
+  }
+  await connectButton(page).click();
+  const ready = panelNamed(page, C.CONNECT);
+  const start = ready.getByRole("button", { name: C.START, exact: true });
+  await start.scrollIntoViewIfNeeded();
+  expect(await start.evaluate(inView)).toBe(true);
+  const box = (await ready.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
+  expect((await scrolls(page)).across).toBe(false);
 });

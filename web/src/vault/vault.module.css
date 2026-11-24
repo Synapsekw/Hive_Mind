@@ -1198,7 +1198,12 @@
 /* ---- Import a folder ----
    The button sits before the filter; the panel is a reset popover in the card's flow, under
    the tabs, like the delete question. It scrolls inside itself when its lists are long. */
-.importOpen {
+/* The buttons that open a panel under the bar: side by side, wrapping in a narrow window. */
+.openers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
   margin-left: auto;
 }
 

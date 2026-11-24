@@ -6,6 +6,7 @@ import { DevVault } from "./DevVault";
 //   ?fail=1   every write is refused
 //   ?slow=1   deleting a note or ending a link takes over a second; an import batch most of one
 //   ?failbatch=2    the import's second batch is refused (any number, or "all")
+//   ?failconnect=2  the second step of connecting wiki links is refused (any number, or "all")
 //   ?taken=1  a new workspace is refused: the name is in use
 //   ?limit=1  a new workspace is refused: the person has 20 already
 // A fixed clock keeps every render, and so every test and screenshot, the same.
@@ -40,6 +41,7 @@ export default async function DevVaultPage({
       slow={one(q.slow) === "1"}
       importFlags={{
         failbatch: one(q.failbatch) ?? null,
+        failconnect: one(q.failconnect) ?? null,
         taken: one(q.taken) === "1",
         limit: one(q.limit) === "1",
       }}
