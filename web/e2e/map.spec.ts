@@ -634,7 +634,7 @@ test("a fresh note is drawn in the top colour of the theme's ramp", async ({
   }, p);
   // The dot is crisp, so allow only rounding off the exact ramp colour.
   for (let i = 0; i < 3; i++)
-    expect(Math.abs(px[i]! - fresh[i]!)).toBeLessThanOrEqual(24);
+    expect(Math.abs(px[i]! - fresh[i]!)).toBeLessThanOrEqual(4);
 });
 
 test('"Arrange by" is visible in Rings and absent in Timeline and Orbit', async ({
