@@ -1,6 +1,10 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
 import { fixtureGallery, fixtureMore } from "../src/gallery/fixture";
-import { tabCounts, viewable, visibleFiles } from "../src/gallery/select";
+import {
+  tabCounts,
+  viewableV1 as viewable,
+  visibleFiles,
+} from "../src/gallery/filters";
 import { metaLine, sharingText } from "../src/gallery/text";
 import type { GalleryFile } from "../src/gallery/types";
 import { setLook } from "./look";
@@ -489,6 +493,8 @@ test("a file attached to a readable note links to it in the vault", async ({
   await expect(
     viewer(page).getByRole("link", { name: "Open note in vault" }),
   ).toHaveAttribute("href", `/vault?note=${PHOTO.note!.id}`);
+  // Gallery v2: replaced in Task 8 (contract-signed.pdf joined the fixture: one more stop)
+  await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");

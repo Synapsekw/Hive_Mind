@@ -8,9 +8,9 @@
 import { fixtureMore } from "../../../gallery/fixture";
 import { Gallery } from "../../../gallery/Gallery";
 import type {
-  GalleryActions,
   GalleryData,
   GalleryFile,
+  LegacyActions,
 } from "../../../gallery/types";
 
 declare global {
@@ -92,7 +92,8 @@ export function DevGallery({
   const find = (id: string): GalleryFile | undefined =>
     [...data.files, ...fixtureMore(now).files].find((f) => f.id === id);
 
-  const actions: GalleryActions = {
+  // Gallery v2: replaced in Task 8 (stand-ins for the v2 actions arrive with the new screen)
+  const actions: LegacyActions = {
     openFile: async (id) => {
       record("openFile", [id]);
       const file = find(id);

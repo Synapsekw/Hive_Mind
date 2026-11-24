@@ -9,7 +9,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { longDate } from "../vault/format";
 import { kindLabel, PDF_VIEW_MAX } from "./kind";
 import { sharingText, sizeText } from "./text";
-import type { GalleryActions, GalleryFile } from "./types";
+import type { GalleryFile, LegacyActions } from "./types";
 import s from "./gallery.module.css";
 
 /** The dot beside the sharing line: hollow, filled or half, so the words never stand alone. */
@@ -24,7 +24,7 @@ export function SharingMark({ file }: { file: GalleryFile }) {
  * download disposition, so the page stays where it is. Answers false when there is no link.
  */
 export function useDownload(
-  downloadFile: GalleryActions["downloadFile"],
+  downloadFile: LegacyActions["downloadFile"],
   id: string,
 ): () => Promise<boolean> {
   const busy = useRef(false);
@@ -51,7 +51,7 @@ export function Actions({
   stacked = false,
 }: {
   file: GalleryFile;
-  actions: GalleryActions;
+  actions: LegacyActions;
   /** The server removed the file: take it out of the list. */
   onDeleted: (id: string) => void;
   /** One control per line, for the narrow popover. */
@@ -190,7 +190,7 @@ export function Details({
   onDeleted,
 }: {
   file: GalleryFile;
-  actions: GalleryActions;
+  actions: LegacyActions;
   /** `back` says whether the focus returns to the card (Escape, the close button). */
   onClose: (back: boolean) => void;
   onDeleted: (id: string) => void;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { metaLine, sharingText, sizeText } from "./text";
+import { metaLine, sharingText, sizeText, whoCanRead } from "./text";
 import type { GalleryFile } from "./types";
 
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
@@ -12,10 +12,14 @@ function file(over: Partial<GalleryFile> = {}): GalleryFile {
     size: 1258291,
     created_at: "2026-11-03T09:00:00.000Z",
     owner: "Danijel",
+    owner_id: "m-me",
     mine: true,
     note: null,
     sharing: "private",
     thumb: null,
+    session_id: null,
+    refs: [],
+    folders: [],
     ...over,
   };
 }
@@ -101,5 +105,29 @@ describe("metaLine", () => {
     expect(
       metaLine(file({ kind: "other", name: "LICENSE", size: 512 }), NOW),
     ).toBe("FILE · 512 B · 3 Nov");
+  });
+});
+
+describe("whoCanRead", () => {
+  const note = { id: "n1", title: "Harbour proposal" };
+  it("names the owner for a file shared with the caller", () => {
+    expect(whoCanRead(file({ mine: false, owner: "Ahmed" }))).toBe(
+      "Shared with you by Ahmed.",
+    );
+  });
+  it("says only you when there is no home note", () => {
+    expect(whoCanRead(file({ note: null }))).toBe(
+      "Only you. It has no home note.",
+    );
+  });
+  it("follows a shared note", () => {
+    expect(whoCanRead(file({ note, sharing: "through-note" }))).toBe(
+      "Whoever can read “Harbour proposal”.",
+    );
+  });
+  it("follows a private note", () => {
+    expect(whoCanRead(file({ note, sharing: "private" }))).toBe(
+      "Only you, for now: it follows “Harbour proposal”, which is private.",
+    );
   });
 });

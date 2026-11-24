@@ -12,7 +12,7 @@ import { Actions, Chevron, Cross, SharingMark, useDownload } from "./Details";
 import { Sheet } from "./FileCard";
 import { PDF_VIEW_MAX } from "./kind";
 import { metaLine, sharingText } from "./text";
-import type { GalleryActions, GalleryFile } from "./types";
+import type { GalleryFile, LegacyActions } from "./types";
 import s from "./gallery.module.css";
 
 const PDF = "application/pdf";
@@ -60,7 +60,7 @@ function Stage({
   actions,
 }: {
   file: GalleryFile;
-  actions: GalleryActions;
+  actions: LegacyActions;
 }) {
   const [view, setView] = useState<View>({ phase: "opening" });
   const [failed, setFailed] = useState(false);
@@ -75,7 +75,7 @@ function Stage({
     let made: string | null = null;
     const abort = new AbortController();
     (async () => {
-      let link: Awaited<ReturnType<GalleryActions["openFile"]>> = null;
+      let link: Awaited<ReturnType<LegacyActions["openFile"]>> = null;
       try {
         link = await openFile.current(file.id);
       } catch {
@@ -163,7 +163,7 @@ export function Viewer({
   position: number;
   total: number;
   now: number;
-  actions: GalleryActions;
+  actions: LegacyActions;
   onMove: (by: -1 | 1) => void;
   onClose: () => void;
   onDeleted: (id: string) => void;

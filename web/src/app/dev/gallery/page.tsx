@@ -20,7 +20,9 @@ export default async function DevGalleryPage({
   if (process.env.NODE_ENV === "production") notFound();
   const q = await searchParams;
   let data =
-    one(q.empty) === "1" ? { files: [], next: null } : fixtureGallery(NOW);
+    one(q.empty) === "1"
+      ? { files: [], sessions: [], folders: [], members: [], next: null }
+      : fixtureGallery(NOW);
   if (one(q.stale) === "1")
     data = {
       ...data,

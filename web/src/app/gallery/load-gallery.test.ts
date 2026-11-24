@@ -203,7 +203,7 @@ describe("loadGallery: states", () => {
     const t = stub(world());
     expect(await loadGallery(t.db)).toEqual({
       state: "ok",
-      data: { files: [], next: null },
+      data: { files: [], sessions: [], folders: [], members: [], next: null },
     });
     expect(table(t, "notes")).toHaveLength(0);
     expect(t.createSignedUrls).not.toHaveBeenCalled();
@@ -300,10 +300,14 @@ describe("loadGallery: a file", () => {
       size: 1001,
       created_at: file(1).created_at,
       owner: "Danijel",
+      owner_id: ME, // Gallery v2: replaced in Task 6
       mine: true,
       note: null,
       sharing: "private",
       thumb: null,
+      session_id: null,
+      refs: [],
+      folders: [],
     });
     expect(data.files[1]).toMatchObject({ owner: "Ahmed", mine: false });
     expect(data.files[2]).toMatchObject({ owner: "", mine: false });
@@ -339,12 +343,16 @@ describe("loadGallery: a file", () => {
       expect(Object.keys(f).sort()).toEqual(
         [
           "created_at",
+          "folders",
           "id",
           "kind",
           "mine",
           "name",
           "note",
           "owner",
+          "owner_id",
+          "refs",
+          "session_id",
           "sharing",
           "size",
           "thumb",

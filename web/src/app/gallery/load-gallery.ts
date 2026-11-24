@@ -81,10 +81,15 @@ export function toFile(r: Row, ctx: Context): GalleryFile {
       typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 0,
     created_at: text(r.created_at),
     owner: ctx.names.get(owner) ?? "",
+    owner_id: owner, // Gallery v2: replaced in Task 6
     mine,
     note: found ? { id: noteId, title: found.title } : null,
     sharing: !mine ? "shared-with-me" : shared ? "through-note" : "private",
     thumb: (hasThumb(r) && ctx.thumbs.get(text(r.storage_path))) || null,
+    // Gallery v2: replaced in Task 6 (sessions, references and folders are read there)
+    session_id: null,
+    refs: [],
+    folders: [],
   };
 }
 
@@ -205,6 +210,10 @@ async function page(db: Db, cursor: Cursor | null): Promise<GalleryLoad> {
     state: "ok",
     data: {
       files: shown.map((r) => toFile(r, { mine, names, notes, thumbs })),
+      // Gallery v2: replaced in Task 6
+      sessions: [],
+      folders: [],
+      members: [],
       next:
         all.length > PAGE && last
           ? { created_at: text(last.created_at), id: text(last.id) }

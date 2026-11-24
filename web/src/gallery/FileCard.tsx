@@ -5,7 +5,7 @@
 import { useState, type ReactNode } from "react";
 import { kindLabel } from "./kind";
 import { SharingMark } from "./Details";
-import { viewable } from "./select";
+import { viewableV1 as viewable } from "./filters";
 import { metaLine, sharingText } from "./text";
 import type { GalleryFile } from "./types";
 import s from "./gallery.module.css";

@@ -10,8 +10,14 @@ import { useSlidingPill } from "../shell/useSlidingPill";
 import pillCss from "../shell/SlidingPill.module.css";
 import { Details } from "./Details";
 import { FileCard } from "./FileCard";
-import { defaultTab, tabCounts, viewable, visibleFiles } from "./select";
-import type { GalleryActions, GalleryData, Tab } from "./types";
+import {
+  defaultTab,
+  tabCounts,
+  viewableV1 as viewable,
+  visibleFiles,
+  type Tab,
+} from "./filters";
+import type { GalleryData, LegacyActions } from "./types";
 import { Viewer } from "./Viewer";
 import s from "./gallery.module.css";
 
@@ -32,7 +38,7 @@ export function Gallery({
 }: {
   data: GalleryData;
   now: number;
-  actions: GalleryActions;
+  actions: LegacyActions;
   /** How much waits in the inbox, for the rail. */
   inbox?: number;
 }) {
@@ -102,7 +108,7 @@ export function Gallery({
     if (!next || loading) return;
     setLoading(true);
     setError(null);
-    let page: Awaited<ReturnType<GalleryActions["loadMore"]>> = null;
+    let page: Awaited<ReturnType<LegacyActions["loadMore"]>> = null;
     try {
       page = await actions.loadMore(next);
     } catch {

@@ -46,3 +46,12 @@ export function metaLine(f: GalleryFile, now: number): string {
     .filter((part) => part !== "")
     .join(" · ");
 }
+
+/** The panel's sentence on who can read a file. */
+export function whoCanRead(f: GalleryFile): string {
+  if (!f.mine) return `Shared with you by ${f.owner}.`;
+  if (!f.note) return "Only you. It has no home note.";
+  return f.sharing === "through-note"
+    ? `Whoever can read “${f.note.title}”.`
+    : `Only you, for now: it follows “${f.note.title}”, which is private.`;
+}
