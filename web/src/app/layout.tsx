@@ -8,7 +8,7 @@ import { FoldProvider } from "../shell/FoldProvider";
 import { HiveActionsProvider } from "../shell/HiveActions";
 import { LookProvider } from "../shell/LookProvider";
 import { FOLD_COOKIE, parseFold } from "../shell/fold";
-import { LOOK_COOKIE, parseLook } from "../theme/look";
+import { LOOK_COOKIE, parseLook, schemeOf } from "../theme/look";
 import { loadAccount, type Account } from "./account";
 import { cancelHiveDeletion, createHive, switchHive } from "./hives/actions";
 import "./globals.css";
@@ -56,9 +56,7 @@ export default async function RootLayout({
       lang="en"
       className={`${inter.variable} ${mono.variable}`}
       data-theme={look.theme}
-      data-mode={look.mode}
-      data-reach={look.reach}
-      data-dots={look.dots}
+      data-mode={schemeOf(look.theme)}
       data-rail={fold.rail}
       data-panel={fold.panel}
     >

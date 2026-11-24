@@ -1,6 +1,6 @@
 "use client";
 
-// Holds the chosen look. The server renders the four attributes on <html> from the cookie;
+// Holds the chosen look. The server renders the theme attributes on <html> from the cookie;
 // a change here sets them in place and rewrites the cookie. No request, no navigation: the
 // generated stylesheet already carries every theme.
 import {
@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatLook, type Look } from "../theme/look";
+import { formatLook, schemeOf, type Look } from "../theme/look";
 import { lookCookie } from "./cookie";
 
 type LookApi = { look: Look; setLook(patch: Partial<Look>): void };
@@ -22,9 +22,8 @@ const LookContext = createContext<LookApi | null>(null);
 function paint(look: Look) {
   const d = document.documentElement.dataset;
   d.theme = look.theme;
-  d.mode = look.mode;
-  d.reach = look.reach;
-  d.dots = look.dots;
+  // Each theme is dark or light by itself; the attribute keeps `[data-mode]` selectors working.
+  d.mode = schemeOf(look.theme);
 }
 
 function apply(look: Look) {
@@ -64,7 +63,7 @@ export function LookProvider({
     latest.current = initial;
     paint(initial);
     set(initial);
-    // `key` stands for `initial`'s four values; a new object with the same look is no change.
+    // `key` stands for `initial`'s value; a new object with the same look is no change.
   }, [key]);
   const api = useMemo(() => ({ look, setLook }), [look, setLook]);
   return <LookContext.Provider value={api}>{children}</LookContext.Provider>;
