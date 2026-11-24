@@ -1,12 +1,28 @@
 import {
   expect,
   test,
+  type BrowserContext,
   type Locator,
   type Page,
   type Request,
 } from "@playwright/test";
 import { fixturePayload, HOSTILE_TITLE } from "../src/map/fixture";
 import { setLook } from "./look";
+
+/**
+ * Folds both sides, so the stage is wide enough for the filter bar to show its chips: with the
+ * rail and panel open, the bar's cap leaves room for one or two, and the rest give way to "+N".
+ */
+async function roomForChips(context: BrowserContext) {
+  await context.addCookies([
+    {
+      name: "hive-fold",
+      value: "shut.shut",
+      url: "http://localhost:3100",
+      sameSite: "Lax",
+    },
+  ]);
+}
 
 const VIEWS = ["Rings", "Timeline", "Orbit"];
 
@@ -62,9 +78,43 @@ const arrangeGroup = (page: Page) =>
 const arrangeButton = (page: Page, name: string) =>
   arrangeGroup(page).getByRole("button", { name, exact: true });
 
-/** The dock's list of groups; its name follows the arrangement (Folders, Clusters, Months). */
+/** The filter bar's open list; its name follows the arrangement (Folders, Clusters, Months, Topics). */
 const groups = (page: Page, name = "Folders") =>
   page.getByRole("group", { name, exact: true });
+
+/** A filter bar list's button: its name may carry a ", N chosen" tail. */
+const listButton = (page: Page, name: string) =>
+  page.getByRole("button", { name: new RegExp(`^${name}(\\s|,|$)`) });
+
+/** Opens a filter list and returns its group. */
+async function openList(page: Page, name: string) {
+  const button = listButton(page, name);
+  if ((await button.getAttribute("aria-expanded")) !== "true")
+    await button.click();
+  const list = groups(page, name);
+  await expect(list).toBeVisible();
+  return list;
+}
+
+const row = (list: Locator, name: string | RegExp) =>
+  list.getByRole("checkbox", { name });
+
+const countText = (page: Page) =>
+  page.getByRole("status").filter({ hasText: /shown$/ });
+
+/** The notes and files that are lit, counted from the hidden list. */
+const litItems = (page: Page) =>
+  page.locator(
+    '[data-map-dot][data-lit]:is([data-kind="note"], [data-kind="file"])',
+  );
+
+/** The topic number of each lit note or file, as a sorted set. */
+async function litTopics(page: Page): Promise<string[]> {
+  const t = await litItems(page).evaluateAll((els) => [
+    ...new Set(els.map((e) => e.getAttribute("data-topic") ?? "")),
+  ]);
+  return t.sort();
+}
 
 /** Every dot's position as one string, to tell whether anything moved. */
 const positions = (page: Page) =>
@@ -183,7 +233,7 @@ test("rings at rest names no ring and has no At the hive panel", async ({
   await settle(page);
   await expect(page.getByLabel("At the hive")).toHaveCount(0);
   await expect(page.getByText("At the hive")).toHaveCount(0);
-  // The map panel carries no "Agents" text of its own (the dock's kind entry is the one exception).
+  // The map panel carries no "Agents" text of its own (the filter bar's Agents row is the one exception).
   const stray = await page.evaluate(() =>
     [...document.querySelectorAll("main *")]
       .filter(
@@ -300,10 +350,10 @@ test("the three views switch in the browser without a request", async ({
       );
   }
   await viewButton(page, "Rings").click();
-  const topics = groups(page);
-  await topics.getByRole("button", { name: "DMT" }).click();
-  await topics.getByRole("button", { name: "ADNOC" }).click();
-  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  const topics = await openList(page, "Folders");
+  await row(topics, "DMT").click();
+  await row(topics, "ADNOC").click();
+  await row(await openList(page, "Kind"), "Notes").click();
   await page.getByRole("button", { name: "Labels", exact: true }).click();
   await page.waitForTimeout(500);
 
@@ -314,20 +364,6 @@ test("the three views switch in the browser without a request", async ({
       ["document", "fetch", "xhr"].includes(r.resourceType()),
   );
   expect(bad.map((r) => `${r.resourceType()} ${r.url()}`)).toEqual([]);
-});
-
-test("a topic chip leaves its dots lit and dims the rest", async ({ page }) => {
-  await open(page);
-  await page
-    .getByRole("group", { name: "Folders" })
-    .getByRole("button", { name: "DMT" })
-    .click();
-  const dmt = page.locator('[data-map-dot][data-kind="note"][data-topic="0"]');
-  const adnoc = page.locator(
-    '[data-map-dot][data-kind="note"][data-topic="1"]',
-  );
-  await expect(dmt.first()).toHaveAttribute("data-lit", "");
-  await expect(adnoc.first()).not.toHaveAttribute("data-lit");
 });
 
 test("a locked dot shows only that it is private", async ({ page }) => {
@@ -564,31 +600,6 @@ for (const look of [undefined, "aurora.light.vivid.classic"])
     });
   }
 
-test("hovering a dock topic previews it and a click pins it", async ({
-  page,
-}) => {
-  await open(page);
-  await viewButton(page, "Rings").click();
-  const dmt = page
-    .getByRole("group", { name: "Folders" })
-    .getByRole("button", { name: /^DMT/ });
-  await dmt.hover();
-  await expect(page.locator("[data-map-canvas]")).toHaveAttribute(
-    "data-preview",
-    "topic:0",
-  );
-  await dmt.click();
-  await expect(dmt).toHaveAttribute("aria-pressed", "true");
-  await page.mouse.move(5, 5);
-  await expect(page.locator("[data-map-canvas]")).toHaveAttribute(
-    "data-preview",
-    "",
-  );
-  await expect(
-    page.locator('[data-map-dot][data-kind="note"][data-topic="1"]').first(),
-  ).not.toHaveAttribute("data-lit");
-});
-
 test("the side panel shows today, the 14-day line and what needs you", async ({
   page,
 }) => {
@@ -651,19 +662,15 @@ test('"Arrange by" is visible in Rings and absent in Timeline and Orbit', async 
     );
     await expect(arrangeGroup(page)).toHaveCount(0);
     // Timeline and Orbit keep the plain "Topics" heading, and the hubs' kind entry says so too.
-    await expect(groups(page, "Topics")).toBeVisible();
-    await expect(
-      page
-        .getByRole("group", { name: "Kinds" })
-        .getByRole("button", { name: "Topics", exact: true }),
-    ).toBeAttached();
+    await expect(listButton(page, "Topics")).toBeVisible();
+    await expect(listButton(page, "Folders")).toHaveCount(0);
+    const kinds = await openList(page, "Kind");
+    await expect(row(kinds, "Topics")).toBeVisible();
+    await listButton(page, "Kind").click();
   }
   await viewButton(page, "Rings").click();
-  await expect(
-    page
-      .getByRole("group", { name: "Kinds" })
-      .getByRole("button", { name: "Groups", exact: true }),
-  ).toBeAttached();
+  const kinds = await openList(page, "Kind");
+  await expect(row(kinds, "Groups")).toBeVisible();
 });
 
 test("choosing Time regroups by month, moves the dots and sends no request", async ({
@@ -680,16 +687,18 @@ test("choosing Time regroups by month, moves the dots and sends no request", asy
     "aria-pressed",
     "true",
   );
-  await expect(groups(page, "Months")).toBeVisible();
-  await expect(groups(page, "Folders")).toHaveCount(0);
-  await expect(groups(page, "Months").getByRole("button").first()).toHaveText(
+  await expect(listButton(page, "Months")).toBeVisible();
+  await expect(listButton(page, "Folders")).toHaveCount(0);
+  const months = await openList(page, "Months");
+  await expect(months.getByRole("checkbox").first()).toContainText(
     /^Last 2 weeks/,
   );
+  await listButton(page, "Months").click();
   await settle(page);
   expect(await positions(page)).not.toEqual(before);
 
   await arrangeButton(page, "Links").click();
-  await expect(groups(page, "Clusters")).toBeVisible();
+  await expect(listButton(page, "Clusters")).toBeVisible();
   await settle(page);
   await page.waitForTimeout(300);
 
@@ -704,18 +713,18 @@ test("choosing Time regroups by month, moves the dots and sends no request", asy
 
 test("choosing Links clears a pinned group filter", async ({ page }) => {
   await open(page);
-  const dmt = groups(page).getByRole("button", { name: /^DMT/ });
+  const dmt = row(await openList(page, "Folders"), /^DMT/);
   await dmt.click();
-  await expect(dmt).toHaveAttribute("aria-pressed", "true");
+  await expect(dmt).toHaveAttribute("aria-checked", "true");
   await expect(
     page.locator("[data-map-dot]:not([data-lit])").first(),
   ).toBeAttached();
 
   await arrangeButton(page, "Links").click();
-  await expect(groups(page, "Clusters")).toBeVisible();
-  await expect(
-    groups(page, "Clusters").locator('button[aria-pressed="true"]'),
-  ).toHaveCount(0);
+  await expect(listButton(page, "Clusters")).toBeVisible();
+  // The old arrangement's choice is gone: no chip, everything lit.
+  await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0);
+  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
   await expect(page.locator("[data-map-dot]:not([data-lit])")).toHaveCount(0);
 });
 
@@ -728,7 +737,7 @@ test("a selected dot stays selected when the arrangement changes", async ({
     HOSTILE_TITLE,
   );
   await arrangeButton(page, "Time").click();
-  await expect(groups(page, "Months")).toBeVisible();
+  await expect(listButton(page, "Months")).toBeVisible();
   await expect(rail(page).getByRole("heading", { level: 2 })).toHaveText(
     HOSTILE_TITLE,
   );
@@ -861,9 +870,10 @@ test("a pinned group's spoke does not stay where Timeline had it", async ({
 }) => {
   await open(page);
   await settle(page);
-  const dmt = groups(page).getByRole("button", { name: /^DMT/ });
+  const dmt = row(await openList(page, "Folders"), /^DMT/);
   await dmt.click();
-  await expect(dmt).toHaveAttribute("aria-pressed", "true");
+  await expect(dmt).toHaveAttribute("aria-checked", "true");
+  await listButton(page, "Folders").click();
   await viewButton(page, "Timeline").click();
   await settle(page);
   // Where the index and the pinned group's hub sit in Timeline: the lit spoke between them
@@ -910,4 +920,279 @@ test("a pinned group's spoke does not stay where Timeline had it", async ({
     { a, b },
   );
   expect(out.filter(([, min]) => min > 8)).toEqual([]);
+});
+
+// ---- The filter bar ----
+
+test("choosing two folders lights exactly the dots of those two groups and counts them", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
+  const list = await openList(page, "Folders");
+  await row(list, "DMT").click();
+  await row(list, "ADNOC").click();
+  await expect(row(list, "DMT")).toHaveAttribute("aria-checked", "true");
+  await expect(row(list, "ADNOC")).toHaveAttribute("aria-checked", "true");
+
+  await expect.poll(() => litTopics(page)).toEqual(["0", "1"]);
+  const lit = await litItems(page).count();
+  expect(lit).toBeGreaterThan(0);
+  // Every unlit note or file belongs to some other folder.
+  const outside = await page
+    .locator(
+      '[data-map-dot]:is([data-kind="note"], [data-kind="file"]):not([data-lit])',
+    )
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-topic")));
+  expect(outside.length).toBeGreaterThan(0);
+  expect(outside.filter((t) => t === "0" || t === "1")).toEqual([]);
+  await expect(countText(page)).toHaveText(
+    new RegExp(`^${lit} of \\d+ shown$`),
+  );
+});
+
+test("adding a person narrows the count and keeps only items in the chosen folders", async ({
+  page,
+}) => {
+  await open(page);
+  const folders = await openList(page, "Folders");
+  await row(folders, "DMT").click();
+  await row(folders, "ADNOC").click();
+  await expect(countText(page)).toHaveText(/^\d+ of \d+ shown$/);
+  const before = await litItems(page).count();
+
+  const people = await openList(page, "People");
+  await row(people, /^Ahmed/).click();
+  await expect(row(people, /^Ahmed/)).toHaveAttribute("aria-checked", "true");
+  await expect.poll(() => litItems(page).count()).toBeLessThan(before);
+  const after = await litItems(page).count();
+  expect(after).toBeGreaterThan(0);
+  for (const t of await litTopics(page)) expect(["0", "1"]).toContain(t);
+  await expect(countText(page)).toHaveText(
+    new RegExp(`^${after} of \\d+ shown$`),
+  );
+});
+
+test("each choice is a chip; removing one restores its group and Clear all restores everything", async ({
+  page,
+  context,
+}) => {
+  await roomForChips(context);
+  await open(page);
+  const remove = (name: string) =>
+    page.getByRole("button", { name: `Remove ${name}`, exact: true });
+  const folders = await openList(page, "Folders");
+  await row(folders, "DMT").click();
+  await row(folders, "ADNOC").click();
+  await expect(remove("DMT")).toBeVisible();
+  await expect(remove("ADNOC")).toBeVisible();
+  await expect.poll(() => litTopics(page)).toEqual(["0", "1"]);
+
+  await remove("ADNOC").click();
+  await expect(remove("ADNOC")).toHaveCount(0);
+  await expect(remove("DMT")).toBeVisible();
+  await expect.poll(() => litTopics(page)).toEqual(["0"]);
+  await remove("DMT").click();
+  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
+  await expect(page.locator("[data-map-dot]:not([data-lit])")).toHaveCount(0);
+
+  // Clear all: a folder, a person and some search text, all gone at once.
+  const again = await openList(page, "Folders");
+  await row(again, "DMT").click();
+  await listButton(page, "Folders").click();
+  const people = await openList(page, "People");
+  await row(people, /^Sara/).click();
+  await listButton(page, "People").click();
+  await page.getByPlaceholder("Search").fill("a");
+  await expect(countText(page)).toHaveText(/^\d+ of \d+ shown$/);
+  await page.getByRole("button", { name: "Clear all", exact: true }).click();
+  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
+  await expect(page.getByPlaceholder("Search")).toHaveValue("");
+  await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Clear all" })).toHaveCount(0);
+});
+
+test("typing in Search adds a chip and its remove button clears the field", async ({
+  page,
+  context,
+}) => {
+  await roomForChips(context);
+  await open(page);
+  const search = page.getByPlaceholder("Search");
+  await search.fill("zzzqx");
+  const remove = page.getByRole("button", { name: "Remove “zzzqx”" });
+  await expect(remove).toBeVisible();
+  await expect(countText(page)).toHaveText(/^\d+ of \d+ shown$/);
+  await remove.click();
+  await expect(search).toHaveValue("");
+  await expect(remove).toHaveCount(0);
+  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
+});
+
+test("pointing at a row previews it and leaving clears it; so does focusing it", async ({
+  page,
+}) => {
+  await open(page);
+  const canvas = page.locator("[data-map-canvas]");
+  const list = await openList(page, "Folders");
+  const dmt = row(list, "DMT");
+  await dmt.hover();
+  await expect(canvas).toHaveAttribute("data-preview", "topic:0");
+  // Previewing chooses nothing.
+  await expect(dmt).toHaveAttribute("aria-checked", "false");
+  await page.mouse.move(5, 5);
+  await expect(canvas).toHaveAttribute("data-preview", "");
+
+  await dmt.focus();
+  await expect(canvas).toHaveAttribute("data-preview", "topic:0");
+  await page.keyboard.press("ArrowDown");
+  await expect(row(list, "ADNOC")).toBeFocused();
+  await expect(canvas).toHaveAttribute("data-preview", "topic:1");
+  await page.keyboard.press("Escape");
+  await expect(canvas).toHaveAttribute("data-preview", "");
+});
+
+test("Escape closes a list and returns focus to its button", async ({
+  page,
+}) => {
+  await open(page);
+  const list = await openList(page, "Kind");
+  await row(list, "Notes").focus();
+  await page.keyboard.press("Escape");
+  await expect(list).toHaveCount(0);
+  await expect(listButton(page, "Kind")).toBeFocused();
+  await expect(listButton(page, "Kind")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+});
+
+test("pressing outside a list closes it", async ({ page }) => {
+  await open(page);
+  const list = await openList(page, "People");
+  await rail(page).getByText("Today", { exact: true }).click();
+  await expect(list).toHaveCount(0);
+  await expect(listButton(page, "People")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+});
+
+test("tabbing out of a list closes it", async ({ page }) => {
+  await open(page);
+  const list = await openList(page, "Kind");
+  await list.getByRole("checkbox").last().focus();
+  await page.keyboard.press("Tab");
+  await expect(list).toHaveCount(0);
+  await expect(listButton(page, "Kind")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  // Focus went on to the next control, not back.
+  await expect(listButton(page, "People")).toBeFocused();
+});
+
+test("only one list is open at a time", async ({ page }) => {
+  await open(page);
+  await openList(page, "Kind");
+  await listButton(page, "People").click();
+  await expect(groups(page, "People")).toBeVisible();
+  await expect(groups(page, "Kind")).toHaveCount(0);
+});
+
+test("the Legend lists the shapes, and brightness only in Rings", async ({
+  page,
+}) => {
+  await open(page);
+  const legend = page.getByRole("button", { name: "Legend", exact: true });
+  await legend.click();
+  const list = groups(page, "Legend");
+  await expect(list).toBeVisible();
+  for (const text of [
+    "Note",
+    "File",
+    "Not shared with you",
+    "Group hub",
+    "Agent",
+  ])
+    await expect(list.getByText(text, { exact: true })).toBeVisible();
+  await expect(
+    list.getByText("Brighter means changed more recently"),
+  ).toBeVisible();
+  await legend.click();
+  await expect(list).toHaveCount(0);
+
+  await viewButton(page, "Timeline").click();
+  await expect(viewButton(page, "Timeline")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await legend.click();
+  await expect(list).toBeVisible();
+  await expect(list.getByText("Topic hub", { exact: true })).toBeVisible();
+  await expect(
+    list.getByText("Brighter means changed more recently"),
+  ).toHaveCount(0);
+});
+
+test("in Timeline and Orbit the group list is named Topics", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(listButton(page, "Folders")).toBeVisible();
+  for (const name of ["Timeline", "Orbit"]) {
+    await viewButton(page, name).click();
+    await expect(viewButton(page, name)).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(listButton(page, "Topics")).toBeVisible();
+    await expect(listButton(page, "Folders")).toHaveCount(0);
+  }
+});
+
+test("choosing a filter clears the selection", async ({ page }) => {
+  await open(page);
+  await pick(page, page.locator('[data-map-dot][aria-label^="<img src=x"]'));
+  await expect(rail(page).getByRole("heading", { level: 2 })).toHaveText(
+    HOSTILE_TITLE,
+  );
+  const kinds = await openList(page, "Kind");
+  await row(kinds, "Files").click();
+  await expect(page.locator('[data-map-dot][aria-pressed="true"]')).toHaveCount(
+    0,
+  );
+  await expect(rail(page).getByRole("heading", { level: 2 })).toHaveCount(0);
+});
+
+test("several choices at once: any within a list, all across lists", async ({
+  page,
+}) => {
+  await open(page);
+  const kinds = await openList(page, "Kind");
+  await row(kinds, "Notes").click();
+  const notes = await litItems(page).count();
+  await row(kinds, "Files").click();
+  await expect.poll(() => litItems(page).count()).toBeGreaterThan(notes);
+  await expect(
+    page.locator('[data-map-dot][data-lit][data-kind="hub"]'),
+  ).toHaveCount(0);
+  // A folder on top of two kinds narrows it: all lists must agree.
+  const folders = await openList(page, "Folders");
+  await row(folders, "DMT").click();
+  await expect.poll(() => litTopics(page)).toEqual(["0"]);
+});
+
+test("chips that do not fit give way to a +N chip that counts them", async ({
+  page,
+}) => {
+  await open(page);
+  const folders = await openList(page, "Folders");
+  for (const name of ["DMT", "ADNOC", "Hiring", "Emsteel"])
+    await row(folders, name).click();
+  await listButton(page, "Folders").click();
+  await expect(page.getByText(/^\+\d+ more$/)).toBeVisible();
+  // Every choice is still counted, so none is lost from view.
+  await expect(countText(page)).toHaveText(/^\d+ of \d+ shown$/);
+  await expect(listButton(page, "Folders")).toContainText("4");
 });

@@ -333,9 +333,13 @@ test("the keyboard walks the button, each hive, New hive and the form in order",
   await expect(form.getByRole("button", { name: "Create" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(form.getByRole("button", { name: "Cancel" })).toBeFocused();
-  await page.keyboard.press("Tab"); // the first destination: out of the switcher
-  await expect(rail.getByRole("link", { name: "Map" })).toBeFocused();
+  await page.keyboard.press("Tab"); // out of the switcher, to the fold button beside it
+  await expect(
+    rail.getByRole("button", { name: "Fold navigation" }),
+  ).toBeFocused();
   await expect(popover).toBeHidden();
+  await page.keyboard.press("Tab"); // then the first destination
+  await expect(rail.getByRole("link", { name: "Map" })).toBeFocused();
 });
 
 test("a person in one hive still has the button, their hive and New hive", async ({
