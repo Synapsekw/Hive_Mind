@@ -11,6 +11,7 @@
 // title or text. The answer is numbers and the next cursor, which is a path of the person's own.
 import {
   buildIndex,
+  looksLikeFile,
   resolveTarget,
   wikiTargets,
   type Indexed,
@@ -28,8 +29,12 @@ import { isUuid } from "./validate";
 
 /** The notes one step reads. */
 export const STEP_NOTES = 40;
-/** The longest cursor, in characters: the longest path an import stores. */
-export const MAX_CURSOR_CHARS = 500;
+/**
+ * The longest cursor, in characters. The cursor is a note's path, and a note written through an
+ * agent can have a longer one than the 500 characters the import stores: a cap of 500 would halt
+ * every run at that note.
+ */
+export const MAX_CURSOR_CHARS = 4000;
 /**
  * The rows asked for in one page of the index of paths, and of the links the notes already
  * have. The API may answer fewer than asked (its max-rows setting), so a short page is not
@@ -47,6 +52,13 @@ const TIER = 2;
 const SCORE = 0.8;
 /** What `links_before_insert` says of a pair that got its link since the links were read. */
 const SAYS_LINKED = "these notes already have a link";
+/** The pair index (`links_pair_idx`), which is what refuses when two runs race. */
+const UNIQUE_VIOLATION = "23505";
+/** What `zz_hive_frozen` says: no insert of this run will go in, so the run stops. */
+const SAYS_FROZEN = "this hive is being deleted";
+
+const says = (res: Res, words: string): boolean =>
+  String(res.error?.message ?? "").includes(words);
 
 const REFUSED: ConnectResult = { ok: false };
 
@@ -187,7 +199,8 @@ export async function connectBatchIn(
     for (const target of wikiTargets(body, note.row.frontmatter)) {
       const to = resolveTarget(index, note.path, target);
       if (to === null) {
-        counts.missing += 1;
+        // An image or a PDF that is no note says nothing; a note that is not there is counted.
+        if (!looksLikeFile(target)) counts.missing += 1;
         continue;
       }
       if (to === note.id) continue;
@@ -233,14 +246,20 @@ export async function connectBatchIn(
       counts.linked += chunk.length;
       continue;
     }
+    // A hive that is being deleted takes no link at all: the step is refused, so the browser
+    // ends the run after three such steps and not after a request for every pair.
+    if (says(res, SAYS_FROZEN)) return REFUSED;
     // Find the pairs the database refused; the others still go in.
     for (const link of chunk) {
       const one = (await db.from("links").insert([link])) as Res;
       if (!one.error) counts.linked += 1;
-      else if (String(one.error.message ?? "").includes(SAYS_LINKED))
+      else if (says(one, SAYS_LINKED) || one.error.code === UNIQUE_VIOLATION)
+        // The pair got its link since the links were read: by the trigger's word, or by the
+        // pair index when another run made it at the same moment.
         counts.already += 1;
       else {
         failed("connect link insert", one, true);
+        if (says(one, SAYS_FROZEN)) return REFUSED;
         counts.failed += 1;
       }
     }

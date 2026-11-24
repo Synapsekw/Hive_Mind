@@ -119,7 +119,9 @@ export function Vault({
   }
   function closeConnect() {
     setPanel(null);
-    connectOpener.current?.focus();
+    // Its opener is not there on "Shared with me", reached while a run was in flight: the
+    // import's is, so the focus never falls to the page.
+    (connectOpener.current ?? importOpener.current)?.focus();
   }
   const main = useRef<HTMLElement>(null);
   // Where the focus goes once a deleted note has left the page.

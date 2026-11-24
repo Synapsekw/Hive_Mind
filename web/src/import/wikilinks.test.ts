@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_TARGETS,
   buildIndex,
+  looksLikeFile,
   resolveTarget,
   wikiTargets,
   type Indexed,
@@ -71,13 +72,15 @@ describe("wikiTargets: what is skipped", () => {
     expect(wikiTargets("[[A\rB]]", {})).toEqual([]);
   });
 
-  it("skips an image", () => {
-    expect(wikiTargets("[[pic.png]]", {})).toEqual([]);
-  });
-
-  it("skips an embedded PDF", () => {
-    expect(wikiTargets("![[doc.pdf]]", {})).toEqual([]);
-    expect(wikiTargets("![[files/Doc.PDF#page=2]]", {})).toEqual([]);
+  it("keeps a target that looks like a file: a note may be named so", () => {
+    expect(wikiTargets("[[pic.png]]", {})).toEqual(["pic.png"]);
+    expect(wikiTargets("![[doc.pdf]]", {})).toEqual(["doc.pdf"]);
+    expect(wikiTargets("![[files/Doc.PDF#page=2]]", {})).toEqual([
+      "files/Doc.PDF",
+    ]);
+    expect(
+      wikiTargets("[[Node.js]] [[claude.ai]] [[Report 2026.Q4]]", {}),
+    ).toEqual(["Node.js", "claude.ai", "Report 2026.Q4"]);
   });
 
   it("keeps a name with dots that is not an extension", () => {
@@ -91,8 +94,52 @@ describe("wikiTargets: what is skipped", () => {
     expect(wikiTargets("[[a/B.MD]]", {})).toEqual(["a/B.MD"]);
   });
 
-  it("looks for the extension in the last part only", () => {
+  it("keeps a target with a dotted folder", () => {
     expect(wikiTargets("[[v1.png/notes]]", {})).toEqual(["v1.png/notes"]);
+  });
+});
+
+describe("looksLikeFile", () => {
+  it("says yes to an image, a PDF and any other extension", () => {
+    for (const target of [
+      "pic.png",
+      "doc.pdf",
+      "files/Doc.PDF",
+      "a/b/clip.mp4",
+      "Node.js",
+      "claude.ai",
+      "Report 2026.Q4",
+      "archive.tar.gz",
+      "data.jsonl",
+    ])
+      expect(looksLikeFile(target), target).toBe(true);
+  });
+
+  it("says no to a note's name, with .md or without", () => {
+    for (const target of ["A", "a/b", "a/b.md", "a/B.MD", "Plan v2", ""])
+      expect(looksLikeFile(target), target).toBe(false);
+  });
+
+  it("says no to dots that end in no extension", () => {
+    for (const target of [
+      "Meeting 2026.11.24",
+      "v1.2",
+      "ends with a dot.",
+      "a.toolong",
+      "e.g. this",
+      "a.b-c",
+    ])
+      expect(looksLikeFile(target), target).toBe(false);
+  });
+
+  it("looks at the last part only", () => {
+    expect(looksLikeFile("v1.png/notes")).toBe(false);
+    expect(looksLikeFile("notes/v1.png")).toBe(true);
+  });
+
+  it("never throws, whatever it is given", () => {
+    for (const v of [null, undefined, 7, {}, ["a.png"]])
+      expect(looksLikeFile(v as never)).toBe(false);
   });
 });
 

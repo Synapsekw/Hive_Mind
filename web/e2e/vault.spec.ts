@@ -1845,6 +1845,53 @@ test("after the last batch the import connects the wiki links and counts them", 
   );
 });
 
+test("Stop pressed during the last batch ends the import without connecting", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await pick(page, folder("Two", { "a.md": "[[b]]", "b.md": "B" }));
+  await importPanel(page)
+    .getByRole("button", { name: T.START, exact: true })
+    .click();
+  // The only batch is on its way: every note will have been answered when it comes back.
+  const running = panelNamed(page, T.RUNNING);
+  await expect(running.getByRole("status")).toHaveText(T.progress(0, 2));
+  await running.getByRole("button", { name: T.STOP, exact: true }).click();
+  const done = panelNamed(page, T.FINISHED);
+  await expect(done.getByText("Created 2", { exact: true })).toBeVisible();
+  await expect(panelNamed(page, C.CONNECTING)).toHaveCount(0);
+  await expect(done.getByText(/Links made/)).toHaveCount(0);
+  await expect(done.getByText(C.AFTER_IMPORT_UNFINISHED)).toHaveCount(0);
+  await expect(done.getByText(/not sent/)).toHaveCount(0);
+  expect(await connectCalls(page)).toEqual([]);
+});
+
+test("closing a connect panel whose opener is gone puts the focus on the import opener", async ({
+  page,
+}) => {
+  await open(page, "?slow=1");
+  await connectButton(page).click();
+  await panelNamed(page, C.CONNECT)
+    .getByRole("button", { name: C.START, exact: true })
+    .click();
+  const running = panelNamed(page, C.CONNECTING);
+  await expect(running).toBeVisible();
+  // Another tab while the run is in flight: the panel stays, its opener does not.
+  await page
+    .getByRole("navigation", { name: "Workspaces" })
+    .getByRole("link", { name: "Shared with me" })
+    .click();
+  await expect(page).toHaveURL(/tab=shared/);
+  await expect(connectButton(page)).toHaveCount(0);
+  const done = panelNamed(page, C.CONNECTED);
+  await expect(done.getByText("Links made 21", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await done.getByRole("button", { name: T.CLOSE, exact: true }).click();
+  await expect(done).toHaveCount(0);
+  await expect(importButton(page)).toBeFocused();
+});
+
 test("an import whose every batch was refused connects nothing", async ({
   page,
 }) => {

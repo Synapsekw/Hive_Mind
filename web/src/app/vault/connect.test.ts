@@ -57,7 +57,7 @@ function fake(
     notes?: Row[];
     links?: Row[];
     fail?: (c: Call, nth: number) => Res | undefined;
-    refuseLink?: (row: Row) => string | undefined;
+    refuseLink?: (row: Row) => string | Err | undefined;
     cap?: number;
     countless?: boolean;
   } = {},
@@ -88,7 +88,10 @@ function fake(
       const pairs = new Set(table.map((l) => pairOf(l.from_note, l.to_note)));
       for (const r of list) {
         const why = opts.refuseLink?.(r);
-        if (why) return no(why, "P0001");
+        if (why)
+          return typeof why === "string"
+            ? no(why, "P0001")
+            : no(why.message, why.code);
         const pair = pairOf(r.from_note, r.to_note);
         if (pairs.has(pair))
           return no("these notes already have a link", "P0001");
@@ -209,7 +212,7 @@ describe("connectBatchIn", () => {
       [W1, undefined],
       [W1, false],
       [W1, ""],
-      [W1, "x".repeat(501)],
+      [W1, "x".repeat(4001)],
       [W1, "a\u0000.md"],
     ];
     for (const [ws, after] of refused)
@@ -218,8 +221,9 @@ describe("connectBatchIn", () => {
       });
     expect(t.from).not.toHaveBeenCalled();
     expect(t.auth.getUser).not.toHaveBeenCalled();
-    // The longest cursor there is.
-    expect(await connectBatchIn(t.db, W1, "x".repeat(500))).toMatchObject({
+    // The longest cursor there is: longer than any path the import stores, because a note
+    // written through an agent can have one.
+    expect(await connectBatchIn(t.db, W1, "x".repeat(4000))).toMatchObject({
       ok: true,
     });
   });
@@ -779,8 +783,8 @@ describe("connectBatchIn", () => {
       expect(line.join(" ")).not.toMatch(/declined|policy|already have/);
   });
 
-  it("says failed for every pair of a hive that takes no writes", async () => {
-    quiet();
+  it("stops at once in a hive that is being deleted, without trying the pairs one by one", async () => {
+    const log = quiet();
     const t = fake({
       notes: [note("a.md", "[[b]] [[c]]"), note("b.md"), note("c.md")],
       fail: (c) =>
@@ -788,13 +792,91 @@ describe("connectBatchIn", () => {
           ? no("this hive is being deleted", "P0001")
           : undefined,
     });
+    expect(await connectBatchIn(t.db, W1, null)).toEqual({ ok: false });
+    expect(inserts(t).map((rows) => rows.length)).toEqual([2]);
+    expect(t.tables.links).toEqual([]);
+    expect(log.mock.calls).toEqual([["connect links insert failed", "P0001"]]);
+  });
+
+  it("stops at once when the hive starts being deleted between two single inserts", async () => {
+    const log = quiet();
+    const a = note("a.md", "[[b]] [[c]] [[d]]");
+    const [b, c, d] = ["b.md", "c.md", "d.md"].map((p) => note(p));
+    const t = fake({
+      notes: [a, b!, c!, d!],
+      refuseLink: (r) =>
+        r.to_note === b!.id
+          ? "new row violates row-level security policy"
+          : undefined,
+      fail: (call, nth) =>
+        kind(call) === "insert" && nth >= 3
+          ? no("this hive is being deleted", "P0001")
+          : undefined,
+    });
+    expect(await connectBatchIn(t.db, W1, null)).toEqual({ ok: false });
+    // The chunk, the pair it was refused for, and the one that met the deletion; not the last.
+    expect(inserts(t).map((rows) => rows.length)).toEqual([3, 1, 1]);
+    for (const line of log.mock.calls)
+      expect(line.join(" ")).not.toMatch(/being deleted|policy/);
+  });
+
+  it("counts a pair the pair index refuses, when two runs race, as already linked", async () => {
+    const log = quiet();
+    const a = note("a.md", "[[b]] [[c]]");
+    const [b, c] = ["b.md", "c.md"].map((p) => note(p));
+    const t = fake({
+      notes: [a, b!, c!],
+      refuseLink: (r) =>
+        r.to_note === b!.id
+          ? {
+              code: "23505",
+              message:
+                'duplicate key value violates unique constraint "links_pair_idx"',
+            }
+          : undefined,
+    });
+    expect(await connectBatchIn(t.db, W1, null)).toMatchObject({
+      ok: true,
+      linked: 1,
+      already: 1,
+      failed: 0,
+    });
+    expect(inserts(t).map((rows) => rows.length)).toEqual([2, 1, 1]);
+    // The refused chunk is logged by its code; the pair that is already linked is no failure.
+    expect(log.mock.calls).toEqual([["connect links insert failed", "23505"]]);
+  });
+
+  it("links a note whose name has a dot in it", async () => {
+    const a = note("a.md", "[[Node.js]] [[claude.ai]] [[Report 2026.Q4]]");
+    const named = ["Node.js.md", "tools/claude.ai.md", "Report 2026.Q4.md"].map(
+      (p) => note(p),
+    );
+    const t = fake({ notes: [a, ...named] });
+    expect(await connectBatchIn(t.db, W1, null)).toMatchObject({
+      ok: true,
+      linked: 3,
+      missing: 0,
+    });
+    expect(
+      inserts(t)
+        .flat()
+        .map((l) => l.to_note),
+    ).toEqual(named.map((n) => n.id));
+  });
+
+  it("neither links nor counts a file that is not a note, and counts a missing note", async () => {
+    const a = note(
+      "a.md",
+      "![[pic.png]] [[files/Doc.PDF#page=2]] [[Node.js]] [[Meeting 2026.11.24]] [[gone.md]]",
+    );
+    const t = fake({ notes: [a, note("b.md")] });
     expect(await connectBatchIn(t.db, W1, null)).toMatchObject({
       ok: true,
       linked: 0,
-      already: 0,
-      failed: 2,
+      // The meeting and `gone.md`; the three that look like files say nothing.
+      missing: 2,
     });
-    expect(t.tables.links).toEqual([]);
+    expect(inserts(t)).toEqual([]);
   });
 
   it("answers the 40th path as the cursor when 40 notes came back, and null for fewer", async () => {

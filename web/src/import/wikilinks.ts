@@ -19,6 +19,26 @@ function fold(text: string): string {
   return text.normalize("NFC").toLowerCase().replace(/\.md$/, "");
 }
 
+/**
+ * Whether a target reads as a file that is not a note (an image, a PDF): its last part has an
+ * extension that is not `.md`. "Meeting 2026.11.24" has a dot and no extension, so an extension
+ * is 1 to 5 letters or digits with a letter among them.
+ *
+ * A note may be named so too ("Node.js", "claude.ai"), which is why `wikiTargets` keeps such a
+ * target: it is looked up like any other, and this only says whether one that means no note is
+ * worth counting as a reference to a missing note. Never throws.
+ */
+export function looksLikeFile(target: string): boolean {
+  if (typeof target !== "string") return false;
+  const name = target.slice(target.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  if (dot === -1) return false;
+  const ext = name.slice(dot + 1);
+  return (
+    EXTENSION.test(ext) && /[a-z]/i.test(ext) && ext.toLowerCase() !== "md"
+  );
+}
+
 /** The target of one reference, given the text between the brackets; null when it is skipped. */
 function targetOf(inner: string): string | null {
   const cut = inner.search(/[|#]/);
@@ -27,18 +47,7 @@ function targetOf(inner: string): string | null {
   if (cut !== -1 && inner[cut] === "|" && target.endsWith("\\"))
     target = target.slice(0, -1);
   target = target.trim();
-  if (!target) return null;
-
-  // An image, a PDF: the last part has an extension that is not `.md`. "Meeting 2026.11.24" has
-  // a dot and no extension, so an extension is 1 to 5 letters or digits with a letter among them.
-  const name = target.slice(target.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
-  if (dot !== -1) {
-    const ext = name.slice(dot + 1);
-    if (EXTENSION.test(ext) && /[a-z]/i.test(ext) && ext.toLowerCase() !== "md")
-      return null;
-  }
-  return target;
+  return target || null;
 }
 
 /** One line with its inline code (`…`, ``…``) blanked out. A run of backticks that nothing on

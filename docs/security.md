@@ -897,7 +897,7 @@ signed in as the person; it adds no rule of its own.
 
 **Limits, checked on the server before any query.**
 
-- The workspace is a uuid; the cursor is null or 1 to 500 characters with no NUL.
+- The workspace is a uuid; the cursor is null or 1 to 4,000 characters with no NUL.
 - 40 notes a step; at most 2,000 distinct references a note; links are inserted 200 at a time.
 - The workspace's index of paths and the links of the step's notes are read in pages, at most
   20,000 rows each; a workspace over that is refused.
@@ -909,7 +909,7 @@ signed in as the person; it adds no rule of its own.
   makes the link again while the text still says `[[…]]`.
 - **A reference removed from the text does not remove its link.**
 - **Notes an agent writes later are not scanned by themselves.**
-- **A path over 500 characters** (not possible through the import) stops a run that reaches it
-  as the 40th note of a step.
+- **A path over 4,000 characters** (not possible through the import, which stores at most 500)
+  stops a run that reaches it as the 40th note of a step.
 - Any member can run it on their own workspaces as often as they like; each run is bounded as
   above and writes nothing that is already there.

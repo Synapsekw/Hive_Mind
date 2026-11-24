@@ -26,9 +26,12 @@ Read from a note's text and from every text value in its fields (frontmatter), a
 
 - `[[Target]]`, `[[Target|shown]]`, `[[Target#heading]]`, `[[Target#^block]]`, `![[Target]]`.
   The target is the text before the first `|` or `#`, trimmed.
-- Skipped: an empty target (`[[#heading]]`), a target with a line break, a target whose last part
-  has an extension other than `.md` (an image, a PDF), and anything inside a fenced code block
-  (``` or ~~~) or inline code in the text. Fields are not markdown, so nothing is skipped there.
+- Skipped: an empty target (`[[#heading]]`), a target with a line break, and anything inside a
+  fenced code block (``` or ~~~) or inline code in the text. Fields are not markdown, so nothing
+  is skipped there.
+- A target that looks like a file (`[[pic.png]]`, `[[doc.pdf]]`) is tried like any other, since a
+  note can be called `Node.js`. When no note matches, it is left out without being counted as
+  "pointing at no note" (changed in review, 2026-11-24).
 - Ordinary markdown links `[text](note.md)` are out of scope.
 - At most 2,000 distinct targets are taken from one note; the rest are ignored.
 

@@ -276,10 +276,12 @@ export function Import({
     }
 
     // Every note was answered and the workspace holds some of them: connect its wiki links,
-    // over the whole workspace, so links to notes that were already there are found too.
+    // over the whole workspace, so links to notes that were already there are found too. Stop
+    // pressed during the last batch means stop: the notes are all in, and nothing is connected.
     let links: { tally: ConnectTally; end: ConnectEnd } | null = null;
     if (
       end === "finished" &&
+      !stop.current &&
       alive.current &&
       tally.created + tally.updated + tally.unchanged > 0
     ) {
