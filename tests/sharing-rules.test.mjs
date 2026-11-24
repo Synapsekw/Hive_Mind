@@ -11500,3 +11500,55 @@ test("vault_index answers nobody but the workspace's owner, as a person", async 
   // The public cannot call it at all.
   await assert.rejects(vaultIndex(null, f.workspace), /permission denied/);
 });
+
+test("erasing a hive takes its gallery folders and their memberships with it", async () => {
+  const h = await hdHive();
+  const file = (
+    await db.query(`select id from public.files where hive_id = $1 limit 1`, [
+      h.id,
+    ])
+  ).rows[0].id;
+  for (const who of ["owner", "member"]) {
+    const top = (
+      await as(
+        h[who],
+        `insert into public.gallery_folders (member_id, name) values ($1, 'Gone') returning id`,
+        [h[`${who}Member`]],
+      )
+    )[0].id;
+    const sub = (
+      await as(
+        h[who],
+        `insert into public.gallery_folders (member_id, parent_id, name) values ($1, $2, 'Gone too') returning id`,
+        [h[`${who}Member`], top],
+      )
+    )[0].id;
+    if (who === "owner")
+      await as(
+        h[who],
+        `insert into public.gallery_folder_files (folder_id, file_id) values ($1, $2)`,
+        [sub, file],
+      );
+  }
+  const left = async () =>
+    (
+      await db.query(
+        `select (select count(*) from public.gallery_folders g
+                  where g.member_id in (select id from public.members where hive_id = $1))::int as folders,
+                (select count(*) from public.gallery_folder_files)::int as memberships`,
+        [h.id],
+      )
+    ).rows[0];
+  await db.exec("reset role");
+  assert.deepEqual(await left(), { folders: 4, memberships: 1 });
+  await requestDeletion(h.owner, h.id, h.name);
+  await hdMakeDue(h.id);
+  await hdBegin(h.id);
+  await hdRemoveObjects(h.id);
+  let done = false;
+  for (let i = 0; i < 50 && !done; i++) done = await hdStep(h.id);
+  assert.equal(done, true);
+  await db.exec("reset role");
+  assert.deepEqual(await left(), { folders: 0, memberships: 0 });
+  assert.notEqual((await hdRecord(h.id)).purged_at, null);
+});

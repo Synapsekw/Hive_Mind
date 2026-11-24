@@ -43,6 +43,9 @@ begin
       raise exception 'this hive is being deleted';
     end if;
   end if;
+  if new.parent_id = new.id then
+    raise exception 'folders go two levels deep at most';
+  end if;
   if new.parent_id is not null then
     select * into p from public.gallery_folders where id = new.parent_id;
     if not found or p.member_id <> new.member_id then

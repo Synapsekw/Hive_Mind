@@ -274,3 +274,15 @@ test("a hive that is being deleted takes no new folders or memberships", async (
     /being deleted/,
   );
 });
+
+test("a folder cannot be its own parent", async () => {
+  const top = await folder(dani(), h.members.dani, "Self parent");
+  await assert.rejects(
+    h.as(
+      dani(),
+      `update public.gallery_folders set parent_id = id where id = $1`,
+      [top],
+    ),
+    /two levels/,
+  );
+});
