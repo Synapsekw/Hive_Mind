@@ -77,10 +77,19 @@ export type Invited =
 export type Sent =
   { ok: true } | { ok: false; reason: "wait" | "limit" | "failed" };
 
+/** What deleting the hive would erase: how many members, notes and files it holds. */
+export type Deletion = { members: number; notes: number; files: number };
+/** `name`: what was typed is not the hive's name. */
+export type Requested = { ok: true } | { ok: false; reason: "name" | "failed" };
+
 export type SettingsActions = {
   createAgent(input: NewAgent): Promise<Created>;
   revokeAgent(id: string): Promise<Result>;
   inviteMember(email: string, name: string): Promise<Invited>;
   revokeInvitation(id: string): Promise<Result>;
   resendInvitation(id: string): Promise<Sent>;
+  /** Marks this hive for deletion; `typedName` is what the person typed as its name. */
+  requestHiveDeletion(typedName: string): Promise<Requested>;
+  /** Takes this hive's deletion back. */
+  cancelHiveDeletion(): Promise<Result>;
 };

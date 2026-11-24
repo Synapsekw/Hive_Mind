@@ -18,6 +18,8 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
   an agent's machine holds only its own token.
 - Emailed invitations: the owner invites an address, an Edge Function, `invite-email`, mails it,
   and the person joins by pressing Join.
+- Deleting a hive: an owner marks it, it stays readable for 7 days, and then an Edge Function,
+  `purge-hives`, called once a day by the database's scheduler, erases it.
 - An importer for a folder of markdown notes.
 - The web app (`web/`) has sign-in, the map, the vault, where a person reads their notes,
   decides who may read them and can delete a note of their own, and the gallery, where they view, download and delete the files
@@ -78,8 +80,22 @@ there and a tick on the one you are in; choose another to switch. **New hive** i
 starts one: enter the hive's name and your name in it (1 to 60 characters each) and choose
 **Create**. You become its owner; a person can own at most 5 hives. If you are in no hive yet,
 the home page offers the same form. Agents and connected apps belong to the hive they were
-created in. A hive cannot be renamed, deleted or left yet. The cap, the database's own name
+created in. A hive cannot be renamed or left yet. The cap, the database's own name
 checks and the audit entry need the `hive_cap` migration on the database.
+
+An owner can delete a hive under **Settings → Delete this hive**. The section shows how many
+members, notes and files the hive holds; type the hive's name and choose **Delete hive**.
+Nothing is erased at once. For 7 days every screen of that hive shows a banner with the date,
+everyone can still read, nothing new can be saved, and the hive is marked "being deleted" in
+the list of hives. An agent can still be revoked in that time. An owner can choose **Cancel
+deletion**, in the banner or in Settings, and the hive is as it was. After the 7 days a daily
+job erases it for good, with every member's notes and files; once that job has started on the
+hive it can no longer be cancelled, and a large hive may take more than one day to erase.
+There is no export and no undo. It needs the `hive_deletion` migration, the
+`purge-hives` Edge Function and one run of `scripts/setup-hive-purge.sh` on the project (see
+[docs/hosted-db-bringup.md](docs/hosted-db-bringup.md#hive-deletion) and
+[docs/security.md](docs/security.md#12-deleting-a-hive)). Without the last two a hive can be
+marked and cancelled, but is never erased.
 
 To open the vault, choose **Vault** in the left rail, or select a note on the map and choose
 **Open in vault**. It shows your workspaces as tabs, then "Shared with me" for notes colleagues

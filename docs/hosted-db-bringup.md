@@ -6,7 +6,8 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
 
 Putting the web app online and connecting Claude or ChatGPT to it is in
 [Hosting and the connector](#hosting-and-the-connector). Emailing invitations, and closing
-sign-ups afterwards, is in [Invitation email](#invitation-email).
+sign-ups afterwards, is in [Invitation email](#invitation-email). Erasing hives their owners
+deleted is in [Hive deletion](#hive-deletion).
 
 ## Current state of the dev project
 
@@ -47,6 +48,10 @@ sign-ups afterwards, is in [Invitation email](#invitation-email).
   `supabase db query --linked -f <file>` in one transaction and recorded under that version. It
   replaces `create_hive`: at most 5 hives owned by one person, both names 1 to 60 characters
   after trimming, and a `hive.created` entry in the audit log.
+- Migration `20261124091833_hive_deletion` is **not applied yet**. The Edge Function
+  `purge-hives` is not deployed, its secret `HIVE_PURGE_SECRET` is not set and the scheduler
+  is not set up (no `pg_cron` job `purge-hives`). Until the steps in
+  [Hive deletion](#hive-deletion) are done, a hive cannot be deleted on this project.
 - The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
   the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
   still the build from before its signing code moved to `_shared/`; behaviour is the same.
@@ -587,6 +592,102 @@ towards the 5 and starts the 2 minutes. Revoking and inviting again does not get
 one person can cause at most 5 invitation emails to one address in 24 hours, so past that, wait
 a day. Each email requested is in the audit log as `member.invitation_emailed`.
 
+## Hive deletion
+
+An owner marks a hive for deletion in **Settings**. For 7 days it can be read and not changed,
+and the owner can cancel. Then the Edge Function `purge-hives`, called once a day by the
+database's scheduler, erases it. What protects each step is in
+[security.md](security.md#12-deleting-a-hive).
+
+Do the six steps in this order, on the project the site uses. Have the migration's security
+reviewed before step 1. Steps 1 to 3 need the Supabase CLI, signed in and linked to the project
+(`supabase link --project-ref <project-ref>`); they do not need Docker.
+
+1. **Apply the migration**, unchanged, and record its version:
+
+   ```sh
+   supabase db query --linked -f supabase/migrations/20261124091833_hive_deletion.sql
+   ```
+
+   Then record it in the project's migration history under the version `20261124091833`, as
+   the earlier migrations are, so that a later `supabase db push` does not try to apply the
+   file again. To check:
+
+   ```sql
+   select version, name from supabase_migrations.schema_migrations
+    where version = '20261124091833';
+   ```
+
+   From here on an owner can mark a hive and cancel, and a marked hive is frozen. Nothing is
+   erased until steps 2 and 3 are done.
+
+2. **Deploy the function:**
+
+   ```sh
+   supabase functions deploy purge-hives --no-verify-jwt
+   ```
+
+   JWT verification is off because the scheduler has no identity; the shared secret is the
+   credential. Until step 3 has stored that secret the function answers 503 to every call.
+
+3. **Run the setup script**, once per project:
+
+   ```sh
+   scripts/setup-hive-purge.sh
+   ```
+
+   It works on the linked project; `--project-ref <project-ref>` names it explicitly. It makes
+   a random secret, stores it as the function secret `HIVE_PURGE_SECRET` and in the
+   database's secret store together with the function's address, enables `pg_cron` and `pg_net`
+   if they are not enabled, and schedules the job `purge-hives` to call the function once a
+   day. The extension DDL, the writes to the secret store and the schedule run as three
+   separate statements files, so the secret never travels in a batch with DDL. It prints what
+   it did by name and never the secret. Running it again makes a new secret
+   and replaces the stored one and the job.
+
+   The function also needs a key that bypasses the sharing rules: `HIVE_SECRET_KEY` if it is
+   set ([Invitation email](#3-deploy-the-function-and-set-its-secrets)), else the Edge
+   runtime's legacy `SUPABASE_SERVICE_ROLE_KEY`. While it depends on the legacy key, the
+   legacy API keys must stay enabled.
+
+4. **Check that the scheduled job exists.** In the SQL editor:
+
+   ```sql
+   select jobname, schedule, active from cron.job where jobname = 'purge-hives';
+   ```
+
+   Expected: one row, active.
+
+5. **Check that a call without the secret is refused:**
+
+   | Call                                                             | Expected |
+   | ---------------------------------------------------------------- | -------- |
+   | `POST /functions/v1/purge-hives` with no `x-purge-secret` header | 401      |
+   | `GET /functions/v1/purge-hives`                                  | 405      |
+
+   A 503 here means a secret is missing: step 3 did not finish. A 404 means the function is
+   not deployed. Do not test with the real secret from a shell: it would stay in the shell's
+   history, and the scheduler makes that call itself once a day.
+
+6. **Redeploy the site** from the same commit. A site built before it has no Delete section,
+   no banner and no "being deleted" mark; the database's rules hold either way.
+
+A run takes only hives whose date has come, at most 20 a run, and answers with counts only.
+For each hive it first stamps it and writes its row in `deleted_hives` (`begin_hive_purge`);
+from then on the owner can no longer cancel. It then removes the hive's stored objects and
+deletes the hive in steps of at most about 2,000 rows. A hive that fails at any step, or is too large
+for one run, is left for a later run, and hives already attempted come last in the list. So
+after a run, a row in `deleted_hives` with an empty `purged_at` is a hive whose erase has
+begun and not finished:
+
+```sql
+select hive_id, name, requested_at, purged_at from public.deleted_hives order by requested_at;
+```
+
+Run it in the SQL editor; the API roles cannot read that table. The hosted API ends a
+statement after 8 seconds. The steps are sized for that, but it has not been measured on a
+large real hive, so watch the first erase of one.
+
 ## What is proven, and what is not
 
 - `pnpm test:live` runs its checks against the hosted project: the MCP server signs in with an
@@ -613,3 +714,6 @@ a day. Each email requested is in the audit log as `member.invitation_emailed`.
 - Invitation email is checked by hand ([Invitation email](#5-test-by-hand)). The database rules
   behind it and the function are tested without a network (`pnpm test`); no automated test
   sends a real email or opens a real link.
+- Hive deletion is not rolled out on the dev project yet ([Hive deletion](#hive-deletion)).
+  The database rules behind it and the function `purge-hives` are tested without a network
+  (`pnpm test`); no automated test runs the scheduler or erases a hive on a hosted project.

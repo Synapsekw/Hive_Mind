@@ -19,6 +19,8 @@ export type OwnHive = {
   name: string;
   /** The person's member id in that hive. */
   memberId: string;
+  /** When the hive will be erased, while it is being deleted; null otherwise. */
+  deleteAfter: string | null;
 };
 
 /** The hive plus who the person is in it, for the rail. Opt in with `{ profile: true }`. */
@@ -37,15 +39,17 @@ export type Membership = {
   role: string;
   memberId: string;
   displayName: string;
+  /** When the hive will be erased, while it is being deleted; null otherwise. */
+  deleteAfter: string | null;
 };
 
 type Db = Pick<SupabaseClient, "from" | "auth">;
 type Res = { data: unknown; error: { code?: string; message: string } | null };
 
 /** The hive is named through the membership's own `hive_id`, so no other path can be meant. */
-const COLUMNS = "id, hive_id, hive:hives!hive_id(name)";
+const COLUMNS = "id, hive_id, hive:hives!hive_id(name, delete_after)";
 const PROFILE_COLUMNS =
-  "id, hive_id, display_name, role, hive:hives!hive_id(name)";
+  "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)";
 
 /**
  * The user id the session's access token names, read from the cookie with no call to the auth
@@ -175,6 +179,7 @@ export async function myHives(
         role: m.role,
         memberId: m.memberId,
         displayName: m.displayName,
+        deleteAfter: m.deleteAfter,
       });
   }
   return out;
@@ -195,8 +200,15 @@ function toOwnHive(v: unknown): OwnHive | null {
   if (typeof id !== "string" || typeof hive_id !== "string") return null;
   if (typeof hive !== "object" || hive === null || Array.isArray(hive))
     return null;
-  const { name } = hive as Record<string, unknown>;
-  return typeof name === "string" ? { id: hive_id, name, memberId: id } : null;
+  const { name, delete_after } = hive as Record<string, unknown>;
+  if (typeof name !== "string") return null;
+  return {
+    id: hive_id,
+    name,
+    memberId: id,
+    // Absent or not text: the hive is not being deleted.
+    deleteAfter: typeof delete_after === "string" ? delete_after : null,
+  };
 }
 
 function toProfile(v: unknown): OwnHiveProfile | null {

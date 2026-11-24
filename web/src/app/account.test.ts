@@ -75,7 +75,16 @@ describe("loadAccount", () => {
       hive: "Synapse",
       initials: "DA",
       hiveId: H1,
-      hives: [{ id: H1, name: "Synapse", role: "owner", current: true }],
+      hives: [
+        {
+          id: H1,
+          name: "Synapse",
+          role: "owner",
+          current: true,
+          closing: false,
+        },
+      ],
+      closing: null,
     });
     expect(d.from).toHaveBeenCalledTimes(1);
     expect(d.from).toHaveBeenCalledWith("members");
@@ -92,9 +101,22 @@ describe("loadAccount", () => {
       initials: "DA",
       hiveId: H1,
       hives: [
-        { id: H1, name: "Synapse", role: "owner", current: true },
-        { id: H2, name: "Side", role: "member", current: false },
+        {
+          id: H1,
+          name: "Synapse",
+          role: "owner",
+          current: true,
+          closing: false,
+        },
+        {
+          id: H2,
+          name: "Side",
+          role: "member",
+          current: false,
+          closing: false,
+        },
       ],
+      closing: null,
     });
     expect(d.from).toHaveBeenCalledTimes(1);
   });
@@ -107,9 +129,16 @@ describe("loadAccount", () => {
       initials: "DJ",
       hiveId: H2,
       hives: [
-        { id: H1, name: "Synapse", role: "owner", current: false },
-        { id: H2, name: "Side", role: "member", current: true },
+        {
+          id: H1,
+          name: "Synapse",
+          role: "owner",
+          current: false,
+          closing: false,
+        },
+        { id: H2, name: "Side", role: "member", current: true, closing: false },
       ],
+      closing: null,
     });
   });
 
@@ -131,7 +160,7 @@ describe("loadAccount", () => {
     const account = await loadAccount(db(TWO) as never, { chosen });
     expect(account?.hiveId).toBe(H1);
     expect(account?.hives.filter((h) => h.current)).toEqual([
-      { id: H1, name: "Synapse", role: "owner", current: true },
+      { id: H1, name: "Synapse", role: "owner", current: true, closing: false },
     ]);
   });
 
@@ -148,5 +177,37 @@ describe("loadAccount", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(await loadAccount(db(null) as never)).toBeNull();
     spy.mockRestore();
+  });
+});
+
+describe("loadAccount and a hive that is being deleted", () => {
+  const AFTER = "2026-12-01T09:00:00+00:00";
+  const rows = [
+    TWO[0],
+    { ...TWO[1]!, hive: { name: "Side", delete_after: AFTER } },
+  ];
+
+  it("carries the date of the hive on show and marks that hive in the list", async () => {
+    const d = db(rows);
+    const account = await loadAccount(d as never, { chosen: H2 });
+    expect(account?.closing).toBe(AFTER);
+    expect(account?.hives).toEqual([
+      {
+        id: H1,
+        name: "Synapse",
+        role: "owner",
+        current: false,
+        closing: false,
+      },
+      { id: H2, name: "Side", role: "member", current: true, closing: true },
+    ]);
+    // Still the one bounded read.
+    expect(d.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("has no date on another hive, which still shows the mark on the one that goes", async () => {
+    const account = await loadAccount(db(rows) as never, { chosen: H1 });
+    expect(account?.closing).toBeNull();
+    expect(account?.hives.map((h) => h.closing)).toEqual([false, true]);
   });
 });

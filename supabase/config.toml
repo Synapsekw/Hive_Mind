@@ -17,6 +17,12 @@ verify_jwt = false
 [functions.invite-email]
 verify_jwt = false
 
+# The caller is the database's scheduler, which has no session: its credential
+# is the shared secret in the x-purge-secret header, which the function
+# compares with its own HIVE_PURGE_SECRET before it does anything.
+[functions.purge-hives]
+verify_jwt = false
+
 # Supabase Auth as the OAuth 2.1 server for the remote connector. The approval
 # window is the web app's /oauth/consent page; the address Auth sends people to
 # is the Site URL plus this path. Dynamic registration is OFF on purpose: an app

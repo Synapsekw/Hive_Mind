@@ -112,11 +112,23 @@ const INVITATIONS = [
 const tokenOf = (sub: string) =>
   `h.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.s`;
 
-const OWN = { id: M_DANI, hive_id: HIVE, hive: { name: "Synapse" } };
+/** The person's own membership, as the one read answers it: they own the hive. */
+const OWN = {
+  id: M_DANI,
+  hive_id: HIVE,
+  display_name: "Danijel",
+  role: "owner",
+  hive: { name: "Synapse" },
+};
+const PREVIEW = [{ members: 2, notes: 41, files: 6 }];
 
 /** A stand-in client: every `from(table)` chain is recorded and answers that table's result. */
 function stub(
-  opts: Partial<Record<Table, Res>> & { user?: { id: string } | null } = {},
+  opts: Partial<Record<Table, Res>> & {
+    user?: { id: string } | null;
+    /** What `hive_deletion_preview` answers, or a function that throws. */
+    preview?: Res | (() => never);
+  } = {},
 ) {
   const calls: Call[] = [];
   const answers: Record<Table, Res> = {
@@ -150,7 +162,11 @@ function stub(
       error: null,
     })),
   };
-  const rpc = vi.fn();
+  const rpc = vi.fn(async (_name: string, _args?: unknown) =>
+    typeof opts.preview === "function"
+      ? opts.preview()
+      : (opts.preview ?? ok(PREVIEW)),
+  );
   const of = (table: Table) => calls.find((c) => c.table === table);
   return { db: { from, auth, rpc } as never, calls, from, auth, rpc, of };
 }
@@ -236,6 +252,8 @@ describe("loadSettings", () => {
     expect(await loadSettings(t.db, NOW)).toEqual({
       state: "ok",
       hiveId: HIVE,
+      deletion: { members: 2, notes: 41, files: 6 },
+      closing: null,
       data: {
         hiveName: "Synapse",
         isOwner: true,
@@ -380,7 +398,12 @@ describe("loadSettings", () => {
     expect(t.calls[0]!.table).toBe("own");
     expect(t.from.mock.calls[0]).toEqual(["members"]);
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", U_DANI]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
@@ -404,7 +427,10 @@ describe("loadSettings", () => {
       "created_at",
       { ascending: true },
     ]);
-    expect(t.rpc).not.toHaveBeenCalled();
+    // The owner's preview, once.
+    expect(t.rpc.mock.calls).toEqual([
+      ["hive_deletion_preview", { p_hive: HIVE }],
+    ]);
   });
 
   it("asks for at most 200 agents, newest first, and never for the hash", async () => {
@@ -572,5 +598,137 @@ describe("loadSettings and other hives", () => {
     expect(out.data.agents.length).toBeGreaterThan(0);
     expect(out.data.agents.every((a) => a.workspaceId === W1)).toBe(true);
     expect(out.data.agents.some((a) => a.id === A2)).toBe(false);
+  });
+});
+
+describe("loadSettings and deleting the hive", () => {
+  const AS_MEMBER = {
+    ...OWN,
+    id: M_AHMED,
+    display_name: "Ahmed",
+    role: "member",
+  };
+
+  it("asks an owner's preview in the same batch as the four lists, not after them", async () => {
+    const order: string[] = [];
+    const t = stub();
+    t.rpc.mockImplementation(async () => {
+      order.push("preview asked");
+      await new Promise((r) => setTimeout(r, 5));
+      order.push("preview answered");
+      return ok(PREVIEW);
+    });
+    const from = t.from.getMockImplementation()!;
+    t.from.mockImplementation((table) => {
+      const chain = from(table) as { then: (...a: unknown[]) => unknown };
+      const then = chain.then;
+      chain.then = (...a: unknown[]) => {
+        order.push(`${table} awaited`);
+        return then(...a);
+      };
+      return chain;
+    });
+    const out = await loadSettings(t.db, NOW);
+    expect(out.state === "ok" && out.deletion).toEqual({
+      members: 2,
+      notes: 41,
+      files: 6,
+    });
+    // Every list was already asked for when the preview's answer came.
+    const answered = order.indexOf("preview answered");
+    for (const table of ["workspaces", "agents", "invitations"])
+      expect(order.indexOf(`${table} awaited`)).toBeLessThan(answered);
+    expect(order.indexOf("preview asked")).toBeLessThan(answered);
+    expect(t.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask for a person who is not an owner, and answers no counts", async () => {
+    const t = stub({ own: ok([AS_MEMBER]), user: { id: U_AHMED } });
+    const out = await loadSettings(t.db, NOW);
+    if (out.state !== "ok") throw new Error("not ok");
+    expect(out.deletion).toBeNull();
+    expect(out.data.isOwner).toBe(false);
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it("reads the person's role with the same one read of their membership", async () => {
+    const t = stub();
+    await loadSettings(t.db, NOW);
+    expect(t.calls.filter((c) => c.table === "own")).toHaveLength(1);
+    expect(args(t.of("own"), "select")).toEqual([
+      "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+    ]);
+  });
+
+  it("survives a refused preview: the page loads without counts, logging code and message only", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      preview: err("only the owner can delete a hive", "P0001"),
+    });
+    const out = await loadSettings(t.db, NOW);
+    if (out.state !== "ok") throw new Error("not ok");
+    expect(out.deletion).toBeNull();
+    expect(out.data.members).toHaveLength(2);
+    expect(log).toHaveBeenCalledWith(
+      "hive deletion preview failed",
+      "P0001",
+      "only the owner can delete a hive",
+    );
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+
+  it("survives a preview that throws", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      preview: () => {
+        throw new Error("network: secret payload");
+      },
+    });
+    const out = await loadSettings(t.db, NOW);
+    expect(out.state === "ok" && out.deletion).toBeNull();
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+
+  it.each([
+    ["nothing", null],
+    ["no row", []],
+    ["a word", "many"],
+    ["a count that is text", [{ members: "2", notes: 41, files: 6 }]],
+    ["a negative count", [{ members: 2, notes: -1, files: 6 }]],
+    ["a fraction", [{ members: 2, notes: 1.5, files: 6 }]],
+    ["a missing count", [{ members: 2, notes: 41 }]],
+  ])("answers no counts when the preview answers %s", async (_n, data) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await loadSettings(stub({ preview: ok(data) }).db, NOW);
+    expect(out.state === "ok" && out.deletion).toBeNull();
+  });
+
+  it("accepts the one row on its own, and names only the three counts", async () => {
+    const out = await loadSettings(
+      stub({ preview: ok({ members: 1, notes: 0, files: 0, name: "Synapse" }) })
+        .db,
+      NOW,
+    );
+    expect(out.state === "ok" && out.deletion).toEqual({
+      members: 1,
+      notes: 0,
+      files: 0,
+    });
+  });
+
+  it("carries the date a hive that is being deleted goes, for an owner and for a member", async () => {
+    const AFTER = "2026-12-01T09:00:00+00:00";
+    const hive = { name: "Synapse", delete_after: AFTER };
+    const owner = await loadSettings(
+      stub({ own: ok([{ ...OWN, hive }]) }).db,
+      NOW,
+    );
+    expect(owner.state === "ok" && owner.closing).toBe(AFTER);
+    const member = await loadSettings(
+      stub({ own: ok([{ ...AS_MEMBER, hive }]), user: { id: U_AHMED } }).db,
+      NOW,
+    );
+    expect(member.state === "ok" && member.closing).toBe(AFTER);
+    expect(member.state === "ok" && member.deletion).toBeNull();
   });
 });

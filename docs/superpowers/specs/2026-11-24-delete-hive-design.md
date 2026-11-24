@@ -117,3 +117,61 @@ Apply the migration with `supabase db query --linked -f`, record the version, de
 `purge-hives`, run `scripts/setup-hive-purge.sh`, check the scheduled job exists and that a
 call without the secret gets 401, redeploy the site. Have the migration's security reviewed
 before applying.
+
+## Changes after the security review (2026-11-24)
+
+These replace what the sections above say where they differ.
+
+1. **An agent can be revoked while its hive is closing.** A leaked token must not stay good for
+   seven days. Revoking is the one change to an agent that passes the freeze, besides the
+   sign-in stamps. Un-revoking stays refused. Moving a connected app to another hive works and
+   revokes its agent in the closing hive.
+2. **The erase has a point of no return.** When the scheduled run starts on a hive it first
+   calls `begin_hive_purge`, which stamps the hive; from then on `cancel_hive_deletion` is
+   refused with `this hive is already being erased`. Before that moment (during the 7 days,
+   and after the date until the run starts) cancel works and nothing has been removed. This
+   closes a gap where a late cancel could have kept a hive whose stored files were already
+   removed.
+3. **The erase runs in steps.** After `begin_hive_purge` the function removes the hive's stored
+   objects, then calls `purge_hive` repeatedly; each call deletes at most about 2,000 rows and
+   answers whether the hive is gone. A large hive may take more than one daily run. Only the
+   service role may delete during this phase; people, agents and app passes are still refused
+   every write.
+4. **Stored objects are found by the hive's members' paths** (`hive_object_paths`, service
+   only), so objects that have no file row are erased too.
+5. **The permanent record is written when the erase begins**, with the counts at that moment;
+   its `purged_at` is filled when the erase completes.
+6. **The due list puts hives that were already attempted last**, so one hive that keeps failing
+   cannot hold up the others.
+7. **Mixed-hive rows are refused at the source.** A workspace must belong to its member's hive,
+   and a note can only be tied to an entity of its own hive. This closed a way for a member to
+   block another hive's erase. In the freeze, a delete that is a cascade from an already
+   deleted parent passes; a top-level delete in a closing hive never does.
+8. **`TRUNCATE` on the hive tables is revoked** from the API roles.
+9. **Setup script.** The extension DDL, the Vault writes and the cron schedule run as three
+   separate statements files, so the secret never travels in a batch with DDL.
+10. **Known gaps, added:**
+    - anyone signed in who knows a hive's id can learn that it is closing, by the refusal
+      message on an insert;
+    - deleting an account that is a member of a closing hive is refused until the hive is
+      erased or the deletion is cancelled;
+    - calling Revoke on an already revoked agent in a closing hive shows the generic failure;
+    - concurrency was reasoned about but cannot be tested in the single-connection test
+      database;
+    - the hosted API applies an 8 second statement timeout, which the stepwise erase is
+      designed around but which has not been measured on a large real hive.
+
+### Second review round (2026-11-24)
+
+- `purge_hive` refuses to remove the members or the hive row while a stored object is left
+  under one of the hive's members, and the function lists again from the start and needs an
+  empty answer before it calls `purge_hive` at all. A file store that reports success without
+  removing everything can no longer leave objects behind.
+- The erase goes by a row budget, table by table with the children first, so no single call
+  depends on how much a member wrote. The hive row goes only once every table is empty.
+- The service role's deletes pass the freeze only inside `purge_hive`, which marks its own
+  transaction; the role alone is not enough.
+- An entity cannot be moved to another hive, and a person cannot change which agent a note
+  says it was written by.
+- The setup script lets the database make the secret, so it is in no statement text; the
+  script reads it back into a private file to set the function's secret.

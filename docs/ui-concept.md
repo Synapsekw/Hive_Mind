@@ -157,7 +157,8 @@ Settings and Sign out; the member's name, role and hive load in the root layout.
 opens a popover, in the way the account button does, with:
 
 - the person's hives, each with their role there and a tick on the current one. Choosing
-  another switches to it and reloads the page the person is on;
+  another switches to it and reloads the page the person is on. A hive that is marked for
+  deletion reads "being deleted" beside its name;
 - **New hive**, which opens a small form in the same popover with two fields, "Hive name" and
   "Your name in this hive" (filled in with the person's current display name), then **Create**
   and **Cancel**. After Create the new hive opens on the map. A refusal shows one line under
@@ -167,10 +168,22 @@ opens a popover, in the way the account button does, with:
 A person in one hive still gets the button and New hive. Escape closes the popover and returns
 focus to the button. The list is drawn from what the page already loaded, so opening it costs
 no round-trip. It reuses the rail's tokens and the account popover's classes; the account
-popover keeps showing the current hive and role. There is no rename, delete or leave yet.
+popover keeps showing the current hive and role. There is no rename or leave yet; deleting a
+hive is in Settings (section 4).
 
 **No hive yet.** A signed-in person who is in no hive sees the home page's empty state with the
 same New hive form, so a first hive can be started without an invitation.
+
+**A hive that is being deleted.** Every screen of a hive marked for deletion shows one banner
+above the page: "This hive will be deleted on (date). Nothing new can be saved." The date is in
+the person's locale. An owner also gets **Cancel deletion** in the banner; it asks once in
+place, then the page reloads and the banner is gone. Other members see the banner without the
+button. The banner is placed once, in the root layout, and its date comes with what every page
+already loads, so it costs no round-trip. It is a status line (`role="status"`), not a modal:
+reading goes on as before. A write that is tried anyway fails with the screen's usual failure
+line, and the banner says why. Cancelling works until the scheduled erase has started on the
+hive; after that the database refuses it. It uses no new colour or token. When the hive is erased, a
+person who had it chosen lands in their oldest remaining hive, or on the no-hive page.
 
 Known follow-ups: make the rail persistent across pages so the bar slides.
 
@@ -216,6 +229,15 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   under **Invitations** with name, email, invited and expiry dates, **Send again** and
   **Revoke**. A notice says the invitation was sent, or that it was saved but the email could
   not be sent. A member who is not the owner sees neither the form nor the invitations.
+  Owners also have a **Delete this hive** section. It shows how many members, notes and files
+  the hive holds and a field for the hive's name; **Delete hive** is enabled only when the
+  typed name matches exactly. Nothing is erased at once: the hive is marked, the page reloads,
+  and for 7 days everyone can read and nobody can save. While the hive is marked, the section
+  shows the date it will be erased and **Cancel deletion** in place of the form. A member who
+  is not an owner does not see the section. In a hive that is being deleted **Revoke** on an
+  agent still works, so a leaked token can be cut off; everything else in Settings that saves
+  is refused. Revoke on an agent that is already revoked shows the usual failure line there (a
+  known gap).
 
 ## 5. Overlays and states
 
@@ -229,6 +251,7 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 | First run                | Empty map with the onboarding steps and a connect action    |
 | No hive yet              | The home page's empty state with the New hive form          |
 | Hive switcher            | Popover from the hive's name: hives, role, tick, New hive   |
+| Hive being deleted       | Banner on every screen with the date; an owner can cancel   |
 | Token revoked or expired | Inbox item with a regenerate action                         |
 | Write rejected           | Inbox item with the attempted path and the reason           |
 | Synthesis failed         | Entity page shows the last good version with a retry        |

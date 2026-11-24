@@ -6,6 +6,10 @@
 // cookie; the cookie itself grants nothing (see `chosen-hive.ts`). Creating calls `create_hive`,
 // where the database checks the names and the limit on owned hives.
 //
+// Asking for a hive's deletion and cancelling it call `request_hive_deletion` and
+// `cancel_hive_deletion`: the database decides whether the person owns the hive and whether the
+// typed name is the hive's.
+//
 // Arguments are checked before any query. A log line carries an error's code and message or
 // the name of what was thrown: never an argument, a row or a cookie's value. The database's
 // words are never answered to the caller, only one of the fixed reasons.
@@ -122,5 +126,80 @@ export async function createHiveIn(
   } catch (e) {
     console.error("create_hive failed", e instanceof Error ? e.name : "");
     return no("failed");
+  }
+}
+
+export type Requested = { ok: true } | { ok: false; reason: "name" | "failed" };
+
+/** The database's words when the typed name is not the hive's. */
+const NOT_THE_NAME = "that is not the name of this hive";
+
+/**
+ * Marks the hive for deletion, when the database agrees that the person owns it and that
+ * `typedName` is its name. An id that is not one, or a name that is empty after trimming or
+ * longer than 60 characters, asks nothing; without a session nothing is asked either.
+ */
+export async function requestHiveDeletionIn(
+  db: Db,
+  hiveId: unknown,
+  typedName: unknown,
+): Promise<Requested> {
+  const failed: Requested = { ok: false, reason: "failed" };
+  if (!isUuid(hiveId)) return failed;
+  const name = cleanName(typedName);
+  // No hive has such a name, so it cannot be this one's.
+  if (name === null) return { ok: false, reason: "name" };
+  try {
+    if (!(await sessionUserId(db))) return failed;
+    const res = (await db.rpc("request_hive_deletion", {
+      p_hive: hiveId,
+      p_name: name,
+    })) as Res;
+    if (res.error) {
+      console.error(
+        "request_hive_deletion failed",
+        res.error.code,
+        res.error.message,
+      );
+      return res.error.message === NOT_THE_NAME
+        ? { ok: false, reason: "name" }
+        : failed;
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error(
+      "request_hive_deletion failed",
+      e instanceof Error ? e.name : "",
+    );
+    return failed;
+  }
+}
+
+/** Takes the hive's deletion back, when the database agrees that the person owns it. */
+export async function cancelHiveDeletionIn(
+  db: Db,
+  hiveId: unknown,
+): Promise<{ ok: boolean }> {
+  if (!isUuid(hiveId)) return { ok: false };
+  try {
+    if (!(await sessionUserId(db))) return { ok: false };
+    const res = (await db.rpc("cancel_hive_deletion", {
+      p_hive: hiveId,
+    })) as Res;
+    if (res.error) {
+      console.error(
+        "cancel_hive_deletion failed",
+        res.error.code,
+        res.error.message,
+      );
+      return { ok: false };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error(
+      "cancel_hive_deletion failed",
+      e instanceof Error ? e.name : "",
+    );
+    return { ok: false };
   }
 }

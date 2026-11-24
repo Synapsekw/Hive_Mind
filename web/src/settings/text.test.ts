@@ -199,3 +199,46 @@ describe("MCP_COMMAND", () => {
     );
   });
 });
+
+describe("deleting the hive", () => {
+  it("says what would be erased, with one of each in the singular", async () => {
+    const t = await import("./text");
+    expect(t.deletionCounts({ members: 3, notes: 128, files: 14 })).toBe(
+      "Deleting this hive erases 128 notes and 14 files of 3 members.",
+    );
+    expect(t.deletionCounts({ members: 1, notes: 1, files: 1 })).toBe(
+      "Deleting this hive erases 1 note and 1 file of 1 member.",
+    );
+    expect(t.deletionCounts({ members: 2, notes: 0, files: 0 })).toBe(
+      "Deleting this hive erases 0 notes and 0 files of 2 members.",
+    );
+    expect(t.DELETE_UNCOUNTED).toBe(
+      "Deleting this hive erases every member's notes and files.",
+    );
+  });
+
+  it("names the section, the field and the two buttons", async () => {
+    const t = await import("./text");
+    expect(t.DELETE_TITLE).toBe("Delete this hive");
+    expect(t.DELETE_FIELD).toBe("Type the hive's name to confirm");
+    expect(t.DELETE_HIVE).toBe("Delete hive");
+    expect(t.CANCEL_DELETION).toBe("Cancel deletion");
+    expect(t.DELETED_ON).toBe("This hive will be deleted on");
+  });
+
+  it("says why Delete hive cannot be pressed yet, naming the hive", async () => {
+    const t = await import("./text");
+    expect(t.deleteHint("Synapse")).toBe(
+      'Delete hive can be pressed once you have typed "Synapse" exactly.',
+    );
+  });
+
+  it("says one line for each refusal", async () => {
+    const t = await import("./text");
+    expect(t.deleteFailure("name")).toBe("That is not this hive's name.");
+    expect(t.deleteFailure("failed")).toBe("That didn't work. Try again.");
+    expect(t.deleteFailure("other" as never)).toBe(
+      "That didn't work. Try again.",
+    );
+  });
+});

@@ -110,7 +110,7 @@ describe("saveNoteIn", () => {
     expect(t.calls.map((c) => c.table)).toEqual(["own", "members", "notes"]);
     expect(t.from.mock.calls[0]).toEqual(["members"]);
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["select", ["id, hive_id, hive:hives!hive_id(name, delete_after)"]],
       ["eq", ["user_id", "u-me"]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],

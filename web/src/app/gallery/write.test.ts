@@ -289,7 +289,7 @@ describe("deleteIn", () => {
     expect(table(t, "members")).toHaveLength(1);
     const [m] = table(t, "members");
     expect(m!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["select", ["id, hive_id, hive:hives!hive_id(name, delete_after)"]],
       ["eq", ["user_id", "u-me"]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
