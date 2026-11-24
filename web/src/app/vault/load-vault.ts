@@ -5,9 +5,12 @@ import type {
   Tab,
   VaultData,
   VaultNote,
+  VaultTopic,
   Visibility,
 } from "../../vault/types";
+import { KINDS, type Kind } from "../../topics/types";
 import { ownHive } from "../own-hive";
+import { counting, paged } from "./connect";
 import { isUuid } from "./validate";
 
 export type VaultLoad =
@@ -21,7 +24,8 @@ type Res = { data: unknown; error: { code?: string; message: string } | null };
 export const NOTE_COLUMNS =
   "id,workspace_id,member_id,path,title,updated_at,written_by_agent,visibility,shared_with," +
   "quarantined,effective:note_visibility,effective_with:note_shared_with," +
-  "rule_folder:note_rule_folder,access:note_access";
+  "rule_folder:note_rule_folder,access:note_access," +
+  "note_entities(entity_id,confidence,detached_at)";
 
 const INDEX_CAP = 2000;
 const SHARED_CAP = 500;
@@ -34,6 +38,25 @@ const vis = (v: unknown): Visibility | null =>
 const ids = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/**
+ * The ids of a note's attached topics, strongest first: rows not detached, by confidence
+ * descending (a stable sort keeps the order the database answered for ties). Anything that is
+ * not a pair of an id and a number is skipped.
+ */
+function topicsOf(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const kept: { id: string; confidence: number }[] = [];
+  for (const r of v) {
+    if (typeof r !== "object" || r === null) continue;
+    const { entity_id, confidence, detached_at } = r as Row;
+    if (typeof entity_id !== "string" || typeof confidence !== "number")
+      continue;
+    if (detached_at !== null && detached_at !== undefined) continue;
+    kept.push({ id: entity_id, confidence });
+  }
+  return kept.sort((a, b) => b.confidence - a.confidence).map((k) => k.id);
+}
 
 /**
  * A note row as the vault shows it. The computed columns are null for a note the caller cannot
@@ -62,6 +85,7 @@ export function toNote(r: Row, me: string): VaultNote {
     effective_with: ids(r.effective_with),
     rule_folder: typeof r.rule_folder === "string" ? r.rule_folder : null,
     access,
+    topics: topicsOf(r.note_entities),
   };
 }
 
@@ -107,6 +131,43 @@ async function noteLinks(db: Db, noteId: string): Promise<NoteLink[]> {
     .slice(0, LINKS_CAP);
 }
 
+/** Kinds in the order the vault lists them. */
+const KIND_ORDER = new Map<string, number>(KINDS.map((k, i) => [k, i]));
+
+/**
+ * The hive's topics, by kind order then name. The vault still opens without them when this read
+ * fails: only the error's code is logged (by the paging), never a name.
+ */
+async function hiveTopics(db: Db, hiveId: string): Promise<VaultTopic[]> {
+  let read: Row[] | null;
+  try {
+    read = await paged("topics query", "too many topics", (from, to, counted) =>
+      db
+        .from("entities")
+        .select("id, type, canonical_name", counting(counted))
+        .eq("hive_id", hiveId)
+        .order("id")
+        .range(from, to),
+    );
+  } catch (e) {
+    console.error("topics query failed", e instanceof Error ? e.name : "");
+    return [];
+  }
+  if (read === null) return [];
+  const out: VaultTopic[] = [];
+  for (const r of read) {
+    if (typeof r.id !== "string" || typeof r.canonical_name !== "string")
+      continue;
+    if (typeof r.type !== "string" || !KIND_ORDER.has(r.type)) continue;
+    out.push({ id: r.id, kind: r.type as Kind, name: r.canonical_name });
+  }
+  return out.sort(
+    (a, b) =>
+      KIND_ORDER.get(a.kind)! - KIND_ORDER.get(b.kind)! ||
+      (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+  );
+}
+
 /**
  * Everything `/vault` shows, in this order: the caller's own hive; then its members, the
  * caller's workspaces in it, the caller's user, the `?note=` body and that note's links in
@@ -124,7 +185,7 @@ export async function loadVault(
   const noteId = query.note === undefined ? null : query.note;
   const wantNote = noteId !== null && isUuid(noteId);
 
-  const [members, workspaces, user, opened, links] = await Promise.all([
+  const [members, workspaces, user, opened, links, topics] = await Promise.all([
     db
       .from("members")
       .select("id, display_name, user_id")
@@ -144,6 +205,7 @@ export async function loadVault(
           .limit(1) as unknown as Promise<Res>)
       : Promise.resolve(null),
     wantNote ? noteLinks(db, noteId) : Promise.resolve([]),
+    hiveTopics(db, hiveId),
   ]);
   if (failed("members query", members)) return { state: "error" };
   if (failed("workspaces query", workspaces)) return { state: "error" };
@@ -242,6 +304,7 @@ export async function loadVault(
       notes: all.slice(0, cap).map((r) => toNote(r, meId)),
       truncated: all.length > cap,
       open,
+      topics,
     },
   };
 }

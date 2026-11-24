@@ -55,7 +55,7 @@ function stub(
     const call: Call = { table, ops: [] };
     calls.push(call);
     const chain: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "neq", "order", "limit", "in"])
+    for (const m of ["select", "eq", "neq", "order", "limit", "in", "range"])
       chain[m] = (...args: unknown[]) => {
         // The read of the person's own oldest membership is filed apart from the hive's members.
         if (table === "members" && m === "eq" && args[0] === "user_id")
@@ -91,6 +91,7 @@ function world(opts: {
   shared?: unknown[];
   open?: unknown[];
   fail?: string;
+  topics?: (c: Call) => Res;
 }) {
   return (c: Call): Res | undefined => {
     if (opts.fail === c.table)
@@ -110,6 +111,7 @@ function world(opts: {
         { id: W1, name: "Main" },
         { id: W2, name: "Ops" },
       ]);
+    if (c.table === "entities") return opts.topics ? opts.topics(c) : ok([]);
     if (c.table === "folders")
       return ok([{ path: "Decisions", visibility: "group", shared_with: [] }]);
     if (c.table === "notes") {
@@ -165,8 +167,11 @@ describe("loadVault", () => {
     expect(selected(index)).toContain("effective_with:note_shared_with");
     expect(selected(index)).toContain("rule_folder:note_rule_folder");
     expect(selected(index)).toContain("access:note_access");
+    expect(selected(index)).toContain(
+      "note_entities(entity_id,confidence,detached_at)",
+    );
     expect(t.calls.map((c) => c.table).sort()).toEqual(
-      ["folders", "members", "notes", "own", "workspaces"].sort(),
+      ["entities", "folders", "members", "notes", "own", "workspaces"].sort(),
     );
     expect(t.rpc).not.toHaveBeenCalled();
   });
@@ -237,6 +242,9 @@ describe("loadVault", () => {
       (c) => c.table === "notes" && has(c, "eq", "id", THEIRS),
     )!;
     expect(selected(one)).toMatch(/\bbody\b/);
+    expect(selected(one)).toContain(
+      "note_entities(entity_id,confidence,detached_at)",
+    );
   });
 
   it("opens my own note in its own workspace", async () => {
@@ -341,7 +349,8 @@ describe("loadVault: the open note's links", () => {
       "workspaces",
       "notes",
     ]);
-    expect(tables((n) => n > rpcAt)).toEqual(["folders", "notes"]);
+    // The hive's topics are read in the first batch too, after the note's links.
+    expect(tables((n) => n > rpcAt)).toEqual(["entities", "folders", "notes"]);
     expect(out.data.open).toEqual({
       note: toNote(mine, ME),
       body: "Hello",
@@ -460,6 +469,7 @@ describe("toNote", () => {
       effective_with: [],
       rule_folder: null,
       access: "link",
+      topics: [],
     });
   });
 
@@ -485,5 +495,163 @@ describe("toNote", () => {
       access: "own",
       by_agent: false,
     });
+  });
+});
+
+const T = (n: number) =>
+  `00000000-0000-4000-8000-0000000d${String(n).padStart(4, "0")}`;
+
+describe("toNote: topics", () => {
+  const link = (
+    n: number,
+    confidence: unknown,
+    detached_at: unknown = null,
+  ) => ({
+    entity_id: T(n),
+    confidence,
+    detached_at,
+  });
+
+  it("lists the attached topics strongest first, ties in the order answered", () => {
+    const n = toNote(
+      row(MINE, {
+        note_entities: [
+          link(1, 0.5),
+          link(2, 0.9),
+          link(3, 0.5),
+          link(4, 1),
+          link(5, 0.9),
+        ],
+      }),
+      ME,
+    );
+    expect(n.topics).toEqual([T(4), T(2), T(5), T(1), T(3)]);
+  });
+
+  it("drops detached and malformed rows", () => {
+    const n = toNote(
+      row(MINE, {
+        note_entities: [
+          link(1, 0.8),
+          link(2, 0.9, "2026-11-20T00:00:00Z"),
+          link(3, "high"),
+          { entity_id: 7, confidence: 1, detached_at: null },
+          { confidence: 1, detached_at: null },
+          null,
+          "row",
+          link(4, 0.7, undefined),
+        ],
+      }),
+      ME,
+    );
+    expect(n.topics).toEqual([T(1), T(4)]);
+  });
+
+  it("has none when the column is absent or not a list", () => {
+    expect(toNote(row(MINE), ME).topics).toEqual([]);
+    expect(toNote(row(MINE, { note_entities: null }), ME).topics).toEqual([]);
+    expect(
+      toNote(row(MINE, { note_entities: { entity_id: T(1) } }), ME).topics,
+    ).toEqual([]);
+  });
+});
+
+describe("loadVault: the hive's topics", () => {
+  const entity = (n: number, type: string, canonical_name: string) => ({
+    id: T(n),
+    type,
+    canonical_name,
+  });
+
+  /** What the API answers: the rows on the first page, then nothing. */
+  const firstPage = (rows: unknown[]) => (c: Call) =>
+    ok((op(c, "range")[0]![1][0] as number) === 0 ? rows : []);
+
+  it("reads the hive's entities by id, in pages of 1,000, and sorts by kind then name", async () => {
+    const t = stub(
+      world({
+        topics: firstPage([
+          entity(1, "subject", "Pricing"),
+          entity(2, "client", "Zed"),
+          entity(3, "client", "Acme"),
+          entity(4, "partner", "Mid"),
+        ]),
+      }),
+    );
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.topics).toEqual([
+      { id: T(3), kind: "client", name: "Acme" },
+      { id: T(2), kind: "client", name: "Zed" },
+      { id: T(4), kind: "partner", name: "Mid" },
+      { id: T(1), kind: "subject", name: "Pricing" },
+    ]);
+    const read = t.calls.find((c) => c.table === "entities")!;
+    expect(selected(read)).toBe("id, type, canonical_name");
+    expect(has(read, "eq", "hive_id", HIVE)).toBe(true);
+    expect(has(read, "order", "id")).toBe(true);
+    expect(has(read, "range", 0, 999)).toBe(true);
+  });
+
+  it("loses nothing when the API answers 1,000 rows and then 3", async () => {
+    const t = stub(
+      world({
+        topics: (c) => {
+          const [from] = op(c, "range")[0]![1] as [number, number];
+          const n = from === 0 ? 1000 : 3;
+          const base = from === 0 ? 0 : 1000;
+          return {
+            data: Array.from({ length: n }, (_, i) =>
+              entity(
+                base + i,
+                "client",
+                `Client ${String(base + i).padStart(5, "0")}`,
+              ),
+            ),
+            error: null,
+            ...(from === 0 ? { count: 1003 } : {}),
+          } as Res;
+        },
+      }),
+    );
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.topics).toHaveLength(1003);
+    expect(out.data.topics[0]!.name).toBe("Client 00000");
+    expect(out.data.topics[1002]!.name).toBe("Client 01002");
+    expect(t.calls.filter((c) => c.table === "entities")).toHaveLength(2);
+  });
+
+  it("skips a row whose kind is unknown or that is malformed", async () => {
+    const t = stub(
+      world({
+        topics: firstPage([
+          entity(1, "client", "Acme"),
+          entity(2, "galaxy", "Andromeda"),
+          { id: T(3), type: "client" },
+          { id: 4, type: "client", canonical_name: "X" },
+          null,
+        ]),
+      }),
+    );
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.topics).toEqual([
+      { id: T(1), kind: "client", name: "Acme" },
+    ]);
+  });
+
+  it("still loads, with no topics, when that read fails; logs only the code", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub(world({ index: [row(MINE)], fail: "entities" }));
+    const out = await loadVault(t.db, {});
+    expect(out.state).toBe("ok");
+    if (out.state !== "ok") return;
+    expect(out.data.topics).toEqual([]);
+    expect(out.data.notes).toHaveLength(1);
+    expect(spy).toHaveBeenCalled();
+    expect(JSON.stringify(spy.mock.calls)).toContain("XX000");
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    spy.mockRestore();
   });
 });

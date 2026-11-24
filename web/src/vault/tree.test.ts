@@ -18,6 +18,7 @@ function note(path: string, extra: Partial<VaultNote> = {}): VaultNote {
     effective_with: [],
     rule_folder: null,
     access: "own",
+    topics: [],
     ...extra,
   };
 }

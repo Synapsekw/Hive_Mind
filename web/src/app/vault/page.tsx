@@ -3,10 +3,12 @@ import { createServerSupabase } from "../../lib/supabase/server";
 import { Vault } from "../../vault/Vault";
 import { loadInboxCount } from "../inbox/load-inbox";
 import {
+  addTopic,
   connectWikiLinks,
   attachTopics,
   createImportWorkspace,
   deleteNote,
+  detachTopic,
   importBatch,
   preview,
   release,
@@ -55,7 +57,16 @@ export default async function VaultPage({
     <Vault
       data={result.data}
       now={Date.now()}
-      actions={{ saveNote, saveFolder, release, preview, deleteNote, unlink }}
+      actions={{
+        saveNote,
+        saveFolder,
+        release,
+        preview,
+        deleteNote,
+        unlink,
+        detachTopic,
+        addTopic,
+      }}
       importer={{
         // Bound to the hive this page shows, as inviting a member is.
         createWorkspace: createImportWorkspace.bind(null, result.data.hive.id),
