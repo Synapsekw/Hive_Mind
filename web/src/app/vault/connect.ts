@@ -74,7 +74,7 @@ type Rows = Record<string, unknown>[];
  * Null when a page cannot be read or is not a list, when there are more than `MAX_ROWS` rows,
  * or after `MAX_REQUESTS` requests.
  */
-async function paged(
+export async function paged(
   what: string,
   tooMany: string,
   page: (from: number, to: number, counted: boolean) => PromiseLike<unknown>,
@@ -104,7 +104,7 @@ async function paged(
 }
 
 /** What a page's `select` takes besides its columns: the exact count, on the first page. */
-const counting = (counted: boolean): { count: "exact" } | undefined =>
+export const counting = (counted: boolean): { count: "exact" } | undefined =>
   counted ? { count: "exact" } : undefined;
 
 /** The two notes of a link as one key, whichever way the link points. */
