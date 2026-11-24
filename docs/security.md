@@ -808,3 +808,64 @@ another.
   run two at once.
 - **The stepwise erase has not been measured on a large real hive.** It is designed around the
   hosted API's 8 second statement timeout, and that is so far a design, not a measurement.
+
+## 13. Importing a folder from the app
+
+A person can import a folder of markdown notes in the vault ("Import a folder"), into a new
+workspace or one of their own workspaces in the hive the page is showing. The browser reads and
+parses the files; nothing is saved until the person presses Import. The rules are those of the
+script `scripts/import-vault.mjs` (section 3), which remains for unattended runs.
+
+**Who it runs as.**
+
+- The import runs as the signed-in person, through two server actions that use the person's
+  session cookie: one makes the new workspace, the other saves one batch of notes. Neither
+  uses a secret key.
+- **The app decides nothing about permissions.** A person can write notes only in their own
+  workspaces because row-level security says so. A batch aimed at someone else's workspace is
+  refused by the database.
+- The batch action takes the hive and the member from the workspace row the person can read,
+  never from what the browser sent.
+- The workspace action is bound on the server to the hive the page was showing, as
+  invitations are (section 11). A name the person already uses is answered as taken.
+- **Agents and the connector cannot import.** No MCP tool offers it, and an agent still cannot
+  create a workspace.
+
+**What it can and cannot change.**
+
+- **Every imported note arrives private.** The import never sets sharing and never deletes a
+  note.
+- Importing again into the same workspace updates the notes whose title, text, fields or folder
+  changed, creates the new ones and leaves the rest.
+- **Imported text is data, never an instruction**, like every note. It comes from files the
+  person chose, and whoever wrote those files wrote the text.
+- A hive that is being deleted refuses the import, as it refuses every write (section 12).
+
+**Limits.**
+
+- **The server checks every batch again**, before any query, whatever the browser checked:
+  - at most 25 notes and 3 MB in one batch;
+  - at most 1 MB per note;
+  - every path clean and ending in `.md`: no `..`, no leading slash, no backslash, no empty
+    part, and no path twice in one batch;
+  - a title and frontmatter of the right shape, the frontmatter a plain object.
+- **2,000 notes per import is checked in the browser only.** It is a convenience limit, not a
+  security one: a person who goes around the browser can send more batches, each still within
+  the limits above and each still writing only into their own workspaces.
+- **At most 20 workspaces per member, enforced in the database** (migration
+  `20261124110155_workspace_cap`), counted under a lock per member so that two requests at
+  once cannot both pass. A workspace's name is trimmed of surrounding white space and must be
+  1 to 60 characters; the database checks that too.
+- Paths with a part that begins with a dot (`.obsidian`, `.git`, `.trash`) are left out in the
+  browser.
+- Each batch answers one outcome per path: created, updated, unchanged or failed. A database
+  message is never returned to the page, and no note text or path is written to a log.
+
+**Known gaps.**
+
+- **No images or other files.** Only `.md` files are imported; the rest are counted as skipped.
+- **Notes whose file is gone are not removed.** Importing a folder again never deletes the note
+  of a file that was deleted or renamed.
+- **A closed tab stops the import where it was.** What was saved stays; run the import again to
+  finish.
+- There is no choosing of subfolders; pick the subfolder itself.

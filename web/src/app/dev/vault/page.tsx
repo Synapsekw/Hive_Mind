@@ -4,7 +4,10 @@ import { DevVault } from "./DevVault";
 
 // A development page: the vault over the built-in fixture. Never served in production.
 //   ?fail=1   every write is refused
-//   ?slow=1   deleting a note or ending a link takes over a second
+//   ?slow=1   deleting a note or ending a link takes over a second; an import batch most of one
+//   ?failbatch=2    the import's second batch is refused (any number, or "all")
+//   ?taken=1  a new workspace is refused: the name is in use
+//   ?limit=1  a new workspace is refused: the person has 20 already
 // A fixed clock keeps every render, and so every test and screenshot, the same.
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 
@@ -35,6 +38,11 @@ export default async function DevVaultPage({
       now={NOW}
       fail={one(q.fail) === "1"}
       slow={one(q.slow) === "1"}
+      importFlags={{
+        failbatch: one(q.failbatch) ?? null,
+        taken: one(q.taken) === "1",
+        limit: one(q.limit) === "1",
+      }}
     />
   );
 }

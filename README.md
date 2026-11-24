@@ -20,7 +20,8 @@ Phase 1 is under way: the engine runs on a hosted Supabase project and the owner
   and the person joins by pressing Join.
 - Deleting a hive: an owner marks it, it stays readable for 7 days, and then an Edge Function,
   `purge-hives`, called once a day by the database's scheduler, erases it.
-- An importer for a folder of markdown notes.
+- Importing a folder of markdown notes: in the web app's vault, or with a script for unattended
+  runs.
 - The web app (`web/`) has sign-in, the map, the vault, where a person reads their notes,
   decides who may read them and can delete a note of their own, and the gallery, where they view, download and delete the files
   their agents saved. The other pages are not built; `docs/ui/` holds the design
@@ -107,6 +108,20 @@ confirm with **Delete** again (or **Keep** to back out). The note is gone for go
 history and its links; there is no trash and no undo. Files attached to it stay in the gallery.
 A colleague's note has no Delete.
 
+To bring in notes you already have, choose **Import a folder** in the vault and pick a folder
+of markdown notes. The files are read in your browser, and a summary shows what was found
+before anything is saved. Choose where the notes go: a new workspace, named after the folder
+unless you change it, or one of your workspaces in this hive. Then choose **Import**. Progress
+is shown and the import can be stopped; what was saved stays. The result lists how many notes
+were created, updated, unchanged, skipped and failed. Every imported note is private, and
+importing never deletes a note. Importing the same folder again updates the notes that
+changed and adds the new ones. Only `.md` files are imported, each at most 1 MB and at most
+2,000 in one import; for a larger folder, import its subfolders one at a time. If the tab is
+closed part-way, run the import again to finish. A person can have at most 20 workspaces in a
+hive; that cap and the database's own check of a workspace's name (1 to 60 characters) need
+the `workspace_cap` migration on the database (see
+[docs/security.md](docs/security.md#13-importing-a-folder-from-the-app)).
+
 The gallery (**Gallery** in the left rail) shows the files you may read as cards. Images and
 PDFs open in a full-window viewer; every file downloads; your own files can be deleted. A file is
 shared exactly as the note it is attached to, so sharing is changed on the note, in the vault.
@@ -192,6 +207,11 @@ Rebuild (`pnpm build`) after any change under `mcp/`; the client runs the built 
    unless asked.
 
 ### Import existing notes
+
+The web app imports a folder from the vault (**Import a folder**, described under
+[Run the web app](#run-the-web-app)). The script `scripts/import-vault.mjs` remains for
+unattended runs and for choosing subfolders with `--include` and `--exclude`; both follow the
+same rules.
 
 ```sh
 pnpm import:vault "<folder of markdown>" <workspace> --dry-run

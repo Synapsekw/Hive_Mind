@@ -12,8 +12,11 @@ import {
   type CSSProperties,
   type MouseEvent,
 } from "react";
+import type { ImportActions } from "../import/types";
 import { Shell } from "../shell/Shell";
 import { Folders } from "./Folders";
+import { Import } from "./Import";
+import { IMPORT } from "./importText";
 import { folderMark } from "./marks";
 import { NoteList } from "./NoteList";
 import { Preview } from "./Preview";
@@ -61,11 +64,14 @@ export function Vault({
   data: served,
   now,
   actions,
+  importer,
   inbox,
 }: {
   data: VaultData;
   now: number;
   actions: VaultActions;
+  /** Importing a folder of notes. Without it the vault offers no import. */
+  importer?: ImportActions;
   /** How much waits in the inbox, for the rail. */
   inbox?: number;
 }) {
@@ -92,6 +98,14 @@ export function Vault({
   }, [servedOpen]);
   // Deletes on their way, by note: a second request for the same note joins the first.
   const deleting = useRef(new Map<string, Promise<boolean>>());
+  // The import panel: open or not, and whether notes are being sent (it cannot be closed then).
+  const [importing, setImporting] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const importOpener = useRef<HTMLButtonElement>(null);
+  function closeImport() {
+    setImporting(false);
+    importOpener.current?.focus();
+  }
   const main = useRef<HTMLElement>(null);
   // Where the focus goes once a deleted note has left the page.
   const target = useRef<{ row: HTMLElement | null } | null>(null);
@@ -349,6 +363,23 @@ export function Vault({
             hrefWorkspace={hrefWorkspace}
             hrefShared={hrefShared}
           />
+          {importer && (
+            <button
+              ref={importOpener}
+              type="button"
+              className={`${s.secondary} ${s.importOpen}`}
+              aria-expanded={importing}
+              aria-controls={importing ? "vault-import" : undefined}
+              aria-disabled={importBusy || undefined}
+              onClick={() => {
+                if (importBusy) return;
+                if (importing) closeImport();
+                else setImporting(true);
+              }}
+            >
+              {IMPORT}
+            </button>
+          )}
           <label className={s.filter}>
             <span className={s.srOnly}>Filter notes</span>
             <input
@@ -382,6 +413,16 @@ export function Vault({
             </button>
           )}
         </div>
+        {importer && importing && (
+          <Import
+            workspaces={data.workspaces}
+            current={wsId}
+            actions={importer}
+            hrefWorkspace={hrefWorkspace}
+            onClose={closeImport}
+            onBusy={setImportBusy}
+          />
+        )}
         <div className={s.cols} data-shared={shared || undefined}>
           {!shared && (
             <Folders
