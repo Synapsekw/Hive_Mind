@@ -100,8 +100,10 @@ const AMBIENT_MS = 83;
 const AMBIENT_PULSE_MS = 33;
 /** The largest hit radius any shape can have, in screen px (the hot index, x1.7). */
 const MAX_REACH = 24;
-/** The smallest hit radius in the flat views, in screen px. */
-const MIN_REACH = 6;
+/** The smallest hit radius in Timeline, in screen px. */
+const MIN_REACH = 8;
+/** The smallest hit radius in Rings, whose big hives pack dots tighter. */
+const MIN_REACH_RINGS = 6;
 const THEME_ATTRS = ["data-theme", "data-mode", "data-dots", "data-reach"];
 const GLIDE_MS = 900;
 /** A move within one view (the timeline's columns as the day turns): no wave. */
@@ -704,14 +706,15 @@ export function MapCanvas(props: Props): JSX.Element {
     if (sc <= 0) return null;
     const bx = (clientX - r.left - c.tx) / sc;
     const by = (clientY - r.top - c.ty) / sc;
-    // Within 6 px of the dot, or within its drawn radius for the larger shapes. Rings packs
-    // a big hive tighter (dots 13.5 * scale apart), so the reach follows the drawn size.
+    // Within MIN_REACH px of the dot, or within its drawn radius for the larger shapes. Rings
+    // packs a big hive tighter (dots 13.5 * scale apart), so its reach is smaller.
+    const min = p.view === "rings" ? MIN_REACH_RINGS : MIN_REACH;
     const reach = (i: number) => {
       const n = p.model.nodes[i];
-      if (!n) return MIN_REACH / sc;
+      if (!n) return min / sc;
       const r =
         (dotDiameter(n, p.scene.dotScale) / 2) * (i === p.hot ? 1.7 : 1);
-      return Math.max(MIN_REACH, r) / sc;
+      return Math.max(min, r) / sc;
     };
     return hitTest(grid, bx, by, MAX_REACH / sc, (i) => {
       if (!eligible(i)) return false;

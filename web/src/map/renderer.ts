@@ -100,7 +100,7 @@ type SceneCache = {
   filtered: WeakMap<boolean[], boolean>;
   /** At most GLOW_MAX dots at freshness levels 6 and 7: the fresh ones may glow. */
   glow: boolean;
-  /** Per group: does any of its nodes stay lit under this filter (its name shows)? */
+  /** Per group: does any of its nodes stay lit (its name at full, else faint)? */
   groupOn: WeakMap<boolean[], boolean[]>;
 };
 
@@ -201,6 +201,55 @@ function fit(
   }
   const out = { text, w };
   fitted.set(key, out);
+  return out;
+}
+
+/** A group name keeps at least this many characters, or only the count is shown. */
+const GROUP_NAME_MIN = 4;
+/** Group names stay this many screen px inside the map box. */
+const GROUP_MARGIN = 8;
+/** A group name whose group has nothing lit (filter, search, selection). */
+const GROUP_DIM = 0.4;
+
+/**
+ * A group label "<name> · <count>" fitted into `room` px: the name is cut with "…" and the
+ * count stays whole. With fewer than four name characters left, only the count ("384").
+ */
+export function fitGroupLabel(
+  text: string,
+  room: number,
+  measure: (s: string) => number,
+): string {
+  if (measure(text) <= room) return text;
+  const at = text.lastIndexOf(" · ");
+  if (at < 0) return text;
+  const name = text.slice(0, at);
+  const tail = text.slice(at);
+  let lo = 0;
+  let hi = name.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (measure(`${name.slice(0, mid).trimEnd()}…${tail}`) <= room) lo = mid;
+    else hi = mid - 1;
+  }
+  const kept = name.slice(0, lo).trimEnd();
+  return kept.length >= GROUP_NAME_MIN ? `${kept}…${tail}` : tail.slice(3);
+}
+
+/** fitGroupLabel, measured once per font, label and whole pixel of room. */
+function fitGroup(
+  ctx: CanvasRenderingContext2D,
+  font: string,
+  text: string,
+  room: number,
+): string {
+  const px = Math.max(0, Math.floor(room));
+  const key = `${font}\u0000${px}\u0000${text}`;
+  const hit = fitted.get(key);
+  if (hit) return hit.text;
+  if (fitted.size > 20_000) fitted.clear();
+  const out = fitGroupLabel(text, px, (s) => ctx.measureText(s).width);
+  fitted.set(key, { text: out, w: 0 });
   return out;
 }
 
@@ -1168,18 +1217,25 @@ function drawLabels(F: Frame) {
     }
   }
 
-  // Group names outside the circle, aligned away from it; a group the filter leaves empty
-  // loses its name.
+  // Group names outside the circle, aligned away from it and cut to stay inside the box; a
+  // group with nothing lit is drawn faint.
   if (scene.groupLabels.length && f.labelsOn !== false) {
     const on = groupsOn(F.c, scene, f.lit);
-    ctx.font = `600 12px ${fam}`;
-    ctx.globalAlpha = 1;
+    const font = `600 12px ${fam}`;
+    ctx.font = font;
     ctx.fillStyle = pal.fg;
+    const x0 = sx(0) + GROUP_MARGIN;
+    const x1 = sx(1000) - GROUP_MARGIN;
     scene.groupLabels.forEach((g, t) => {
-      if (!on[t]) return;
+      const x = sx(g.x);
+      const text =
+        g.align === "centre"
+          ? g.text
+          : fitGroup(ctx, font, g.text, g.align === "left" ? x1 - x : x - x0);
+      ctx.globalAlpha = on[t] ? 1 : GROUP_DIM;
       ctx.textAlign =
         g.align === "centre" ? "center" : g.align === "left" ? "left" : "right";
-      ctx.fillText(g.text, sx(g.x), sy(g.y) + 0.5);
+      ctx.fillText(text, x, sy(g.y) + 0.5);
     });
     ctx.textAlign = "left";
   }
