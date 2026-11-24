@@ -17,7 +17,7 @@ import { Folders } from "./Folders";
 import { folderMark } from "./marks";
 import { NoteList } from "./NoteList";
 import { Preview } from "./Preview";
-import { DELETE_FAILED, DELETED } from "./sentences";
+import { DELETE_FAILED, DELETED, UNLINK_FAILED } from "./sentences";
 import { ShareControl } from "./ShareControl";
 import { Tabs } from "./Tabs";
 import { buildTree, notesIn, type Scope, type TreeNode } from "./tree";
@@ -73,8 +73,10 @@ export function Vault({
   const router = useRouter();
   // Notes deleted here. They stay out even if a refresh is slow to drop them.
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
-  // What the last delete came to. It is shown until the person opens another note, deletes
-  // again or dismisses it.
+  // Links ended here. They stay out even if a refresh is slow to drop them.
+  const [unlinked, setUnlinked] = useState<ReadonlySet<string>>(new Set());
+  // What the last delete came to, or that an unlink did not work. It is shown until the person
+  // opens another note, deletes or unlinks again, or dismisses it.
   const [said, setSaid] = useState<{ text: string; failed: boolean } | null>(
     null,
   );
@@ -119,14 +121,18 @@ export function Vault({
   }
 
   const data = useMemo<VaultData>(() => {
-    if (gone.size === 0) return served;
-    const open = served.open;
+    if (gone.size === 0 && unlinked.size === 0) return served;
+    let open = served.open;
+    if (open && "note" in open)
+      open = gone.has(open.note.id)
+        ? null
+        : { ...open, links: open.links.filter((l) => !unlinked.has(l.id)) };
     return {
       ...served,
       notes: served.notes.filter((n) => !gone.has(n.id)),
-      open: open && "note" in open && gone.has(open.note.id) ? null : open,
+      open,
     };
-  }, [served, gone]);
+  }, [served, gone, unlinked]);
 
   // Runs after every render, once the deleted note's row is out of the page.
   useEffect(() => {
@@ -207,6 +213,41 @@ export function Vault({
     return run;
   }
 
+  // Ends a link of the open note. The database decides whether it may be ended and what is
+  // still readable afterwards; the page is read again either way.
+  async function unlink(linkId: string): Promise<boolean> {
+    const from = wanted.current;
+    setSaid(null);
+    let ok = false;
+    try {
+      ok = (await actions.unlink(linkId)).ok === true;
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      setSaid({ text: UNLINK_FAILED, failed: true });
+      router.refresh();
+      return false;
+    }
+    // The row and its question leave the page. The focus goes to the open note's row in the
+    // list, and only from the note the link was on, or from nowhere.
+    const at = document.activeElement;
+    const note = main.current?.querySelector('section[aria-label="Note"]');
+    if (
+      wanted.current === from &&
+      (!at || at === document.body || note?.contains(at))
+    )
+      target.current = {
+        row:
+          main.current?.querySelector<HTMLElement>(
+            'nav[aria-label="Notes"] a[aria-current="page"]',
+          ) ?? null,
+      };
+    setUnlinked((set) => new Set(set).add(linkId));
+    router.refresh();
+    return true;
+  }
+
   const tabKey = data.tab.kind === "shared" ? "shared" : data.tab.id;
   const [local, setLocal] = useState<Local>(() => fresh(data, tabKey));
   // A new tab starts from "All notes" with nothing filtered.
@@ -234,6 +275,8 @@ export function Vault({
 
   const hrefWorkspace = (id: string) => `${base}?ws=${encodeURIComponent(id)}`;
   const hrefShared = `${base}?tab=shared`;
+  // The note alone: the open note decides the tab.
+  const hrefNote = (id: string) => `${base}?note=${encodeURIComponent(id)}`;
   const hrefFor = (n: VaultNote) =>
     shared
       ? `${hrefShared}&note=${encodeURIComponent(n.id)}`
@@ -320,7 +363,7 @@ export function Vault({
             />
           </label>
         </div>
-        {/* How the last delete went. The status element is always here, so it is announced. */}
+        {/* How the last delete or unlink went. The status element is always here, so it is announced. */}
         <div
           className={said ? s.said : s.srOnly}
           data-failed={said?.failed || undefined}
@@ -380,6 +423,8 @@ export function Vault({
             onSave={actions.saveNote}
             onRelease={actions.release}
             onDelete={deleteNote}
+            onUnlink={unlink}
+            hrefNote={hrefNote}
           />
         </div>
       </main>

@@ -64,6 +64,47 @@ describe("fixtureVault", () => {
     });
   });
 
+  it("links Findings draft with a colleague's note and with one of my own, seen from each side", () => {
+    const all = [
+      ...fixtureVault(NOW).notes,
+      ...fixtureVault(NOW, { tab: "shared" }).notes,
+    ];
+    const id = (title: string) => all.find((n) => n.title === title)!.id;
+    const linksOf = (title: string) => {
+      const open = fixtureVault(NOW, { note: id(title) }).open;
+      if (!open || !("note" in open)) throw new Error(title);
+      return open.links;
+    };
+    const [withSara, withMine] = linksOf("Findings draft");
+    expect(linksOf("Findings draft")).toHaveLength(2);
+    expect(withSara).toMatchObject({
+      note_id: id("Pricing options"),
+      title: "Pricing options",
+      owner: "Sara",
+      mine: false,
+    });
+    expect(withMine).toMatchObject({
+      note_id: id("Call notes"),
+      title: "Call notes",
+      owner: "Danijel",
+      mine: true,
+    });
+    // The same two links from their other sides.
+    expect(linksOf("Pricing options")).toEqual([
+      {
+        id: withSara!.id,
+        note_id: id("Findings draft"),
+        title: "Findings draft",
+        owner: "Danijel",
+        mine: true,
+      },
+    ]);
+    expect(linksOf("Call notes")).toEqual([
+      { ...linksOf("Pricing options")[0], id: withMine!.id },
+    ]);
+    expect(linksOf("Readme")).toEqual([]);
+  });
+
   it("opens the hostile note with the hostile body", () => {
     const d = fixtureVault(NOW, { note: HOSTILE_NOTE_ID });
     expect(d.open).not.toBeNull();

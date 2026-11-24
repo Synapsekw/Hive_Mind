@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   FolderRule,
+  NoteLink,
   Tab,
   VaultData,
   VaultNote,
@@ -25,6 +26,7 @@ export const NOTE_COLUMNS =
 const INDEX_CAP = 2000;
 const SHARED_CAP = 500;
 const BODY_CAP = 200_000;
+const LINKS_CAP = 50;
 
 const VISIBILITIES = new Set(["private", "group", "members"]);
 const vis = (v: unknown): Visibility | null =>
@@ -72,10 +74,43 @@ function failed(what: string, res: Res): boolean {
 
 const rows = (res: Res): Row[] => (Array.isArray(res.data) ? res.data : []);
 
+/** The five fields of a link row, or null when the row is not what the database promises. */
+function toLink(r: unknown): NoteLink | null {
+  if (typeof r !== "object" || r === null) return null;
+  const { id, note_id, title, owner, mine } = r as Row;
+  if (!isUuid(id) || !isUuid(note_id)) return null;
+  if (typeof title !== "string" || typeof owner !== "string") return null;
+  if (typeof mine !== "boolean") return null;
+  return { id, note_id, title, owner, mine };
+}
+
+/**
+ * The open note's accepted links, as the database lists them for the caller. The note is shown
+ * without them when this read fails: only the error's code and message are logged.
+ */
+async function noteLinks(db: Db, noteId: string): Promise<NoteLink[]> {
+  let res: Res | null | undefined;
+  try {
+    res = (await db.rpc("note_links", { p_note: noteId })) as Res | null;
+  } catch (e) {
+    console.error("note_links failed", e instanceof Error ? e.name : "");
+    return [];
+  }
+  if (!res) {
+    console.error("note_links failed");
+    return [];
+  }
+  if (failed("note_links", res)) return [];
+  return rows(res)
+    .map(toLink)
+    .filter((l): l is NoteLink => l !== null)
+    .slice(0, LINKS_CAP);
+}
+
 /**
  * Everything `/vault` shows, in this order: the caller's own hive; then its members, the
- * caller's workspaces in it, the caller's user and the `?note=` body in parallel; then the open
- * tab's folders and note index in parallel. Row-level security decides every row.
+ * caller's workspaces in it, the caller's user, the `?note=` body and that note's links in
+ * parallel; then the open tab's folders and note index in parallel. Row-level security decides every row.
  */
 export async function loadVault(
   db: Db,
@@ -89,7 +124,7 @@ export async function loadVault(
   const noteId = query.note === undefined ? null : query.note;
   const wantNote = noteId !== null && isUuid(noteId);
 
-  const [members, workspaces, user, opened] = await Promise.all([
+  const [members, workspaces, user, opened, links] = await Promise.all([
     db
       .from("members")
       .select("id, display_name, user_id")
@@ -108,6 +143,7 @@ export async function loadVault(
           .eq("id", noteId)
           .limit(1) as unknown as Promise<Res>)
       : Promise.resolve(null),
+    wantNote ? noteLinks(db, noteId) : Promise.resolve([]),
   ]);
   if (failed("members query", members)) return { state: "error" };
   if (failed("workspaces query", workspaces)) return { state: "error" };
@@ -134,6 +170,7 @@ export async function loadVault(
         note: toNote(r, meId),
         body: body.length > BODY_CAP ? body.slice(0, BODY_CAP) : body,
         cut: body.length > BODY_CAP,
+        links,
       };
     }
   }

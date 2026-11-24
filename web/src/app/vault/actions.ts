@@ -13,6 +13,7 @@ import {
   releaseIn,
   saveFolderIn,
   saveNoteIn,
+  unlinkIn,
 } from "./write";
 
 async function withSession<T>(
@@ -52,6 +53,10 @@ export async function release(noteId: string): Promise<Result> {
 
 export async function deleteNote(noteId: string): Promise<Result> {
   return withSession<Result>({ ok: false }, (db) => deleteNoteIn(db, noteId));
+}
+
+export async function unlink(linkId: string): Promise<Result> {
+  return withSession<Result>({ ok: false }, (db) => unlinkIn(db, linkId));
 }
 
 export async function preview(

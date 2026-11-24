@@ -6,6 +6,7 @@ import {
   saveFolderIn,
   saveNoteIn,
   toPreview,
+  unlinkIn,
 } from "./write";
 
 const HIVE = "00000000-0000-4000-8000-000000000a01";
@@ -383,6 +384,78 @@ describe("deleteNoteIn", () => {
       "deleteNote failed",
       "P0001",
       "agents cannot delete notes",
+    );
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    spy.mockRestore();
+  });
+});
+
+describe("unlinkIn", () => {
+  const LINK = "00000000-0000-4000-8000-000000000c01";
+
+  it("asks the database to unlink, as the person, and sends nothing else", async () => {
+    const t = stub();
+    expect(await unlinkIn(t.db, LINK)).toEqual({ ok: true });
+    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
+    expect(t.rpc).toHaveBeenCalledTimes(1);
+    expect(t.rpc).toHaveBeenCalledWith("unlink", { p_link: LINK });
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it("asks in lower case for an id given in upper case", async () => {
+    const t = stub();
+    expect(
+      await unlinkIn(t.db, "ABCDEF00-0000-4000-8000-00000001ABCD"),
+    ).toEqual({ ok: true });
+    expect(t.rpc).toHaveBeenCalledWith("unlink", {
+      p_link: "abcdef00-0000-4000-8000-00000001abcd",
+    });
+  });
+
+  it("refuses anything that is not a uuid without a query or a session check", async () => {
+    const bad: unknown[] = [
+      "nope",
+      "1 or 1=1",
+      "",
+      `${LINK} `,
+      undefined,
+      null,
+      42,
+      [LINK],
+      { id: LINK },
+    ];
+    for (const id of bad) {
+      const t = stub();
+      expect(await unlinkIn(t.db, id)).toEqual({ ok: false });
+      expect(t.from).not.toHaveBeenCalled();
+      expect(t.rpc).not.toHaveBeenCalled();
+      expect(t.auth.getUser).not.toHaveBeenCalled();
+    }
+  });
+
+  it("is not ok without a session, and sends no query", async () => {
+    const t = stub({ user: null });
+    expect(await unlinkIn(t.db, LINK)).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it("is not ok when the database refuses; says only that, and logs only code and message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      rpc: {
+        data: null,
+        error: { message: "link not found", code: "P0001", details: "Secret" },
+      },
+    });
+    const out = await unlinkIn(t.db, LINK);
+    expect(out).toEqual({ ok: false });
+    expect(JSON.stringify(out)).not.toContain("link not found");
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(
+      "unlink failed",
+      "P0001",
+      "link not found",
     );
     expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
     spy.mockRestore();

@@ -185,7 +185,7 @@ export function registerTools(server: McpServer, session: GetSession): void {
 
   server.tool(
     "hive_propose_link",
-    "Propose a link from one of your notes to another note you can read. A person on each side must accept before it counts.",
+    "Propose a link from one of your notes to another note you can read. A person on each side must accept before it counts. A pair a person declined or unlinked cannot be proposed again.",
     {
       from_path: z.string().min(1),
       to_id: z.string().uuid(),

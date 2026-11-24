@@ -1,6 +1,8 @@
 // A deterministic sample vault for the dev page and the tests: one hive of three people, two
 // workspaces of about 60 notes in nested folders, two folder rules, notes with their own setting,
-// two held notes and five notes shared by colleagues. Dates are relative to `now`; nothing random.
+// two held notes and five notes shared by colleagues. Two accepted links: "Findings draft" with
+// Sara's "Pricing options" (the note opened by a link) and with my own "Call notes". Dates are
+// relative to `now`; nothing random.
 //
 // For the notes `me` owns, `effective`, `effective_with`, `rule_folder` and `access` are worked
 // out here from the folder rules the way the database would report them (nearest ancestor rule
@@ -8,6 +10,7 @@
 // exact counts. `rule_folder` is the nearest rule folder even when the note has its own setting.
 import type {
   FolderRule,
+  NoteLink,
   SharePreview,
   VaultData,
   VaultNote,
@@ -302,6 +305,44 @@ const RULES: Record<string, FolderRule[]> = {
   [W_OPERATIONS]: [{ path: "hiring", visibility: null, shared_with: [] }],
 };
 
+// Accepted links, newest first: [link id, one note's path, the other note's path].
+const LINKS: [string, string, string][] = [
+  [
+    "00000000-0000-4000-8000-000000000c01",
+    "clients/redwood-energy/findings-draft.md",
+    "clients/redwood-energy/pricing-options.md",
+  ],
+  [
+    "00000000-0000-4000-8000-000000000c02",
+    "clients/redwood-energy/findings-draft.md",
+    "clients/redwood-energy/call-notes.md",
+  ],
+];
+
+const MEMBERS = [
+  { id: ME, display_name: "Danijel" },
+  { id: AHMED, display_name: "Ahmed" },
+  { id: SARA, display_name: "Sara" },
+];
+
+/** A note's accepted links as the database lists them: the note on the other side of each. */
+function linksOf(note: VaultNote, pool: VaultNote[]): NoteLink[] {
+  const out: NoteLink[] = [];
+  for (const [id, a, b] of LINKS) {
+    if (note.path !== a && note.path !== b) continue;
+    const other = pool.find((n) => n.path === (note.path === a ? b : a));
+    if (!other) continue;
+    out.push({
+      id,
+      note_id: other.id,
+      title: other.title,
+      owner: MEMBERS.find((m) => m.id === other.member_id)?.display_name ?? "",
+      mine: other.member_id === ME,
+    });
+  }
+  return out;
+}
+
 /** Nearest ancestor folder record with a visibility. */
 function nearestRule(folders: FolderRule[], path: string): FolderRule | null {
   let best: FolderRule | null = null;
@@ -399,17 +440,14 @@ export function fixtureVault(
               ? HOSTILE_BODY
               : `# ${found.title}\n\nSample note.\n`,
           cut: false,
+          links: linksOf(found, pool),
         }
       : { missing: true };
   }
   return {
     hive: { id: "00000000-0000-4000-8000-000000000a01", name: "Synapse" },
     me: ME,
-    members: [
-      { id: ME, display_name: "Danijel" },
-      { id: AHMED, display_name: "Ahmed" },
-      { id: SARA, display_name: "Sara" },
-    ],
+    members: MEMBERS.map((m) => ({ ...m })),
     workspaces,
     tab: isShared ? { kind: "shared" } : { kind: "workspace", id: ws.id },
     folders: isShared ? [] : (RULES[ws.id] ?? []),

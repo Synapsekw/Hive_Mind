@@ -9,6 +9,7 @@ const W1 = "00000000-0000-4000-8000-000000000b01";
 const W2 = "00000000-0000-4000-8000-000000000b02";
 const MINE = "00000000-0000-4000-8000-000000010001";
 const THEIRS = "00000000-0000-4000-8000-000000020001";
+const LINK = "00000000-0000-4000-8000-000000000c01";
 
 type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
@@ -47,6 +48,7 @@ const tokenOf = (sub: string) =>
 function stub(
   answer: (c: Call) => Res | undefined,
   user: { id: string } | null = { id: U_ME },
+  links: () => Res | Promise<Res> = () => ok([]),
 ) {
   const calls: Call[] = [];
   const from = vi.fn((table: string) => {
@@ -65,7 +67,7 @@ function stub(
       Promise.resolve(answer(call) ?? ok([])).then(res, rej);
     return chain;
   });
-  const rpc = vi.fn();
+  const rpc = vi.fn(async (..._args: unknown[]) => links());
   const auth = {
     getUser: vi.fn(async () => ({ data: { user }, error: null })),
     getSession: vi.fn(async () => ({
@@ -305,6 +307,127 @@ describe("loadVault", () => {
     );
     expect(await loadVault(t.db, { note: MINE })).toEqual({ state: "error" });
     spy.mockRestore();
+  });
+});
+
+describe("loadVault: the open note's links", () => {
+  const mine = row(MINE, { body: "Hello" });
+  const link = {
+    id: LINK,
+    note_id: THEIRS,
+    title: "Pricing options",
+    owner: "Ahmed",
+    mine: false,
+  };
+
+  it("asks note_links once for the open note, in the same batch as the note", async () => {
+    const t = stub(world({ open: [mine], index: [mine] }), { id: U_ME }, () =>
+      ok([link]),
+    );
+    const out = await loadVault(t.db, { note: MINE });
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(t.rpc).toHaveBeenCalledTimes(1);
+    expect(t.rpc).toHaveBeenCalledWith("note_links", { p_note: MINE });
+    // Started with the first batch (own hive, members, workspaces, the note), before any of
+    // it was awaited, and so before the second batch (folders, the index).
+    const rpcAt = t.rpc.mock.invocationCallOrder[0]!;
+    const tables = (when: (n: number) => boolean) =>
+      t.from.mock.calls
+        .filter((_, i) => when(t.from.mock.invocationCallOrder[i]!))
+        .map(([table]) => table);
+    expect(tables((n) => n < rpcAt)).toEqual([
+      "members",
+      "members",
+      "workspaces",
+      "notes",
+    ]);
+    expect(tables((n) => n > rpcAt)).toEqual(["folders", "notes"]);
+    expect(out.data.open).toEqual({
+      note: toNote(mine, ME),
+      body: "Hello",
+      cut: false,
+      links: [link],
+    });
+  });
+
+  it("does not ask when no note is open, or when the id is not a uuid", async () => {
+    const t = stub(world({}));
+    await loadVault(t.db, {});
+    await loadVault(t.db, { tab: "shared" });
+    await loadVault(t.db, { note: "x' or 1=1" });
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it("keeps only the five fields, and drops malformed rows", async () => {
+    const t = stub(world({ open: [mine] }), { id: U_ME }, () =>
+      ok([
+        { ...link, body: "secret", extra: 1 },
+        { ...link, id: "nope" },
+        { ...link, note_id: 7 },
+        { ...link, title: null },
+        { ...link, owner: undefined },
+        { ...link, mine: "yes" },
+        null,
+        "row",
+        { ...link, id: LINK.replace("c01", "c02"), mine: true },
+      ]),
+    );
+    const out = await loadVault(t.db, { note: MINE });
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.open).toMatchObject({
+      links: [link, { ...link, id: LINK.replace("c01", "c02"), mine: true }],
+    });
+  });
+
+  it("shows at most 50 links", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      ...link,
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    }));
+    const t = stub(world({ open: [mine] }), { id: U_ME }, () => ok(many));
+    const out = await loadVault(t.db, { note: MINE });
+    if (out.state !== "ok") throw new Error(out.state);
+    expect((out.data.open as { links: unknown[] }).links).toHaveLength(50);
+  });
+
+  it("still shows the note, with no links, when the read fails; logs only code and message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub(world({ open: [mine] }), { id: U_ME }, () => ({
+      data: [link],
+      error: { message: "boom", code: "XX000", details: "Secret title" },
+    }));
+    const out = await loadVault(t.db, { note: MINE });
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.open).toMatchObject({ note: { id: MINE }, links: [] });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith("note_links failed", "XX000", "boom");
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Pricing");
+    spy.mockRestore();
+  });
+
+  it("still shows the note, with no links, when the read throws or answers nothing", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const links of [
+      () => Promise.reject(new Error("Secret title")),
+      () => undefined as never,
+      () => ok({ id: LINK }),
+      () => ok(null),
+    ]) {
+      const t = stub(world({ open: [mine] }), { id: U_ME }, links);
+      const out = await loadVault(t.db, { note: MINE });
+      if (out.state !== "ok") throw new Error(out.state);
+      expect(out.data.open).toMatchObject({ note: { id: MINE }, links: [] });
+    }
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    spy.mockRestore();
+  });
+
+  it("a missing note stays missing, whatever the links read says", async () => {
+    const t = stub(world({ open: [] }), { id: U_ME }, () => ok([link]));
+    const out = await loadVault(t.db, { note: MINE });
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.open).toEqual({ missing: true });
   });
 });
 

@@ -112,7 +112,9 @@ suggestion-first: the system proposes "this looks like your DMT" and the owner c
   only the entity or topic.
 - A link goes live only when both sides accept. If either declines, nothing is shared and the
   decliner stays invisible to the other.
-- Links are bidirectional once accepted.
+- A decline is final: the same two notes cannot be proposed again, from either side.
+- Links are bidirectional once accepted. Either owner can end an accepted link with Unlink;
+  the two notes cannot be linked again after that.
 
 ### 7.5 Synthesis layer
 

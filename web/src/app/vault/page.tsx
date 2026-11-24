@@ -2,7 +2,14 @@ import { Notice } from "../../shell/Notice";
 import { createServerSupabase } from "../../lib/supabase/server";
 import { Vault } from "../../vault/Vault";
 import { loadInboxCount } from "../inbox/load-inbox";
-import { deleteNote, preview, release, saveFolder, saveNote } from "./actions";
+import {
+  deleteNote,
+  preview,
+  release,
+  saveFolder,
+  saveNote,
+  unlink,
+} from "./actions";
 import { loadVault } from "./load-vault";
 
 // Reads the session cookie, so never prerendered.
@@ -44,7 +51,7 @@ export default async function VaultPage({
     <Vault
       data={result.data}
       now={Date.now()}
-      actions={{ saveNote, saveFolder, release, preview, deleteNote }}
+      actions={{ saveNote, saveFolder, release, preview, deleteNote, unlink }}
       inbox={inbox}
     />
   );

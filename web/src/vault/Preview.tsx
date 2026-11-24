@@ -2,19 +2,30 @@
 
 // The open note: title, path, last change, who wrote it, the sharing control and Delete for the
 // person's own notes (a colleague's note says how it reached you instead), release for a held
-// note, then the rendered text.
+// note, the notes it is linked with and Unlink for each, then the rendered text.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { longDate } from "./format";
 import { folderMark, noteMark } from "./marks";
 import { Markdown } from "./Markdown";
-import { DELETE_QUESTION, releaseSentence } from "./sentences";
+import {
+  DELETE_QUESTION,
+  keepLinkName,
+  LINKED_WITH,
+  releaseSentence,
+  UNLINK,
+  UNLINK_GROUP,
+  unlinkName,
+  unlinkQuestion,
+  YOU,
+} from "./sentences";
 import { ShareControl } from "./ShareControl";
-import type { Choice, Result, VaultData, VaultNote } from "./types";
+import type { Choice, NoteLink, Result, VaultData, VaultNote } from "./types";
 import s from "./vault.module.css";
 
 /**
- * A confirming Delete sooner than this after the question opened, or after the press before it,
+ * A confirming press sooner than this after the question opened, or after the press before it,
  * is taken as part of a double click or a burst, not as an answer.
  */
 const CONFIRM_AFTER_MS = 500;
@@ -67,12 +78,30 @@ function Release({
 }
 
 /**
- * Delete, in two steps: the quiet button asks, and only a later, separate press on the
- * question's own Delete removes the note. Mounted per note, so opening another note or tab
- * drops a waiting question. What happens after the answer (the list, the line that says how it
- * went, the re-read) is the screen's; this only goes back to the quiet button when it failed.
+ * Something that cannot be taken back (Delete, Unlink), in two steps: the quiet button asks, and
+ * only a later, separate press on the question's own button does it. Mounted per note or per
+ * link, so opening another note or tab drops a waiting question. What happens after the answer
+ * (the list, the line that says how it went, the re-read) is the screen's; this only goes back
+ * to the quiet button when it failed.
  */
-function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
+function Ask({
+  word,
+  question: sentence,
+  group,
+  yes,
+  no,
+  onConfirm,
+}: {
+  /** The word on the quiet button and on the question's own. */
+  word: string;
+  question: string;
+  /** The names of the question, of both buttons that do it, and of Keep. */
+  group: string;
+  yes: string;
+  no: string;
+  /** Does it, and says whether it worked. */
+  onConfirm: () => Promise<boolean>;
+}) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   // The same as `busy`, readable at once by a second press that arrives before the render.
@@ -117,12 +146,12 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
     setBusy(true);
     let ok = false;
     try {
-      ok = await onDelete();
+      ok = await onConfirm();
     } catch {
       ok = false;
     }
     running.current = false;
-    if (ok) return; // The note, and this control with it, leaves the page.
+    if (ok) return; // The note or the link, and this control with it, leaves the page.
     // Back to the quiet button, with the focus if it was still here (or nowhere).
     const at = document.activeElement;
     if (!at || at === document.body || question.current?.contains(at))
@@ -136,7 +165,7 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
     <div
       ref={question}
       role="group"
-      aria-label="Delete this note"
+      aria-label={group}
       aria-busy={off}
       data-scope="reset"
       className={`${s.release} ${s.wide}`}
@@ -147,22 +176,22 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
         }
       }}
     >
-      <p className={s.sentence}>{DELETE_QUESTION}</p>
+      <p className={s.sentence}>{sentence}</p>
       <div className={s.actions}>
         <button
           type="button"
           className={s.confirm}
-          aria-label="Delete note"
+          aria-label={yes}
           aria-disabled={off}
           onClick={confirm}
         >
-          Delete
+          {word}
         </button>
         <button
           ref={keeper}
           type="button"
           className={s.secondary}
-          aria-label="Keep note"
+          aria-label={no}
           aria-disabled={off}
           onClick={keep}
         >
@@ -175,11 +204,74 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
       ref={opener}
       type="button"
       className={s.quiet}
-      aria-label="Delete note"
+      aria-label={yes}
       onClick={ask}
     >
-      Delete
+      {word}
     </button>
+  );
+}
+
+function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
+  return (
+    <Ask
+      word="Delete"
+      question={DELETE_QUESTION}
+      group="Delete this note"
+      yes="Delete note"
+      no="Keep note"
+      onConfirm={onDelete}
+    />
+  );
+}
+
+/**
+ * The notes the open note is linked with, as the database listed them: each a row of the note
+ * list (title, then whose it is) with Unlink at its end. Nothing at all when there is none.
+ * The row and its Unlink share the line the way the sharing control and Delete do.
+ */
+function Linked({
+  links,
+  own,
+  owner,
+  hrefNote,
+  onUnlink,
+}: {
+  links: NoteLink[];
+  /** The open note is the person's own. */
+  own: boolean;
+  /** Who the open note belongs to, by name. */
+  owner: string;
+  hrefNote: (noteId: string) => string;
+  onUnlink: (linkId: string) => Promise<boolean>;
+}) {
+  if (links.length === 0) return null;
+  return (
+    <section aria-label={LINKED_WITH} className={s.tools}>
+      <h3 className={`${s.groupName} ${s.wide}`}>{LINKED_WITH}</h3>
+      <ul className={`${s.rows} ${s.wide}`}>
+        {links.map((l) => (
+          <li key={l.id} className={s.tools}>
+            <Link href={hrefNote(l.note_id)} prefetch={false} className={s.row}>
+              <span className={s.rowTitle}>{l.title}</span>
+              <span className={s.rowMeta}>{l.mine ? YOU : l.owner}</span>
+            </Link>
+            <Ask
+              word={UNLINK}
+              question={unlinkQuestion({
+                own: own && l.mine,
+                // The colleague on the other side: of that note, or of this one.
+                owner: l.mine ? owner : l.owner,
+              })}
+              group={UNLINK_GROUP}
+              yes={unlinkName(l.title)}
+              no={keepLinkName(l.title)}
+              onConfirm={() => onUnlink(l.id)}
+            />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -188,12 +280,18 @@ export function Preview({
   onSave,
   onRelease,
   onDelete,
+  onUnlink,
+  hrefNote,
 }: {
   data: VaultData;
   onSave: (noteId: string, choice: Choice) => Promise<Result>;
   onRelease: (noteId: string) => Promise<Result>;
   /** Deletes the note and says whether it worked. */
   onDelete: (noteId: string) => Promise<boolean>;
+  /** Ends a link of the open note and says whether it worked. */
+  onUnlink: (linkId: string) => Promise<boolean>;
+  /** The address of another note in the vault. */
+  hrefNote: (noteId: string) => string;
 }) {
   const open = data.open;
   let body;
@@ -271,6 +369,14 @@ export function Preview({
               onRelease={() => onRelease(n.id)}
             />
           )}
+          <Linked
+            key={`links-${n.id}`}
+            links={open.links}
+            own={n.member_id === data.me}
+            owner={owner}
+            hrefNote={hrefNote}
+            onUnlink={onUnlink}
+          />
         </header>
         {open.cut && (
           <p className={s.cut}>Showing the first 200,000 characters.</p>
