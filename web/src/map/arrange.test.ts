@@ -443,6 +443,20 @@ describe("grouping by category", () => {
     expect(g.of).toEqual([1, 0, 2]);
   });
 
+  it("puts a locked node and a file under No topic even when their payload carries topic ids", () => {
+    const nodes = [
+      tagged("a", ["c1"], { locked: true, title: null }),
+      tagged("f", ["c1"], { kind: "file" }),
+      tagged("b", ["c1"]),
+    ];
+    const cat = grouping({ nodes, links: [], topics: TOPICS }, "category", NOW);
+    expect(cat.names).toEqual(["Customers", "No topic"]);
+    expect(cat.of).toEqual([1, 1, 0]);
+    const top = grouping({ nodes, links: [], topics: TOPICS }, "topic", NOW);
+    expect(top.names).toEqual(["Acme", "No topic"]);
+    expect(top.of).toEqual([1, 1, 0]);
+  });
+
   it("puts every node under No topic when the payload has no topics", () => {
     const nodes = [tagged("a", ["c1"]), node("b")];
     const g = grouping({ nodes, links: [] }, "category", NOW);
@@ -451,7 +465,7 @@ describe("grouping by category", () => {
 });
 
 describe("grouping by topic", () => {
-  it("draws the largest first, ties by name, No topic sized like any group", () => {
+  it("draws the largest first, ties by name, and No topic last whatever its size", () => {
     const nodes = [
       tagged("a", ["v2"]),
       tagged("b", ["c1"]),
@@ -462,8 +476,8 @@ describe("grouping by topic", () => {
       tagged("g", []),
     ];
     const g = grouping({ nodes, links: [], topics: TOPICS }, "topic", NOW);
-    expect(g.names).toEqual(["No topic", "Acme", "Bolt", "Fleet"]);
-    expect(sizes(g)).toEqual([3, 2, 1, 1]);
+    expect(g.names).toEqual(["Acme", "Bolt", "Fleet", "No topic"]);
+    expect(sizes(g)).toEqual([2, 1, 1, 3]);
   });
 
   it("suffixes a name shared by two kinds, for both, and only then", () => {
@@ -496,6 +510,28 @@ describe("grouping by topic", () => {
     expect(g.names).toHaveLength(12);
     expect(g.names[11]).toBe("Other topics");
     expect(g.names[0]).toBe("T00");
+  });
+
+  it("keeps No topic out of the fold: twelve names, ending Other topics then No topic", () => {
+    const topics = Array.from({ length: 15 }, (_, i) =>
+      T(`t${i}`, `T${String(i).padStart(2, "0")}`, "subject"),
+    );
+    const nodes = [
+      ...topics.map((t) => tagged(`n-${t.id}`, [t.id])),
+      ...Array.from({ length: 40 }, (_, i) => tagged(`none${i}`, [])),
+    ];
+    const g = grouping({ nodes, links: [], topics }, "topic", NOW);
+    expect(g.names).toHaveLength(12);
+    expect(g.names.slice(-2)).toEqual(["Other topics", "No topic"]);
+    expect(g.names[0]).toBe("T00");
+    expect(sizes(g)[11]).toBe(40);
+    expect(sizes(g)[10]).toBe(5);
+  });
+
+  it("has no No topic group when every node has a topic", () => {
+    const nodes = [tagged("a", ["c1"]), tagged("b", ["v2"])];
+    const g = grouping({ nodes, links: [], topics: TOPICS }, "topic", NOW);
+    expect(g.names).toEqual(["Acme", "Bolt"]);
   });
 
   it("falls back to No topic for unknown ids and a missing list", () => {

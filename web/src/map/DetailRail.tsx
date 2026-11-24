@@ -218,12 +218,13 @@ function Facts({
   owner: string;
   now: number;
 }) {
-  const topic = model.topics[n.topic]?.name ?? "";
+  const folder = n.folder ?? "";
   if (n.locked)
     return (
       <p className={s.meta}>
-        {topic}. {owner} has not shared this, so you see where it sits but not
-        what it says.
+        {folder ? `${folder}. ` : ""}
+        {owner} has not shared this, so you see where it sits but not what it
+        says.
       </p>
     );
   return (
@@ -236,7 +237,7 @@ function Facts({
           </>
         )}
         <dt>Folder</dt>
-        <dd>{topic}</dd>
+        <dd>{folder}</dd>
         {n.held && (
           <>
             <dt>Topics</dt>

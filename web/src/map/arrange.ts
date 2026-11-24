@@ -72,6 +72,8 @@ function strongest(p: Input): (Strong | null)[] {
   const byId = new Map<string, Strong>();
   for (const t of p.topics ?? []) byId.set(t.id, t);
   return p.nodes.map((n) => {
+    // A locked note and a file have no topics, whatever the payload carries.
+    if (n.locked || n.kind !== "note") return null;
     for (const id of n.topics ?? []) {
       const t = byId.get(id);
       if (t) return t;
@@ -117,6 +119,30 @@ function topic(p: Input): Raw {
         : t.name,
   );
   return { key, order: bySize(key) };
+}
+
+/**
+ * The topic groups: the largest topics, folded past the cap, and No topic last. No topic is
+ * never folded and takes one of the places, so the other groups share `max - 1` of them.
+ */
+function topicGroups(p: Input, max: number): Grouping {
+  const raw = topic(p);
+  const named = raw.key.flatMap((k, i) => (k === NO_TOPIC ? [] : [i]));
+  const hasNone = named.length < raw.key.length;
+  const g = cap(
+    {
+      key: named.map((i) => raw.key[i]!),
+      order: raw.order.filter((k) => k !== NO_TOPIC),
+    },
+    hasNone ? max - 1 : max,
+    "Other topics",
+    "More topics",
+  );
+  if (!hasNone) return { names: g.names, of: raw.key.map((_, i) => g.of[i]!) };
+  const none = g.names.length;
+  const of = raw.key.map(() => none);
+  named.forEach((at, j) => (of[at] = g.of[j]!));
+  return { names: [...g.names, NO_TOPIC], of };
 }
 
 const RECENT = "Last 2 weeks";
@@ -279,8 +305,7 @@ export function grouping(
 ): Grouping {
   if (p.nodes.length === 0) return { names: [], of: [] };
   if (arrange === "category") return category(p);
-  if (arrange === "topic")
-    return cap(topic(p), max, "Other topics", "More topics");
+  if (arrange === "topic") return topicGroups(p, max);
   if (arrange === "time") return cap(time(p, now), max, EARLIER, EARLIER);
   if (arrange === "links") return cap(links(p), max, "Other", "Other clusters");
   return cap(folder(p), max, "Other", "Other topics");

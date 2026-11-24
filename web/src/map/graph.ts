@@ -117,6 +117,7 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
       id: n.id,
       kind: n.kind,
       topic: g.of[at] ?? 0,
+      folder: n.topic,
       member: n.member_id,
       mine: meIds.has(n.member_id),
       locked,

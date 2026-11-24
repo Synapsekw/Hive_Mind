@@ -58,6 +58,8 @@ export type ModelNode = {
   updatedAt: number; // epoch ms; 0 for root and hubs
   createdAt: number; // epoch ms; `updatedAt` when the payload has no usable created date
   byAgent: boolean;
+  /** The note's or file's own folder, as the payload names it, whatever the grouping. Absent on root, hubs and agents. */
+  folder?: string;
   /** A readable note's topics, strongest first. Absent when it has none. */
   held?: { name: string; kind: Kind }[];
   nb: number[]; // neighbours

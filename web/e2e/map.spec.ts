@@ -2001,6 +2001,32 @@ test("a selected note names its topics with their kinds, and its folder", async 
   await expect(held).toContainText(names.get(note.topics![1]!)!);
 });
 
+test("under Group by Category a selected note's Folder row still shows its folder, not a kind name", async ({
+  page,
+}) => {
+  const all = fixturePayload(Date.now()).nodes;
+  const note = all.find(
+    (n) =>
+      n.kind === "note" &&
+      !n.locked &&
+      (n.topics?.length ?? 0) >= 1 &&
+      all.filter((m) => m.title === n.title).length === 1,
+  )!;
+  await open(page);
+  await groupBy(page, "Folder", "Category");
+  await pick(
+    page,
+    page.locator(`[data-map-dot][aria-label^="${note.title}, note, "]`),
+  );
+  const folder = rail(page)
+    .locator("dl dt", { hasText: "Folder" })
+    .locator("+ dd");
+  await expect(folder).toHaveText(note.topic);
+  await expect(folder).not.toHaveText(
+    /^(Customers|Partners|Projects|Vendors|Products|Solutions|People|Subjects|No topic)$/,
+  );
+});
+
 test("a note with no topic has no Topics row", async ({ page }) => {
   await open(page);
   await pick(page, page.locator('[data-map-dot][aria-label^="<img src=x"]'));

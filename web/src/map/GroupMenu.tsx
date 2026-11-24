@@ -1,4 +1,4 @@
-// "Group by" in the top bar (Rings only): a button that opens a small menu of the three
+// "Group by" in the top bar (Rings only): a button that opens a small menu of the five
 // arrangements. Choosing one is client state, no request.
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { ARRANGES, type Arrange } from "./arrange";
