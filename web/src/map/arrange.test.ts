@@ -340,7 +340,7 @@ describe("determinism and edges", () => {
     expect(sizes(first)).toEqual([3, 3, 2, 1]);
   });
 
-  it("exposes the dock headings", () => {
+  it("exposes the filter bar's group labels", () => {
     expect(GROUP_HEADING).toEqual({
       folder: "Folders",
       links: "Clusters",

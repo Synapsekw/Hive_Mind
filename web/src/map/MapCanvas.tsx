@@ -43,7 +43,7 @@ import s from "./map.module.css";
 
 export type { CameraApi } from "./useCamera";
 
-/** What the legend dock is pointing at: its matching dots stay, the rest drop to the soft dim. */
+/** What a filter row or the detail rail points at: its matching dots stay, the rest drop to the soft dim. */
 export type Preview = {
   topic?: number | null;
   kind?: NodeKind | null;
