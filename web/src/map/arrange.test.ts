@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GROUP_HEADING, grouping } from "./arrange";
+import { ARRANGES, GROUP_HEADING, grouping } from "./arrange";
+import type { Kind } from "../topics/types";
 import type { MapNode } from "./types";
 
 const DAY = 86_400_000;
@@ -377,15 +378,129 @@ describe("determinism and edges", () => {
       folder: "Folders",
       links: "Clusters",
       time: "Months",
+      category: "Categories",
+      topic: "Topics",
     });
   });
 
   it("returns nothing for no nodes", () => {
-    for (const a of ["folder", "links", "time"] as const) {
+    for (const a of ["folder", "links", "time", "category", "topic"] as const) {
       expect(grouping({ nodes: [], links: [] }, a, NOW)).toEqual({
         names: [],
         of: [],
       });
     }
+  });
+});
+
+const T = (id: string, name: string, kind: Kind) => ({ id, name, kind });
+const TOPICS = [
+  T("c1", "Acme", "client"),
+  T("p1", "Qualcomm", "partner"),
+  T("v1", "Qualcomm", "vendor"),
+  T("s1", "Fleet", "solution"),
+  T("v2", "Bolt", "vendor"),
+];
+const tagged = (id: string, topics: string[], over: Partial<MapNode> = {}) =>
+  node(id, { topics, ...over });
+
+describe("the menu order", () => {
+  it("lists Folder, Category, Topic, Links, Time", () => {
+    expect(ARRANGES.map(([a]) => a)).toEqual([
+      "folder",
+      "category",
+      "topic",
+      "links",
+      "time",
+    ]);
+  });
+});
+
+describe("grouping by category", () => {
+  it("draws kinds in kind order, No topic last, whatever the sizes", () => {
+    const nodes = [
+      ...Array.from({ length: 5 }, (_, i) => tagged(`n${i}`, [])),
+      tagged("a", ["s1"]),
+      tagged("b", ["v2"]),
+      tagged("c", ["c1"]),
+      tagged("d", [], { locked: true, title: null }),
+      node("f", { kind: "file", topics: [] }),
+    ];
+    const g = grouping({ nodes, links: [], topics: TOPICS }, "category", NOW);
+    expect(g.names).toEqual(["Customers", "Vendors", "Solutions", "No topic"]);
+    expect(g.of).toHaveLength(nodes.length);
+    expect(sizes(g)).toEqual([1, 1, 1, 7]);
+  });
+
+  it("is decided by the strongest topic that is known", () => {
+    const nodes = [
+      tagged("a", ["v2", "c1"]),
+      tagged("b", ["ghost", "c1"]),
+      tagged("c", ["ghost"]),
+    ];
+    const g = grouping({ nodes, links: [], topics: TOPICS }, "category", NOW);
+    expect(g.names).toEqual(["Customers", "Vendors", "No topic"]);
+    expect(g.of).toEqual([1, 0, 2]);
+  });
+
+  it("puts every node under No topic when the payload has no topics", () => {
+    const nodes = [tagged("a", ["c1"]), node("b")];
+    const g = grouping({ nodes, links: [] }, "category", NOW);
+    expect(g).toEqual({ names: ["No topic"], of: [0, 0] });
+  });
+});
+
+describe("grouping by topic", () => {
+  it("draws the largest first, ties by name, No topic sized like any group", () => {
+    const nodes = [
+      tagged("a", ["v2"]),
+      tagged("b", ["c1"]),
+      tagged("c", ["c1"]),
+      tagged("d", ["s1"]),
+      tagged("e", []),
+      tagged("f", []),
+      tagged("g", []),
+    ];
+    const g = grouping({ nodes, links: [], topics: TOPICS }, "topic", NOW);
+    expect(g.names).toEqual(["No topic", "Acme", "Bolt", "Fleet"]);
+    expect(sizes(g)).toEqual([3, 2, 1, 1]);
+  });
+
+  it("suffixes a name shared by two kinds, for both, and only then", () => {
+    const nodes = [
+      tagged("a", ["p1"]),
+      tagged("b", ["v1"]),
+      tagged("c", ["c1"]),
+    ];
+    const g = grouping({ nodes, links: [], topics: TOPICS }, "topic", NOW);
+    expect(g.names).toEqual([
+      "Acme",
+      "Qualcomm (Partners)",
+      "Qualcomm (Vendors)",
+    ]);
+    // The shared name appears for one kind only: no suffix.
+    const one = grouping(
+      { nodes: [tagged("a", ["p1"])], links: [], topics: TOPICS },
+      "topic",
+      NOW,
+    );
+    expect(one.names).toEqual(["Qualcomm"]);
+  });
+
+  it("folds past the cap into Other topics", () => {
+    const topics = Array.from({ length: 14 }, (_, i) =>
+      T(`t${i}`, `T${String(i).padStart(2, "0")}`, "subject"),
+    );
+    const nodes = topics.map((t) => tagged(`n-${t.id}`, [t.id]));
+    const g = grouping({ nodes, links: [], topics }, "topic", NOW);
+    expect(g.names).toHaveLength(12);
+    expect(g.names[11]).toBe("Other topics");
+    expect(g.names[0]).toBe("T00");
+  });
+
+  it("falls back to No topic for unknown ids and a missing list", () => {
+    const nodes = [tagged("a", ["ghost"]), node("b")];
+    const g = grouping({ nodes, links: [] }, "topic", NOW);
+    expect(g).toEqual({ names: ["No topic"], of: [0, 0] });
   });
 });

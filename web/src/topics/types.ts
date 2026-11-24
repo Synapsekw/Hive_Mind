@@ -11,6 +11,17 @@ export const KINDS = [
 ] as const;
 export type Kind = (typeof KINDS)[number];
 
+export const KIND_NAMES: Record<Kind, string> = {
+  client: "Customers",
+  partner: "Partners",
+  project: "Projects",
+  vendor: "Vendors",
+  product: "Products",
+  solution: "Solutions",
+  person: "People",
+  subject: "Subjects",
+};
+
 export const MAX_NAME = 80;
 export const MAX_ALIASES = 20;
 export const MAX_HEAD_TAGS = 50;

@@ -1,9 +1,12 @@
 // The groups the Rings view is drawn in, for one arrangement. Pure and deterministic.
+import { KINDS, KIND_NAMES, type Kind } from "../topics/types";
 import type { MapPayload } from "./types";
 
-export type Arrange = "folder" | "links" | "time";
+export type Arrange = "folder" | "category" | "topic" | "links" | "time";
 export const ARRANGES: [Arrange, string][] = [
   ["folder", "Folder"],
+  ["category", "Category"],
+  ["topic", "Topic"],
   ["links", "Links"],
   ["time", "Time"],
 ];
@@ -12,6 +15,8 @@ export const GROUP_HEADING: Record<Arrange, string> = {
   folder: "Folders",
   links: "Clusters",
   time: "Months",
+  category: "Categories",
+  topic: "Topics",
 };
 export type Grouping = {
   names: string[]; // group names in drawing order
@@ -38,7 +43,7 @@ const MONTHS = [
   "December",
 ];
 
-type Input = Pick<MapPayload, "nodes" | "links">;
+type Input = Pick<MapPayload, "nodes" | "links" | "topics">;
 
 /** Raw group key per node plus the order the keys are drawn in, before the cap. */
 type Raw = { key: string[]; order: string[] };
@@ -55,6 +60,62 @@ function bySize(key: string[]): string[] {
 
 function folder(p: Input): Raw {
   const key = p.nodes.map((n) => n.topic);
+  return { key, order: bySize(key) };
+}
+
+const NO_TOPIC = "No topic";
+
+type Strong = NonNullable<MapPayload["topics"]>[number];
+
+/** Each node's strongest topic: the first of its ids the payload lists, else null. */
+function strongest(p: Input): (Strong | null)[] {
+  const byId = new Map<string, Strong>();
+  for (const t of p.topics ?? []) byId.set(t.id, t);
+  return p.nodes.map((n) => {
+    for (const id of n.topics ?? []) {
+      const t = byId.get(id);
+      if (t) return t;
+    }
+    return null;
+  });
+}
+
+/** One group per kind in kind order, then No topic. Never folded: nine groups at most. */
+function category(p: Input): Grouping {
+  const top = strongest(p);
+  const used = new Set<Kind>();
+  for (const t of top) if (t) used.add(t.kind);
+  const names: string[] = [];
+  const at = new Map<Kind | null, number>();
+  for (const k of KINDS) {
+    if (!used.has(k)) continue;
+    at.set(k, names.length);
+    names.push(KIND_NAMES[k]);
+  }
+  if (top.some((t) => t === null)) {
+    at.set(null, names.length);
+    names.push(NO_TOPIC);
+  }
+  return { names, of: top.map((t) => at.get(t ? t.kind : null)!) };
+}
+
+function topic(p: Input): Raw {
+  const top = strongest(p);
+  // A name held by two kinds that both appear carries its kind name.
+  const kinds = new Map<string, Set<Kind>>();
+  for (const t of top) {
+    if (!t) continue;
+    const set = kinds.get(t.name);
+    if (set) set.add(t.kind);
+    else kinds.set(t.name, new Set([t.kind]));
+  }
+  const key = top.map((t) =>
+    !t
+      ? NO_TOPIC
+      : kinds.get(t.name)!.size > 1
+        ? `${t.name} (${KIND_NAMES[t.kind]})`
+        : t.name,
+  );
   return { key, order: bySize(key) };
 }
 
@@ -217,6 +278,9 @@ export function grouping(
   max = 12,
 ): Grouping {
   if (p.nodes.length === 0) return { names: [], of: [] };
+  if (arrange === "category") return category(p);
+  if (arrange === "topic")
+    return cap(topic(p), max, "Other topics", "More topics");
   if (arrange === "time") return cap(time(p, now), max, EARLIER, EARLIER);
   if (arrange === "links") return cap(links(p), max, "Other", "Other clusters");
   return cap(folder(p), max, "Other", "Other topics");

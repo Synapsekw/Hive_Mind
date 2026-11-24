@@ -714,6 +714,8 @@ test('"Group by" is a menu, visible in Rings and absent in Timeline and Orbit', 
   await expect(groupMenu(page)).toBeVisible();
   await expect(groupMenu(page).getByRole("menuitemradio")).toHaveText([
     "Folder",
+    "Category",
+    "Topic",
     "Links",
     "Time",
   ]);
@@ -789,7 +791,9 @@ test("arrow keys, Home and End move between the Group by rows", async ({
   await page.keyboard.press("Enter");
   await expect(groupRow(page, "Folder")).toBeFocused();
   await page.keyboard.press("ArrowDown");
-  await expect(groupRow(page, "Links")).toBeFocused();
+  await expect(groupRow(page, "Category")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(groupRow(page, "Topic")).toBeFocused();
   await page.keyboard.press("End");
   await expect(groupRow(page, "Time")).toBeFocused();
   await page.keyboard.press("ArrowDown");
@@ -1897,6 +1901,113 @@ test("Escape closes the Group by menu and keeps the selected dot; alone it clear
   await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
   await page.keyboard.press("Escape");
   await expect(page.locator('[data-map-dot][aria-pressed="true"]')).toHaveCount(
+    0,
+  );
+});
+
+// ---- Group by Category and by Topic, and a note's topics in the side panel ----
+
+/** Requests the page makes while `act` runs that would reach the server. */
+async function requestsDuring(page: Page, act: () => Promise<void>) {
+  const seen: Request[] = [];
+  const on = (r: Request) => seen.push(r);
+  page.on("request", on);
+  await act();
+  await page.waitForTimeout(300);
+  page.off("request", on);
+  return seen
+    .filter(
+      (r) =>
+        r.url().includes("/rest/") ||
+        r.url().includes("/auth/") ||
+        ["document", "fetch", "xhr"].includes(r.resourceType()),
+    )
+    .map((r) => `${r.resourceType()} ${r.url()}`);
+}
+
+test("choosing Category shows the kinds in kind order, No topic last, with no request", async ({
+  page,
+}) => {
+  await open(page);
+  await settle(page);
+  const bad = await requestsDuring(page, async () => {
+    await groupBy(page, "Folder", "Category");
+    const list = await openList(page, "Categories");
+    await expect(column(page, "Folders")).toHaveCount(0);
+    await expect(list.getByRole("checkbox")).toContainText([
+      "Customers",
+      "Partners",
+      "Vendors",
+      "Products",
+      "Solutions",
+      "Subjects",
+      "No topic",
+    ]);
+    await closeFilter(page);
+  });
+  expect(bad).toEqual([]);
+});
+
+test("choosing Topic names the topics, and a name shared by two kinds carries its kind", async ({
+  page,
+}) => {
+  await open(page);
+  await settle(page);
+  const bad = await requestsDuring(page, async () => {
+    await groupBy(page, "Folder", "Topic");
+    const list = await openList(page, "Topics");
+    await expect(row(list, /^Qualcomm \(Partners\)/)).toBeVisible();
+    await expect(row(list, /^Qualcomm \(Vendors\)/)).toBeVisible();
+    await expect(row(list, /^No topic/)).toBeVisible();
+    await expect(row(list, /^Emsteel/)).toBeVisible();
+    await closeFilter(page);
+  });
+  expect(bad).toEqual([]);
+});
+
+test("the search lights a group by its name under Category", async ({
+  page,
+}) => {
+  await open(page);
+  await groupBy(page, "Folder", "Category");
+  await searchField(page).fill("Customers");
+  await expect.poll(() => litTopics(page)).toEqual(["0"]);
+  expect(await litItems(page).count()).toBeGreaterThan(0);
+});
+
+test("a selected note names its topics with their kinds, and its folder", async ({
+  page,
+}) => {
+  const now = Date.now();
+  const names = new Map(fixturePayload(now).topics!.map((t) => [t.id, t.name]));
+  const note = fixturePayload(now).nodes.find(
+    (n) => n.kind === "note" && !n.locked && (n.topics?.length ?? 0) >= 2,
+  )!;
+  await open(page);
+  await pick(
+    page,
+    page.locator(
+      `[data-map-dot][aria-label="${note.title}, note, ${note.topic}"]`,
+    ),
+  );
+  const facts = rail(page).locator("dl");
+  await expect(facts.locator("dt")).toContainText(["Folder", "Topics"]);
+  await expect(facts.locator("dt", { hasText: /^Topic$/ })).toHaveCount(0);
+  await expect(
+    facts.locator("dt", { hasText: "Folder" }).locator("+ dd"),
+  ).toHaveText(note.topic);
+  const held = facts.locator("dt", { hasText: "Topics" }).locator("+ dd");
+  await expect(held).toContainText(names.get(note.topics![0]!)!);
+  await expect(held).toContainText(names.get(note.topics![1]!)!);
+});
+
+test("a note with no topic has no Topics row", async ({ page }) => {
+  await open(page);
+  await pick(page, page.locator('[data-map-dot][aria-label^="<img src=x"]'));
+  await expect(
+    rail(page).locator("dl dt", { hasText: "Folder" }),
+  ).toBeVisible();
+  await expect(rail(page).locator("dl dt", { hasText: "Topics" })).toHaveCount(
     0,
   );
 });

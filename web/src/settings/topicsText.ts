@@ -24,16 +24,8 @@ export const KEEP = "Keep";
 export const DELETE_ASIDE = "Notes stay. They are no longer under this topic.";
 export const FAILED = "That didn't work. Try again.";
 
-export const KIND_NAMES: Record<Kind, string> = {
-  client: "Customers",
-  partner: "Partners",
-  project: "Projects",
-  vendor: "Vendors",
-  product: "Products",
-  solution: "Solutions",
-  person: "People",
-  subject: "Subjects",
-};
+// Kept here for the settings screens; the map reads it from `topics/types`.
+export { KIND_NAMES } from "../topics/types";
 
 const many = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
