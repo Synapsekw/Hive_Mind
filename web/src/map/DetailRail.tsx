@@ -394,12 +394,7 @@ export function DetailRail({
   const n = sel !== null ? model.nodes[sel] : undefined;
   const info = n?.kind === "agent" && n.id ? agentInfo.get(n.id) : undefined;
   return (
-    <aside
-      id={panelId}
-      aria-label="Details"
-
-      className={s.details}
-    >
+    <aside id={panelId} aria-label="Details" className={s.details}>
       <button
         ref={foldRef}
         type="button"

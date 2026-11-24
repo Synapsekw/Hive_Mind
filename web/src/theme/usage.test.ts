@@ -93,6 +93,7 @@ describe("token usage under web/src", () => {
       if (file === "theme/usage.test.ts") continue;
       for (const gone of [
         "backdrop-filter",
+        "backdropFilter",
         "data-scope",
         "data-reach",
         "data-dots",

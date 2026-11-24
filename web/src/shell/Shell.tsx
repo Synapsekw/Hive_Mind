@@ -153,12 +153,7 @@ export function Shell({
   }, [current, folded]);
 
   return (
-    <aside
-      id={railId}
-      aria-label="Navigation"
-
-      className={`${s.rail} rise`}
-    >
+    <aside id={railId} aria-label="Navigation" className={`${s.rail} rise`}>
       <div className={s.brand}>
         <span aria-hidden="true" className={s.mark} />
         <HiveSwitcher actions={hiveActions ?? provided} />

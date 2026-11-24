@@ -110,7 +110,6 @@
 
 /* The highlight is the sliding pill under the group (shell/SlidingPill.module.css). */
 .tab[aria-pressed="true"] {
-  background: var(--active-bg);
   color: var(--active-fg);
   font-weight: 500;
 }
@@ -227,7 +226,7 @@
   overflow: hidden;
 }
 
-/* The zoom control: a small glass bar in the stage's bottom-right corner. */
+/* The zoom control: a small bar in the stage's bottom-right corner. */
 .zoom {
   position: absolute;
   right: 12px;
@@ -239,7 +238,7 @@
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 11px;
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  background: var(--surface);
   color: var(--fg2);
   font-size: 12px;
 }
@@ -335,7 +334,7 @@
     var(--ring);
 }
 
-/* ---- The peek card: glass next to the pointer, never in the way of it ---- */
+/* ---- The peek card: a solid card next to the pointer, never in the way of it ---- */
 
 .peek {
   position: fixed;
@@ -344,7 +343,7 @@
   padding: 10px 12px 11px;
   border: 1px solid var(--line-hi);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  background: var(--surface);
   box-shadow: var(--lift);
   color: var(--fg);
   pointer-events: none;
@@ -434,7 +433,7 @@
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 13px;
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  background: var(--surface);
   font-size: 12.5px;
   animation: filter-in 0.8s 0.5s var(--ease) both;
 }
@@ -801,7 +800,7 @@
   );
 }
 
-/* ---- The side panel: a second, lighter glass slab ---- */
+/* ---- The side panel: a second, lighter slab ---- */
 
 .details {
   flex: 1 1 280px;

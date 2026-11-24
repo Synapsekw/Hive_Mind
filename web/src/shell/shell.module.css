@@ -951,8 +951,8 @@
 }
 
 /* ---- The banner of a hive that is being deleted ----
-   One line above the rail and the page, straight on the page colour like the rail, and part of the flow: it covers nothing, and the one-window pages give it its
-   height back through --closing-banner (ClosingBanner.tsx measures it). */
+   One line above the rail and the page, straight on the page colour like the rail, and part
+   of the flow: it covers nothing, and the one-window pages give it its height back through --closing-banner (ClosingBanner.tsx measures it). */
 
 .closing {
   display: flex;

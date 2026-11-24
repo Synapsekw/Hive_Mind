@@ -341,7 +341,6 @@ export function Import({
       id="vault-import"
       aria-labelledby={`${id}-title`}
       aria-busy={running || undefined}
-
       className={`${s.release} ${s.importPanel}`}
       onKeyDown={(e) => {
         if (e.key === "Escape" && !running) {

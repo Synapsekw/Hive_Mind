@@ -167,7 +167,6 @@ function Ask({
       role="group"
       aria-label={group}
       aria-busy={off}
-
       className={`${s.release} ${s.wide}`}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
