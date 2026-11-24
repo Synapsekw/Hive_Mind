@@ -176,6 +176,7 @@ test("a window narrower than 700 px does not fold and shows no fold button", asy
   await open(page);
   await expect(railButton(page)).toBeHidden();
   await expect(panelButton(page)).toBeHidden();
+  await expect(todayButton(page)).toBeHidden();
   // The rail is not the 60 px strip: it keeps its labels.
   const box = (await leftRail(page).boundingBox())!;
   expect(box.width).toBeGreaterThan(100);
@@ -274,6 +275,43 @@ test("shutting the panel keeps the selected dot selected", async ({ page }) => {
   await panelButton(page).click();
   await expect(html(page)).toHaveAttribute("data-panel", "shut");
   await expect(dot).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the Today button's dot shows only when something waits, in the accent colour", async ({
+  page,
+}) => {
+  await open(page, "/dev/map?inbox=2");
+  const dot = todayButton(page).locator('[class*="todayBtnDot"]');
+  await expect(dot).toBeVisible();
+  const box = (await dot.boundingBox())!;
+  expect(box.width).toBeGreaterThan(0);
+  expect(box.height).toBeGreaterThan(0);
+  const [bg, acc] = await page.evaluate(() => {
+    const d = document.querySelector('[class*="todayBtnDot"]')!;
+    const probe = document.createElement("span");
+    probe.style.color = "var(--acc)";
+    document.body.append(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return [getComputedStyle(d).backgroundColor, c];
+  });
+  expect(bg).toBe(acc);
+  await expect(todayButton(page).locator('[class*="todayBtnWord"]')).toHaveCSS(
+    "color",
+    await page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--muted)";
+      document.body.append(probe);
+      const c = getComputedStyle(probe).color;
+      probe.remove();
+      return c;
+    }),
+  );
+
+  await open(page, "/dev/map");
+  await expect(todayButton(page).locator('[class*="todayBtnDot"]')).toHaveCount(
+    0,
+  );
 });
 
 test("the Today button's name carries today's count and how many need you", async ({

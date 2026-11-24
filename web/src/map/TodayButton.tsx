@@ -27,11 +27,11 @@ export function TodayButton({
       aria-keyshortcuts="]"
       onClick={onToggle}
     >
-      <span aria-hidden="true" className={s.todayWord}>
+      <span aria-hidden="true" className={s.todayBtnWord}>
         Today
       </span>
       <span aria-hidden="true">{today}</span>
-      {needs > 0 && <span aria-hidden="true" className={s.todayDot} />}
+      {needs > 0 && <span aria-hidden="true" className={s.todayBtnDot} />}
     </button>
   );
 }

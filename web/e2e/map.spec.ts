@@ -1071,7 +1071,11 @@ test("Escape closes a list and returns focus to its button", async ({
 test("pressing outside a list closes it", async ({ page }) => {
   await open(page);
   const list = await openList(page, "People");
-  await todayButton(page).click();
+  // Neutral ground: the card's padding, left of the top bar, which holds no control.
+  const card = (await page
+    .getByRole("main", { name: "Hive map" })
+    .boundingBox())!;
+  await page.mouse.click(card.x + 4, card.y + card.height / 2);
   await expect(list).toHaveCount(0);
   await expect(listButton(page, "People")).toHaveAttribute(
     "aria-expanded",

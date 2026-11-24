@@ -11,7 +11,7 @@ import {
 } from "react";
 import type { Preview } from "./MapCanvas";
 import type { Activity, MapModel, ModelNode } from "./types";
-import { useFold, useFoldSide } from "../shell/FoldProvider";
+import { foldWide, useFold, useFoldSide } from "../shell/FoldProvider";
 import { Shape } from "./Shape";
 import { daySeries, sparkPath } from "./sparkline";
 import { reducedMotion } from "./useCamera";
@@ -386,7 +386,8 @@ export function DetailRail({
   // focus inside it moves to the Today button rather than being lost. Before paint, while the
   // focused element is still the active element.
   useLayoutEffect(() => {
-    if (!folded) return;
+    // Under 700 px the panel is always shown and nothing folds, so there is nothing to end.
+    if (!folded || !foldWide()) return;
     onPreview(null);
     const active = document.activeElement;
     if (active && asideRef.current?.contains(active))
