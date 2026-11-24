@@ -65,7 +65,7 @@ export async function setupHive() {
       await as(
         extra.as ?? person(name),
         `insert into public.notes (hive_id, member_id, workspace_id, path, title, body, visibility, shared_with)
-         values ($1, $2, $3, $4, $5, 'body', $6, $7) returning id`,
+         values ($1, $2, $3, $4, $5, 'body', $6, $7) returning id, session_id`,
         [
           hive,
           members[name],
@@ -94,7 +94,7 @@ export async function setupHive() {
       await as(
         who,
         `insert into public.files (hive_id, member_id, workspace_id, note_id, storage_path, name, mime, size_bytes)
-         values ($1, $2, $3, $4, $5, $6, $7, 100) returning id`,
+         values ($1, $2, $3, $4, $5, $6, $7, 100) returning id, session_id`,
         [
           hive,
           members[owner],

@@ -5485,6 +5485,14 @@ test("every function refuses an app pass except connector_login", async () => {
   await as(kai, `select public.request_hive_deletion($1, 'CA closing')`, [
     closingHive,
   ]);
+  // Two upload sessions of kai's: one to retitle, one to end.
+  const uploadSessions = [];
+  for (let i = 0; i < 2; i++)
+    uploadSessions.push(
+      (
+        await as(kai, `select public.upload_session_open($1) as id`, [ws.kai])
+      )[0].id,
+    );
   const calls = {
     my_member_ids: [`select id from public.my_member_ids() as id`],
     my_hive_ids: [`select id from public.my_hive_ids() as id`],
@@ -5555,6 +5563,21 @@ test("every function refuses an app pass except connector_login", async () => {
       [ca.hive],
       true,
     ],
+    upload_session_open: [
+      `select public.upload_session_open($1)`,
+      [ws.kai],
+      true,
+    ],
+    upload_session_end: [
+      `select public.upload_session_end($1, $2)`,
+      [uploadSessions[0], ca.ownNote],
+      true,
+    ],
+    session_retitle: [
+      `select public.session_retitle($1, 'Retitled')`,
+      [uploadSessions[1]],
+      true,
+    ],
     // Cancelling needs a hive that is being deleted: one of kai's own, made
     // for this and taken away again at the end of the test.
     cancel_hive_deletion: [
@@ -5564,7 +5587,17 @@ test("every function refuses an app pass except connector_login", async () => {
     ],
   };
 
-  const known = [...pure, ...byToken, ...forApps, ...Object.keys(calls)];
+  // Made for an agent: a person is refused for another reason, so the proof
+  // for an app pass is its own check below.
+  const forAgents = ["session_end"];
+
+  const known = [
+    ...pure,
+    ...byToken,
+    ...forApps,
+    ...forAgents,
+    ...Object.keys(calls),
+  ];
   // A function added later must be put in one of the groups above, and the
   // only group that asks for no proof is `pure`, which is checked to touch
   // no table.
@@ -5622,6 +5655,13 @@ test("every function refuses an app pass except connector_login", async () => {
       `${name} answered an app pass`,
     );
   }
+
+  const ended = await trial(pass, `select public.session_end('t', 's')`);
+  assert.match(
+    ended.error?.message ?? "(no error)",
+    APP_REFUSED,
+    "session_end",
+  );
 
   // agent_login: a pass that holds no token gets what anyone gets.
   const guess = await trial(pass, `select * from public.agent_login('hive_x')`);
@@ -6881,7 +6921,13 @@ const HD_TABLES = {
 };
 // The tables that hold hive data and stay writable while a hive is closing,
 // and the record that lives outside every hive.
-const HD_OPEN = ["audit_log", "deleted_hives", "hives", "notifications"];
+const HD_OPEN = [
+  "audit_log",
+  "deleted_hives",
+  "hives",
+  "notifications",
+  "sessions", // written only by the session functions, none of which writes a note into a closing hive
+];
 const hdSnapshot = async (hiveId) => {
   await db.exec("reset role");
   const out = {};
