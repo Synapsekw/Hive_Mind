@@ -830,8 +830,8 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   expect((await scrolls()).inside).toBe(true);
   expect((await scrolls()).sideways).toBe(false);
 
-  // From the heading, Tab walks the card: Connect, each Revoke, each workspace's Delete, Invite
-  // a member, then each invitation's Send again and Revoke.
+  // From the heading, Tab walks the card: Connect, each Revoke, each workspace's Delete, the
+  // topics' controls, Invite a member, then each invitation's Send again and Revoke.
   await main(page).getByRole("heading", { level: 1 }).focus();
   await page.keyboard.press("Tab");
   await expect(connect(page)).toBeFocused();
@@ -850,6 +850,17 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
     await page.keyboard.press("Tab");
     await expect(
       main(page).getByRole("button", { name: `Delete ${space.name}` }),
+    ).toBeFocused();
+  }
+  // Then the Topics section: Find, and each topic's Delete (customers before vendors).
+  await page.keyboard.press("Tab");
+  await expect(
+    main(page).getByRole("button", { name: "Find topics in my notes" }),
+  ).toBeFocused();
+  for (const topic of ["Zain", "Terra Drone"]) {
+    await page.keyboard.press("Tab");
+    await expect(
+      main(page).getByRole("button", { name: `Delete ${topic}` }),
     ).toBeFocused();
   }
   await page.keyboard.press("Tab");
@@ -1497,4 +1508,89 @@ test("a failed workspace delete keeps the row and says so; a hive that is being 
   await open(page, "?closing=1", false);
   await expect(rows(page, "Workspaces")).toHaveCount(2);
   await expect(deleteSpace(workspaceRow(page, DRA.name))).toHaveCount(0);
+});
+
+// ---- Topics ----
+
+const topics = (page: Page) => section(page, "Topics");
+const findTopics = (page: Page) =>
+  topics(page).getByRole("button", { name: "Find topics in my notes" });
+
+test("Topics: the owner finds candidates, new ones only, with subjects unticked; Save adds the ticked ones", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(topics(page)).toContainText("Zain");
+  await expect(topics(page)).toContainText("198 notes");
+  await expect(topics(page)).toContainText("No notes yet");
+
+  await findTopics(page).click();
+  const found = topics(page).getByRole("form", {
+    name: "Topics found in your notes",
+  });
+  await expect(
+    found.getByRole("heading", { name: "Topics found in your notes" }),
+  ).toBeFocused();
+  // Zain is there already: only Orbit and the tag are offered.
+  const orbit = found.getByRole("checkbox", { name: "Customers: Orbit" });
+  const flare = found.getByRole("checkbox", { name: "Subjects: flare-stack" });
+  await expect(orbit).toBeChecked();
+  await expect(flare).not.toBeChecked();
+  await expect(found.getByRole("checkbox", { name: /Zain/ })).toHaveCount(0);
+  await expect(found).toContainText("tag on 5 notes");
+
+  await found.getByRole("button", { name: "Save topics" }).click();
+  await expect(found).toHaveCount(0);
+  await expect(live(page)).toHaveText(
+    "1 topic saved. Now open the vault and press Attach topics.",
+  );
+  await expect(
+    topics(page).getByRole("list", { name: "Customers" }),
+  ).toContainText("Orbit");
+  const saves = (await calls(page)).filter((c) => c.name === "saveTopics");
+  expect(saves).toEqual([
+    {
+      name: "saveTopics",
+      args: [[{ kind: "client", name: "Orbit", aliases: [] }]],
+    },
+  ]);
+  // Both of the owner's workspaces were read, from the start.
+  expect(
+    (await calls(page))
+      .filter((c) => c.name === "scanTopics")
+      .map((c) => c.args),
+  ).toEqual([
+    [MAIN.id, null],
+    [DRA.id, null],
+  ]);
+});
+
+test("Topics: Delete asks first and says the notes stay; a failed read or save says so", async ({
+  page,
+}) => {
+  await open(page);
+  const row = topics(page)
+    .getByRole("listitem")
+    .filter({ hasText: "Terra Drone" });
+  await row.getByRole("button", { name: "Delete Terra Drone" }).click();
+  await expect(row).toContainText("Delete the topic Terra Drone?");
+  await expect(row).toContainText(
+    "Notes stay. They are no longer under this topic.",
+  );
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(row).toHaveCount(0);
+  await expect(live(page)).toHaveText("Terra Drone deleted.");
+
+  await open(page, "?fail=1");
+  await findTopics(page).click();
+  await expect(topics(page)).toContainText(
+    "Your notes could not be read. Try again.",
+  );
+});
+
+test("Topics: a member who is not the owner has no such section", async ({
+  page,
+}) => {
+  await open(page, "?member=1");
+  await expect(topics(page)).toHaveCount(0);
 });

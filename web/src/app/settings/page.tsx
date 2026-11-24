@@ -5,11 +5,14 @@ import { cancelHiveDeletion, requestHiveDeletion } from "../hives/actions";
 import { loadInboxCount } from "../inbox/load-inbox";
 import {
   createAgent,
+  deleteTopic,
   deleteWorkspace,
   inviteMember,
   resendInvitation,
   revokeAgent,
   revokeInvitation,
+  saveTopics,
+  scanTopics,
 } from "./actions";
 import { loadSettings } from "./load-settings";
 
@@ -55,6 +58,9 @@ export default async function SettingsPage() {
         requestHiveDeletion: requestHiveDeletion.bind(null, result.hiveId),
         cancelHiveDeletion: cancelHiveDeletion.bind(null, result.hiveId),
         deleteWorkspace,
+        scanTopics,
+        saveTopics: saveTopics.bind(null, result.hiveId),
+        deleteTopic,
       }}
     />
   );

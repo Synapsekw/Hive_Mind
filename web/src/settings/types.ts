@@ -1,6 +1,16 @@
 // Shapes shared by the settings screen, its loader and its actions. The database decides who may
 // create or revoke an agent and who may invite a member; these only carry what it returned. An
 // agent's token is not part of any of them except `Created`, the one answer that shows it once.
+import type {
+  NoteHead,
+  Proposal,
+  ScanResult,
+  TopicRow,
+  TopicsSaved,
+} from "../topics/types";
+
+export type { NoteHead, Proposal, ScanResult, TopicRow, TopicsSaved };
+
 export const PROVIDERS = [
   "Claude",
   "ChatGPT",
@@ -52,6 +62,8 @@ export type SettingsData = {
   members: Member[];
   /** Only the owner can read these; empty for everyone else. */
   invitations: Invitation[];
+  /** The hive's topics, for its owner; empty for everyone else. */
+  topics: TopicRow[];
 };
 
 export type NewAgent = {
@@ -102,4 +114,9 @@ export type SettingsActions = {
   cancelHiveDeletion(): Promise<Result>;
   /** Deletes one of the person's own workspaces, with every note in it. */
   deleteWorkspace(id: string): Promise<WorkspaceDeleted>;
+  /** One page of the heads of the person's own notes in a workspace of theirs. */
+  scanTopics(workspaceId: string, after: string | null): Promise<ScanResult>;
+  /** Saves up to 200 picked candidates as topics of this hive. */
+  saveTopics(picks: Proposal[]): Promise<TopicsSaved>;
+  deleteTopic(id: string): Promise<Result>;
 };

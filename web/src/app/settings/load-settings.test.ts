@@ -20,7 +20,8 @@ type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
 type Call = { table: string; ops: [string, unknown[]][] };
 /** `own` is the read of the person's own oldest membership, which is also from `members`. */
-type Table = "own" | "members" | "workspaces" | "agents" | "invitations";
+type Table =
+  "own" | "members" | "workspaces" | "agents" | "invitations" | "entities";
 
 const ok = (data: unknown): Res => ({ data, error: null });
 const err = (message: string, code?: string): Res => ({
@@ -137,6 +138,7 @@ function stub(
     workspaces: opts.workspaces ?? ok(WORKSPACES),
     agents: opts.agents ?? ok(AGENTS),
     invitations: opts.invitations ?? ok(INVITATIONS),
+    entities: opts.entities ?? ok([]),
   };
   const from = vi.fn((table: Table) => {
     const call: Call = { table, ops: [] };
@@ -241,6 +243,14 @@ describe("loadSettings", () => {
     },
   );
 
+  it("answers error when the topics read fails, logging code and message only", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({ entities: err("denied", "42501") });
+    expect(await loadSettings(t.db, NOW)).toEqual({ state: "error" });
+    expect(log).toHaveBeenCalledWith("topics query failed", "42501", "denied");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+
   it("answers error without a session", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const t = stub({ user: null });
@@ -313,6 +323,7 @@ describe("loadSettings", () => {
             expiresAt: "2026-12-04T09:00:00+00:00",
           },
         ],
+        topics: [],
       },
     });
   });
@@ -397,7 +408,14 @@ describe("loadSettings", () => {
     const t = stub();
     await loadSettings(t.db, NOW);
     expect(t.calls.map((c) => c.table).sort()).toEqual(
-      ["agents", "invitations", "members", "own", "workspaces"].sort(),
+      [
+        "agents",
+        "entities",
+        "invitations",
+        "members",
+        "own",
+        "workspaces",
+      ].sort(),
     );
     expect(t.calls[0]!.table).toBe("own");
     expect(t.from.mock.calls[0]).toEqual(["members"]);
@@ -474,6 +492,67 @@ describe("loadSettings", () => {
       ["created_at", { ascending: false }],
     ]);
     expect(args(inv, "limit")).toEqual([100]);
+  });
+
+  it("reads the hive's topics for the owner with their note counts, and none for a member", async () => {
+    const t = stub({
+      entities: ok([
+        {
+          id: "t1",
+          type: "client",
+          canonical_name: "Zain",
+          note_entities: [{ count: 12 }],
+        },
+        {
+          id: "t2",
+          type: "weird",
+          canonical_name: "Dropped",
+          note_entities: [],
+        },
+      ]),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await loadSettings(t.db, NOW);
+    // A row whose kind is unknown makes the whole answer unreadable, as for the other lists.
+    expect(out.state).toBe("error");
+    const good = stub({
+      entities: ok([
+        {
+          id: "t1",
+          type: "client",
+          canonical_name: "Zain",
+          note_entities: [{ count: 12 }],
+        },
+      ]),
+    });
+    const loaded = await loadSettings(good.db, NOW);
+    if (loaded.state !== "ok") throw new Error("expected ok");
+    expect(loaded.data.topics).toEqual([
+      { id: "t1", kind: "client", name: "Zain", notes: 12 },
+    ]);
+    const read = good.of("entities");
+    expect(args(read, "select")).toEqual([
+      "id, type, canonical_name, note_entities(count)",
+    ]);
+    expect(args(read, "eq")).toEqual(["hive_id", HIVE]);
+    expect(args(read, "limit")).toEqual([2000]);
+    // A member is not asked at all.
+    const member = stub({
+      own: ok([{ ...OWN, id: M_AHMED, role: "member" }]),
+      user: { id: U_AHMED },
+      entities: ok([
+        {
+          id: "t1",
+          type: "client",
+          canonical_name: "Zain",
+          note_entities: [],
+        },
+      ]),
+    });
+    const seen = await loadSettings(member.db, NOW);
+    if (seen.state !== "ok") throw new Error("expected ok");
+    expect(seen.data.topics).toEqual([]);
+    expect(member.of("entities")).toBeUndefined();
   });
 
   it("answers no invitations when the database returns none", async () => {
