@@ -26,17 +26,19 @@
   position: relative;
 }
 
+/* The mark is drawn by brand/Mark; the rail only places it. */
 .mark {
   flex: none;
-  width: 18px;
-  height: 18px;
-  background: var(--mark);
-  clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%);
-  transition: transform 0.8s var(--ease);
 }
 
-.brand:hover .mark {
-  transform: rotate(60deg);
+/* Hovering the row lights the link between the mark's two halves. */
+.brand [data-link] {
+  opacity: 0.75;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.brand:hover [data-link] {
+  opacity: 1;
 }
 
 .brandName {
@@ -855,7 +857,7 @@
   .link::before,
   .link .slot,
   .bar,
-  .mark,
+  .brand [data-link],
   .chevron,
   .agentsBody,
   .hiveInput,

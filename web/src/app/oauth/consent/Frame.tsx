@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Logo } from "../../../brand/Logo";
 import styles from "../../login/login.module.css";
 import { TITLE } from "./text";
 
@@ -8,8 +9,9 @@ export function Frame({ children }: { children: ReactNode }) {
     <main className={styles.page} aria-label={TITLE}>
       <div className={styles.panel}>
         <div className={styles.brand}>
-          <span className={styles.mark} aria-hidden="true" />
-          <h1 className={styles.name}>Hive</h1>
+          <h1 className={styles.name}>
+            <Logo />
+          </h1>
         </div>
         {children}
       </div>

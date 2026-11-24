@@ -1,0 +1,30 @@
+.mark {
+  flex: none;
+  display: block;
+  overflow: visible;
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Capitals by CSS, so the text itself (and what a screen reader says) is "Hive Mind". */
+.word {
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.hive {
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.mind {
+  font-weight: 300;
+  color: var(--muted);
+}

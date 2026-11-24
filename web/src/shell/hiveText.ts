@@ -3,7 +3,7 @@
 // refused before any request.
 
 /** The rail's name when nobody is signed in (dev pages, the no-hive notice). */
-export const BRAND = "Hive";
+export const BRAND = "Hive Mind";
 export const HIVES = "Hives";
 export const NEW_HIVE = "New hive";
 export const HIVE_NAME = "Hive name";

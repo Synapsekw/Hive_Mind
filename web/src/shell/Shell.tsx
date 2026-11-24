@@ -9,6 +9,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Mark } from "../brand/Mark";
 import { badge } from "../inbox/text";
 import { AccountMenu } from "./AccountMenu";
 import { AgentsCard } from "./AgentsCard";
@@ -155,7 +156,7 @@ export function Shell({
   return (
     <aside id={railId} aria-label="Navigation" className={`${s.rail} rise`}>
       <div className={s.brand}>
-        <span aria-hidden="true" className={s.mark} />
+        <Mark className={s.mark} />
         <HiveSwitcher actions={hiveActions ?? provided} />
         <button
           type="button"

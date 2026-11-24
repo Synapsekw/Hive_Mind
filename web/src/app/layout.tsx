@@ -17,7 +17,7 @@ import "./globals.css";
 // their licences beside them. No request to a font service at build or run time.
 const inter = localFont({
   src: "./fonts/inter-latin-wght-normal.woff2",
-  weight: "400 600",
+  weight: "300 700",
   display: "swap",
   variable: "--font-sans",
 });
@@ -29,7 +29,7 @@ const mono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Hive",
+  title: "Hive Mind",
   description: "Shared memory for small expert teams.",
 };
 
