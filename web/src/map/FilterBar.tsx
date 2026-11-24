@@ -1,8 +1,7 @@
-// The filter bar: a glass bar at the stage's bottom-left. Three buttons (the groups, Kind, People)
-// each open a checkbox list above the bar; chips name what is active; a count says how much shows;
-// and Clear all. Pointing at or focusing a row previews it on the map: that list as just
-// the row, the other lists and the search kept. Only one list is open at a time. Names are text
-// nodes only.
+// The filter, in the map's top bar: the search field with a Filter button at its end, one popover
+// under it with three columns (the groups, Kind, People), the chips that name what is active, one
+// count and Clear all. Pointing at or focusing a row previews it on the map: that list as just
+// the row, the other lists and the search kept. Names are text nodes only.
 import {
   useEffect,
   useId,
@@ -16,9 +15,10 @@ import {
   type ReactNode,
 } from "react";
 import { chipFit } from "./chipFit";
+import { countText } from "./countText";
 import type { Preview } from "./MapCanvas";
 import { Mark } from "./Legend";
-import { useCloseOnOtherOpen } from "./useDismiss";
+import { useDismiss } from "./useDismiss";
 import type { MapModel, NodeKind } from "./types";
 import s from "./map.module.css";
 
@@ -32,7 +32,15 @@ const KINDS: [NodeKind, string][] = [
 /** The least room, in px, a chip with a shortened name is shown in rather than counted in "+N". */
 const MIN_CHIP = 64;
 
+/** The popover's width with three columns side by side. */
+const POP_WIDTH = 600;
+/** Narrower than this, the three columns stack and the popover scrolls as one. */
+const POP_STACK = 520;
+/** The least gap, in px, the popover keeps from the card's edge. */
+const POP_EDGE = 12;
+
 type Which = "topics" | "kinds" | "members";
+const COLUMNS: Which[] = ["topics", "kinds", "members"];
 
 /** One entry in a list: what it previews, its row and its chip. */
 type Entry = {
@@ -47,6 +55,16 @@ type Entry = {
 
 /** One chip: an active entry or the search text. */
 type Chip = { key: string; name: string; mark?: ReactNode; remove(): void };
+
+/** Where the open popover sits: right-aligned to the search field when the card has room to its
+ * left, else left-aligned to it; never wider than the card allows, never taller than 60% of the
+ * stage. */
+type Place = {
+  side: "left" | "right";
+  width?: number;
+  stack: boolean;
+  height: string;
+};
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -72,7 +90,24 @@ const CHEVRON = (
     strokeLinecap="round"
     strokeLinejoin="round"
   >
-    <path d="m2 6.5 3-3 3 3" />
+    <path d="m2 3.5 3 3 3-3" />
+  </svg>
+);
+
+const SEARCH_ICON = (
+  <svg
+    aria-hidden="true"
+    className={s.searchIcon}
+    width="14"
+    height="14"
+    viewBox="0 0 14 14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+  >
+    <circle cx="6" cy="6" r="4.25" />
+    <path d="m9.2 9.2 3.3 3.3" />
   </svg>
 );
 
@@ -87,14 +122,16 @@ export function FilterBar({
   members,
   onMembers,
   q,
+  onQ,
   onClearSearch,
   counts,
+  truncated,
   onClearAll,
   onPreview,
 }: {
   model: MapModel;
   heading: string; // Folders | Clusters | Months | Topics
-  rings: boolean; // legend mentions brightness only in Rings
+  rings: boolean; // in Rings every group is drawn alike
   topics: number[];
   onTopics(next: number[]): void;
   kinds: NodeKind[];
@@ -102,58 +139,37 @@ export function FilterBar({
   members: string[];
   onMembers(next: string[]): void;
   q: string;
+  onQ(q: string): void;
   onClearSearch(): void;
   counts: { shown: number; total: number };
+  /** The map was cut to its newest items. */
+  truncated: boolean;
   onClearAll(): void;
   onPreview(p: Preview | null): void;
 }) {
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
-  const buttons = useRef<Partial<Record<Which, HTMLButtonElement | null>>>({});
-  const [open, setOpen] = useState<Which | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState<Place>({
+    side: "right",
+    stack: false,
+    height: "60vh",
+  });
 
   const close = (refocus: boolean) => {
     const was = open;
-    setOpen(null);
+    setOpen(false);
     onPreview(null);
-    if (refocus && was) buttons.current[was]?.focus();
+    if (refocus && was) button.current?.focus();
   };
-  const closeRef = useRef(close);
-  closeRef.current = close;
 
-  // A press outside closes the list. Focus goes back to its button unless the press landed on
-  // something that takes focus itself (the search field, another control).
-  useEffect(() => {
-    if (!open) return;
-    const down = (e: PointerEvent) => {
-      const t = e.target;
-      if (!(t instanceof Element) || root.current?.contains(t)) return;
-      const takesFocus = !!t.closest(
-        "button, a, input, textarea, select, [tabindex]",
-      );
-      const btn = buttons.current[open];
-      closeRef.current(false);
-      // After the press's own focus change, which would otherwise blur the button again.
-      if (!takesFocus) setTimeout(() => btn?.focus({ preventScroll: true }), 0);
-    };
-    // Escape closes the list wherever focus is, <body> included (Safari does not focus a button
-    // on click). Caught first, so the map's own Escape does not also clear the selection.
-    const esc = (e: globalThis.KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      closeRef.current(true);
-    };
-    document.addEventListener("pointerdown", down);
-    document.addEventListener("keydown", esc, true);
-    return () => {
-      document.removeEventListener("pointerdown", down);
-      document.removeEventListener("keydown", esc, true);
-    };
-  }, [open]);
-
-  // Only one popover on the map is open at a time.
-  useCloseOnOtherOpen(open !== null, id, () => closeRef.current(false));
+  // A press outside, Escape (wherever focus is), focus leaving the filter, or another popover
+  // opening closes the list; Escape gives focus back to the Filter button.
+  useDismiss({ open, root, button, onClose: close });
 
   // A list that loses its entries (another arrangement) or the bar going away ends the preview.
   useEffect(() => () => onPreview(null), [onPreview]);
@@ -261,9 +277,11 @@ export function FilterBar({
   const active = chips.length > 0;
 
   // Chips that do not fit give way to a "+N" chip. A hidden copy of every chip gives their widths;
-  // the row takes the width they need and the bar shrinks it when room runs out.
+  // the row takes the width they need and the filter shrinks it when room runs out.
   const measure = useRef<HTMLDivElement>(null);
   const row = useRef<HTMLDivElement>(null);
+  const count = useRef<HTMLSpanElement>(null);
+  const clear = useRef<HTMLButtonElement>(null);
   const [need, setNeed] = useState(0);
   // The "+N" chip's width: the row never shrinks below it, so what is hidden is always counted.
   const [least, setLeast] = useState(0);
@@ -273,21 +291,22 @@ export function FilterBar({
   useLayoutEffect(() => {
     const m = measure.current;
     const r = row.current;
-    const bar = root.current;
-    if (!m || !r || !bar) return;
-    // The stage the bar is placed in: its cap is the stage's width less the gutter.
-    const stage =
-      bar.offsetParent instanceof HTMLElement ? bar.offsetParent : null;
-    /** The width the row may take: the bar at its cap, less everything else in the bar. Not the
-     * row's own width, which is small while its chips are hidden. */
+    const wrap = root.current;
+    const field = box.current;
+    const n = count.current;
+    if (!m || !r || !wrap || !field || !n) return;
+    /** The width the row may take: the filter's width less the search field, the count, Clear
+     * all and the gaps between them. Not the row's own width, which is small while its chips are
+     * hidden. */
     const roomAtCap = () => {
-      const barW = bar.getBoundingClientRect().width;
-      const others = barW - r.getBoundingClientRect().width;
-      const gutter =
-        parseFloat(getComputedStyle(bar).getPropertyValue("--filter-gutter")) ||
-        0;
-      const cap = stage ? stage.clientWidth - gutter : barW;
-      return Math.max(0, Math.floor(cap - others));
+      const gap = parseFloat(getComputedStyle(wrap).columnGap) || 0;
+      const c = clear.current;
+      const others =
+        field.getBoundingClientRect().width +
+        n.getBoundingClientRect().width +
+        (c ? c.getBoundingClientRect().width + gap : 0) +
+        gap * 2;
+      return Math.max(0, Math.floor(wrap.clientWidth - others));
     };
     const compute = () => {
       const all = [...m.children] as HTMLElement[];
@@ -310,11 +329,11 @@ export function FilterBar({
       );
     };
     compute();
-    // The stage (a fold, a window resize) and the rest of the bar (the count's text) change room.
+    // The bar (a fold, a window resize, a wrap), the count's text and the search field change room.
     const ro = new ResizeObserver(compute);
-    ro.observe(r);
-    ro.observe(bar);
-    if (stage) ro.observe(stage);
+    ro.observe(wrap);
+    ro.observe(n);
+    ro.observe(field);
     // A web font that arrives late changes every chip's width.
     let gone = false;
     const fonts = typeof document !== "undefined" ? document.fonts : undefined;
@@ -342,26 +361,44 @@ export function FilterBar({
       row.current?.querySelectorAll<HTMLButtonElement>("[data-chip-remove]");
     const next =
       rest && rest.length ? rest[Math.min(at, rest.length - 1)] : null;
-    (next ?? buttons.current.topics)?.focus();
+    (next ?? button.current ?? input.current)?.focus();
   });
 
-  const toggleOpen = (w: Which) => {
-    if (open === w) return close(false);
-    onPreview(null);
-    setOpen(w);
+  /** Where the popover goes, read once as it opens: the card's room beside the search field and
+   * the stage's height. */
+  const measurePlace = (): Place => {
+    const field = box.current?.getBoundingClientRect();
+    const card = root.current?.closest("main");
+    const stage = card?.querySelector<HTMLElement>("[data-map-stage]");
+    const height = stage ? `${Math.round(stage.clientHeight * 0.6)}px` : "60vh";
+    if (!field || !card) return { side: "right", stack: false, height };
+    const c = card.getBoundingClientRect();
+    const leftward = Math.floor(field.right - (c.left + POP_EDGE));
+    const rightward = Math.floor(c.right - POP_EDGE - field.left);
+    if (leftward >= POP_WIDTH) return { side: "right", stack: false, height };
+    const side = rightward > leftward ? "left" : "right";
+    const width = Math.min(POP_WIDTH, side === "left" ? rightward : leftward);
+    return { side, width, stack: width < POP_STACK, height };
   };
 
-  // Focus moving anywhere but the open list and its own button (another list's button, a chip,
-  // out of the bar) closes the list and leaves focus where it went. A null target (a press on a
-  // non-focusable spot) is left to the outside-press handler.
+  const toggleOpen = () => {
+    if (open) return close(false);
+    onPreview(null);
+    setPlace(measurePlace());
+    setOpen(true);
+  };
+
+  // Focus moving within the filter but off the popover and its button (to the search field, a
+  // chip) closes the list and leaves focus where it went. Leaving the filter is useDismiss's.
   const onBlur = (e: FocusEvent<HTMLDivElement>) => {
     const to = e.relatedTarget as Node | null;
     if (!open || !to) return;
-    const slot = buttons.current[open]?.parentElement;
-    if (!slot?.contains(to)) close(false);
+    if (!button.current?.contains(to) && !pop.current?.contains(to))
+      close(false);
   };
 
-  // Arrow keys and Home/End move between a list's rows; Tab goes on as usual.
+  // Arrow keys and Home/End move between a column's rows; Tab goes on as usual, into the next
+  // column.
   const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const rows = [
       ...e.currentTarget.querySelectorAll<HTMLButtonElement>(
@@ -381,168 +418,200 @@ export function FilterBar({
     rows[to].focus();
   };
 
-  if (model.nodes.length <= 1) return null;
-
   const labels: Record<Which, string> = {
     topics: heading,
     kinds: "Kind",
     members: "People",
   };
+  const chosen = topics.length + kinds.length + members.length;
 
-  const listButton = (w: Which) => {
+  const columnOf = (w: Which) => {
     const list = lists[w];
-    const chosen = list.filter((e) => e.on).length;
+    const on = list.filter((e) => e.on).length;
     return (
-      <div className={s.filterSlot} key={w}>
-        <button
-          ref={(el) => {
-            buttons.current[w] = el;
-          }}
-          type="button"
-          className={s.filterButton}
-          aria-expanded={open === w}
-          aria-controls={open === w ? `${id}-${w}` : undefined}
-          onClick={() => toggleOpen(w)}
-        >
-          {labels[w]}
-          {chosen > 0 && (
-            <>
-              <span aria-hidden="true" className={s.filterBadge}>
-                {chosen}
-              </span>
-              <span className={s.srOnly}>, {chosen} chosen</span>
-            </>
-          )}
-          {CHEVRON}
-        </button>
-        {open === w && (
-          <div
-            id={`${id}-${w}`}
-            role="group"
-            aria-label={labels[w]}
-            data-popover=""
-            className={s.filterPop}
-            onKeyDown={onListKey}
-            onPointerLeave={() => onPreview(null)}
+      <div
+        key={w}
+        role="group"
+        aria-label={labels[w]}
+        className={s.filterCol}
+        onKeyDown={onListKey}
+      >
+        <div aria-hidden="true" className={s.filterPopHead}>
+          <span>{labels[w]}</span>
+          <span>{on ? `${on} chosen` : "All"}</span>
+        </div>
+        {list.map((e) => (
+          <button
+            key={e.key}
+            type="button"
+            role="checkbox"
+            aria-checked={e.on}
+            className={s.filterRow}
+            onClick={e.toggle}
+            onPointerEnter={() => onPreview(e.preview)}
+            onFocus={() => onPreview(e.preview)}
+            onBlur={() => onPreview(null)}
           >
-            <div aria-hidden="true" className={s.filterPopHead}>
-              <span>{labels[w]}</span>
-              <span>{chosen ? `${chosen} chosen` : "All"}</span>
-            </div>
-            {list.map((e) => (
-              <button
-                key={e.key}
-                type="button"
-                role="checkbox"
-                aria-checked={e.on}
-                className={s.filterRow}
-                onClick={e.toggle}
-                onPointerEnter={() => onPreview(e.preview)}
-                onFocus={() => onPreview(e.preview)}
-                onBlur={() => onPreview(null)}
-              >
-                <span aria-hidden="true" className={s.filterBox}>
-                  {e.on && (
-                    <svg
-                      width="9"
-                      height="9"
-                      viewBox="0 0 10 10"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="m2 5.2 2 2 4-4.4" />
-                    </svg>
-                  )}
-                </span>
-                {e.mark}
-                <span className={s.filterRowName}>{e.name}</span>
-                <span aria-hidden="true" className={s.filterRowCount}>
-                  {e.count}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+            <span aria-hidden="true" className={s.filterBox}>
+              {e.on && (
+                <svg
+                  width="9"
+                  height="9"
+                  viewBox="0 0 10 10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="m2 5.2 2 2 4-4.4" />
+                </svg>
+              )}
+            </span>
+            {e.mark}
+            <span className={s.filterRowName}>{e.name}</span>
+            <span aria-hidden="true" className={s.filterRowCount}>
+              {e.count}
+            </span>
+          </button>
+        ))}
       </div>
     );
   };
 
   return (
-    <div ref={root} className={s.filterBar} data-map-overlay="" onBlur={onBlur}>
-      {listButton("topics")}
-      {listButton("kinds")}
-      {listButton("members")}
-      <span aria-hidden="true" className={s.filterRule} />
-      <div
-        ref={row}
-        className={s.filterChips}
-        style={{ width: `${need}px`, minWidth: `${least}px` }}
-      >
-        {shownChips.map((c, i) => (
-          <span key={c.key} className={s.filterChip}>
-            {c.mark}
-            <span className={s.filterChipName}>{c.name}</span>
-            <button
-              type="button"
-              data-chip-remove=""
-              className={s.filterChipRemove}
-              aria-label={`Remove ${c.name}`}
-              onClick={() => {
-                pending.current = i;
-                c.remove();
-              }}
-            >
-              <svg
-                aria-hidden="true"
-                width="8"
-                height="8"
-                viewBox="0 0 8 8"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              >
-                <path d="m1.5 1.5 5 5m0-5-5 5" />
-              </svg>
-            </button>
-          </span>
-        ))}
-        {hidden > 0 && (
-          <span
-            className={`${s.filterChip} ${s.filterMore}`}
-            title={chips
-              .slice(shownChips.length)
-              .map((c) => c.name)
-              .join(", ")}
+    <div
+      ref={root}
+      className={s.filterGroup}
+      data-filter-bar=""
+      onBlur={onBlur}
+    >
+      <div ref={box} className={s.searchBox} data-search-box="">
+        {SEARCH_ICON}
+        <label htmlFor="hv-search" className={s.srOnly}>
+          Search notes and files
+        </label>
+        <input
+          ref={input}
+          id="hv-search"
+          type="search"
+          placeholder="Search notes and files"
+          autoComplete="off"
+          className={s.searchInput}
+          value={q}
+          onChange={(e) => onQ(e.target.value)}
+        />
+        {barShown && (
+          <button
+            ref={button}
+            type="button"
+            className={s.filterToggle}
+            // Named outright: the badge's box would otherwise put a space before the comma.
+            aria-label={chosen > 0 ? `Filter, ${chosen} chosen` : "Filter"}
+            aria-expanded={open}
+            aria-controls={open ? `${id}-filter` : undefined}
+            onClick={toggleOpen}
           >
-            +{hidden}
-            <span className={s.srOnly}> more</span>
-          </span>
+            Filter
+            {chosen > 0 && (
+              <span aria-hidden="true" className={s.filterBadge}>
+                {chosen}
+              </span>
+            )}
+            {CHEVRON}
+          </button>
+        )}
+        {barShown && open && (
+          <div
+            ref={pop}
+            id={`${id}-filter`}
+            role="group"
+            aria-label="Filter"
+            data-popover=""
+            className={s.filterPop}
+            data-side={place.side}
+            data-stack={place.stack ? "" : undefined}
+            style={{
+              maxHeight: place.height,
+              width: place.width !== undefined ? `${place.width}px` : undefined,
+            }}
+            onPointerLeave={() => onPreview(null)}
+          >
+            <div className={s.filterCols}>{COLUMNS.map(columnOf)}</div>
+          </div>
         )}
       </div>
+      {barShown && (
+        <div
+          ref={row}
+          className={s.filterChips}
+          data-chips=""
+          style={{ width: `${need}px`, minWidth: `${least}px` }}
+        >
+          {shownChips.map((c, i) => (
+            <span key={c.key} className={s.filterChip}>
+              {c.mark}
+              <span className={s.filterChipName}>{c.name}</span>
+              <button
+                type="button"
+                data-chip-remove=""
+                className={s.filterChipRemove}
+                aria-label={`Remove ${c.name}`}
+                onClick={() => {
+                  pending.current = i;
+                  c.remove();
+                }}
+              >
+                <svg
+                  aria-hidden="true"
+                  width="8"
+                  height="8"
+                  viewBox="0 0 8 8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <path d="m1.5 1.5 5 5m0-5-5 5" />
+                </svg>
+              </button>
+            </span>
+          ))}
+          {hidden > 0 && (
+            <span
+              className={`${s.filterChip} ${s.filterMore}`}
+              title={chips
+                .slice(shownChips.length)
+                .map((c) => c.name)
+                .join(", ")}
+            >
+              +{hidden}
+              <span className={s.srOnly}> more</span>
+            </span>
+          )}
+        </div>
+      )}
       {/* Every chip at its natural width, for measuring; never seen or read. */}
-      <div ref={measure} aria-hidden="true" className={s.filterMeasure}>
-        {chips.map((c) => (
-          <span key={c.key} className={s.filterChip}>
-            {c.mark}
-            <span className={s.filterChipName}>{c.name}</span>
-            <span className={s.filterChipRemove} />
+      {barShown && (
+        <div ref={measure} aria-hidden="true" className={s.filterMeasure}>
+          {chips.map((c) => (
+            <span key={c.key} className={s.filterChip}>
+              {c.mark}
+              <span className={s.filterChipName}>{c.name}</span>
+              <span className={s.filterChipRemove} />
+            </span>
+          ))}
+          <span className={`${s.filterChip} ${s.filterMore}`}>
+            +{chips.length}
           </span>
-        ))}
-        <span className={`${s.filterChip} ${s.filterMore}`}>
-          +{chips.length}
-        </span>
-      </div>
-      <span role="status" className={s.filterCount}>
-        {active
-          ? `${counts.shown} of ${counts.total} shown`
-          : `All ${counts.total} shown`}
+        </div>
+      )}
+      <span ref={count} role="status" className={s.filterCount}>
+        {countText({ ...counts, active, truncated })}
       </span>
       {active && (
         <button
+          ref={clear}
           type="button"
           className={s.filterClear}
           onClick={() => {

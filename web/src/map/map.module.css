@@ -50,19 +50,17 @@
   gap: 10px;
 }
 
+/* The top bar. A container, so it wraps by the card's own width: on a narrow card the filter
+   takes a second row and Today stays at the first row's end. Kept above the stage, which its
+   popovers open over. */
 .bar {
+  position: relative;
+  z-index: 3;
+  container: map-bar / inline-size;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
-}
-
-.stats {
-  flex: 1 1 160px;
-  margin: 0;
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 /* The view switch: one segmented control, a 10 px hairline track with 7 px segments. */
@@ -183,38 +181,6 @@
 .tab[aria-pressed="true"] {
   color: var(--active-fg);
   font-weight: 500;
-}
-
-/* min-width 0: the search box may narrow, so at 1366 px the bar stays one line and the stage
-   keeps the height. */
-.tools {
-  flex: 1 1 160px;
-  min-width: 0;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-}
-
-.search {
-  flex: 0 1 200px;
-  min-width: 0;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--fill);
-  color: var(--fg);
-  font-size: 13px;
-  transition: border-color 0.24s var(--ease);
-}
-
-.search:hover {
-  border-color: var(--line-hi);
-}
-
-.search::placeholder {
-  color: var(--muted);
 }
 
 /* ---- The stage: one canvas, fitted to the room the card has ---- */
@@ -497,48 +463,81 @@
   color: var(--fg2);
 }
 
-/* ---- The filter bar ---- */
+/* ---- The filter, in the top bar ---- */
 
-/* It leaves room for the zoom control (about 200 px wide with Labels and Legend, 12 px in) and a gap, so it never runs
-   under it; the chips give way first. The bar reads --filter-gutter to know its cap. */
-.filterBar {
-  --filter-gutter: 256px;
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 3;
-  max-width: calc(100% - var(--filter-gutter));
+/* Search with the Filter button, the chips, the count and Clear all. It takes the room the bar
+   has left; the chips give way first. */
+.filterGroup {
+  position: relative;
+  flex: 1 1 520px;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  background: var(--surface);
+  gap: 10px;
   font-size: 12.5px;
-  animation: filter-in 0.8s 0.5s var(--ease) both;
 }
 
-@keyframes filter-in {
-  from {
-    opacity: 0;
-    transform: translateY(14px);
-  }
-}
-
-.filterSlot {
+/* One field: the mark, the input and the Filter button at its end. The popover opens under it. */
+.searchBox {
   position: relative;
-  flex: none;
+  flex: 0 1 320px;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 4px 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--fill);
+  transition: border-color 0.24s var(--ease);
 }
 
-.filterButton {
+.searchBox:hover,
+.searchBox:focus-within {
+  border-color: var(--line-hi);
+}
+
+.searchIcon {
+  flex: none;
+  color: var(--muted);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.searchInput::placeholder {
+  color: var(--muted);
+}
+
+/* The ring goes round the whole field, not the bare input inside it. */
+.root .searchInput:focus-visible {
+  outline: none;
+}
+
+.searchBox:has(.searchInput:focus-visible) {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.filterToggle {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 10px;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 7px;
   background: none;
   color: var(--muted);
   font-size: 12.5px;
@@ -550,12 +549,8 @@
     color var(--dur-fast) var(--ease);
 }
 
-.filterButton:hover {
-  background: var(--fill);
-  color: var(--fg);
-}
-
-.filterButton[aria-expanded="true"] {
+.filterToggle:hover,
+.filterToggle[aria-expanded="true"] {
   background: var(--fill-on);
   color: var(--fg);
 }
@@ -578,31 +573,76 @@
   text-align: center;
 }
 
-.filterRule {
-  flex: none;
-  width: 1px;
-  height: 20px;
-  margin: 0 3px;
-  background: var(--line);
-}
-
-/* The open list, above its button. The stage is a size container, so it never runs off the top. */
+/* The popover, under the search field and right-aligned to it (left-aligned when the card has
+   no room to its left). Three columns side by side, each scrolling by itself; its height is capped
+   from the stage's as it opens. Stacked, the columns run down and the popover scrolls as one. */
 .filterPop {
   position: absolute;
-  left: 0;
-  bottom: calc(100% + 10px);
+  top: calc(100% + 8px);
+  right: 0;
   z-index: 4;
-  width: 270px;
-  max-height: min(360px, calc(100cqh - 80px));
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--fill-on) transparent;
+  width: 600px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-sizing: border-box;
   padding: 6px;
   border: 1px solid var(--line-hi);
   border-radius: 13px;
   background: var(--surface);
   box-shadow: var(--lift);
+}
+
+.filterPop[data-side="left"] {
+  left: 0;
+  right: auto;
+}
+
+.filterCols {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 1fr) minmax(
+      120px,
+      1fr
+    );
+  grid-template-rows: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.filterCol {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.filterCol + .filterCol {
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+
+.filterPop[data-stack] {
+  display: block;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.filterPop[data-stack] .filterCols {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: none;
+}
+
+.filterPop[data-stack] .filterCol {
+  overflow: visible;
+}
+
+.filterPop[data-stack] .filterCol + .filterCol {
+  padding: 4px 0 0;
+  border-left: 0;
+  border-top: 1px solid var(--line);
 }
 
 .filterPopHead {
@@ -710,9 +750,10 @@
   font-weight: 600;
 }
 
-/* The chips: as wide as they need, shrinking first when the bar runs out of room. */
+/* The chips: as wide as they need, shrinking first (well before the search field) when the bar
+   runs out of room. */
 .filterChips {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -720,10 +761,13 @@
   overflow: hidden;
 }
 
+/* Clipped to the filter, so its overflow never widens the page. */
 .filterMeasure {
   position: absolute;
   left: 0;
   top: 0;
+  max-width: 100%;
+  overflow: hidden;
   display: flex;
   gap: 5px;
   visibility: hidden;
@@ -794,6 +838,7 @@
 
 .filterCount {
   flex: none;
+  margin-left: auto;
   padding: 0 6px;
   font-family: var(--font-mono), monospace;
   font-size: 11px;
@@ -831,35 +876,6 @@
   gap: 10px;
   padding: 7px 10px;
   color: var(--muted);
-}
-
-/* A narrow stage (a 1280 px window with the side panel open) tightens the bar before the chips
-   have to go. The stage is the size container. */
-@container (max-width: 820px) {
-  .filterBar {
-    gap: 2px;
-  }
-
-  .filterButton {
-    gap: 5px;
-    padding: 0 8px;
-  }
-
-  .filterChevron {
-    display: none;
-  }
-
-  .filterRule {
-    margin: 0 2px;
-  }
-
-  .filterCount {
-    padding: 0 4px;
-  }
-
-  .filterClear {
-    padding: 0 7px;
-  }
 }
 
 .legendRamp {
@@ -1089,6 +1105,27 @@
 @media not (min-width: 700px) {
   .todayBtn {
     display: none;
+  }
+}
+
+/* A narrow card: the filter takes the bar's second row; Today stays at the first row's end.
+   After the rules it overrides. */
+@container map-bar (max-width: 1100px) {
+  .filterGroup {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .todayBtn {
+    margin-left: auto;
+  }
+}
+
+/* A phone-width card: the count and Clear all wrap under the search field rather than run off. */
+@container map-bar (max-width: 560px) {
+  .filterGroup {
+    flex-wrap: wrap;
+    row-gap: 8px;
   }
 }
 
@@ -1357,7 +1394,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .filterBar,
   .sparkLine,
   .sparkArea,
   .fill {
@@ -1374,8 +1410,8 @@
 
   .tab,
   .groupButton,
-  .search,
-  .filterButton,
+  .searchBox,
+  .filterToggle,
   .zoomButton,
   .zoomFit,
   .clear,

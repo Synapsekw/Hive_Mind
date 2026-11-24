@@ -55,8 +55,10 @@ async function settle(page: Page) {
   );
 }
 
-const countText = (page: Page) =>
-  page.getByRole("status").filter({ hasText: /shown$/ });
+/** The map's top bar, and the one count in it. */
+const topBar = (page: Page) =>
+  page.getByRole("main", { name: "Hive map" }).locator("[data-map-bar]");
+const countText = (page: Page) => topBar(page).getByRole("status");
 
 // ---- The left rail ----
 
@@ -159,7 +161,9 @@ test("typing [ in the search field does not fold and lands in the field", async 
   page,
 }) => {
   await open(page);
-  const search = page.getByPlaceholder("Search");
+  const search = page.getByPlaceholder("Search notes and files", {
+    exact: true,
+  });
   await search.click();
   await page.keyboard.type("a[b]c");
   await expect(search).toHaveValue("a[b]c");
@@ -323,14 +327,14 @@ test("the Today button's name carries today's count and how many need you", asyn
   );
 });
 
-test("a By person row is a button that adds that person to the filter bar and narrows the count", async ({
+test("a By person row is a button that adds that person to the filter and narrows the count", async ({
   page,
   context,
 }) => {
   // The rail folded leaves room for the chip.
   await setFold(context, "shut.open");
   await open(page);
-  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
+  await expect(countText(page)).toHaveText(/^\d+ items$/);
   const person = rightPanel(page).getByRole("button", { name: /^Ahmed/ });
   await expect(person).toHaveAttribute("aria-pressed", "false");
   await person.click();
@@ -345,7 +349,7 @@ test("a By person row is a button that adds that person to the filter bar and na
   await expect(
     page.getByRole("button", { name: "Remove Ahmed", exact: true }),
   ).toHaveCount(0);
-  await expect(countText(page)).toHaveText(/^All \d+ shown$/);
+  await expect(countText(page)).toHaveText(/^\d+ items$/);
 });
 
 test("shutting the panel from a focused By person row ends the preview and moves focus to the Today button", async ({
@@ -411,7 +415,7 @@ test("folding the rail or opening the panel keeps a zoomed-in view zoomed in", a
 });
 
 for (const fold of ["open.open", "shut.open", "open.shut", "shut.shut"]) {
-  test(`at 1280 px with ${fold} the filter bar and zoom control do not overlap and the top bar holds`, async ({
+  test(`at 1280 px with ${fold} the top bar holds the filter above the stage and nothing overlaps`, async ({
     page,
     context,
   }) => {
@@ -421,30 +425,24 @@ for (const fold of ["open.open", "shut.open", "open.shut", "shut.shut"]) {
     await settle(page);
 
     // Give the bar some chips to carry.
-    await page.getByRole("button", { name: /^Folders/ }).click();
+    const filter = topBar(page).getByRole("button", { name: /^Filter/ });
+    await filter.click();
     const list = page.getByRole("group", { name: "Folders", exact: true });
     await list.getByRole("checkbox", { name: "DMT" }).click();
     await list.getByRole("checkbox", { name: "ADNOC" }).click();
-    await page.getByRole("button", { name: /^Folders/ }).click();
+    await filter.click();
     await expect(list).toHaveCount(0);
     await expect(countText(page)).toHaveText(/^\d+ of \d+ shown$/);
 
-    const filter = page
-      .locator("[data-map-overlay]")
-      .filter({
-        has: page.getByRole("button", { name: /^Folders/ }),
-      })
-      .last();
-    const a = (await filter.boundingBox())!;
-    const b = (await page.getByRole("group", { name: "Zoom" }).boundingBox())!;
-    const apart =
-      a.x + a.width <= b.x + 0.5 ||
-      b.x + b.width <= a.x + 0.5 ||
-      a.y + a.height <= b.y + 0.5 ||
-      b.y + b.height <= a.y + 0.5;
-    expect(apart, "filter bar and zoom control overlap").toBe(true);
+    // The filter is in the bar, wholly above the stage, so it can never run under the zoom control.
+    const a = (await topBar(page).locator("[data-filter-bar]").boundingBox())!;
+    const stage = (await page.locator("[data-map-stage]").boundingBox())!;
+    expect(a.y + a.height).toBeLessThanOrEqual(stage.y + 0.5);
+    await expect(
+      page.locator("[data-map-stage] [data-filter-bar]"),
+    ).toHaveCount(0);
 
-    const bar = page.locator('main[aria-label="Hive map"] > div').first();
+    const bar = topBar(page);
     const barBox = (await bar.boundingBox())!;
     const children = await bar.locator("> *").evaluateAll((els) =>
       els.map((e) => {

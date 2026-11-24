@@ -1,5 +1,6 @@
-// The controls around the stage: stats line, view switch, labels toggle and search on top;
-// the filter bar (FilterBar.tsx) sits on the stage.
+// The map's top bar: the view switch, Group by (Rings only), the filter (FilterBar.tsx: search
+// with the Filter button, the chips and the count) and the Today button. On a narrow card the
+// filter drops to a second row.
 import { useRef } from "react";
 import type { View } from "./types";
 import type { Arrange } from "./arrange";
@@ -15,32 +16,26 @@ export const VIEWS: [View, string][] = [
 ];
 
 export function TopBar({
-  stats,
   view,
   onView,
   arrange,
   onArrange,
-  q,
-  onQ,
+  filter,
   today,
 }: {
-  stats: string;
   view: View;
   onView: (v: View) => void;
   arrange: Arrange;
   onArrange: (a: Arrange) => void;
-  q: string;
-  onQ: (q: string) => void;
+  /** The filter: search, the Filter button and its popover, the chips and the count. */
+  filter: React.ReactNode;
   /** The Today button, last in the bar. */
   today: React.ReactNode;
 }) {
   const group = useRef<HTMLDivElement>(null);
   const pillStyle = useSlidingPill(group, '[aria-pressed="true"]', view);
   return (
-    <div className={s.bar}>
-      <p className={s.stats} aria-live="polite">
-        {stats}
-      </p>
+    <div className={s.bar} data-map-bar="">
       <div ref={group} role="group" aria-label="View" className={s.switch}>
         <span aria-hidden="true" className={pill.pill} style={pillStyle} />
         {VIEWS.map(([v, name]) => (
@@ -58,21 +53,8 @@ export function TopBar({
       {view === "rings" && (
         <GroupMenu arrange={arrange} onArrange={onArrange} />
       )}
-      <div className={s.tools}>
-        <label htmlFor="hv-search" className={s.srOnly}>
-          Search
-        </label>
-        <input
-          id="hv-search"
-          type="search"
-          placeholder="Search"
-          autoComplete="off"
-          className={s.search}
-          value={q}
-          onChange={(e) => onQ(e.target.value)}
-        />
-        {today}
-      </div>
+      {filter}
+      {today}
     </div>
   );
 }
