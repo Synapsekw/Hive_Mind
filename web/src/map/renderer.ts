@@ -59,6 +59,10 @@ export type Palette = {
   lineHi: string;
   edge: string;
   accent: string;
+  /** The hubs' colour in Rings when the theme asks for honey rings, else null (group hues). */
+  ringsHub: string | null;
+  /** How much stronger the theme wants the fresh dots' glow in Rings (1 = as drawn by default). */
+  ringsGlow: number;
 };
 
 const TAU = Math.PI * 2;
@@ -89,6 +93,8 @@ export function readPalette(el: Element): Palette {
     lineHi: v("--line-hi"),
     edge: v("--edge"),
     accent: v("--acc"),
+    ringsHub: v("--rings-hub") || null,
+    ringsGlow: Number(v("--rings-glow")) || 1,
   };
 }
 
@@ -308,6 +314,9 @@ const hueOf = (F: Frame, topic: number) =>
   F.pal.hue[F.model.topics[topic]?.hue ?? -1] ?? F.pal.fg2;
 const colourOf = (F: Frame, n: ModelNode) =>
   n.topic >= 0 ? hueOf(F, n.topic) : F.pal.fg2;
+/** A hub's colour: its group's hue, or in Rings the theme's honey when it asks for it. */
+const hubColour = (F: Frame, topic: number) =>
+  F.fresh && F.pal.ringsHub ? F.pal.ringsHub : hueOf(F, topic);
 const strong = (F: Frame, i: number) =>
   i === F.f.hot || i === F.f.focusRing || i === F.f.sel;
 const alphaOf = (F: Frame, i: number) =>
@@ -914,13 +923,17 @@ function fillGroup(
   ctx.shadowBlur = 0;
 }
 
-/** The glow of a freshness level: 8 px at level 6, 14 px breathing at level 7, else none. */
+/**
+ * The glow of a freshness level: 8 px at level 6, 14 px breathing at level 7, else none; times
+ * the theme's own strength for Rings.
+ */
 function freshGlow(F: Frame, level: number): number {
   if (!F.c.glow || level < 6) return 0;
-  if (level === 6) return 8;
-  if (F.still) return 14;
+  const k = F.pal.ringsGlow;
+  if (level === 6) return 8 * k;
+  if (F.still) return 14 * k;
   F.ambient = true;
-  return 14 + 4 * Math.sin((TAU * F.f.time) / 4000);
+  return (14 + 4 * Math.sin((TAU * F.f.time) / 4000)) * k;
 }
 
 /** Outline opacity for a readable dot drawn `d` px wide on screen at dim `a`. */
@@ -1056,7 +1069,15 @@ function drawDots(F: Frame) {
   }
   for (const b of dc.batches)
     if (b.topic >= 0)
-      fillGroup(F, b.kind, hueOf(F, b.topic), b.alpha, b.paths, 0, b.topic);
+      fillGroup(
+        F,
+        b.kind,
+        b.kind === "hub" ? hubColour(F, b.topic) : hueOf(F, b.topic),
+        b.alpha,
+        b.paths,
+        0,
+        b.topic,
+      );
     else
       fillGroup(
         F,
@@ -1149,7 +1170,7 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
   fillGroup(
     F,
     kind,
-    colourOf(F, n),
+    kind === "hub" ? hubColour(F, n.topic) : colourOf(F, n),
     alphaOf(F, i) * (theirs(n) && i !== F.f.hot ? 0.72 : 1),
     paths,
     glow,

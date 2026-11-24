@@ -58,7 +58,12 @@ the bottom of the left rail.
   Peach, Glacier, Dusk, Berry, Candy, Citrus, Prism, Mocha, Neon. Keystone and Graphite have one
   accent; the rest have two. The seed values for every theme in both modes are in
   [`ui/themes.json`](ui/themes.json); the 17 other than Hive were copied from Monolith's `develop` on
-  2026-11-18. Hive's light seeds are darkened so white text on the wash keeps its contrast. A `--mark`
+  2026-11-18. Hive's light seeds are darkened so white text on the wash keeps its contrast. Hive's
+  dark mode is near-black, so fresh notes read as honey light in the dark. Hive also sets
+  `"rings": "honey"` in its seeds: in Rings its hubs and the legend's group swatches take the brand
+  colour, and the glow on fresh notes is 1.9 times as strong (tokens `--rings-hub` and
+  `--rings-glow`, unset in every other theme, which keep group hues on hubs). Each theme is tuned on
+  its own; nothing here changes the other 17. A `--mark`
   token carries the colour of the hexagon mark beside the Hive name at the top of the left rail.
 - **Mode:** dark (default) or light. Light is a "bold frame": the wash is a saturated gradient,
   everything painted on it is white, and the map sits on white glass. A primary button on the

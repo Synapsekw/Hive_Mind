@@ -92,7 +92,15 @@ export function Dock({
               className={s.dockItem}
               aria-pressed={topic === i}
               data-quiet={(topic !== null && topic !== i) || undefined}
-              style={{ "--c": `var(--hue-${t.hue + 1})` } as CSSProperties}
+              style={
+                {
+                  // In Rings a theme with honey rings colours every group alike, as its hubs.
+                  "--c":
+                    heading === "Topics"
+                      ? `var(--hue-${t.hue + 1})`
+                      : `var(--rings-hub, var(--hue-${t.hue + 1}))`,
+                } as CSSProperties
+              }
               onClick={() => onTopic(topic === i ? null : i)}
               {...aim(onPreview, { topic: i })}
             >
