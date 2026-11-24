@@ -237,3 +237,28 @@ and can run at the same time. Unit 5 is last.
 - Old notes (ramp steps 0 to 4) are below 3:1 against the card.
 - A person who had chosen one of the 18 old themes lands on Honey.
 - The topic colours in Timeline and Orbit stay generated, not hand-tuned.
+
+## 11. Refinements made while planning
+
+Found while reading the code for the plan. Where this section differs from one above, this
+section holds.
+
+- **Paper's colours.** Four of the mock's values failed the limits of section 6 and were changed:
+  muted `#645e54`, accent and hub `#b8540b`, and a quiet label colour of `#7d776b`. The seven dark
+  themes pass as drawn.
+- **`fg2` and `quiet` are in each record**, not fixed per scheme, so a theme can be tuned alone.
+  Each record also holds `onAccent`, the text colour on the accent.
+- **Tint and grid are opacities.** `tint` is the opacity of the theme's glow colour (0.05 to 0.1)
+  and `grid` the opacity of the accent in Blueprint's lines (0.07), not free colours.
+- **`--wash` and `--bloom` are removed**, not kept with new values: the page background reads
+  `--bg`. `--glow` stays and is `none`.
+- **`--line-hi`** is the line colour moved 25% towards the text, not 12%: a hover has to show.
+- **`--fill-on`** is the theme's active fill.
+- **The ramp is mixed in OKLab** (a straight line, no hue detour), not OKLCH.
+- **`--halo-blend`** is a new token: `lighter` in dark themes, `source-over` in Paper. The
+  renderer reads it instead of knowing the scheme.
+- **The index** is drawn in the text colour in every theme (near-white in the dark ones).
+- **A colleague's unshared item** (the hollow dot) is outlined in the accent in Rings, since the
+  ramp's old end would make it nearly invisible.
+- **A swatch** in Appearance is the theme's card colour and its freshest ramp colour, split on the
+  diagonal. The panel keeps its swatch grid; only the three other controls go.
