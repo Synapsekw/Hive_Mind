@@ -29,6 +29,8 @@ import {
 } from "./importFiles";
 import { runConnect, type ConnectEnd, type ConnectTally } from "./connectRun";
 import * as c from "./connectText";
+import { runAttach, type AttachEnd, type AttachTally } from "./attachRun";
+import * as a from "./attachText";
 import * as t from "./importText";
 import s from "./vault.module.css";
 
@@ -47,6 +49,13 @@ type Stage =
       total: number | null;
       stopping: boolean;
     }
+  // The workspace's topics, after its wiki links.
+  | {
+      kind: "attaching";
+      done: number;
+      total: number | null;
+      stopping: boolean;
+    }
   | {
       kind: "done";
       tally: Tally;
@@ -56,6 +65,8 @@ type Stage =
       workspace: { id: string; name: string };
       /** How connecting the wiki links went; null when the import did not get that far. */
       links: { tally: ConnectTally; end: ConnectEnd } | null;
+      /** How attaching the topics went; null when the import did not get that far. */
+      topics: { tally: AttachTally; end: AttachEnd } | null;
     };
 
 const REFUSALS = {
@@ -121,7 +132,10 @@ export function Import({
   // A workspace made here, kept so pressing Import again does not ask for it twice.
   const made = useRef<{ id: string; name: string } | null>(null);
 
-  const running = stage.kind === "running" || stage.kind === "connecting";
+  const running =
+    stage.kind === "running" ||
+    stage.kind === "connecting" ||
+    stage.kind === "attaching";
 
   useEffect(() => {
     alive.current = true;
@@ -316,6 +330,22 @@ export function Import({
       });
     }
 
+    // The wiki links are connected: attach the workspace's notes to the hive's topics.
+    let topics: { tally: AttachTally; end: AttachEnd } | null = null;
+    if (links?.end === "finished" && !stop.current && alive.current) {
+      setStage({
+        kind: "attaching",
+        done: 0,
+        total: null,
+        stopping: stop.current,
+      });
+      topics = await runAttach(actions.attach, workspace.id, {
+        progress: (done, total) =>
+          setStage({ kind: "attaching", done, total, stopping: stop.current }),
+        stop: () => stop.current || !alive.current,
+      });
+    }
+
     onBusy(false);
     setStage({
       kind: "done",
@@ -325,6 +355,7 @@ export function Import({
       end,
       workspace,
       links,
+      topics,
     });
     router.refresh();
   }
@@ -346,6 +377,7 @@ export function Import({
   if (stage.kind === "ready") title = t.READY;
   if (stage.kind === "running") title = t.RUNNING;
   if (stage.kind === "connecting") title = c.CONNECTING;
+  if (stage.kind === "attaching") title = a.ATTACHING;
   if (stage.kind === "done")
     title = stage.end === "finished" ? t.FINISHED : t.STOPPED;
 
@@ -533,7 +565,9 @@ export function Import({
         </>
       )}
 
-      {(stage.kind === "running" || stage.kind === "connecting") && (
+      {(stage.kind === "running" ||
+        stage.kind === "connecting" ||
+        stage.kind === "attaching") && (
         <>
           {/* Without a total yet, the bar says only that something is under way. */}
           <progress
@@ -547,7 +581,9 @@ export function Import({
               ? t.progress(stage.done, stage.total)
               : stage.total === null
                 ? ""
-                : c.connectProgress(stage.done, stage.total)}
+                : stage.kind === "connecting"
+                  ? c.connectProgress(stage.done, stage.total)
+                  : a.attachProgress(stage.done, stage.total)}
           </p>
           <p className={s.sentence} data-quiet>
             {stage.stopping ? `${t.STOPPING}. ${t.KEEPS}` : t.KEEPS}
@@ -602,6 +638,23 @@ export function Import({
           )}
           {stage.links && stage.links.end !== "finished" && (
             <p className={s.sentence}>{c.AFTER_IMPORT_UNFINISHED}</p>
+          )}
+          {stage.topics && stage.topics.tally.topics > 0 && (
+            <p className={s.facts}>
+              {a.attachCounts(stage.topics.tally).map((n) => (
+                <span key={n.label}>
+                  {n.label} <strong>{n.value}</strong>
+                </span>
+              ))}
+            </p>
+          )}
+          {stage.topics &&
+            stage.topics.tally.topics === 0 &&
+            stage.topics.end === "finished" && (
+              <p className={s.sentence}>{a.NO_TOPICS}</p>
+            )}
+          {stage.topics && stage.topics.end !== "finished" && (
+            <p className={s.sentence}>{a.AFTER_IMPORT_UNFINISHED}</p>
           )}
           {stage.unsent > 0 && (
             <p className={s.sentence}>
