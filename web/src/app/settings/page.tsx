@@ -44,7 +44,7 @@ export default async function SettingsPage() {
       actions={{
         createAgent,
         revokeAgent,
-        inviteMember,
+        inviteMember: inviteMember.bind(null, result.hiveId),
         revokeInvitation,
         resendInvitation,
       }}

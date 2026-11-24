@@ -237,7 +237,7 @@ describe("loadGallery: the files query", () => {
       ["eq", ["user_id", U_ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
-      ["limit", [1]],
+      ["limit", [50]],
     ]);
     expect(args(table(t, "files")[0]!, "eq")).toEqual(["hive_id", HIVE]);
     // One call to the auth server, as before.

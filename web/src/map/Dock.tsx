@@ -9,7 +9,7 @@ import s from "./map.module.css";
 const KINDS: [NodeKind, string][] = [
   ["note", "Notes"],
   ["file", "Files"],
-  ["hub", "Topics"],
+  ["hub", "Groups"],
   ["agent", "Agents"],
 ];
 
@@ -32,6 +32,7 @@ function aim(onPreview: (p: Preview | null) => void, p: Preview) {
 
 export function Dock({
   model,
+  heading,
   topic,
   onTopic,
   kind,
@@ -41,6 +42,7 @@ export function Dock({
   onPreview,
 }: {
   model: MapModel;
+  heading: string;
   topic: number | null;
   onTopic: (t: number | null) => void;
   kind: NodeKind | null;
@@ -56,6 +58,8 @@ export function Dock({
   useEffect(() => {
     const el = row.current;
     if (!el) return;
+    // A new set of groups (another arrangement) starts from the left.
+    el.scrollLeft = 0;
     const measure = () => setOver(el.scrollWidth > el.clientWidth + 1);
     measure();
     const ro = new ResizeObserver(measure);
@@ -71,14 +75,14 @@ export function Dock({
       ro.disconnect();
       el.removeEventListener("wheel", onWheel);
     };
-  }, [model.topics.length]);
+  }, [model.topics]);
 
   if (model.nodes.length <= 1) return null;
   return (
     <div className={s.dock} data-map-overlay="">
-      <div role="group" aria-label="Topics" className={s.dockGroup}>
+      <div role="group" aria-label={heading} className={s.dockGroup}>
         <span aria-hidden="true" className={s.dockLabel}>
-          Topics
+          {heading}
         </span>
         <div ref={row} className={s.dockTopics} data-over={over || undefined}>
           {model.topics.map((t, i) => (
@@ -106,23 +110,28 @@ export function Dock({
         <span aria-hidden="true" className={s.dockLabel}>
           Kind
         </span>
-        {KINDS.map(([k, name]) => (
-          <button
-            key={k}
-            type="button"
-            className={`${s.dockItem} ${s.dockIcon}`}
-            aria-label={name}
-            aria-pressed={kind === k}
-            data-quiet={(kind !== null && kind !== k) || undefined}
-            onClick={() => onKind(kind === k ? null : k)}
-            {...aim(onPreview, { kind: k })}
-          >
-            <span aria-hidden="true" className={s.chipDot} data-kind={k} />
-            <span aria-hidden="true" className={s.dockTip}>
-              {name}
-            </span>
-          </button>
-        ))}
+        {KINDS.map(([k, kindName]) => {
+          // The hubs' entry takes the groups' own word: Topics where the heading says so.
+          const name =
+            k === "hub" && heading === "Topics" ? "Topics" : kindName;
+          return (
+            <button
+              key={k}
+              type="button"
+              className={`${s.dockItem} ${s.dockIcon}`}
+              aria-label={name}
+              aria-pressed={kind === k}
+              data-quiet={(kind !== null && kind !== k) || undefined}
+              onClick={() => onKind(kind === k ? null : k)}
+              {...aim(onPreview, { kind: k })}
+            >
+              <span aria-hidden="true" className={s.chipDot} data-kind={k} />
+              <span aria-hidden="true" className={s.dockTip}>
+                {name}
+              </span>
+            </button>
+          );
+        })}
         <span className={`${s.dockItem} ${s.dockIcon} ${s.dockLegend}`}>
           <span aria-hidden="true" className={s.legendDot} />
           <span aria-hidden="true" className={s.dockTip}>

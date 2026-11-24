@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ cookies: vi.fn() }));
+vi.mock("next/headers", () => ({ cookies: mocks.cookies }));
+
 import { loadConsent } from "./load";
 
 const USER = "00000000-0000-4000-8000-000000000001";
@@ -83,7 +87,15 @@ function stub(
   return { db, from, oauth, rpc, tables, filters };
 }
 
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  // No choice of hive unless a test makes one.
+  mocks.cookies.mockResolvedValue({ get: () => undefined });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  mocks.cookies.mockReset();
+});
 
 describe("loadConsent: a request still to be answered", () => {
   it("answers the form: the app, the host it returns to and the person's workspaces", async () => {
@@ -96,6 +108,7 @@ describe("loadConsent: a request still to be answered", () => {
         name: "Claude",
         host: "claude.ai",
       },
+      hive: "Synapse",
       workspaces: [
         { id: W2, name: "Client notes" },
         { id: W1, name: "Main" },
@@ -106,6 +119,30 @@ describe("loadConsent: a request still to be answered", () => {
     // The person's own workspaces only, and a bounded read.
     expect(t.filters).toContainEqual(["eq", ["member_id", MEMBER]]);
     expect(t.filters).toContainEqual(["limit", [50]]);
+  });
+
+  it("names the chosen hive and lists the person's workspaces in that one", async () => {
+    const OTHER = "00000000-0000-4000-8000-000000000a02";
+    const OTHER_MEMBER = "00000000-0000-4000-8000-000000000c02";
+    mocks.cookies.mockResolvedValue({
+      get: (name: string) =>
+        name === "hm_hive" ? { name, value: OTHER } : undefined,
+    });
+    const t = stub({
+      members: {
+        data: [
+          { id: MEMBER, hive_id: HIVE, hive: { name: "Synapse" } },
+          { id: OTHER_MEMBER, hive_id: OTHER, hive: { name: "Side" } },
+        ],
+        error: null,
+      },
+    });
+    expect(await loadConsent(t.db, AUTH)).toMatchObject({
+      state: "form",
+      hive: "Side",
+    });
+    expect(t.tables).toEqual(["members", "workspaces"]);
+    expect(t.filters).toContainEqual(["eq", ["member_id", OTHER_MEMBER]]);
   });
 
   it("decides nothing: no approval, no denial, no write", async () => {

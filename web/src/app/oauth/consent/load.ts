@@ -1,6 +1,8 @@
 // What the approval window shows, given a client signed in as the person: the request's details
 // from the auth server, the person's own hive (one indexed read) and their workspaces in it
-// (indexed on `member_id`, 50 at most).
+// (indexed on `member_id`, 50 at most). A person in several hives connects the app to the one
+// they have chosen in the rail, which is the hive `ownHive` answers; its name is shown, so they
+// see which one. An agent belongs to one member, and a member to one hive.
 //
 // A request the auth server answers with only a return address is one it approved by itself,
 // because the person approved this app before. The window is not shown and nothing is recorded
@@ -20,6 +22,8 @@ export type Loaded =
   | {
       state: "form";
       details: Extract<Details, { kind: "ask" }>;
+      /** The name of the hive the app is being connected to: the one the person has chosen. */
+      hive: string;
       workspaces: Workspace[];
     }
   | { state: "answered"; redirect: string }
@@ -81,5 +85,5 @@ export async function loadConsent(
     console.error("workspaces answer is empty or has an unexpected shape");
     return { state: "error" };
   }
-  return { state: "form", details, workspaces };
+  return { state: "form", details, hive: hive.name, workspaces };
 }

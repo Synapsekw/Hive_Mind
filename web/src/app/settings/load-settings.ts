@@ -16,7 +16,7 @@ import type {
 } from "../../settings/types";
 
 export type SettingsLoad =
-  | { state: "ok"; data: SettingsData }
+  | { state: "ok"; hiveId: string; data: SettingsData }
   | { state: "no-hive" }
   | { state: "error" };
 
@@ -212,6 +212,8 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
   }));
   return {
     state: "ok",
+    // Beside the data, not in it: the page binds invitations to this hive on the server.
+    hiveId: hive.id,
     data: {
       hiveName: hive.name,
       isOwner: members.some((m) => m.isMe && m.role === "owner"),

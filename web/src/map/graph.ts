@@ -1,9 +1,10 @@
 // Turns the `map_graph` payload into the drawing model. Pure and deterministic.
+import { grouping, type Grouping } from "./arrange";
 import type { Activity, MapModel, MapPayload, ModelNode } from "./types";
 
 export const BOX: { w: 1000; h: 760 } = { w: 1000, h: 760 };
 
-/** Hues 0..7 exist; with more than eight topics the seven largest keep theirs. */
+/** Hues 0..7 exist; with more than eight groups they repeat. */
 const HUES = 8;
 const DAY_MS = 86_400_000;
 export const CONNECTED_MS = 70 * 60_000;
@@ -41,7 +42,7 @@ function parseTime(s: string | null): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-export function buildModel(payload: MapPayload): MapModel {
+export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
   const members = payload.members.map((m) => ({
     id: m.id,
     name: m.display_name,
@@ -50,31 +51,14 @@ export function buildModel(payload: MapPayload): MapModel {
   const meIds = new Set(members.filter((m) => m.isMe).map((m) => m.id));
   const nameOf = new Map(members.map((m) => [m.id, m.name]));
 
-  // Rank topics by item count, ties by name; fold the tail into "Other".
-  const counts = new Map<string, number>();
-  for (const n of payload.nodes)
-    counts.set(n.topic, (counts.get(n.topic) ?? 0) + 1);
-  const ranked = [...counts.entries()].sort((a, b) =>
-    b[1] !== a[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0,
-  );
-  const topics: MapModel["topics"] = [];
-  const topicIndex = new Map<string, number>();
-  const fold = ranked.length > HUES;
-  // A real topic among the kept seven may itself be called "Other".
-  const otherName = ranked.slice(0, HUES - 1).some(([name]) => name === "Other")
-    ? "Other topics"
-    : "Other";
-  ranked.forEach(([name, count], r) => {
-    if (fold && r >= HUES - 1) {
-      if (topics.length < HUES)
-        topics.push({ name: otherName, hue: HUES - 1, count: 0 });
-      topics[HUES - 1]!.count += count;
-      topicIndex.set(name, HUES - 1);
-    } else {
-      topicIndex.set(name, topics.length);
-      topics.push({ name, hue: topics.length, count });
-    }
-  });
+  // The groups: by default the folders, seven largest plus "Other" (see `grouping`).
+  const g = groups ?? grouping(payload, "folder", 0, HUES);
+  const topics: MapModel["topics"] = g.names.map((name, i) => ({
+    name,
+    hue: i % HUES,
+    count: 0,
+  }));
+  for (const t of g.of) topics[t]!.count++;
 
   const nodes: ModelNode[] = [];
   const add = (n: Omit<ModelNode, "i" | "nb">): number => {
@@ -109,12 +93,12 @@ export function buildModel(payload: MapPayload): MapModel {
     }),
   );
   const byId = new Map<string, number>();
-  for (const n of payload.nodes) {
+  for (const [at, n] of payload.nodes.entries()) {
     const locked = n.locked;
     const i = add({
       id: n.id,
       kind: n.kind,
-      topic: topicIndex.get(n.topic) ?? 0,
+      topic: g.of[at] ?? 0,
       member: n.member_id,
       mine: meIds.has(n.member_id),
       locked,

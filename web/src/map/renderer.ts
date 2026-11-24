@@ -1,9 +1,10 @@
 // Draws one frame of the map on a 2D canvas context. No React, no DOM writes: MapCanvas owns the
-// element and the loop. Geometry that only changes with the scene (edges, comb cells per topic)
-// is built once per scene as batched Path2Ds; a frame is a few dozen fills and strokes. Colours
+// element and the loop. Geometry that only changes with the scene (the edges) is built once per
+// scene as batched Path2Ds; a frame is a few dozen fills and strokes. Colours
 // come from the theme's tokens (readPalette), never from literals; transparency is always
 // `globalAlpha`. Line widths and radii are divided by the scale, so they keep their screen size.
 import type { Cam } from "./camera";
+import { FRESH_ALPHA } from "./freshness";
 import { size } from "./nodeShape";
 import { orbitAlpha, type OrbitProjection } from "./orbit3d";
 import type { Scene } from "./scene";
@@ -20,9 +21,7 @@ export type FrameState = {
   sel: number | null;
   focusRing: number | null; // keyboard-focused dot
   labels: Set<number>;
-  marks: Map<number, { state: "live" | "today" | "idle" }>; // agent node -> mark state (Hive)
   pulses: Pulse[];
-  flares: Map<number, number>; // comb cell node -> flare start time
   time: number; // performance.now() for animations
   reducedMotion: boolean;
   /** The camera is moving (wheel, drag, glide): the resting layer is moved, not redrawn. */
@@ -32,15 +31,12 @@ export type FrameState = {
    * keeps its identity for the whole growth, so the dot batches are rebuilt once, not per frame.
    */
   grow?: { nodes: Set<number>; k: number } | null;
-  /**
-   * Agents drawn somewhere other than `pos` (the Hive's marks mid-move). Read only where a single
-   * node's position is needed, never by the cached dot batches, so a mark move rebuilds nothing.
-   */
-  moved?: Map<number, [number, number]> | null;
   /** The resting layer's opacity (it fades in while the dots glide to a new view). */
   layerAlpha?: number;
   /** Orbit only: this frame's projection of the 3D positions (orbit3d.ts). */
   orbit?: OrbitProjection | null;
+  /** The "Labels" switch: off hides the group names too. */
+  labelsOn?: boolean;
 };
 
 export type Pulse = {
@@ -67,8 +63,17 @@ export type Palette = {
 
 const TAU = Math.PI * 2;
 const SQ2 = Math.SQRT2;
-const FLARE_MS = 1400;
 const LABEL_MAX = 220;
+/** Opacity of the thin brand outline around a readable dot in Rings (times its dim). */
+export const OUTLINE_ALPHA = 0.45;
+/** A locked dot's stroke in Rings, in screen px (other views keep 1.2). */
+const LOCKED_W = 1.6;
+/** The smallest note or file drawn, in screen px, however far Rings shrank the drawing. */
+const MIN_DOT = 2.5;
+/** Dots smaller than this on screen get no outline (it would swallow the fill). */
+const OUTLINE_MIN = 4;
+/** Above this many dots at freshness levels 6 and 7 the glow is skipped (shadow blur is slow). */
+const GLOW_MAX = 400;
 
 /** The theme's colours, read once per theme change (getComputedStyle is not free). */
 export function readPalette(el: Element): Palette {
@@ -89,27 +94,20 @@ export function readPalette(el: Element): Palette {
 
 // ---- Per-scene cache ----
 
-type TopicPath = { topic: number; path: Path2D };
 type SceneCache = {
   edges: Path2D;
-  combFill: { topic: number; alpha: number; path: Path2D }[];
-  combStroke: TopicPath[];
-  capped: TopicPath[];
-  hubs: TopicPath[];
-  empty: Path2D;
-  root: Path2D | null;
-  hexR: number;
-  cellOf: Map<number, number>; // node -> index in scene.combCells
-  dimCells: WeakMap<boolean[], Path2D>;
-  softCells: WeakMap<Set<number>, Path2D>;
   litEdges: WeakMap<boolean[], Path2D>;
   filtered: WeakMap<boolean[], boolean>;
+  /** At most GLOW_MAX dots at freshness levels 6 and 7: the fresh ones may glow. */
+  glow: boolean;
+  /** Per group: does any of its nodes stay lit (its name at full, else faint)? */
+  groupOn: WeakMap<boolean[], boolean[]>;
 };
 
 const caches = new WeakMap<Scene, SceneCache>();
 
-/** A pointy-top hexagon (the comb's orientation) of circumradius r, added to `p`. */
-function hex(p: Path2D, x: number, y: number, r: number, turn = Math.PI / 6) {
+/** A hexagon of circumradius r, turned by `turn` (radians), added to `p`. */
+function hex(p: Path2D, x: number, y: number, r: number, turn: number) {
   for (let i = 0; i < 6; i++) {
     const a = turn + (i * Math.PI) / 3;
     const hx = x + r * Math.cos(a);
@@ -129,56 +127,14 @@ function cacheFor(scene: Scene): SceneCache {
     edges.moveTo(e[i]!, e[i + 1]!);
     edges.lineTo(e[i + 2]!, e[i + 3]!);
   }
-  // One hex per cell, appended straight into its batch (the same as addPath of one translated hex).
-  const hexR = Math.max(0.5, scene.combSize - 1.2);
-  const fills = new Map<
-    string,
-    { topic: number; alpha: number; path: Path2D }
-  >();
-  const strokes = new Map<number, Path2D>();
-  const capped = new Map<number, Path2D>();
-  const hubs = new Map<number, Path2D>();
-  const empty = new Path2D();
-  let root: Path2D | null = null;
-  const cellOf = new Map<number, number>();
-  const get = (m: Map<number, Path2D>, t: number) => {
-    let p = m.get(t);
-    if (!p) m.set(t, (p = new Path2D()));
-    return p;
-  };
-  scene.combCells.forEach((c, i) => {
-    if (c.node !== null) cellOf.set(c.node, i);
-    if (c.kind === "empty") return hex(empty, c.x, c.y, hexR);
-    if (c.kind === "root") {
-      root = new Path2D();
-      return hex(root, c.x, c.y, hexR);
-    }
-    if (c.capped) return hex(get(capped, c.topic), c.x, c.y, hexR);
-    // Fill alphas in steps of 0.05, so a topic is a handful of fills rather than one per cell.
-    const alpha = Math.max(0.05, Math.round(c.honey / 0.05) * 0.05);
-    const key = `${c.topic}|${alpha}`;
-    let f = fills.get(key);
-    if (!f) fills.set(key, (f = { topic: c.topic, alpha, path: new Path2D() }));
-    hex(f.path, c.x, c.y, hexR);
-    hex(get(strokes, c.topic), c.x, c.y, hexR);
-    if (c.kind === "hub") hex(get(hubs, c.topic), c.x, c.y, hexR);
-  });
-  const list = (m: Map<number, Path2D>): TopicPath[] =>
-    [...m].map(([topic, path]) => ({ topic, path }));
+  let fresh = 0;
+  for (const v of scene.fresh) if (v >= 6) fresh++;
   const out: SceneCache = {
     edges,
-    combFill: [...fills.values()],
-    combStroke: list(strokes),
-    capped: list(capped),
-    hubs: list(hubs),
-    empty,
-    root,
-    hexR,
-    cellOf,
-    dimCells: new WeakMap(),
-    softCells: new WeakMap(),
     litEdges: new WeakMap(),
     filtered: new WeakMap(),
+    glow: fresh <= GLOW_MAX,
+    groupOn: new WeakMap(),
   };
   caches.set(scene, out);
   return out;
@@ -193,17 +149,13 @@ function isFiltered(c: SceneCache, lit: boolean[]): boolean {
   return v;
 }
 
-/** The comb cells whose item is outside `keep`, as one path (cached per keep-set). */
-function cellsOutside(
-  scene: Scene,
-  c: SceneCache,
-  keep: (node: number) => boolean,
-): Path2D {
-  const p = new Path2D();
-  for (const cell of scene.combCells)
-    if (cell.node !== null && cell.kind !== "root" && !keep(cell.node))
-      hex(p, cell.x, cell.y, c.hexR + 0.6);
-  return p;
+function groupsOn(c: SceneCache, scene: Scene, lit: boolean[]): boolean[] {
+  let v = c.groupOn.get(lit);
+  if (!v) {
+    v = scene.byTopic.map((nodes) => nodes.some((i) => lit[i]));
+    c.groupOn.set(lit, v);
+  }
+  return v;
 }
 
 // ---- Text ----
@@ -252,6 +204,55 @@ function fit(
   return out;
 }
 
+/** A group name keeps at least this many characters, or only the count is shown. */
+const GROUP_NAME_MIN = 4;
+/** Group names stay this many screen px inside the map box. */
+const GROUP_MARGIN = 8;
+/** A group name whose group has nothing lit (filter, search, selection). */
+const GROUP_DIM = 0.4;
+
+/**
+ * A group label "<name> · <count>" fitted into `room` px: the name is cut with "…" and the
+ * count stays whole. With fewer than four name characters left, only the count ("384").
+ */
+export function fitGroupLabel(
+  text: string,
+  room: number,
+  measure: (s: string) => number,
+): string {
+  if (measure(text) <= room) return text;
+  const at = text.lastIndexOf(" · ");
+  if (at < 0) return text;
+  const name = text.slice(0, at);
+  const tail = text.slice(at);
+  let lo = 0;
+  let hi = name.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (measure(`${name.slice(0, mid).trimEnd()}…${tail}`) <= room) lo = mid;
+    else hi = mid - 1;
+  }
+  const kept = name.slice(0, lo).trimEnd();
+  return kept.length >= GROUP_NAME_MIN ? `${kept}…${tail}` : tail.slice(3);
+}
+
+/** fitGroupLabel, measured once per font, label and whole pixel of room. */
+function fitGroup(
+  ctx: CanvasRenderingContext2D,
+  font: string,
+  text: string,
+  room: number,
+): string {
+  const px = Math.max(0, Math.floor(room));
+  const key = `${font}\u0000${px}\u0000${text}`;
+  const hit = fitted.get(key);
+  if (hit) return hit.text;
+  if (fitted.size > 20_000) fitted.clear();
+  const out = fitGroupLabel(text, px, (s) => ctx.measureText(s).width);
+  fitted.set(key, { text: out, w: 0 });
+  return out;
+}
+
 /** Forget measured label widths (call when web fonts finish loading: the widths change). */
 export function clearTextCache(): void {
   fitted.clear();
@@ -260,7 +261,7 @@ export function clearTextCache(): void {
 // ---- The frame ----
 
 /**
- * What a frame leaves running: "motion" (a glide, drag, zoom, pulse or flare: draw again on the
+ * What a frame leaves running: "motion" (a glide, drag, zoom or pulse: draw again on the
  * next animation frame), "ambient" (only the calm breathing and turning: a throttled ~12 fps is
  * enough) or false (nothing: draw again only when something changes).
  */
@@ -281,8 +282,6 @@ type Frame = {
   px: number; // one css px in box units
   cssW: number;
   cssH: number;
-  hive: boolean;
-  small: boolean;
   still: boolean;
   T: number;
   filtered: boolean;
@@ -294,11 +293,17 @@ type Frame = {
   flipX: number;
   /** Orbit: perspective per node (dots grow near, shrink far), else null. */
   depth: Float32Array | null;
+  /** The scene's dot scale (Rings shrinks dots with the drawing); 1 in Orbit. */
+  dotScale: number;
+  /**
+   * Rings only: freshness per node; notes and files are drawn in the brand colour, brighter
+   * when fresher. Null in Timeline and Orbit, which keep the group hues.
+   */
+  fresh: Uint8Array | null;
 };
 
 const CENTRE: [number, number] = [500, 380];
-const P = (F: Frame, i: number): [number, number] =>
-  F.f.moved?.get(i) ?? F.f.pos[i] ?? CENTRE;
+const P = (F: Frame, i: number): [number, number] => F.f.pos[i] ?? CENTRE;
 const hueOf = (F: Frame, topic: number) =>
   F.pal.hue[F.model.topics[topic]?.hue ?? -1] ?? F.pal.fg2;
 const colourOf = (F: Frame, n: ModelNode) =>
@@ -316,19 +321,12 @@ const alphaOf = (F: Frame, i: number) =>
 const theirs = (n: ModelNode) =>
   !n.mine && !n.locked && (n.kind === "note" || n.kind === "file");
 
-/** A dot's drawn diameter in screen px (the Hive draws smaller marks on its cells). */
-export function dotDiameter(
-  n: ModelNode,
-  hive: boolean,
-  smallComb: boolean,
-): number {
-  if (!hive) return size(n);
-  if (n.kind === "hub") return smallComb ? 8 : 11;
-  if (n.kind === "note" || n.kind === "file") return smallComb ? 4 : 6;
-  if (n.kind === "root") return smallComb ? 14 : 22;
-  return 12;
+/** A dot's drawn diameter in screen px, shrunk by `scale`; notes and files never below 2.5. */
+export function dotDiameter(n: ModelNode, scale = 1): number {
+  const d = size(n) * scale;
+  return n.kind === "note" || n.kind === "file" ? Math.max(MIN_DOT, d) : d;
 }
-const diam = (F: Frame, n: ModelNode) => dotDiameter(n, F.hive, F.small);
+const diam = (F: Frame, n: ModelNode) => dotDiameter(n, F.dotScale);
 
 const kindOf = (n: ModelNode): Kind =>
   n.kind === "hub"
@@ -389,8 +387,6 @@ export function drawFrame(
     px: 1 / s,
     cssW,
     cssH,
-    hive: f.view === "hive",
-    small: scene.combSize > 0 && scene.combSize < 10,
     still: f.reducedMotion,
     T: Math.max(1, model.topics.length),
     filtered,
@@ -400,13 +396,14 @@ export function drawFrame(
     ambient: false,
     flipX: 760,
     depth: null,
+    dotScale: scene.dotScale,
+    fresh: f.view === "rings" ? scene.fresh : null,
   };
 
   drawLayer(F);
   ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * f.cam.tx, dpr * f.cam.ty);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  drawFlares(F);
   drawFocusLinks(F);
   drawPulses(F);
   drawCore(F);
@@ -481,8 +478,6 @@ function drawOrbit(
     px: 1,
     cssW,
     cssH,
-    hive: false,
-    small: false,
     still: f.reducedMotion,
     T: Math.max(1, model.topics.length),
     filtered: false,
@@ -492,6 +487,8 @@ function drawOrbit(
     ambient: false,
     flipX: cssW * 0.76,
     depth: o.p,
+    dotScale: 1,
+    fresh: null,
   };
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.lineCap = "round";
@@ -572,85 +569,13 @@ const special = (F: Frame, i: number) =>
 /** Orbit: a node's perspective scale (near dots larger); 1 in the flat views. */
 const depthOf = (F: Frame, i: number) => (F.depth ? (F.depth[i] ?? 1) : 1);
 
-// ---- The resting layer: comb, guides, resting edges ----
+// ---- The resting layer: guides, resting edges ----
 
 /** Draws the resting layer into `g`, whose transform is already set to the box. */
 function drawStatic(F: Frame, g: CanvasRenderingContext2D) {
-  const { scene, c, pal, px, f, model } = F;
+  const { scene, c, pal, px, f } = F;
   g.lineCap = "round";
   g.lineJoin = "round";
-  if (scene.combCells.length) {
-    for (const b of c.combFill) {
-      g.globalAlpha = b.alpha;
-      g.fillStyle = hueOf(F, b.topic);
-      g.fill(b.path);
-    }
-    g.lineWidth = px;
-    g.globalAlpha = 0.28;
-    for (const b of c.combStroke) {
-      g.strokeStyle = hueOf(F, b.topic);
-      g.stroke(b.path);
-    }
-    g.globalAlpha = 1;
-    g.strokeStyle = pal.line;
-    g.stroke(c.empty);
-    if (c.root) {
-      g.globalAlpha = 0.22;
-      g.fillStyle = pal.brand;
-      g.fill(c.root);
-    }
-    g.setLineDash([2 * px, 2 * px]);
-    for (const b of c.capped) {
-      g.globalAlpha = 1;
-      g.fillStyle = pal.bg;
-      g.fill(b.path);
-      g.globalAlpha = 0.8;
-      g.strokeStyle = hueOf(F, b.topic);
-      g.stroke(b.path);
-    }
-    g.setLineDash([]);
-    g.lineWidth = 1.5 * px;
-    g.globalAlpha = 0.9;
-    for (const b of c.hubs) {
-      g.strokeStyle = hueOf(F, b.topic);
-      g.stroke(b.path);
-    }
-    // Cells outside the filter (or the soft keep-set) drop to a near-empty frame.
-    g.fillStyle = pal.bg;
-    if (F.filtered) {
-      let p = c.dimCells.get(f.lit);
-      if (!p) {
-        const lit = f.lit;
-        p = cellsOutside(scene, c, (n) => !!lit[n]);
-        c.dimCells.set(lit, p);
-      }
-      g.globalAlpha = 0.8;
-      g.fill(p);
-    }
-    if (f.soft) {
-      let p = c.softCells.get(f.soft);
-      if (!p) {
-        const soft = f.soft;
-        p = cellsOutside(scene, c, (n) => soft.has(n));
-        c.softCells.set(soft, p);
-      }
-      g.globalAlpha = 0.55;
-      g.fill(p);
-    }
-    if (scene.entrance) {
-      const [ex, ey] = scene.entrance;
-      const idle = scene.agents.filter(
-        (i) => (f.marks.get(i)?.state ?? "idle") === "idle",
-      ).length;
-      g.globalAlpha = 1;
-      g.lineWidth = px;
-      g.strokeStyle = pal.line;
-      g.beginPath();
-      g.arc(ex, ey + 6, Math.max(14, idle * 9 + 6), Math.PI, TAU);
-      g.stroke();
-    }
-  }
-
   g.globalAlpha = 1;
   g.lineWidth = px;
   g.strokeStyle = pal.line;
@@ -668,23 +593,24 @@ function drawStatic(F: Frame, g: CanvasRenderingContext2D) {
     g.stroke();
   }
 
-  // Edges: none at rest in Hive; the timeline draws only the focused links.
-  if (!F.hive && f.view !== "timeline") {
+  // Edges: the timeline draws only the focused links.
+  if (f.view !== "timeline") {
     g.strokeStyle = pal.edge;
     g.lineWidth = 0.6 * px;
-    g.globalAlpha = F.busy ? 0.08 : f.view === "links" ? 0.55 : 0.3;
+    g.globalAlpha = F.busy ? 0.08 : 0.3;
     g.stroke(c.edges);
     if (F.filtered && f.sel === null && f.hot === null) {
+      // Cached per scene and filter, so it is built from the scene's own resting coordinates,
+      // never from the glide's: a path built mid-glide would stay where the dots were.
       let p = c.litEdges.get(f.lit);
       if (!p) {
         p = new Path2D();
-        for (const [u, v] of model.edges)
-          if (f.lit[u] && f.lit[v]) {
-            const a = P(F, u);
-            const b = P(F, v);
-            p.moveTo(a[0], a[1]);
-            p.lineTo(b[0], b[1]);
-          }
+        const e = scene.edges;
+        scene.rest.forEach(([u, v], k) => {
+          if (!f.lit[u] || !f.lit[v]) return;
+          p!.moveTo(e[k * 4]!, e[k * 4 + 1]!);
+          p!.lineTo(e[k * 4 + 2]!, e[k * 4 + 3]!);
+        });
         c.litEdges.set(f.lit, p);
       }
       g.globalAlpha = 0.55;
@@ -699,9 +625,7 @@ type Layer = {
   scene: Scene | null;
   pal: Palette | null;
   lit: boolean[] | null;
-  soft: Set<number> | null;
   busy: boolean;
-  marks: FrameState["marks"] | null;
   dpr: number;
   ww: number;
   W: number;
@@ -721,9 +645,7 @@ function layerFor(ctx: CanvasRenderingContext2D): Layer {
       scene: null,
       pal: null,
       lit: null,
-      soft: null,
       busy: false,
-      marks: null,
       dpr: 0,
       ww: 0,
       W: 0,
@@ -754,15 +676,13 @@ function drawLayer(F: Frame) {
   const W = ctx.canvas.width;
   const H = ctx.canvas.height;
   const cam = f.cam;
-  // Hover changes `busy`, which only the resting edges show: Hive and Timeline have none.
-  const busy = !F.hive && f.view !== "timeline" && F.busy;
+  // Hover changes `busy`, which only the resting edges show: the timeline has none.
+  const busy = f.view !== "timeline" && F.busy;
   const same =
     L.scene === scene &&
     L.pal === pal &&
     L.lit === f.lit &&
-    L.soft === f.soft &&
     L.busy === busy &&
-    L.marks === f.marks &&
     L.W === W &&
     L.H === H &&
     L.dpr === dpr &&
@@ -796,9 +716,7 @@ function drawLayer(F: Frame) {
       scene,
       pal,
       lit: f.lit,
-      soft: f.soft,
       busy,
-      marks: f.marks,
       dpr,
       ww: f.world.w,
       W,
@@ -824,26 +742,6 @@ function drawLayer(F: Frame) {
 }
 
 // ---- Live layers ----
-
-/** Flares: a cell's honey brightens to 0.9 and fades back over 1.4 s. */
-function drawFlares(F: Frame) {
-  const { ctx, scene, c, f } = F;
-  if (!scene.combCells.length) return;
-  for (const [node, t0] of f.flares) {
-    const p = (f.time - t0) / FLARE_MS;
-    const ci = c.cellOf.get(node);
-    if (p >= 1 || ci === undefined) continue;
-    // A slow fade: the calm ambient rate is enough.
-    F.ambient = true;
-    if (p < 0) continue;
-    const cell = scene.combCells[ci]!;
-    const path = new Path2D();
-    hex(path, cell.x, cell.y, c.hexR);
-    ctx.globalAlpha = cell.honey + (0.9 - cell.honey) * (1 - p);
-    ctx.fillStyle = hueOf(F, cell.topic);
-    ctx.fill(path);
-  }
-}
 
 /** The hot and selected dots' own links, in their colour. */
 function drawFocusLinks(F: Frame) {
@@ -922,6 +820,9 @@ function drawTicks(F: Frame) {
 
 // ---- Dots ----
 
+/** A locked dot's stroke width in screen px: heavier in Rings, where readable dots are faint. */
+const lockedW = (F: Frame) => (F.fresh ? LOCKED_W : 1.2);
+
 /** Paths for one group of same-kind dots; a hub has three (outer ring, card ring, centre). */
 function groupPaths(
   F: Frame,
@@ -946,12 +847,16 @@ function groupPaths(
       at(rad),
       at((i) => Math.max(0.5 * px, rad(i) - 2 * px)),
     ];
+  // Clamped: a dot growing in starts near scale 0, and a negative radius makes `arc` throw.
   if (kind === "lnote" || kind === "lfile")
-    return [at((i) => rad(i) - 0.6 * px)];
+    return [at((i) => Math.max(0, rad(i) - (lockedW(F) / 2) * px))];
   return [at(rad)];
 }
 
-/** Fills one group: hubs with their soft breathing glow, locked dots hollow. */
+/**
+ * Fills one group: hubs with their soft breathing glow, locked dots hollow. `outline` is the
+ * opacity of a 1 px brand outline around readable dots (0: none).
+ */
 function fillGroup(
   F: Frame,
   kind: Kind,
@@ -960,6 +865,7 @@ function fillGroup(
   paths: Path2D[],
   glow: number,
   topic: number,
+  outline = 0,
 ) {
   const { ctx, pal, px, still, f, T } = F;
   if (kind === "hub") {
@@ -992,19 +898,41 @@ function fillGroup(
     ctx.fill(p);
     ctx.shadowBlur = 0;
     ctx.strokeStyle = colour;
-    ctx.lineWidth = 1.2 * px;
+    ctx.lineWidth = lockedW(F) * px;
     ctx.stroke(p);
   } else {
     ctx.fillStyle = colour;
     ctx.fill(p);
+    ctx.shadowBlur = 0;
+    if (outline > 0) {
+      ctx.globalAlpha = outline;
+      ctx.strokeStyle = pal.brand;
+      ctx.lineWidth = px;
+      ctx.stroke(p);
+    }
   }
   ctx.shadowBlur = 0;
 }
 
+/** The glow of a freshness level: 8 px at level 6, 14 px breathing at level 7, else none. */
+function freshGlow(F: Frame, level: number): number {
+  if (!F.c.glow || level < 6) return 0;
+  if (level === 6) return 8;
+  if (F.still) return 14;
+  F.ambient = true;
+  return 14 + 4 * Math.sin((TAU * F.f.time) / 4000);
+}
+
+/** Outline opacity for a readable dot drawn `d` px wide on screen at dim `a`. */
+const outlineOf = (d: number, a: number) =>
+  d >= OUTLINE_MIN ? OUTLINE_ALPHA * a : 0;
+
 type Batch = {
-  topic: number;
+  topic: number; // hubs: their group; notes and files: -1 (brand colour)
   kind: Kind;
   alpha: number;
+  level: number; // freshness, for the glow; 0 for hubs and locked dots
+  outline: number;
   paths: Path2D[];
 };
 type DotCache = {
@@ -1020,13 +948,86 @@ type DotCache = {
 };
 const dotCaches = new WeakMap<Scene, DotCache>();
 
+type Group = Omit<Batch, "paths"> & { n: number[] };
+const toBatch = (F: Frame, { n, ...g }: Group): Batch => ({
+  ...g,
+  paths: groupPaths(F, g.kind, n, 1),
+});
+
 /**
- * The dots, batched per topic, kind and alpha. The batches (keys and paths) are cached per
- * scene, positions, filter, soft set, hot, selection, focus and scale, so a frame that only
- * breathes is a few dozen fills.
+ * Rings: notes and files batched per kind, freshness level, alpha and outline, in the brand
+ * colour, freshest on top; then the hubs per group in their hue.
+ */
+function freshBatches(F: Frame, fresh: Uint8Array): Batch[] {
+  const { scene, model } = F;
+  const dots = new Map<string, Group>();
+  const hubs: Group[] = [];
+  scene.byTopic.forEach((nodes, topic) => {
+    const own = new Map<number, Group>();
+    for (const i of nodes) {
+      if (special(F, i)) continue;
+      const n = model.nodes[i]!;
+      const kind = kindOf(n);
+      const dim = alphaOf(F, i);
+      if (kind === "hub") {
+        const g = own.get(dim);
+        if (g) g.n.push(i);
+        else {
+          const h = { topic, kind, alpha: dim, level: 0, outline: 0, n: [i] };
+          own.set(dim, h);
+          hubs.push(h);
+        }
+        continue;
+      }
+      const locked = kind === "lnote" || kind === "lfile";
+      const level = locked ? 0 : fresh[i]!;
+      const alpha = locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim;
+      const outline = locked ? 0 : outlineOf(diam(F, n), dim);
+      const key = `${kind}|${level}|${alpha}|${outline}`;
+      const g = dots.get(key);
+      if (g) g.n.push(i);
+      else dots.set(key, { topic: -1, kind, alpha, level, outline, n: [i] });
+    }
+  });
+  // Older dots first so fresher ones draw over them, hubs on top.
+  return [...[...dots.values()].sort((x, y) => x.level - y.level), ...hubs].map(
+    (g) => toBatch(F, g),
+  );
+}
+
+/** Timeline: per topic, kind and alpha in the topic's hue; a colleague's item at 0.72. */
+function topicBatches(F: Frame): Batch[] {
+  const { scene, model } = F;
+  const batches: Batch[] = [];
+  scene.byTopic.forEach((nodes, topic) => {
+    const groups = new Map<string, Group>();
+    for (const i of nodes) {
+      if (special(F, i)) continue;
+      const n = model.nodes[i]!;
+      const kind = kindOf(n);
+      const alpha = alphaOf(F, i) * (theirs(n) ? 0.72 : 1);
+      const key = `${kind}|${alpha}`;
+      const g = groups.get(key);
+      if (g) g.n.push(i);
+      else
+        groups.set(key, { topic, kind, alpha, level: 0, outline: 0, n: [i] });
+    }
+    // Plain dots first, hubs on top.
+    for (const g of [...groups.values()].sort(
+      (x, y) => +(x.kind === "hub") - +(y.kind === "hub"),
+    ))
+      batches.push(toBatch(F, g));
+  });
+  return batches;
+}
+
+/**
+ * The dots, in Rings by freshness (freshBatches), elsewhere by topic (topicBatches). The batches
+ * (keys and paths) are cached per scene, positions, filter, soft set, hot, selection, focus and
+ * scale, so a frame that only breathes is a few dozen fills.
  */
 function drawDots(F: Frame) {
-  const { scene, model, f, s } = F;
+  const { scene, f, s } = F;
   let dc = dotCaches.get(scene);
   if (
     !dc ||
@@ -1039,30 +1040,7 @@ function drawDots(F: Frame) {
     dc.grow !== (f.grow?.nodes ?? null) ||
     dc.s !== s
   ) {
-    const batches: Batch[] = [];
-    scene.byTopic.forEach((nodes, topic) => {
-      const groups = new Map<string, { kind: Kind; a: number; n: number[] }>();
-      for (const i of nodes) {
-        if (special(F, i)) continue;
-        const n = model.nodes[i]!;
-        const kind = kindOf(n);
-        const a = alphaOf(F, i) * (theirs(n) ? 0.72 : 1);
-        const key = `${kind}|${a}`;
-        const g = groups.get(key);
-        if (g) g.n.push(i);
-        else groups.set(key, { kind, a, n: [i] });
-      }
-      // Plain dots first, hubs on top.
-      for (const g of [...groups.values()].sort(
-        (x, y) => +(x.kind === "hub") - +(y.kind === "hub"),
-      ))
-        batches.push({
-          topic,
-          kind: g.kind,
-          alpha: g.a,
-          paths: groupPaths(F, g.kind, g.n, 1),
-        });
-    });
+    const batches = F.fresh ? freshBatches(F, F.fresh) : topicBatches(F);
     dc = {
       pos: f.pos,
       lit: f.lit,
@@ -1077,51 +1055,29 @@ function drawDots(F: Frame) {
     dotCaches.set(scene, dc);
   }
   for (const b of dc.batches)
-    fillGroup(F, b.kind, hueOf(F, b.topic), b.alpha, b.paths, 0, b.topic);
+    if (b.topic >= 0)
+      fillGroup(F, b.kind, hueOf(F, b.topic), b.alpha, b.paths, 0, b.topic);
+    else
+      fillGroup(
+        F,
+        b.kind,
+        F.pal.brand,
+        b.alpha,
+        b.paths,
+        freshGlow(F, b.level),
+        -1,
+        b.outline,
+      );
 }
 
-/** Agents: a ring with a centre point, or in Hive a hexagon mark by state. */
+/** Agents: a ring with a centre point. */
 function drawAgent(F: Frame, i: number, s0: number, glow: number) {
-  const { ctx, model, f, pal, px, still } = F;
+  const { ctx, model, pal, px } = F;
   const n = model.nodes[i]!;
   const scale = s0 * depthOf(F, i);
   const [x, y] = P(F, i);
   const a = alphaOf(F, i);
-  if (F.hive) {
-    const state = f.marks.get(i)?.state ?? "idle";
-    const p = new Path2D();
-    hex(p, x, y, 6 * scale * px, -Math.PI / 2);
-    ctx.globalAlpha = a * (state === "idle" ? 0.4 : 1);
-    ctx.fillStyle = pal.bg;
-    ctx.fill(p);
-    ctx.strokeStyle = pal.brand;
-    ctx.lineWidth = 1.6 * px;
-    if (glow) {
-      ctx.shadowColor = pal.brand;
-      ctx.shadowBlur = glow;
-    }
-    ctx.stroke(p);
-    ctx.shadowBlur = 0;
-    if (state === "live") {
-      // The glow swells on a 2.6 s cycle, and holds still while a dot is hot.
-      const calm = still || f.hot !== null;
-      if (!calm) F.ambient = true;
-      ctx.shadowColor = pal.brand;
-      ctx.shadowBlur = calm ? 7 : 7 + 5 * Math.sin((TAU * f.time) / 2600);
-      ctx.fillStyle = pal.brand;
-      ctx.beginPath();
-      ctx.arc(x, y, 2.6 * scale * px, 0, TAU);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    } else if (state === "today") {
-      ctx.fillStyle = pal.fg2;
-      ctx.beginPath();
-      ctx.arc(x, y, 1.2 * scale * px, 0, TAU);
-      ctx.fill();
-    }
-    return;
-  }
-  const r = (size(n) / 2) * scale * px;
+  const r = (diam(F, n) / 2) * scale * px;
   ctx.globalAlpha = a;
   if (glow) {
     ctx.shadowColor = pal.fg2;
@@ -1135,7 +1091,8 @@ function drawAgent(F: Frame, i: number, s0: number, glow: number) {
   ctx.strokeStyle = pal.fg2;
   ctx.lineWidth = 1.5 * px;
   ctx.beginPath();
-  ctx.arc(x, y, r - 0.75 * px, 0, TAU);
+  // An agent that is still growing in can be smaller than its own stroke.
+  ctx.arc(x, y, Math.max(0, r - 0.75 * px), 0, TAU);
   ctx.stroke();
   ctx.fillStyle = pal.fg2;
   ctx.beginPath();
@@ -1155,10 +1112,9 @@ function drawRoot(F: Frame, s0: number, glow: number) {
   const p = new Path2D();
   hex(p, x, y, (diam(F, n) / 2) * scale * px, turn);
   ctx.globalAlpha = alphaOf(F, scene.root);
-  const colour = F.hive ? pal.brand : pal.fg;
-  ctx.fillStyle = colour;
+  ctx.fillStyle = pal.fg;
   if (glow) {
-    ctx.shadowColor = colour;
+    ctx.shadowColor = pal.fg;
     ctx.shadowBlur = glow;
   }
   ctx.fill(p);
@@ -1172,12 +1128,30 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
   if (n.kind === "agent") return drawAgent(F, i, scale, glow);
   if (n.kind === "root") return drawRoot(F, scale, glow);
   const kind = kindOf(n);
+  const paths = groupPaths(F, kind, [i], scale);
+  if (F.fresh && kind !== "hub") {
+    // Rings: brand colour, brighter when fresher; hot, focused and selected at full.
+    const dim = alphaOf(F, i);
+    const locked = kind === "lnote" || kind === "lfile";
+    const level = locked ? 0 : (F.fresh[i] ?? 0);
+    fillGroup(
+      F,
+      kind,
+      F.pal.brand,
+      locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim,
+      paths,
+      glow || freshGlow(F, level),
+      n.topic,
+      locked ? 0 : outlineOf(diam(F, n) * scale, dim),
+    );
+    return;
+  }
   fillGroup(
     F,
     kind,
     colourOf(F, n),
     alphaOf(F, i) * (theirs(n) && i !== F.f.hot ? 0.72 : 1),
-    groupPaths(F, kind, [i], scale),
+    paths,
     glow,
     n.topic,
   );
@@ -1244,6 +1218,29 @@ function drawLabels(F: Frame) {
       ctx.fillStyle = pal.fg2;
       ctx.fillText(m.text, x, y + 0.5);
     }
+  }
+
+  // Group names outside the circle, aligned away from it and cut to stay inside the box; a
+  // group with nothing lit is drawn faint.
+  if (scene.groupLabels.length && f.labelsOn !== false) {
+    const on = groupsOn(F.c, scene, f.lit);
+    const font = `600 12px ${fam}`;
+    ctx.font = font;
+    ctx.fillStyle = pal.fg;
+    const x0 = sx(0) + GROUP_MARGIN;
+    const x1 = sx(1000) - GROUP_MARGIN;
+    scene.groupLabels.forEach((g, t) => {
+      const x = sx(g.x);
+      const text =
+        g.align === "centre"
+          ? g.text
+          : fitGroup(ctx, font, g.text, g.align === "left" ? x1 - x : x - x0);
+      ctx.globalAlpha = on[t] ? 1 : GROUP_DIM;
+      ctx.textAlign =
+        g.align === "centre" ? "center" : g.align === "left" ? "left" : "right";
+      ctx.fillText(text, x, sy(g.y) + 0.5);
+    });
+    ctx.textAlign = "left";
   }
 
   for (const i of f.labels) {

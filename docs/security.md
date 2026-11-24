@@ -1,7 +1,7 @@
 ---
 type: spec
 status: active
-last-updated: 2026-11-23
+last-updated: 2026-11-24
 tags: [project/hive-mind, security]
 ---
 
@@ -247,8 +247,10 @@ agent acting under a revocable identity, and humans owning every sharing decisio
     for the same time, so a 24-hour lifetime gives more time to guess one. Guessing is limited
     by Auth's own per-IP rate limit, and the code length is set to 10, the maximum, which makes
     it impractical ([hosted-db-bringup.md](hosted-db-bringup.md#4-supabase-mail-for-sign-in-links)).
-  - **Who may start a hive is not restricted.** Anyone with an account, which now means anyone
-    who was invited, can start a hive of their own and invite from it.
+  - **Anyone with an account can start a hive, up to a cap.** Anyone with an account, which
+    now means anyone who was invited, can start a hive of their own and invite from it. A
+    person can own at most 5 hives (section 11), so this is limited in number, not to named
+    people.
   - **An invitation creates an account record.** Making the link for an address that has none
     creates an unconfirmed account at Supabase Auth, before the person has done anything. It
     is in no hive and reads nothing.
@@ -386,6 +388,9 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   without a note. Never the note's path, title or body. The row is written in the same
   transaction as the delete, so a refused or failed delete leaves none. Not recorded: a delete
   with no person behind it, and notes that go because their whole hive is deleted.
+- Built: starting a hive writes one row with the action `hive.created`. It holds the new hive,
+  the member the person became in it and, in the detail, the hive's name. It is written in the
+  same call that creates the hive, so a refused attempt leaves none.
 - Every MCP call logged: agent, member, tool, note, time, result.
 - Owner view: reads and writes per agent per day, failed authorisations, token last use.
 - Alerts: a burst of reads across many entities by one agent; repeated authorisation failures. A
@@ -408,8 +413,6 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - When is the legacy JWT secret revoked? Agent sign-in no longer uses it (section 3); it stays
   valid until every machine has switched and the function uses `HIVE_PUBLISHABLE_KEY`.
 - Does the `agent-session` function need its own rate limit before colleagues' agents use it?
-- Should starting a hive be limited to named people, now that every account comes from an
-  invitation?
 
 ## 10. The remote connector
 
@@ -468,6 +471,9 @@ it in a Hive Mind window. Setup is in
   token is issued to it. Claude asks for every scope and cannot be told otherwise.
 - A pass exists only after a signed-in member approves the app in the window, and the pass then
   reaches only what that member approved: one agent in one of their own workspaces.
+- The window names the hive the app is being connected to and lists that hive's workspaces. It
+  is the hive the person has chosen in the app (section 11). A person in several hives
+  switches first to connect an app to another one.
 - Approval is `connect_app`, for a person only. It is refused for an agent identity and for an
   app's pass, and the workspace must be the caller's own. The web app passes two things: the
   app's id, read again on the server from Supabase Auth, and the workspace the member chose.
@@ -556,3 +562,68 @@ Supabase Auth.
 - The function is deployed without JWT verification, like `agent-session`, and can be reached
   at its own address as well as through the site. It checks the pass itself by handing it to
   `connector_login`, where the database verifies signature and expiry.
+
+## 11. Hives: choosing one and starting one
+
+A person can belong to several hives. The app shows one of them at a time, and the person
+changes it by choosing another from the list at the top of the rail.
+
+**Which hive a screen shows.**
+
+- The chosen hive's id is kept in a cookie, `hm_hive`: `HttpOnly`, `SameSite=Lax`, `Secure` in
+  production, sent on every path, kept for one year.
+- **The cookie picks; the database decides.** On every screen the app reads the person's own
+  memberships from the database, oldest first, and shows the one whose hive the cookie names.
+  With no cookie, or a cookie that names none of them, it shows the hive of the oldest
+  membership. The cookie is only ever compared with rows the database returned for this
+  person. A forged or stale value therefore picks nothing and reveals nothing: not a hive the
+  person is not in, and not whether such a hive exists.
+- **An invitation goes to the hive the page was showing.** The settings page binds its hive's
+  id to the Invite action on the server. If the person has since switched hive in another tab,
+  the invitation is refused instead of landing in the other hive. Other actions name the row
+  they change (a note, a file, an agent), and the database decides on that row.
+- The cookie carries no secret and grants nothing. What a person may read or change in a hive
+  is decided by row-level security, as before. No policy changed with this, and nothing about
+  who can read what.
+- Switching goes through a server action with the person's session cookie. It checks that the
+  value is a uuid, asks the database for the person's membership in that hive, and sets the
+  cookie only when that membership exists. Joining a hive on `/join` and starting one set the
+  cookie to that hive. Signing out clears it.
+- Actions that write (vault, gallery, settings) name the row they change by id and let the
+  database decide. Where an action looks up "my member in my hive", it follows the same
+  cookie. So a tab left open on one hive, after the person switched to another in a second
+  tab, acts on the new hive's member for hive-level actions and on the named row for
+  row-level ones. Each such action refreshes the page afterwards, and the tab shows the new
+  hive from then on.
+
+**Starting a hive.**
+
+- Any signed-in person may start a hive, with **New hive** at the top of the rail or on the
+  home page when they are in no hive yet. They become its owner and get a `Main` workspace
+  there. Decided by Danijel on 2026-11-24.
+- **At most 5 hives owned by one person.** The database counts the caller's memberships with
+  the role owner, under a lock per person so that two requests at once cannot both pass, and
+  refuses the sixth with `you already own 5 hives`. Being a plain member of other hives does
+  not count.
+- **Names.** The hive's name and the person's name in it are trimmed of surrounding white
+  space, and each must be 1 to 60 characters. The app checks this before it asks, and the
+  database checks it again and refuses otherwise.
+- `create_hive` is refused, as before, for a visitor, an agent identity and an app's pass.
+  Starting a hive is a person's decision; no MCP tool offers it.
+- It writes `hive.created` to the audit log (section 7).
+- When the database refuses for any other reason, the person sees a general failure line and
+  never the database's own words.
+
+**Agents and connected apps belong to one hive.** An agent belongs to a member, and a member
+belongs to one hive. So an agent token, and an app connected through the sign-in window, work
+in the hive of the member that created them and in no other. A person in two hives connects
+an app once per hive. The approval window names the hive it is connecting to (section 10).
+
+**Known gaps.**
+
+- A hive cannot be renamed or deleted yet, and a member cannot leave one.
+- At most 50 of a person's memberships are read, oldest first. A person in more than 50 hives
+  cannot reach the rest from the app.
+- The cap is on hives owned, not on invitations: each hive a person owns can invite, within
+  the daily caps of section 3.
+- An agent cannot work across hives.

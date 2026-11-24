@@ -5,7 +5,7 @@
 //
 // It also owns the map's motion, none of which is React state: dots gliding to a new view in a
 // wave (and blooming out of the core on arrival), new dots growing in after a refresh, firing
-// and ambient pulses along links, cell flares, and the Orbit view's turn, drag and zoom.
+// and ambient pulses along links, and the Orbit view's turn, drag and zoom.
 import {
   useCallback,
   useEffect,
@@ -71,19 +71,11 @@ type Props = {
   labelsOn: boolean;
   /** Labels from the map's own rules (selection, hubs, search, agents); zoom adds more. */
   labels: Set<number>;
-  marks: Map<number, { state: "live" | "today" | "idle" }>;
   onHover(i: number | null, at: { x: number; y: number } | null): void;
   onPick(i: number | null): void; // null = empty-stage click
   cameraRef: RefObject<CameraApi | null>;
   /** A dot became hot or selected: one pulse runs out along each of its links. */
   fire: { from: number; at: number } | null;
-  /** A comb cell's honey flares and fades back (an agent mark arrived). */
-  flare: { node: number; at: number } | null;
-  /**
-   * Hive: where each agent mark is now (node -> box position). A change glides the moved marks
-   * over 0.8 s without touching `pos`, so the cached dot batches are never rebuilt for it.
-   */
-  moved?: Map<number, [number, number]> | null;
   /** The dots have reached `pos` (a glide landed, or there was none): the hidden list may follow. */
   onLanded?(pos: [number, number][], view: View, model: MapModel): void;
 };
@@ -94,7 +86,7 @@ type Tween = {
   delays: number[];
   t0: number;
   dur: number;
-  /** A view change (staggered wave) rather than a mark's short move. */
+  /** A view change (staggered wave) rather than a short move within one view. */
   glide: boolean;
   /** When the last dot lands, ms after t0. */
   end: number;
@@ -108,9 +100,14 @@ const AMBIENT_MS = 83;
 const AMBIENT_PULSE_MS = 33;
 /** The largest hit radius any shape can have, in screen px (the hot index, x1.7). */
 const MAX_REACH = 24;
+/** The smallest hit radius in Timeline, in screen px. */
+const MIN_REACH = 8;
+/** The smallest hit radius in Rings, whose big hives pack dots tighter. */
+const MIN_REACH_RINGS = 6;
 const THEME_ATTRS = ["data-theme", "data-mode", "data-dots", "data-reach"];
 const GLIDE_MS = 900;
-const MARK_MS = 800;
+/** A move within one view (the timeline's columns as the day turns): no wave. */
+const MOVE_MS = 800;
 const GROW_MS = 600;
 const PULSE_MS = 1100;
 /** A hub can link to hundreds of items; one firing draws at most this many pulses. */
@@ -120,7 +117,7 @@ const AMBIENT_MAX = 3;
 const ORBIT_SPIN = 0.0012; // rad per frame at 60 fps
 const ORBIT_DRAG = 0.006; // rad per px
 const ORBIT_REST_MS = 3000;
-const PULSE_VIEWS = new Set<View>(["rings", "topics", "links"]);
+const PULSE_VIEWS = new Set<View>(["rings"]);
 
 export function MapCanvas(props: Props): JSX.Element {
   const canvas = useRef<HTMLCanvasElement | null>(null);
@@ -150,19 +147,9 @@ export function MapCanvas(props: Props): JSX.Element {
   const shown = useRef<[number, number][] | null>(null);
   const tween = useRef<Tween | null>(null);
   const grow = useRef<{ nodes: Set<number>; t0: number } | null>(null);
-  /** Agent marks mid-move (Hive): node -> where it left from, where it goes and when. */
-  const markAnim = useRef(
-    new Map<
-      number,
-      { from: [number, number]; to: [number, number]; t0: number }
-    >(),
-  );
-  const markShown = useRef(new Map<number, [number, number]>());
-  const markTarget = useRef<Map<number, [number, number]> | null>(null);
   const reported = useRef<[number, number][] | null>(null);
   const pulses = useRef<Pulse[]>([]);
   const lastAmbient = useRef(-Infinity);
-  const flares = useRef(new Map<number, number>());
   const orbitState = useRef({
     ry: 0,
     zoom: 1,
@@ -235,7 +222,7 @@ export function MapCanvas(props: Props): JSX.Element {
   const camera = useCamera(stage, onCamera, gesture);
   const { cam, size, api, dragged, dragging } = camera;
 
-  /** Starts a glide, a mark's move or a growth when the positions change. */
+  /** Starts a glide, a move or a growth when the positions change. */
   const syncMotion = (p: Props, time: number) => {
     const prev = target.current;
     if (prev && prev.pos === p.pos) return;
@@ -270,7 +257,7 @@ export function MapCanvas(props: Props): JSX.Element {
       });
     } else {
       from = shown.current ?? prev.pos;
-      // The same view and model: only a few dots moved (an agent mark).
+      // The same view and model: the layout shifted in place (the timeline as the day turns).
       glide = prev.view !== p.view;
     }
     let moved = false;
@@ -287,7 +274,7 @@ export function MapCanvas(props: Props): JSX.Element {
       shown.current = to;
       return;
     }
-    const dur = glide ? GLIDE_MS : MARK_MS;
+    const dur = glide ? GLIDE_MS : MOVE_MS;
     const delays = glide
       ? to.map(([x, y], i) => staggerDelay(x, y, i))
       : to.map(() => 0);
@@ -313,7 +300,7 @@ export function MapCanvas(props: Props): JSX.Element {
     const p = latest.current;
     let motion = false;
 
-    // Positions: the glide, a mark's move, or where the dots are.
+    // Positions: the glide, a move, or where the dots are.
     syncMotion(p, time);
     let drawn = p.pos;
     let layerAlpha = 1;
@@ -327,7 +314,7 @@ export function MapCanvas(props: Props): JSX.Element {
       } else {
         drawn = r.pos;
         motion = true;
-        // The comb, guides and links fade in as the dots arrive.
+        // The guides and links fade in as the dots arrive.
         if (tw.glide) layerAlpha = ease(Math.min(1, (time - tw.t0) / tw.end));
       }
     }
@@ -342,45 +329,6 @@ export function MapCanvas(props: Props): JSX.Element {
         growing = { nodes: g.nodes, k: ease(Math.max(0, u)) };
         motion = true;
       }
-    }
-
-    // Agent marks (Hive): glide the ones whose target changed, as a small override map.
-    let movedNow: Map<number, [number, number]> | null = null;
-    const mt = p.view === "hive" ? (p.moved ?? null) : null;
-    if (mt !== markTarget.current) {
-      markTarget.current = mt;
-      const anim = markAnim.current;
-      if (!mt) {
-        anim.clear();
-        markShown.current.clear();
-      } else
-        for (const [i, to] of mt) {
-          const from = markShown.current.get(i) ?? p.pos[i] ?? to;
-          if (still.current || (from[0] === to[0] && from[1] === to[1]))
-            anim.delete(i);
-          else anim.set(i, { from, to, t0: time });
-        }
-    }
-    if (mt) {
-      movedNow = new Map();
-      for (const [i, to] of mt) {
-        const a = markAnim.current.get(i);
-        let at = to;
-        if (a) {
-          const u = (time - a.t0) / MARK_MS;
-          if (u >= 1) markAnim.current.delete(i);
-          else {
-            const e = ease(Math.max(0, u));
-            at = [
-              a.from[0] + (a.to[0] - a.from[0]) * e,
-              a.from[1] + (a.to[1] - a.from[1]) * e,
-            ];
-            motion = true;
-          }
-        }
-        movedNow.set(i, at);
-      }
-      markShown.current = movedNow;
     }
 
     // Orbit: turn unless dragged (or within 3 s of a drag), hovered, or still; then project.
@@ -407,7 +355,8 @@ export function MapCanvas(props: Props): JSX.Element {
     } else el.removeAttribute("data-ry");
     orbitProj.current = proj;
 
-    // Pulses: firing ones, and a faint ambient one about every 700 ms in the calm flat views.
+    // Pulses: firing ones, and a faint ambient one about every 700 ms in a calm Rings view,
+    // along an edge drawn at rest (the spokes).
     // A hot dot stops the ambient pulses at once (its own firing pulses stay).
     pulses.current = pulses.current.filter(
       (q) => time < q.t0 + q.dur && !(q.ambient && p.hot !== null),
@@ -417,14 +366,14 @@ export function MapCanvas(props: Props): JSX.Element {
       PULSE_VIEWS.has(p.view) &&
       p.hot === null &&
       !tw?.glide &&
-      p.model.edges.length > 0;
+      p.scene.rest.length > 0;
     if (
       ambientOk &&
       time - lastAmbient.current >= AMBIENT_EVERY &&
       pulses.current.filter((q) => q.ambient).length < AMBIENT_MAX
     ) {
       const [u, v] =
-        p.model.edges[Math.floor(Math.random() * p.model.edges.length)]!;
+        p.scene.rest[Math.floor(Math.random() * p.scene.rest.length)]!;
       const flip = Math.random() < 0.5;
       pulses.current.push({
         from: flip ? v : u,
@@ -436,8 +385,6 @@ export function MapCanvas(props: Props): JSX.Element {
       });
       lastAmbient.current = time;
     }
-    for (const [node, t0] of flares.current)
-      if (time - t0 > 1400) flares.current.delete(node);
 
     // Still for MOVING_MS, even with the pointer held down: the resting layer is redrawn crisp.
     const moving = time - lastMove.current < MOVING_MS;
@@ -468,16 +415,14 @@ export function MapCanvas(props: Props): JSX.Element {
         sel: p.sel,
         focusRing: p.focusRing,
         labels,
-        marks: p.marks,
         pulses: pulses.current,
-        flares: flares.current,
         time,
         reducedMotion: still.current,
         moving,
         grow: growing,
-        moved: movedNow,
         layerAlpha,
         orbit: proj,
+        labelsOn: p.labelsOn,
       },
       pal.current,
     );
@@ -523,7 +468,7 @@ export function MapCanvas(props: Props): JSX.Element {
   });
 
   // Firing: one pulse out along each link of a dot that became hot or selected.
-  const { fire, flare } = props;
+  const { fire } = props;
   useEffect(() => {
     if (!fire || still.current) return;
     const { model } = latest.current;
@@ -534,11 +479,7 @@ export function MapCanvas(props: Props): JSX.Element {
     const P = pal.current;
     if (!P) return;
     const colour =
-      n.topic >= 0
-        ? (P.hue[model.topics[n.topic]?.hue ?? -1] ?? P.fg2)
-        : n.kind === "agent" && latest.current.view === "hive"
-          ? P.brand
-          : P.fg2;
+      n.topic >= 0 ? (P.hue[model.topics[n.topic]?.hue ?? -1] ?? P.fg2) : P.fg2;
     for (const j of n.nb.slice(0, MAX_FIRE))
       pulses.current.push({
         from: fire.from,
@@ -549,13 +490,6 @@ export function MapCanvas(props: Props): JSX.Element {
       });
     request();
   }, [fire, request]);
-
-  // A flare: the cell's honey brightens and fades back over 1.4 s.
-  useEffect(() => {
-    if (!flare || still.current) return;
-    flares.current.set(flare.node, flare.at);
-    request();
-  }, [flare, request]);
 
   // Pause entirely while the canvas is off-screen or the tab is hidden; draw again on return.
   useEffect(() => {
@@ -602,7 +536,6 @@ export function MapCanvas(props: Props): JSX.Element {
         tween.current = null;
         grow.current = null;
         pulses.current = [];
-        flares.current.clear();
       }
       request();
     };
@@ -660,7 +593,7 @@ export function MapCanvas(props: Props): JSX.Element {
   }, [props.cameraRef, api, orbitZoomBy, request, cam, size]);
 
   // Zoom-driven labels, worked out once a pan or zoom settles (never per frame).
-  const { model, pos, lit, view, labelsOn, labels } = props;
+  const { model, scene, pos, lit, view, labelsOn, labels } = props;
   useEffect(() => {
     const { sw, sh, w, h } = size.current;
     const k = cam.current.k;
@@ -704,7 +637,15 @@ export function MapCanvas(props: Props): JSX.Element {
     };
     const hit = (a: Box, b: Box) =>
       a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
-    const placed = [...labels].map(box);
+    // The group names (Rings) are placed first too, aligned as the renderer draws them.
+    const groups = scene.groupLabels.map((g): Box => {
+      const [sx, sy] = toScreen(c, g.x, g.y, w, h);
+      const wd = g.text.length * 7 + 4;
+      const x0 =
+        g.align === "left" ? sx : g.align === "right" ? sx - wd : sx - wd / 2;
+      return [x0, sy - 10, x0 + wd, sy + 10];
+    });
+    const placed = [...groups, ...[...labels].map(box)];
     const keep = new Set<number>();
     for (const i of zoomed) {
       if (labels.has(i)) continue;
@@ -718,6 +659,7 @@ export function MapCanvas(props: Props): JSX.Element {
   }, [
     camera.settled,
     model,
+    scene,
     pos,
     lit,
     view,
@@ -729,14 +671,7 @@ export function MapCanvas(props: Props): JSX.Element {
   ]);
 
   // Hit testing runs against where the dots land, not where a glide has them mid-way.
-  const moved = props.view === "hive" ? (props.moved ?? null) : null;
-  const hitPos = useMemo(() => {
-    if (!moved?.size) return pos;
-    const out = pos.slice();
-    for (const [i, at] of moved) out[i] = at;
-    return out;
-  }, [pos, moved]);
-  const grid = useMemo(() => buildHitGrid(hitPos), [hitPos]);
+  const grid = useMemo(() => buildHitGrid(pos), [pos]);
   // The zoom a screen reader hears: only once the camera settles, not on every frame.
   const settledK = useMemo(() => cam.current.k, [camera.settled, cam]);
 
@@ -761,9 +696,7 @@ export function MapCanvas(props: Props): JSX.Element {
         const n = p.model.nodes[i];
         if (!n || !eligible(i)) return false;
         const rad =
-          (dotDiameter(n, false, false) / 2) *
-          (i === p.hot ? 1.7 : 1) *
-          (proj.p[i] ?? 1);
+          (dotDiameter(n) / 2) * (i === p.hot ? 1.7 : 1) * (proj.p[i] ?? 1);
         const [px, py] = proj.pos[i]!;
         return Math.hypot(px - x, py - y) <= Math.max(8, rad);
       });
@@ -773,18 +706,19 @@ export function MapCanvas(props: Props): JSX.Element {
     if (sc <= 0) return null;
     const bx = (clientX - r.left - c.tx) / sc;
     const by = (clientY - r.top - c.ty) / sc;
-    // Within 8 px of the dot, or within its drawn radius for the larger shapes.
-    const hive = p.view === "hive";
-    const small = p.scene.combSize > 0 && p.scene.combSize < 10;
+    // Within MIN_REACH px of the dot, or within its drawn radius for the larger shapes. Rings
+    // packs a big hive tighter (dots 13.5 * scale apart), so its reach is smaller.
+    const min = p.view === "rings" ? MIN_REACH_RINGS : MIN_REACH;
     const reach = (i: number) => {
       const n = p.model.nodes[i];
-      if (!n) return 8 / sc;
-      const r = (dotDiameter(n, hive, small) / 2) * (i === p.hot ? 1.7 : 1);
-      return Math.max(8, r) / sc;
+      if (!n) return min / sc;
+      const r =
+        (dotDiameter(n, p.scene.dotScale) / 2) * (i === p.hot ? 1.7 : 1);
+      return Math.max(min, r) / sc;
     };
     return hitTest(grid, bx, by, MAX_REACH / sc, (i) => {
       if (!eligible(i)) return false;
-      const [x, y] = hitPos[i] ?? CENTRE;
+      const [x, y] = pos[i] ?? CENTRE;
       return Math.hypot(x - bx, y - by) <= reach(i);
     });
   };

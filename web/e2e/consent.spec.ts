@@ -4,6 +4,7 @@ import {
   ASKS,
   DENY,
   FAILED,
+  HIVE,
   NO_HIVE,
   NOTHING_TO_APPROVE,
   TITLE,
@@ -42,6 +43,9 @@ test("shows which app asks, where it returns, and what approving allows", async 
   await open(page);
   await expect(page.getByTestId("app-name")).toHaveText("Claude");
   await expect(page.getByText(ASKS)).toBeVisible();
+  // Which of the person's hives the app is being connected to.
+  await expect(page.getByText(HIVE)).toBeVisible();
+  await expect(page.getByTestId("hive-name")).toHaveText("Synapse");
   await expect(page.getByTestId("returns-to")).toHaveText(
     returnsTo("claude.ai"),
   );

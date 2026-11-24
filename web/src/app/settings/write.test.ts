@@ -456,11 +456,43 @@ describe("inviteIn", () => {
       ["eq", ["user_id", "u-me"]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
-      ["limit", [1]],
+      ["limit", [50]],
     ]);
     // The id is the one the auth server answered with, asked for once.
     expect(t.auth.getUser).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledTimes(1);
+    expect(t.rpc).toHaveBeenCalledWith("invite_member", {
+      p_hive: HIVE,
+      p_email: "ahmed@example.com",
+      p_display_name: "Ahmed",
+    });
+  });
+
+  it("refuses when the page was showing another hive than the one now chosen", async () => {
+    const c = consoles();
+    const t = stub({ rpc: ok(INVITATION) });
+    const f = fetcher();
+    const other = "00000000-0000-4000-8000-000000000b02";
+    for (const shown of [other, "junk", null, ""]) {
+      expect(
+        await inviteIn(t.db, "ahmed@example.com", "Ahmed", f, shown),
+      ).toEqual(FAILED);
+    }
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(f).not.toHaveBeenCalled();
+    expect(c.count()).toBeGreaterThan(0);
+  });
+
+  it("invites when the page was showing the chosen hive, however the id is cased", async () => {
+    const t = stub({ rpc: ok(INVITATION) });
+    const out = await inviteIn(
+      t.db,
+      "ahmed@example.com",
+      "Ahmed",
+      fetcher(),
+      HIVE.toUpperCase(),
+    );
+    expect(out.ok).toBe(true);
     expect(t.rpc).toHaveBeenCalledWith("invite_member", {
       p_hive: HIVE,
       p_email: "ahmed@example.com",

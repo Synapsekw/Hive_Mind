@@ -60,6 +60,29 @@ describe("lit", () => {
     expect(on.filter((x) => !x).length).toBeGreaterThan(0);
   });
 
+  it("with groupNames false, a group's name lights only items whose own title matches", () => {
+    const name = model.topics[0]!.name;
+    const lower = name.toLowerCase();
+    const on = lit(model, { ...NONE, q: name, groupNames: false });
+    model.nodes.forEach((n, i) =>
+      expect(on[i]).toBe(n.title.toLowerCase().includes(lower)),
+    );
+    // The default still lights the whole group.
+    const all = lit(model, { ...NONE, q: name });
+    expect(all.filter(Boolean).length).toBeGreaterThan(
+      on.filter(Boolean).length,
+    );
+  });
+
+  it("matches group names by default, the same as groupNames true", () => {
+    for (const t of model.topics) {
+      const q = t.name.slice(0, 4);
+      expect(lit(model, { ...NONE, q })).toEqual(
+        lit(model, { ...NONE, q, groupNames: true }),
+      );
+    }
+  });
+
   it("never matches a locked node on its real title", () => {
     const secret = "Zebra acquisition terms";
     const make = (locked: boolean): MapPayload => {

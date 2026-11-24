@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { HiveMap } from "../map/Map";
+import { NoHive } from "../shell/NoHive";
 import { Notice } from "../shell/Notice";
 import { createServerSupabase } from "../lib/supabase/server";
 import { loadInboxCount } from "./inbox/load-inbox";
@@ -20,11 +21,8 @@ export default async function Home() {
     // throwing: keep it outside any try/catch.
     const to = await afterNoHive(db);
     if (to) redirect(to);
-    return (
-      <Notice>
-        You&apos;re not in a hive yet. Ask its owner to invite you.
-      </Notice>
-    );
+    // The sentence and, where a hive can be started, the New hive form.
+    return <NoHive />;
   }
   if (result.state === "error") {
     return <Notice tryAgain>Couldn&apos;t load the hive.</Notice>;

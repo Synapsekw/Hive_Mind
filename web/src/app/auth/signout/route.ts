@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "../../../lib/supabase/server";
 import { safeNext } from "../../../lib/safe-next";
+import { noHiveCookie } from "../../chosen-hive";
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,5 +16,9 @@ export async function POST(request: NextRequest) {
   const next = safeNext(request.nextUrl.searchParams.get("next"));
   const to =
     next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`;
-  return NextResponse.redirect(new URL(to, request.url), 303);
+  const res = NextResponse.redirect(new URL(to, request.url), 303);
+  // The chosen hive goes with the session, whether or not signing out worked: the next person
+  // to sign in on this browser starts at their own oldest hive.
+  res.cookies.set(noHiveCookie(process.env.NODE_ENV === "production"));
+  return res;
 }

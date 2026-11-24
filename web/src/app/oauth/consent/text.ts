@@ -7,6 +7,9 @@ export const TITLE = "Connect an app";
 /** The app's name is shown in bold just before this. */
 export const ASKS = "wants to connect to your hive.";
 
+/** Which of the person's hives the app is being connected to; the hive's name follows in bold. */
+export const HIVE = "Hive it connects to:";
+
 /**
  * Where the browser goes after the decision. Shown for the person to read and nothing more: how
  * far the app is trusted is worked out by the database from every address the app registered.

@@ -1,7 +1,7 @@
 ---
 type: design
 status: active
-last-updated: 2026-11-23
+last-updated: 2026-11-24
 tags: [project/hive-mind, ui, design]
 ---
 
@@ -35,19 +35,19 @@ theme-driven dot colours, which are Hive's own
 ([[2026-11-22-decision-13-keystone-glass-look-with-themes]]). It replaces the navy look the first
 map was built with.
 
-| Token      | Choice                                                                                                                                                                                                                           |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Background | The theme's wash: a 168° three-stop gradient, with soft radial glows of the theme's two accents on top (three at the edges, two pooled behind the map card). The map's stage adds one faint glow of its own                      |
-| Map card   | Frosted glass: the card colour at 56% (dark) or 78% (light) opacity, `backdrop-filter: blur(30px) saturate(1.5)`, 20 px radius, a 1 px light edge                                                                                |
-| Side panel | A second, lighter glass slab: white at 4.5% (dark) or 13% (light), same blur, 1 px hairline                                                                                                                                      |
-| Left rail  | No panel; it sits on the wash                                                                                                                                                                                                    |
-| Text       | From the theme: `text`, `textMuted`. On the light-mode wash all text is white (muted is white at 90%)                                                                                                                            |
-| Accent     | The theme's `brand`. Fills that mark "active" or "primary" use the gradient `brand → brandMid → brand2`                                                                                                                          |
-| Type       | Inter 400 / 500 / 600; JetBrains Mono for counts and section labels (11 px, uppercase, 0.12em tracking); tabular numbers                                                                                                         |
-| Controls   | 8 px radius (7 px inside the 10 px view-switch track). Hairlines brighten on hover, never thicken: white 10% to 26% in dark; in light, black 10% to 24% on the card and white 24% to 55% on the rail and side panel              |
-| Nav rows   | 24 px icon slot, then the label. Active row: a faint brand tint plus a 3 px gradient bar on the rail's outer edge                                                                                                                |
-| Depth      | No drop shadows on controls. The card carries one soft shadow (`--lift`); otherwise the glass edge and blur do the separating                                                                                                    |
-| Motion     | Dots glide between views in a staggered wave; the hub breathes; the orbit turns; a live agent mark glows; links fire a pulse. Shared tokens `--dur-fast`, `--dur`, `--dur-slow`, `.rise`; easing `cubic-bezier(0.16, 1, 0.3, 1)` |
+| Token      | Choice                                                                                                                                                                                                                                             |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Background | The theme's wash: a 168° three-stop gradient, with soft radial glows of the theme's two accents on top (three at the edges, two pooled behind the map card). The map's stage adds one faint glow of its own                                        |
+| Map card   | Frosted glass: the card colour at 56% (dark) or 78% (light) opacity, `backdrop-filter: blur(30px) saturate(1.5)`, 20 px radius, a 1 px light edge                                                                                                  |
+| Side panel | A second, lighter glass slab: white at 4.5% (dark) or 13% (light), same blur, 1 px hairline                                                                                                                                                        |
+| Left rail  | No panel; it sits on the wash                                                                                                                                                                                                                      |
+| Text       | From the theme: `text`, `textMuted`. On the light-mode wash all text is white (muted is white at 90%)                                                                                                                                              |
+| Accent     | The theme's `brand`. Fills that mark "active" or "primary" use the gradient `brand → brandMid → brand2`                                                                                                                                            |
+| Type       | Inter 400 / 500 / 600; JetBrains Mono for counts and section labels (11 px, uppercase, 0.12em tracking); tabular numbers                                                                                                                           |
+| Controls   | 8 px radius (7 px inside the 10 px view-switch track). Hairlines brighten on hover, never thicken: white 10% to 26% in dark; in light, black 10% to 24% on the card and white 24% to 55% on the rail and side panel                                |
+| Nav rows   | 24 px icon slot, then the label. Active row: a faint brand tint plus a 3 px gradient bar on the rail's outer edge                                                                                                                                  |
+| Depth      | No drop shadows on controls. The card carries one soft shadow (`--lift`); otherwise the glass edge and blur do the separating                                                                                                                      |
+| Motion     | Dots glide between views and between arrangements in a staggered wave; hubs and the freshest dots breathe; the orbit turns; links fire a pulse. Shared tokens `--dur-fast`, `--dur`, `--dur-slow`, `.rise`; easing `cubic-bezier(0.16, 1, 0.3, 1)` |
 
 ### Themes, mode and reach
 
@@ -59,7 +59,7 @@ the bottom of the left rail.
   accent; the rest have two. The seed values for every theme in both modes are in
   [`ui/themes.json`](ui/themes.json); the 17 other than Hive were copied from Monolith's `develop` on
   2026-11-18. Hive's light seeds are darkened so white text on the wash keeps its contrast. A `--mark`
-  token carries the colour of the agent marks.
+  token carries the colour of the hexagon mark beside the Hive name at the top of the left rail.
 - **Mode:** dark (default) or light. Light is a "bold frame": the wash is a saturated gradient,
   everything painted on it is white, and the map sits on white glass. A primary button on the
   light wash is white with brand-coloured text.
@@ -82,7 +82,9 @@ keeps the original fixed eight:
 `#7F9E1F`; on the light card these are darkened per theme until they reach 3:1, so what is drawn
 is darker than this list).
 The trade-off is known and accepted: in "Follow theme" a topic has no fixed colour across themes,
-and topics sit closer in hue than in Classic.
+and topics sit closer in hue than in Classic. These colours mark groups: the hubs in Rings, and every
+dot in Timeline and Orbit. Dots in Rings are drawn in the theme's brand colour instead (see
+section 3).
 
 Contrast is checked by a test for every theme, mode and reach (section 6). Where a derived
 colour falls short, its lightness is adjusted, never a seed; every adjustment is listed in
@@ -90,43 +92,79 @@ colour falls short, its lightness is adjusted, never a seed; every adjustment is
 
 ## 3. The map (home)
 
-One dot per note or file, coloured by topic, drawn on a single canvas. A visually hidden list of
-real buttons carries keyboard and screen-reader access. The same dots are shown in six views:
+One dot per note or file, drawn on a single canvas. A visually hidden list of real buttons carries
+keyboard and screen-reader access. The same dots are shown in three views, and Rings opens first:
 
-| View     | What it shows                                                                           |
-| -------- | --------------------------------------------------------------------------------------- |
-| Hive     | Opening view. A honeycomb with a territory per topic (see below)                        |
-| Rings    | Concentric bands from the centre: synthesis, notes, files, agents; one sector per topic |
-| Topics   | One cluster per topic                                                                   |
-| Links    | Force layout: linked notes pull together                                                |
-| Timeline | Agent writes per day on top; every note under the day it last changed                   |
-| Orbit    | The same dots on a slowly rotating sphere, agents on an outer ring                      |
+| View     | What it shows                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------- |
+| Rings    | Opening view. The index at the centre, a hub per group, the group's items on arcs outward from it |
+| Timeline | Agent writes per day on top; every note under the day it last changed                             |
+| Orbit    | The same dots on a slowly rotating sphere, agents on an outer ring                                |
 
-- **Hive view:** each territory is a block of cells. Honey fill shows recency and fades over two
-  weeks; a capped cell is an item not shared with you. Agents are geometric hexagon marks: live
-  (writing now), today, or idle. "At the hive", a panel at the top right of the map stage in the
-  Hive view, lists them.
+- **Rings:** the groups sit in sectors around the circle, and each item is placed by how recently
+  it changed: the freshest notes on the arc nearest the hub, older ones further out, files after
+  one empty arc, agents on a ring beyond them. The whole picture shrinks to fit the card. All dots
+  are drawn in the theme's brand colour, and brightness means freshness: an item changed in the
+  last two days is bright and breathes, an old one is faint. A readable dot has a thin outline; the
+  contrast of the faintest dots against the card is a known gap, accepted for now. Only the hubs
+  keep their group colours.
+- **Quiet at rest:** Rings draws no ring labels and does not label hubs. At rest it draws only the
+  spokes from the index to the hubs, and group names are drawn on the canvas on one circle outside
+  the rings, as "name · count". A dot's own links show when it is hot (hovered),
+  focused or selected.
+- **Arrange by:** a switch that appears only in Rings, with Folder, Links and Time. Folder groups
+  by topic (the largest first, up to twelve groups, the rest folded into "Other"). Links groups
+  items that link to each other into clusters, named after their best-linked note, with "Hub
+  notes", "Small clusters" and "Unlinked" for the rest. Time groups by month, with "Last 2 weeks"
+  first when anything changed in that time. Changing it moves the dots in one glide, keeps the
+  selected item selected, and clears a pinned group filter, since the groups are new. It is client
+  state only and sends no request.
+- **Timeline and Orbit** keep the per-topic colours (at most eight topics, the rest folded into
+  "Other"), and the dock calls the list "Topics".
 - **Zoom and pan:** wheel or pinch toward the cursor, drag to pan, double-click to zoom in, a
   zoom control (+, −, Fit), and keys. Orbit turns by dragging. Labels are chosen once motion
   settles; zoom-driven labels are capped at 60 and never overlap (rule labels are not capped).
-- **Hover peek:** a small card with the title, topic and owner; links fire a pulse along their
-  length.
-- **Legend dock:** Topics, Kinds and People. Hover previews the isolation; click pins it.
-- **Shapes:** circle = note, diamond = file, ringed circle = synthesis page, hollow = a colleague's
-  item that is not shared with you, hexagon = the hive index.
+- **Hover peek:** a small card with the title, group and owner; links fire a pulse along their
+  length. The index dot's card says "Groups" with a count.
+- **Legend dock:** the group list, Kinds and People. In Rings the group list is headed "Folders",
+  "Clusters" or "Months" to follow the arrangement, and the kind entry for hubs reads "Groups". In
+  Timeline and Orbit the heading and the hubs' kind entry read "Topics". Hover previews the isolation; click pins it.
+- **Shapes:** circle = note, diamond = file, ringed circle = hub, hollow = a colleague's item that
+  is not shared with you, hexagon = the hive index. In Rings the agents are dots on the outer
+  ring. Nothing on the map shows whether an agent is live, wrote today or is idle; the agents card
+  in the left rail shows who is connected.
 - **Core:** a swarm at the centre showing the last 24 hours of writes.
-- **Isolate, don't hide:** picking a topic, a kind or a person dims everything else.
+- **Isolate, don't hide:** picking a group, a kind or a person dims everything else.
 - **Click a dot:** it lights up with its connections; the right rail shows what it is, who wrote
   it and what it connects to. An unshared note shows only "Private note" and its topic.
 - **Search:** matching dots stay lit and get labels when there are few enough.
 
-Layout: a left rail on the wash (mark, five destinations with icons, agents
+Layout: a left rail on the wash (mark and the hive's name, five destinations with icons, agents
 summary, account button), the map on the glass card with the view switch as one segmented control,
 and a glass side panel. It shows Today until something is selected (a count-up of today's writes,
 a 14-day sparkline of agent writes, By person, and Needs you), then Selected. The housekeeper's last
 run sits below. The rail's active bar marks the current page (each page renders its own rail, so the bar does
 not slide between pages), the agents card collapses, and an account popover holds Appearance,
 Settings and Sign out; the member's name, role and hive load in the root layout.
+
+**The hive switcher.** The hive's name beside the mark at the top of the rail is a button. It
+opens a popover, in the way the account button does, with:
+
+- the person's hives, each with their role there and a tick on the current one. Choosing
+  another switches to it and reloads the page the person is on;
+- **New hive**, which opens a small form in the same popover with two fields, "Hive name" and
+  "Your name in this hive" (filled in with the person's current display name), then **Create**
+  and **Cancel**. After Create the new hive opens on the map. A refusal shows one line under
+  the form: the name rules (1 to 60 characters each), "You already own 5 hives.", or the usual
+  failure line.
+
+A person in one hive still gets the button and New hive. Escape closes the popover and returns
+focus to the button. The list is drawn from what the page already loaded, so opening it costs
+no round-trip. It reuses the rail's tokens and the account popover's classes; the account
+popover keeps showing the current hive and role. There is no rename, delete or leave yet.
+
+**No hive yet.** A signed-in person who is in no hive sees the home page's empty state with the
+same New hive form, so a first hive can be started without an invitation.
 
 Known follow-ups: make the rail persistent across pages so the bar slides.
 
@@ -183,6 +221,8 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 | Contradiction resolver   | Two facts side by side with owners and dates                |
 | Token dialog             | Name, workspace, trust tier, expiry; token shown once       |
 | First run                | Empty map with the onboarding steps and a connect action    |
+| No hive yet              | The home page's empty state with the New hive form          |
+| Hive switcher            | Popover from the hive's name: hives, role, tick, New hive   |
 | Token revoked or expired | Inbox item with a regenerate action                         |
 | Write rejected           | Inbox item with the attempted path and the reason           |
 | Synthesis failed         | Entity page shows the last good version with a retry        |
@@ -192,8 +232,8 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 
 - Colour meaning is doubled by shape or text.
 - Real buttons and labels everywhere; visible keyboard focus.
-- Reduced-motion setting stops everything that moves on its own: the view glide and waves, hub
-  breathing, the orbit turn, live-mark glow, firing pulses, the count-up and ambient frames.
+- Reduced-motion setting stops everything that moves on its own: the view and arrangement glide and
+  waves, hub breathing, the orbit turn, firing pulses, the count-up and ambient frames.
   Nothing moves under it; the map is drawn still.
 - Contrast, in every theme, mode and reach (102 combinations), asserted by
   `web/src/theme/contrast.test.ts`: text at least 4.5:1; quiet labels, the eight dot colours and
@@ -206,13 +246,16 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 
 The map is **one canvas**, not a DOM node per dot (DOM dots ran at 20 to 30 fps on a real
 1,605-note vault). Static layers are cached and redrawn crisp once the camera settles; frames are
-drawn on demand; ambient motion (hub breathing, orbit turn, live-mark glow) is throttled to about
+drawn on demand; ambient motion (hub breathing, orbit turn) is throttled to about
 12 fps and pauses when the map is off-screen or the tab hidden. A browser check (`e2e/map-perf.spec.ts`)
-keeps the 95th-percentile frame of a one-second wheel zoom on 5,000 items under 34 ms. In development,
-`/dev/map?items=N` builds a map of N items to test this.
+keeps the 95th-percentile frame of a one-second wheel zoom on 5,000 items under 34 ms, and the same
+limit holds for the glide after choosing another arrangement and after switching Rings to
+Timeline; neither glide may have a frame of a second or more. In development, `/dev/map?items=N`
+builds a map of N items to test this.
 
-Six views of one graph must be **one load and zero further round-trips**: fetch the nodes and
-links once, compute every layout in the browser, and switch views in client state only. The
+Three views of one graph, and three arrangements of Rings, must be **one load and zero further
+round-trips**: fetch the nodes and links once, compute every layout and grouping in the browser,
+and switch views and arrangements in client state only. The
 fetch must be bounded: select only the columns the map draws, over indexed columns, never note
 bodies.
 

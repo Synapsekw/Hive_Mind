@@ -129,7 +129,7 @@ origin/develop`). Truly dependent work should run **after** its dependency merge
 
 5. **Specs and plans state a performance & data-fetching budget.** When `brainstorming` or
    `writing-plans` designs any UI with **multiple views, tabs, filters, or sorts over the same
-   data** (the map has six views of one graph), the spec/plan MUST answer: (a) what loads on
+   data** (the map has three views of one graph), the spec/plan MUST answer: (a) what loads on
    **first paint** vs. each **interaction** — in-page toggles should be **0 new server
    round-trips**; (b) does the interaction change **server data** (yes → a write + targeted
    refresh; no → client state only); (c) is the hot-path read **bounded** over **indexed** columns
