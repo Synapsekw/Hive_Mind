@@ -5,6 +5,7 @@ import { cancelHiveDeletion, requestHiveDeletion } from "../hives/actions";
 import { loadInboxCount } from "../inbox/load-inbox";
 import {
   createAgent,
+  deleteWorkspace,
   inviteMember,
   resendInvitation,
   revokeAgent,
@@ -53,6 +54,7 @@ export default async function SettingsPage() {
         // Bound to the hive this page shows, as inviting is.
         requestHiveDeletion: requestHiveDeletion.bind(null, result.hiveId),
         cancelHiveDeletion: cancelHiveDeletion.bind(null, result.hiveId),
+        deleteWorkspace,
       }}
     />
   );

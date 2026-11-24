@@ -16,8 +16,8 @@ const MAIN = "00000000-0000-4000-8000-0000000000e1";
 const DRA = "00000000-0000-4000-8000-0000000000e2";
 
 const WORKSPACES: Workspace[] = [
-  { id: MAIN, name: "Main" },
-  { id: DRA, name: "DRA" },
+  { id: MAIN, name: "Main", notes: 128 },
+  { id: DRA, name: "DRA", notes: 25 },
 ];
 
 const AGENTS: Agent[] = [

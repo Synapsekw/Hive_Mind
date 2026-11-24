@@ -75,8 +75,8 @@ const MEMBERS = [
   }),
 ];
 const WORKSPACES = [
-  { id: W1, name: "Main" },
-  { id: W2, name: "DRA" },
+  { id: W1, name: "Main", notes: [{ count: 128 }] },
+  { id: W2, name: "DRA", notes: [{ count: 0 }] },
 ];
 const AGENTS = [
   agent(),
@@ -258,8 +258,8 @@ describe("loadSettings", () => {
         hiveName: "Synapse",
         isOwner: true,
         workspaces: [
-          { id: W1, name: "Main" },
-          { id: W2, name: "DRA" },
+          { id: W1, name: "Main", notes: 128 },
+          { id: W2, name: "DRA", notes: 0 },
         ],
         agents: [
           {
@@ -370,7 +370,11 @@ describe("loadSettings", () => {
     expect(Object.keys(out.data.members[0]!).sort()).toEqual(
       ["id", "isMe", "name", "role"].sort(),
     );
-    expect(Object.keys(out.data.workspaces[0]!).sort()).toEqual(["id", "name"]);
+    expect(Object.keys(out.data.workspaces[0]!).sort()).toEqual([
+      "id",
+      "name",
+      "notes",
+    ]);
     expect(Object.keys(out.data.agents[0]!).sort()).toEqual(
       [
         "createdAt",
@@ -421,7 +425,9 @@ describe("loadSettings", () => {
       { ascending: true },
     ]);
 
-    expect(args(t.of("workspaces"), "select")).toEqual(["id, name"]);
+    expect(args(t.of("workspaces"), "select")).toEqual([
+      "id, name, notes(count)",
+    ]);
     expect(args(t.of("workspaces"), "eq")).toEqual(["hive_id", HIVE]);
     expect(args(t.of("workspaces"), "order")).toEqual([
       "created_at",
@@ -731,4 +737,23 @@ describe("loadSettings and deleting the hive", () => {
     expect(member.state === "ok" && member.closing).toBe(AFTER);
     expect(member.state === "ok" && member.deletion).toBeNull();
   });
+
+  it.each([
+    ["no count beside it", undefined],
+    ["a count that is not a list", { count: 3 }],
+    ["an empty list", []],
+    ["a count that is text", [{ count: "3" }]],
+    ["a count below zero", [{ count: -1 }]],
+    ["a count that is not whole", [{ count: 1.5 }]],
+  ])(
+    "keeps a workspace whose notes have %s, with the number unknown",
+    async (_name, notes) => {
+      const t = stub({ workspaces: ok([{ id: W1, name: "Main", notes }]) });
+      const out = await loadSettings(t.db, NOW);
+      if (out.state !== "ok") throw new Error("expected ok");
+      expect(out.data.workspaces).toEqual([
+        { id: W1, name: "Main", notes: null },
+      ]);
+    },
+  );
 });
