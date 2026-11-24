@@ -91,9 +91,17 @@ function toMember(v: unknown): MemberRow | null {
 
 function toWorkspace(v: unknown): Workspace | null {
   if (!row(v)) return null;
-  const { id, name } = v;
+  const { id, name, notes } = v;
   if (!str(id) || !str(name)) return null;
-  return { id, name };
+  return { id, name, notes: countOf(notes) };
+}
+
+/** The count of an embedded `notes(count)`, which answers `[{ count }]`; null when unreadable. */
+function countOf(v: unknown): number | null {
+  const first: unknown = Array.isArray(v) ? v[0] : undefined;
+  if (!row(first)) return null;
+  const n = first.count;
+  return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : null;
 }
 
 function toInvitation(v: unknown): Invitation | null {
@@ -210,7 +218,9 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
         .order("created_at", { ascending: true }),
       db
         .from("workspaces")
-        .select("id, name")
+        // One read: each workspace with the number of its notes, counted by the database over
+        // the index on (workspace_id, path).
+        .select("id, name, notes(count)")
         .eq("hive_id", hive.id)
         .order("created_at", { ascending: true }),
       db

@@ -25,7 +25,8 @@ export type Agent = {
   status: AgentStatus;
 };
 
-export type Workspace = { id: string; name: string };
+/** `notes`: how many notes it holds; null when that could not be read. */
+export type Workspace = { id: string; name: string; notes: number | null };
 export type Member = {
   id: string;
   name: string;
@@ -82,6 +83,13 @@ export type Deletion = { members: number; notes: number; files: number };
 /** `name`: what was typed is not the hive's name. */
 export type Requested = { ok: true } | { ok: false; reason: "name" | "failed" };
 
+/**
+ * Deleting a workspace. `last`: it is the person's only one. `agents`: an agent of it is still
+ * in use. `files`: it still holds files.
+ */
+export type WorkspaceDeleted =
+  { ok: true } | { ok: false; reason: "last" | "agents" | "files" | "failed" };
+
 export type SettingsActions = {
   createAgent(input: NewAgent): Promise<Created>;
   revokeAgent(id: string): Promise<Result>;
@@ -92,4 +100,6 @@ export type SettingsActions = {
   requestHiveDeletion(typedName: string): Promise<Requested>;
   /** Takes this hive's deletion back. */
   cancelHiveDeletion(): Promise<Result>;
+  /** Deletes one of the person's own workspaces, with every note in it. */
+  deleteWorkspace(id: string): Promise<WorkspaceDeleted>;
 };

@@ -196,6 +196,22 @@ export function DevSettings({
       return { ok: true };
     },
     cancelHiveDeletion,
+    deleteWorkspace: async (id) => {
+      record("deleteWorkspace", [id]);
+      await wait();
+      if (fail) return { ok: false, reason: "failed" };
+      // As the database answers: a workspace with an agent still in use stays.
+      if (
+        data.agents.some((a) => a.workspaceId === id && a.status === "active")
+      )
+        return { ok: false, reason: "agents" };
+      setData((d) => ({
+        ...d,
+        workspaces: d.workspaces.filter((w) => w.id !== id),
+        agents: d.agents.filter((a) => a.workspaceId !== id),
+      }));
+      return { ok: true };
+    },
   };
   const settings = (
     <Settings

@@ -23,7 +23,13 @@
 // call worked or not: a log line here carries an error's code and message and nothing else,
 // so never an email address or a name either.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Created, Invited, Result, Sent } from "../../settings/types";
+import type {
+  Created,
+  Invited,
+  Result,
+  Sent,
+  WorkspaceDeleted,
+} from "../../settings/types";
 import { ownHive } from "../own-hive";
 import { isUuid } from "../vault/validate";
 import { cleanEmail, cleanName, cleanNewAgent } from "./validate";
@@ -274,4 +280,50 @@ export async function revokeInvitationIn(db: Db, id: unknown): Promise<Result> {
   if (!(await signedIn(db))) return NO;
   const res = (await db.rpc("revoke_invitation", { p_invitation: id })) as Res;
   return failed("revoke_invitation", res) ? NO : YES;
+}
+
+/** The database's refusals (20261124160731_workspace_delete.sql), told apart by their words. */
+const SAYS_LAST = "you need at least one workspace";
+const SAYS_AGENT = "this workspace still has an agent in use";
+const SAYS_FILES = "this workspace still holds files";
+const NOT_DELETED: WorkspaceDeleted = { ok: false, reason: "failed" };
+
+/**
+ * Deletes a workspace, with its folders, notes and links. Whose workspace it is, and whether it
+ * may go, is the database's answer: row-level security lets a person delete only their own, and
+ * its trigger keeps the last one, one with an agent in use and one that holds files. Somebody
+ * else's workspace, or one that is not there, comes back as no row and is answered as a failure.
+ */
+export async function deleteWorkspaceIn(
+  db: Db,
+  id: unknown,
+): Promise<WorkspaceDeleted> {
+  if (!isUuid(id)) return NOT_DELETED;
+  if (!(await signedIn(db))) return NOT_DELETED;
+  const wanted = id.toLowerCase();
+  const res = (await db
+    .from("workspaces")
+    .delete()
+    .eq("id", wanted)
+    .select("id")) as Res;
+  if (res.error) {
+    failed("workspace delete", res);
+    const said = String(res.error.message ?? "");
+    if (said.includes(SAYS_LAST)) return { ok: false, reason: "last" };
+    if (said.includes(SAYS_AGENT)) return { ok: false, reason: "agents" };
+    if (said.includes(SAYS_FILES)) return { ok: false, reason: "files" };
+    return NOT_DELETED;
+  }
+  const rows: unknown[] = Array.isArray(res.data) ? res.data : [];
+  const gone = rows.some(
+    (r) =>
+      typeof r === "object" &&
+      r !== null &&
+      String((r as Record<string, unknown>).id).toLowerCase() === wanted,
+  );
+  if (!gone) {
+    console.error("workspace delete removed no row");
+    return NOT_DELETED;
+  }
+  return { ok: true };
 }

@@ -1939,7 +1939,8 @@ test("moving a note, renaming or deleting a rule folder is audited", async () =>
   await as(person("dani"), `delete from public.folders where id = $1`, [plain]);
   assert.deepEqual(await auditSince(mark), []);
 
-  // Deleting a workspace takes its folders and notes with it, unaudited.
+  // Deleting a workspace takes its folders and notes with it: the folders
+  // leave no row of their own, only the workspace's one.
   const gone = (
     await as(
       person("dani"),
@@ -1955,7 +1956,10 @@ test("moving a note, renaming or deleting a rule folder is audited", async () =>
     [gone],
   );
   assert.equal(deleted.length, 1);
-  assert.deepEqual(await auditSince(mark), []);
+  assert.deepEqual(
+    (await auditSince(mark)).map((r) => [r.action, r.detail]),
+    [["workspace.deleted", { notes: 0, folders: 1 }]],
+  );
 
   const text = JSON.stringify(await auditSince(0));
   for (const s of ["ad/plain", "ad/shared/x.md", "ad x", "ad/ren/y.md"])
@@ -4899,12 +4903,8 @@ test("deleting a workspace, a member, an account or a hive still works", async (
   const one = await inSpace("dn/one.md", "dn space one");
   const two = await inSpace("dn/two.md", "dn space two");
   await propose(person("dani"), one, dn.sara);
-  const spaceFile = filePath("dani", "dn-space.pdf", space);
-  await upload(person("dani"), spaceFile);
-  await fileRow(person("dani"), "dani", spaceFile, {
-    note: two,
-    workspace: space,
-  });
+  // No file in it: a workspace that holds files is not deleted through the
+  // API (see "a workspace with an agent in use, or with files").
   let mark = await lastAudit();
   assert.deepEqual(
     await as(
@@ -10538,4 +10538,222 @@ test("the map gives each note and file the date it was made", async () => {
   for (const n of m.nodes) assert.ok(n.created_at, n.id);
   const times = m.nodes.map((n) => Date.parse(n.updated_at));
   for (let i = 1; i < times.length; i++) assert.ok(times[i - 1] >= times[i]);
+});
+
+// ---------------------------------------------------------------- deleting a workspace
+// 20261124160731_workspace_delete.sql. Who may delete a workspace is the
+// workspaces_delete policy's answer, as before; these cover what the delete
+// must not break and the record it leaves.
+
+const WS_LAST = /^error: you need at least one workspace$/;
+const WS_AGENT = /^error: this workspace still has an agent in use$/;
+const WS_FILES = /^error: this workspace still holds files$/;
+
+const dropSpace = (who, id) =>
+  as(who, `delete from public.workspaces where id = $1 returning id`, [id]);
+const spaceThere = async (id) =>
+  (await db.query(`select 1 from public.workspaces where id = $1`, [id])).rows
+    .length === 1;
+const noteIn = async (p, space, path) =>
+  (
+    await as(
+      p.who,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+       values ($1, $2, $3, $4, $4, 'text') returning id`,
+      [p.hive, p.member, space, path],
+    )
+  )[0].id;
+const notesIn = async (space) =>
+  (
+    await db.query(
+      `select count(*)::int as n from public.notes where workspace_id = $1`,
+      [space],
+    )
+  ).rows[0].n;
+const spaceAudits = async (since) =>
+  (await auditSince(since)).filter((r) => r.action === "workspace.deleted");
+
+test("a person deletes a workspace of their own, with its folders, notes and links", async () => {
+  const p = await wsPerson();
+  const [main] = await as(
+    p.who,
+    `select id from public.workspaces where member_id = $1`,
+    [p.member],
+  );
+  const old = await addSpace(p, "Old import");
+  await as(
+    p.who,
+    `insert into public.folders (workspace_id, member_id, path) values ($1, $2, 'a')`,
+    [old.id, p.member],
+  );
+  const kept = await noteIn(p, main.id, "kept.md");
+  const one = await noteIn(p, old.id, "a/one.md");
+  const two = await noteIn(p, old.id, "a/two.md");
+  await as(
+    p.who,
+    `insert into public.links (hive_id, from_note, to_note, tier, score)
+     values ($1, $2, $3, 2, 0.8), ($1, $2, $4, 2, 0.8)`,
+    [p.hive, one, two, kept],
+  );
+  const mark = await lastAudit();
+
+  assert.deepEqual(await dropSpace(p.who, old.id), [{ id: old.id }]);
+
+  assert.equal(await spaceThere(old.id), false);
+  assert.equal(await notesIn(old.id), 0);
+  assert.equal(await notesIn(main.id), 1);
+  const left = await db.query(
+    `select
+       (select count(*)::int from public.folders where workspace_id = $1) as folders,
+       (select count(*)::int from public.links where from_note = $2 or to_note = $2
+                                                  or from_note = $3 or to_note = $3) as links,
+       (select count(*)::int from public.note_versions where note_id in ($2, $3)) as versions`,
+    [old.id, one, two],
+  );
+  assert.deepEqual(left.rows[0], { folders: 0, links: 0, versions: 0 });
+  assert.deepEqual(await spacesOf(p.member), ["Main"]);
+
+  // One row for the workspace, with counts and nothing that names it.
+  const rows = await spaceAudits(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hive_id, p.hive);
+  assert.equal(rows[0].member_id, p.member);
+  assert.equal(rows[0].agent_id, null);
+  assert.equal(rows[0].note_id, null);
+  assert.deepEqual(rows[0].detail, { notes: 2, folders: 1 });
+  // Each note still leaves its own row.
+  assert.equal(
+    (await auditSince(mark)).filter((r) => r.action === "note.deleted").length,
+    2,
+  );
+});
+
+test("a member keeps at least one workspace", async () => {
+  const p = await wsPerson();
+  const [main] = await as(
+    p.who,
+    `select id from public.workspaces where member_id = $1`,
+    [p.member],
+  );
+  const mark = await lastAudit();
+  await assert.rejects(dropSpace(p.who, main.id), WS_LAST);
+  assert.equal(await spaceThere(main.id), true);
+  assert.deepEqual(await spaceAudits(mark), []);
+
+  // "Main" is a workspace like any other: with a second one, it may go.
+  const other = await addSpace(p, "Second");
+  assert.deepEqual(await dropSpace(p.who, main.id), [{ id: main.id }]);
+  await assert.rejects(dropSpace(p.who, other.id), WS_LAST);
+  assert.deepEqual(await spacesOf(p.member), ["Second"]);
+
+  // Both of two in one statement: neither goes.
+  const third = await addSpace(p, "Third");
+  await assert.rejects(
+    as(p.who, `delete from public.workspaces where member_id = $1`, [p.member]),
+    WS_LAST,
+  );
+  assert.deepEqual(await spacesOf(p.member), ["Second", "Third"]);
+  assert.equal(await spaceThere(third.id), true);
+});
+
+test("a workspace with an agent in use, or with files, is not deleted", async () => {
+  const p = await wsPerson();
+  const space = await addSpace(p, "Busy");
+  const made = (
+    await as(
+      p.who,
+      `select * from public.create_agent($1, 'Busy agent', 'other', 'vendor')`,
+      [space.id],
+    )
+  )[0];
+  await assert.rejects(dropSpace(p.who, space.id), WS_AGENT);
+  assert.equal(await spaceThere(space.id), true);
+
+  await as(p.who, `select public.revoke_agent($1)`, [made.agent_id]);
+  const path = `${p.member}/${space.id}/report.pdf`;
+  const [file] = await as(
+    p.who,
+    `insert into public.files (hive_id, member_id, workspace_id, storage_path, name)
+     values ($1, $2, $3, $4, 'a file') returning id`,
+    [p.hive, p.member, space.id, path],
+  );
+  await assert.rejects(dropSpace(p.who, space.id), WS_FILES);
+  assert.equal(await spaceThere(space.id), true);
+
+  await as(p.who, `delete from public.files where id = $1`, [file.id]);
+  // A revoked agent does not hold the workspace: it goes with it.
+  assert.deepEqual(await dropSpace(p.who, space.id), [{ id: space.id }]);
+  assert.equal(
+    (
+      await db.query(`select 1 from public.agents where id = $1`, [
+        made.agent_id,
+      ])
+    ).rows.length,
+    0,
+  );
+});
+
+test("only its owner, as a person, deletes a workspace", async () => {
+  const made = await addSpace(
+    { hive, member: members.sara },
+    "Sara's second",
+    person("sara"),
+  );
+  const mark = await lastAudit();
+  // Somebody else's workspace is not theirs to see: no row, no refusal that
+  // says anything about it.
+  for (const who of [person("dani"), person("ahmed"), person("outsider")])
+    assert.deepEqual(await dropSpace(who, made.id), []);
+  for (const tier of ["vendor", "self_hosted"])
+    assert.deepEqual(
+      await dropSpace(await agentFor("sara", tier), made.id),
+      [],
+    );
+  assert.deepEqual(await dropSpace(passOf(person("sara")), made.id), []);
+  // A visitor is refused outright or finds no row, by the grants.
+  const visitor = await dropSpace(null, made.id).catch((e) => e);
+  assert.ok(
+    Array.isArray(visitor)
+      ? visitor.length === 0
+      : /row-level security|permission denied/.test(String(visitor)),
+  );
+  assert.equal(await spaceThere(made.id), true);
+  assert.deepEqual(await spaceAudits(mark), []);
+
+  assert.deepEqual(await dropSpace(person("sara"), made.id), [{ id: made.id }]);
+});
+
+test("a workspace in a hive that is being deleted stays", async () => {
+  const p = await wsPerson();
+  const space = await addSpace(p, "Frozen");
+  const name = (
+    await db.query(`select name from public.hives where id = $1`, [p.hive])
+  ).rows[0].name;
+  await as(p.who, `select public.request_hive_deletion($1, $2)`, [
+    p.hive,
+    name,
+  ]);
+  await assert.rejects(dropSpace(p.who, space.id), FROZEN);
+  assert.equal(await spaceThere(space.id), true);
+});
+
+test("the last workspace still goes with its member, and the database's owner is not held", async () => {
+  const p = await wsPerson();
+  const mark = await lastAudit();
+  // The database's owner, outside the API: the rules are the app's, not its.
+  const extra = await addSpace(p, "Extra");
+  await as(
+    p.who,
+    `select * from public.create_agent($1, 'Extra agent', 'other', 'vendor')`,
+    [extra.id],
+  );
+  await asDbOwner(null, `delete from public.workspaces where id = $1`, [
+    extra.id,
+  ]);
+  assert.equal(await spaceThere(extra.id), false);
+
+  await asDbOwner(null, `delete from public.members where id = $1`, [p.member]);
+  assert.deepEqual(await spacesOf(p.member), []);
+  // Nobody was signed in: no record.
+  assert.deepEqual(await spaceAudits(mark), []);
 });

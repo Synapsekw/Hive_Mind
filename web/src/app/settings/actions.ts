@@ -16,9 +16,11 @@ import type {
   NewAgent,
   Result,
   Sent,
+  WorkspaceDeleted,
 } from "../../settings/types";
 import {
   createIn,
+  deleteWorkspaceIn,
   inviteIn,
   resendIn,
   revokeIn,
@@ -69,4 +71,11 @@ export async function resendInvitation(id: string): Promise<Sent> {
 
 export async function revokeInvitation(id: string): Promise<Result> {
   return withSession<Result>((db) => revokeInvitationIn(db, id), { ok: false });
+}
+
+export async function deleteWorkspace(id: string): Promise<WorkspaceDeleted> {
+  return withSession<WorkspaceDeleted>((db) => deleteWorkspaceIn(db, id), {
+    ok: false,
+    reason: "failed",
+  });
 }

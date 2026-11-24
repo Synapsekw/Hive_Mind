@@ -278,6 +278,13 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   under **Invitations** with name, email, invited and expiry dates, **Send again** and
   **Revoke**. A notice says the invitation was sent, or that it was saved but the email could
   not be sent. A member who is not the owner sees neither the form nor the invitations.
+  Between Agents and Members, **Workspaces** lists the person's own workspaces with the number
+  of notes in each and **Delete**, which asks once ("Delete DRA and its 25 notes?", **Delete** /
+  **Keep**) and then erases the workspace with its folders, notes and links for good; nothing
+  on the person's computer is touched. The database refuses the person's only workspace, one
+  with an agent still in use and one that still holds files, and the row says what to do first.
+  The only workspace shows no Delete, and neither does any workspace while the hive is being
+  deleted.
   Owners also have a **Delete this hive** section. It shows how many members, notes and files
   the hive holds and a field for the hive's name; **Delete hive** is enabled only when the
   typed name matches exactly. Nothing is erased at once: the hive is marked, the page reloads,

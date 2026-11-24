@@ -242,3 +242,45 @@ describe("deleting the hive", () => {
     );
   });
 });
+
+describe("the workspaces", () => {
+  it("says how many notes a workspace holds", async () => {
+    const { workspaceNotes } = await import("./text");
+    const w = { id: "w", name: "DRA" };
+    expect(workspaceNotes({ ...w, notes: 25 })).toBe("25 notes");
+    expect(workspaceNotes({ ...w, notes: 1 })).toBe("1 note");
+    expect(workspaceNotes({ ...w, notes: 0 })).toBe("No notes");
+    expect(workspaceNotes({ ...w, notes: null })).toBeNull();
+  });
+
+  it("asks before deleting, naming the workspace and what goes with it", async () => {
+    const { workspaceQuestion } = await import("./text");
+    const w = { id: "w", name: "DRA" };
+    expect(workspaceQuestion({ ...w, notes: 25 })).toBe(
+      "Delete DRA and its 25 notes?",
+    );
+    expect(workspaceQuestion({ ...w, notes: 1 })).toBe(
+      "Delete DRA and its 1 note?",
+    );
+    expect(workspaceQuestion({ ...w, notes: 0 })).toBe("Delete DRA?");
+    expect(workspaceQuestion({ ...w, notes: null })).toBe("Delete DRA?");
+  });
+
+  it("says one line for each refusal, and that the computer's files stay", async () => {
+    const { workspaceFailure, workspaceDeleted, WORKSPACES_NOTE } =
+      await import("./text");
+    expect(workspaceFailure("last")).toBe("You need at least one workspace.");
+    expect(workspaceFailure("agents")).toBe(
+      "Revoke this workspace's agents first.",
+    );
+    expect(workspaceFailure("files")).toBe(
+      "Delete this workspace's files in the Gallery first.",
+    );
+    expect(workspaceFailure("failed")).toBe("That didn't work. Try again.");
+    expect(workspaceFailure("other" as never)).toBe(
+      "That didn't work. Try again.",
+    );
+    expect(workspaceDeleted("DRA")).toBe("DRA deleted.");
+    expect(WORKSPACES_NOTE).toContain("files on your computer are not touched");
+  });
+});
