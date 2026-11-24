@@ -12,7 +12,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { badge } from "../inbox/text";
 import { AccountMenu } from "./AccountMenu";
 import { AgentsCard } from "./AgentsCard";
-import { useFold } from "./FoldProvider";
+import { useFold, useFoldSide } from "./FoldProvider";
 import { useHiveActions, type HiveActions } from "./HiveActions";
 import { HiveSwitcher } from "./HiveSwitcher";
 import s from "./shell.module.css";
@@ -121,6 +121,8 @@ export function Shell({
 }) {
   const provided = useHiveActions();
   const { fold, toggleRail } = useFold();
+  // Tells the provider a rail is on the page, so the `[` key has something to fold.
+  useFoldSide("rail");
   const folded = fold.rail === "shut";
   const railId = useId();
   const waiting = inbox ?? 0;

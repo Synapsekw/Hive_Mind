@@ -47,12 +47,28 @@ function apply(fold: Fold) {
 const QUIET =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-popover], [role="dialog"], [role="radiogroup"]';
 
+/** Below this width the page stacks and nothing folds; the CSS uses the same figure. */
+export const FOLD_MEDIA = "(min-width: 700px)";
+
+/** True when the window is wide enough to fold. Read in handlers only, never during render. */
+export function foldWide(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(FOLD_MEDIA).matches;
+}
+
 /**
- * True when a fold key must do nothing: a modifier is held, or the key lands while typing in a
- * field, inside a popover, a dialog or a radio group (where keys already mean something).
+ * True when a fold key must do nothing: the key is held down (repeats), a modifier is held, or
+ * the key lands while typing in a field, inside a popover, a dialog or a radio group (where
+ * keys already mean something).
  */
 export function foldKeyIgnored(e: KeyboardEvent): boolean {
-  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey)
+  if (
+    e.repeat ||
+    e.defaultPrevented ||
+    e.ctrlKey ||
+    e.metaKey ||
+    e.altKey ||
+    e.shiftKey
+  )
     return true;
   const target = e.target;
   if (!(target instanceof Element)) return false;
@@ -100,9 +116,20 @@ export function FoldProvider({
     // `key` stands for `initial`'s two values; a new object with the same fold is no change.
   }, [key]);
 
+  // How many of each side are on the page now. A key only folds a side that is there: on a page
+  // without a rail (sign-in, consent) `[` does nothing and leaves the cookie alone.
+  const present = useRef<Record<keyof Fold, number>>({ rail: 0, panel: 0 });
+  const mount = useCallback((side: keyof Fold) => {
+    present.current[side] += 1;
+    return () => {
+      present.current[side] -= 1;
+    };
+  }, []);
+
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key !== "[" || foldKeyIgnored(e)) return;
+      if (present.current.rail === 0 || !foldWide()) return;
       e.preventDefault();
       toggleRail();
     };
@@ -114,7 +141,37 @@ export function FoldProvider({
     () => ({ fold, toggleRail, togglePanel, openPanel, openRail }),
     [fold, toggleRail, togglePanel, openPanel, openRail],
   );
-  return <FoldContext.Provider value={api}>{children}</FoldContext.Provider>;
+  const presence = useMemo(() => ({ mount, present }), [mount]);
+  return (
+    <PresenceContext.Provider value={presence}>
+      <FoldContext.Provider value={api}>{children}</FoldContext.Provider>
+    </PresenceContext.Provider>
+  );
+}
+
+type Presence = {
+  mount(side: keyof Fold): () => void;
+  present: { readonly current: Record<keyof Fold, number> };
+};
+
+const PresenceContext = createContext<Presence | null>(null);
+
+/**
+ * Marks a side as on the page while the calling component is mounted. The rail (Shell) calls
+ * it with "rail"; the map's panel calls it with "panel", so its key acts only there.
+ */
+export function useFoldSide(side: keyof Fold): void {
+  const mount = useContext(PresenceContext)?.mount;
+  useEffect(() => mount?.(side), [mount, side]);
+}
+
+/** True while at least one component has marked this side as on the page. For key handlers. */
+export function useFoldSidePresent(): (side: keyof Fold) => boolean {
+  const present = useContext(PresenceContext)?.present;
+  return useCallback(
+    (side: keyof Fold) => (present ? present.current[side] > 0 : false),
+    [present],
+  );
 }
 
 const NOOP = () => {};

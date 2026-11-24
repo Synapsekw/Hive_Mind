@@ -5,7 +5,7 @@
 // connected. On a folded rail only the dots show, and pressing them unfolds the rail first.
 import { useEffect, useId, useState } from "react";
 import { agentShort } from "./agentShort";
-import { useFold } from "./FoldProvider";
+import { foldWide, useFold } from "./FoldProvider";
 import s from "./shell.module.css";
 import type { AgentRow } from "./Shell";
 
@@ -32,12 +32,13 @@ export function AgentsCard({
         className={`${s.agentsHead} ${s.control}`}
         aria-expanded={open}
         aria-controls={`${id}-body`}
-        aria-label={`Agents, ${connected} of ${agents.length} connected`}
+        aria-label={`Agents, ${connected} of ${agents.length} live`}
         title={
           folded ? `Agents, ${connected} of ${agents.length} live` : undefined
         }
         onClick={() => {
-          if (folded) {
+          // Narrow windows never fold, whatever the cookie says.
+          if (folded && foldWide()) {
             openRail();
             setOpen(true);
           } else setOpen((v) => !v);

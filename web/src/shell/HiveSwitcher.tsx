@@ -16,7 +16,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useAccount } from "./AccountContext";
-import { useFold } from "./FoldProvider";
+import { foldWide, useFold } from "./FoldProvider";
 import type { HiveActions } from "./HiveActions";
 import {
   BRAND,
@@ -249,7 +249,8 @@ export function HiveSwitcher({ actions }: { actions?: HiveActions | null }) {
         aria-label={hiveButtonLabel(account.hive)}
         title={folded ? account.hive : undefined}
         onClick={() => {
-          if (folded) {
+          // Narrow windows never fold, whatever the cookie says.
+          if (folded && foldWide()) {
             openRail();
             setOpen(true);
           } else if (open) close(false);

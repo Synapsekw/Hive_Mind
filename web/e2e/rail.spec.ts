@@ -50,7 +50,7 @@ test("tabbing out of the account popover closes it", async ({ page }) => {
 test("the agents card opens to one line per agent", async ({ page }) => {
   await page.goto("/dev/map", { waitUntil: "networkidle" });
   const card = page.getByRole("button", {
-    name: /^Agents, \d+ of \d+ connected/,
+    name: /^Agents, \d+ of \d+ live/,
   });
   await expect(card).toHaveAttribute("aria-expanded", "false");
   await card.click();
