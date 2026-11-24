@@ -353,6 +353,13 @@ describe("honey rings", () => {
     const hive = data.themes.find((t) => t.id === "hive")!;
     expect(hive.dark.wash).toEqual(["#140d06", "#090603", "#030201"]);
     expect(hive.dark.surface).toBe("#0e0905");
+    expect(hive.dark.content).toBe("#0a0704");
+    // The amber glows over the wash are turned down for Hive's dark mode only.
+    for (const t of data.themes)
+      for (const m of MODES) {
+        const bloom = (t[m] as { bloom?: number }).bloom;
+        expect(bloom).toBe(t.id === "hive" && m === "dark" ? 0.3 : undefined);
+      }
     expect(hive.light.wash).toEqual(["#844a0b", "#733e0d", "#52260a"]);
   });
 });

@@ -11,10 +11,11 @@
         "brand": "#f5b544",
         "brand2": "#ef8a3c",
         "brandMid": null,
-        "content": "#1a1208",
+        "content": "#0a0704",
         "text": "#fbf3e4",
         "textMuted": "#cfbb9c",
         "surface": "#0e0905",
+        "bloom": 0.3,
         "wash": ["#140d06", "#090603", "#030201"]
       },
       "light": {

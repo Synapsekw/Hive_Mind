@@ -10,7 +10,7 @@
   --fg: #fbf3e4;
   --fg2: #c6c7cf;
   --muted: #cfbb9c;
-  --quiet: #8e909a;
+  --quiet: #7f818b;
   --line: rgba(255, 255, 255, 0.100);
   --line-hi: rgba(255, 255, 255, 0.260);
   --fill: rgba(255, 255, 255, 0.060);
@@ -22,13 +22,13 @@
   --lift: inset 0 1px 0 0 rgba(255, 255, 255, 0.100), 0 8px 24px -12px rgba(0, 0, 0, 0.600);
   --on-brand: #0e0e10;
   --wash: linear-gradient(168deg, #140d06 0%, #090603 46%, #030201 100%);
-  --bloom: radial-gradient(46% 58% at 60% 40%, rgba(239, 138, 60, 0.160) 0%, transparent 72%), radial-gradient(34% 42% at 34% 78%, rgba(245, 181, 68, 0.120) 0%, transparent 72%), radial-gradient(110% 85% at 8% -6%, rgba(245, 181, 68, 0.220) 0%, transparent 58%), radial-gradient(90% 60% at 100% 100%, rgba(239, 138, 60, 0.180) 0%, transparent 60%), radial-gradient(70% 40% at 0% 80%, rgba(242, 160, 64, 0.120) 0%, transparent 60%);
+  --bloom: radial-gradient(46% 58% at 60% 40%, rgba(239, 138, 60, 0.048) 0%, transparent 72%), radial-gradient(34% 42% at 34% 78%, rgba(245, 181, 68, 0.036) 0%, transparent 72%), radial-gradient(110% 85% at 8% -6%, rgba(245, 181, 68, 0.066) 0%, transparent 58%), radial-gradient(90% 60% at 100% 100%, rgba(239, 138, 60, 0.054) 0%, transparent 60%), radial-gradient(70% 40% at 0% 80%, rgba(242, 160, 64, 0.036) 0%, transparent 60%);
   --mark: var(--grad);
   --rings-hub: #f5b544;
   --rings-glow: 1.9;
-  --bg: #251a0b;
+  --bg: #161007;
   --surface: #171008;
-  --glass: rgba(37, 26, 11, 0.560);
+  --glass: rgba(22, 16, 7, 0.560);
   --glow: none;
   --hue-1: #ffa2d5;
   --hue-2: #d49824;
@@ -49,7 +49,7 @@
   --fg: #fbf3e4;
   --fg2: #c6c7cf;
   --muted: #cfbb9c;
-  --quiet: #8e909a;
+  --quiet: #7f818b;
   --line: rgba(255, 255, 255, 0.100);
   --line-hi: rgba(255, 255, 255, 0.260);
   --fill: rgba(255, 255, 255, 0.060);
@@ -61,7 +61,7 @@
   --lift: inset 0 1px 0 0 rgba(255, 255, 255, 0.100), 0 8px 24px -12px rgba(0, 0, 0, 0.600);
   --on-brand: #0e0e10;
   --wash: linear-gradient(168deg, #140d06 0%, #090603 46%, #030201 100%);
-  --bloom: radial-gradient(46% 58% at 60% 40%, rgba(239, 138, 60, 0.160) 0%, transparent 72%), radial-gradient(34% 42% at 34% 78%, rgba(245, 181, 68, 0.120) 0%, transparent 72%), radial-gradient(110% 85% at 8% -6%, rgba(245, 181, 68, 0.220) 0%, transparent 58%), radial-gradient(90% 60% at 100% 100%, rgba(239, 138, 60, 0.180) 0%, transparent 60%), radial-gradient(70% 40% at 0% 80%, rgba(242, 160, 64, 0.120) 0%, transparent 60%);
+  --bloom: radial-gradient(46% 58% at 60% 40%, rgba(239, 138, 60, 0.048) 0%, transparent 72%), radial-gradient(34% 42% at 34% 78%, rgba(245, 181, 68, 0.036) 0%, transparent 72%), radial-gradient(110% 85% at 8% -6%, rgba(245, 181, 68, 0.066) 0%, transparent 58%), radial-gradient(90% 60% at 100% 100%, rgba(239, 138, 60, 0.054) 0%, transparent 60%), radial-gradient(70% 40% at 0% 80%, rgba(242, 160, 64, 0.036) 0%, transparent 60%);
   --mark: var(--grad);
   --rings-hub: #f5b544;
   --rings-glow: 1.9;
@@ -1012,21 +1012,21 @@
   --rings-glow: initial;
 }
 [data-theme="hive"][data-mode="dark"][data-reach="subtle"] {
-  --bg: #1a1208;
+  --bg: #0a0704;
   --surface: #0e0905;
-  --glass: rgba(26, 18, 8, 0.560);
+  --glass: rgba(10, 7, 4, 0.560);
   --glow: none;
 }
 [data-theme="hive"][data-mode="dark"][data-reach="tinted"] {
-  --bg: #251a0b;
+  --bg: #161007;
   --surface: #171008;
-  --glass: rgba(37, 26, 11, 0.560);
+  --glass: rgba(22, 16, 7, 0.560);
   --glow: none;
 }
 [data-theme="hive"][data-mode="dark"][data-reach="vivid"] {
-  --bg: #2c1f0d;
+  --bg: #1d1509;
   --surface: #1e1509;
-  --glass: rgba(44, 31, 13, 0.560);
+  --glass: rgba(29, 21, 9, 0.560);
   --glow: radial-gradient(60% 224px at 14% 0, rgba(245, 181, 68, 0.100) 0%, transparent 70%), radial-gradient(30% 224px at 76% 0, rgba(239, 138, 60, 0.080) 0%, transparent 70%);
 }
 [data-theme="hive"][data-mode="light"][data-reach="subtle"] {
@@ -2475,7 +2475,7 @@
   --fg: #fbf3e4;
   --fg2: #c6c7cf;
   --muted: #cfbb9c;
-  --quiet: #8e909a;
+  --quiet: #7f818b;
   --line: rgba(255, 255, 255, 0.100);
   --line-hi: rgba(255, 255, 255, 0.260);
   --fill: rgba(255, 255, 255, 0.060);
