@@ -110,23 +110,28 @@ export function Dock({
         <span aria-hidden="true" className={s.dockLabel}>
           Kind
         </span>
-        {KINDS.map(([k, name]) => (
-          <button
-            key={k}
-            type="button"
-            className={`${s.dockItem} ${s.dockIcon}`}
-            aria-label={name}
-            aria-pressed={kind === k}
-            data-quiet={(kind !== null && kind !== k) || undefined}
-            onClick={() => onKind(kind === k ? null : k)}
-            {...aim(onPreview, { kind: k })}
-          >
-            <span aria-hidden="true" className={s.chipDot} data-kind={k} />
-            <span aria-hidden="true" className={s.dockTip}>
-              {name}
-            </span>
-          </button>
-        ))}
+        {KINDS.map(([k, kindName]) => {
+          // The hubs' entry takes the groups' own word: Topics where the heading says so.
+          const name =
+            k === "hub" && heading === "Topics" ? "Topics" : kindName;
+          return (
+            <button
+              key={k}
+              type="button"
+              className={`${s.dockItem} ${s.dockIcon}`}
+              aria-label={name}
+              aria-pressed={kind === k}
+              data-quiet={(kind !== null && kind !== k) || undefined}
+              onClick={() => onKind(kind === k ? null : k)}
+              {...aim(onPreview, { kind: k })}
+            >
+              <span aria-hidden="true" className={s.chipDot} data-kind={k} />
+              <span aria-hidden="true" className={s.dockTip}>
+                {name}
+              </span>
+            </button>
+          );
+        })}
         <span className={`${s.dockItem} ${s.dockIcon} ${s.dockLegend}`}>
           <span aria-hidden="true" className={s.legendDot} />
           <span aria-hidden="true" className={s.dockTip}>

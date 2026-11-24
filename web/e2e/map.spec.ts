@@ -401,6 +401,10 @@ test("every dot is a labelled button", async ({ page }) => {
     );
     expect(bad).toEqual([]);
   }
+  // A hub is named as a group.
+  await expect(
+    page.locator('[data-map-dot][data-kind="hub"]').first(),
+  ).toHaveAttribute("aria-label", /, group$/);
   // One layer of dots at a time: the orbit view does not keep the flat dots mounted. Orbit names
   // at most 8 groups (the rest fold into "Other topics"), Rings up to 12, so only hubs differ.
   expect(counts[1]).toBe(counts[0]);
@@ -631,9 +635,20 @@ test('"Arrange by" is visible in Rings and absent in Timeline and Orbit', async 
       "true",
     );
     await expect(arrangeGroup(page)).toHaveCount(0);
-    // Timeline and Orbit keep the plain "Topics" heading.
+    // Timeline and Orbit keep the plain "Topics" heading, and the hubs' kind entry says so too.
     await expect(groups(page, "Topics")).toBeVisible();
+    await expect(
+      page
+        .getByRole("group", { name: "Kinds" })
+        .getByRole("button", { name: "Topics", exact: true }),
+    ).toBeAttached();
   }
+  await viewButton(page, "Rings").click();
+  await expect(
+    page
+      .getByRole("group", { name: "Kinds" })
+      .getByRole("button", { name: "Groups", exact: true }),
+  ).toBeAttached();
 });
 
 test("choosing Time regroups by month, moves the dots and sends no request", async ({
@@ -824,4 +839,60 @@ test("the top bar holds its controls at 1280 px with a dot selected", async ({
         b.y + b.height <= a.y + 0.5;
       expect(apart, `controls ${i} and ${j} overlap`).toBe(true);
     }
+});
+
+test("a pinned group's spoke does not stay where Timeline had it", async ({
+  page,
+}) => {
+  await open(page);
+  await settle(page);
+  const dmt = groups(page).getByRole("button", { name: /^DMT/ });
+  await dmt.click();
+  await expect(dmt).toHaveAttribute("aria-pressed", "true");
+  await viewButton(page, "Timeline").click();
+  await settle(page);
+  // Where the index and the pinned group's hub sit in Timeline: the lit spoke between them
+  // must not be drawn there once Rings has come to rest.
+  const root = page.locator('[data-map-dot][data-kind="root"]');
+  const hub = page.locator('[data-map-dot][data-kind="hub"][data-topic="0"]');
+  const a = await dotPoint(page, root);
+  const b = await dotPoint(page, hub);
+  expect(Math.hypot(b.x - a.x, b.y - a.y)).toBeGreaterThan(100);
+  await viewButton(page, "Rings").click();
+  await settle(page);
+  await page.waitForTimeout(300);
+  // For each offset across the segment (dotPoint is approximate, so a band either side), the
+  // dimmest canvas pixel along it. A line drawn there is lit all along; where nothing is drawn
+  // the canvas is clear and the card shows through.
+  const { out } = await page.evaluate(
+    ({ a, b }) => {
+      const canvas =
+        document.querySelector<HTMLCanvasElement>("[data-map-canvas]")!;
+      const r = canvas.getBoundingClientRect();
+      const dpr = canvas.width / r.width;
+      const g = canvas.getContext("2d")!;
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      const nx = -(b.y - a.y) / len;
+      const ny = (b.x - a.x) / len;
+      const out: [number, number][] = [];
+      for (let o = -150; o <= 150; o += 0.5) {
+        let min = 255;
+        for (let t = 0.2; t <= 0.81; t += 0.075) {
+          const x = a.x + (b.x - a.x) * t + nx * o;
+          const y = a.y + (b.y - a.y) * t + ny * o;
+          const d = g.getImageData(
+            Math.round((x - r.left) * dpr),
+            Math.round((y - r.top) * dpr),
+            1,
+            1,
+          ).data;
+          min = Math.min(min, d[3]!);
+        }
+        if (min > 0) out.push([o, min]);
+      }
+      return { out };
+    },
+    { a, b },
+  );
+  expect(out.filter(([, min]) => min > 8)).toEqual([]);
 });

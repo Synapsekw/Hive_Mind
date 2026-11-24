@@ -600,16 +600,17 @@ function drawStatic(F: Frame, g: CanvasRenderingContext2D) {
     g.globalAlpha = F.busy ? 0.08 : 0.3;
     g.stroke(c.edges);
     if (F.filtered && f.sel === null && f.hot === null) {
+      // Cached per scene and filter, so it is built from the scene's own resting coordinates,
+      // never from the glide's: a path built mid-glide would stay where the dots were.
       let p = c.litEdges.get(f.lit);
       if (!p) {
         p = new Path2D();
-        for (const [u, v] of scene.rest)
-          if (f.lit[u] && f.lit[v]) {
-            const a = P(F, u);
-            const b = P(F, v);
-            p.moveTo(a[0], a[1]);
-            p.lineTo(b[0], b[1]);
-          }
+        const e = scene.edges;
+        scene.rest.forEach(([u, v], k) => {
+          if (!f.lit[u] || !f.lit[v]) return;
+          p!.moveTo(e[k * 4]!, e[k * 4 + 1]!);
+          p!.lineTo(e[k * 4 + 2]!, e[k * 4 + 3]!);
+        });
         c.litEdges.set(f.lit, p);
       }
       g.globalAlpha = 0.55;
@@ -846,8 +847,9 @@ function groupPaths(
       at(rad),
       at((i) => Math.max(0.5 * px, rad(i) - 2 * px)),
     ];
+  // Clamped: a dot growing in starts near scale 0, and a negative radius makes `arc` throw.
   if (kind === "lnote" || kind === "lfile")
-    return [at((i) => rad(i) - (lockedW(F) / 2) * px)];
+    return [at((i) => Math.max(0, rad(i) - (lockedW(F) / 2) * px))];
   return [at(rad)];
 }
 
@@ -1089,7 +1091,8 @@ function drawAgent(F: Frame, i: number, s0: number, glow: number) {
   ctx.strokeStyle = pal.fg2;
   ctx.lineWidth = 1.5 * px;
   ctx.beginPath();
-  ctx.arc(x, y, r - 0.75 * px, 0, TAU);
+  // An agent that is still growing in can be smaller than its own stroke.
+  ctx.arc(x, y, Math.max(0, r - 0.75 * px), 0, TAU);
   ctx.stroke();
   ctx.fillStyle = pal.fg2;
   ctx.beginPath();
@@ -1127,7 +1130,7 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
   const kind = kindOf(n);
   const paths = groupPaths(F, kind, [i], scale);
   if (F.fresh && kind !== "hub") {
-    // The flat views: brand colour, brighter when fresher; hot, focused and selected at full.
+    // Rings: brand colour, brighter when fresher; hot, focused and selected at full.
     const dim = alphaOf(F, i);
     const locked = kind === "lnote" || kind === "lfile";
     const level = locked ? 0 : (F.fresh[i] ?? 0);

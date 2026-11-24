@@ -95,12 +95,17 @@ function links(p: Input): Raw {
   const at = new Map<string, number>();
   p.nodes.forEach((node, i) => at.set(node.id, i));
 
-  // Each link counts once per end; links to unknown ids and self links are skipped.
+  // Each linked pair counts once per end, however many rows link it and in which direction;
+  // links to unknown ids and self links are skipped.
   const adj: number[][] = p.nodes.map(() => []);
+  const seen = new Set<number>();
   for (const l of p.links) {
     const a = at.get(l.from);
     const b = at.get(l.to);
     if (a === undefined || b === undefined || a === b) continue;
+    const pair = Math.min(a, b) * n + Math.max(a, b);
+    if (seen.has(pair)) continue;
+    seen.add(pair);
     adj[a]!.push(b);
     adj[b]!.push(a);
   }
@@ -159,7 +164,9 @@ function links(p: Input): Raw {
     let best = -1;
     for (const i of m) {
       const node = p.nodes[i]!;
-      if (node.locked || node.title === null) continue;
+      // A locked member, or one whose title is blank, has nothing to name the cluster by.
+      if (node.locked || node.title === null || node.title.trim() === "")
+        continue;
       if (best === -1 || degree[i]! > degree[best]!) best = i;
     }
     let name =

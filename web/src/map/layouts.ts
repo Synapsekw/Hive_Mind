@@ -15,7 +15,7 @@ const GAP = 0.05;
 const MIN_SECTOR = 0.12;
 /**
  * The narrowest sector once widths are shared out: 0.35 rad keeps neighbouring hubs more than
- * 40 apart at the hub radius (120). Eight topics at 0.35 rad fit the circle.
+ * 40 apart at the hub radius (120). Up to twelve groups at 0.35 rad fit the circle.
  */
 const MIN_HUB_SECTOR = 0.35;
 
@@ -164,8 +164,11 @@ export function ringsLayout(model: MapModel): RingsLayout {
         list.filter((id) => model.nodes[id]!.kind === kind),
       );
     const kNotes = place(of("note"), s, 0);
-    const kEnd = place(of("file"), s, kNotes > 0 ? kNotes + 1 : 0);
-    lastR.push(FIRST_R + ARC_STEP * Math.max(0, kEnd - 1));
+    const kFiles = kNotes > 0 ? kNotes + 1 : 0;
+    const kEnd = place(of("file"), s, kFiles);
+    // The outermost arc that holds an item: with no files, the empty arc kept before them is not.
+    const kLast = kEnd > kFiles ? kEnd - 1 : kNotes - 1;
+    lastR.push(FIRST_R + ARC_STEP * Math.max(0, kLast));
   });
   const outer = lastR.length ? Math.max(...lastR) : 0;
   const agentR = Math.max(AGENT_MIN, outer + AGENT_PAST);

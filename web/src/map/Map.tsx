@@ -15,7 +15,12 @@ import {
 } from "react";
 import { activity, agentStatus, buildModel } from "./graph";
 import { layout, orbit, ringsLayout, type RingsLayout } from "./layouts";
-import { GROUP_HEADING, grouping, type Arrange } from "./arrange";
+import {
+  GROUP_HEADING,
+  grouping,
+  type Arrange,
+  type Grouping,
+} from "./arrange";
 import { lit, nodeIndex, nodeKey, topicIndexOf } from "./select";
 import { buildScene } from "./scene";
 import type { MapModel, MapPayload, NodeKind, View } from "./types";
@@ -78,31 +83,41 @@ export function HiveMap({
   const sig = useMemo(() => JSON.stringify(payload), [payload]);
   const parsed = useMemo(() => JSON.parse(sig) as MapPayload, [sig]);
   // Models for this payload, by arrangement. Rings has its own per arrangement; Timeline and
-  // Orbit share the folder model capped at 8 groups. Time groups depend on the UTC day only, so
+  // Orbit draw the folders capped at 8 groups. With 8 folders or fewer that is the same grouping
+  // as Rings by folder, so they share its entry: one model, each view with its own layout. With
+  // more, they share an "other" entry of their own. Time groups depend on the UTC day only, so
   // they are not rebuilt every minute. Going back to one already seen returns the same object.
   const entries = useMemo(() => new Map<string, Entry>(), [parsed]);
   const dayNow = Math.floor(now / DAY_MS) * DAY_MS;
-  const entryKey =
-    view !== "rings"
-      ? "other"
-      : arrange === "time"
-        ? `rings:time:${dayNow}`
-        : `rings:${arrange}`;
-  let entry = entries.get(entryKey);
-  if (!entry) {
-    const groups =
-      view === "rings"
-        ? grouping(parsed, arrange, dayNow)
-        : grouping(parsed, "folder", 0, 8);
-    entry = {
-      model: buildModel(parsed, groups),
-      timeline: null,
-      timelineAt: 0,
-      rings: null,
-      orbit: null,
-      orbitFlat: null,
-    };
-    entries.set(entryKey, entry);
+  const entryOf = (key: string, groups: () => Grouping): Entry => {
+    let e = entries.get(key);
+    if (!e) {
+      e = {
+        model: buildModel(parsed, groups()),
+        timeline: null,
+        timelineAt: 0,
+        rings: null,
+        orbit: null,
+        orbitFlat: null,
+      };
+      entries.set(key, e);
+    }
+    return e;
+  };
+  let entry: Entry;
+  if (view === "rings")
+    entry = entryOf(
+      arrange === "time" ? `rings:time:${dayNow}` : `rings:${arrange}`,
+      () => grouping(parsed, arrange, dayNow),
+    );
+  else {
+    const folder = entryOf("rings:folder", () =>
+      grouping(parsed, "folder", dayNow),
+    );
+    entry =
+      folder.model.topics.length <= 8
+        ? folder
+        : entryOf("other", () => grouping(parsed, "folder", 0, 8));
   }
   const model = entry.model;
   const act = useMemo(() => activity(model, now), [model, now]);
@@ -159,8 +174,10 @@ export function HiveMap({
       ),
     [],
   );
-  // The list's own positions and view, so a view switch changes nothing there until the glide
-  // lands.
+  // The list's own positions and view, so a view switch within one model changes nothing there
+  // until the glide lands. A switch to another model (a new arrangement, or Timeline and Orbit
+  // when there are more than 8 folders) re-renders the list at once: its indices are the new
+  // model's.
   const listPos = listAt.model === model ? listAt.pos : pos;
   const listView = listAt.model === model ? listAt.view : view;
 
@@ -209,9 +226,12 @@ export function HiveMap({
     [model, agentInfo, lastUsed],
   );
   const query = q.trim();
+  // In Rings by Links or Time a group's name is a note's title or a month, not a word the user
+  // filed by, so the search does not light whole groups by it.
+  const groupNames = view !== "rings" || arrange === "folder";
   const on = useMemo(
-    () => lit(model, { topic, kind, member, q, sel }),
-    [model, topic, kind, member, q, sel],
+    () => lit(model, { topic, kind, member, q, sel, groupNames }),
+    [model, topic, kind, member, q, sel, groupNames],
   );
   const hits = query ? on.filter(Boolean).length : 0;
   const selNode = sel !== null ? model.nodes[sel] : undefined;

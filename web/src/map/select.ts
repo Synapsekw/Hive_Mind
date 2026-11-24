@@ -35,6 +35,8 @@ export function lit(model: MapModel, f: Filter): boolean[] {
   const sel = f.sel !== null ? (model.nodes[f.sel] ?? null) : null;
   const near = new Set<number>(sel ? sel.nb : []);
   const topicName = model.topics.map((t) => t.name.toLowerCase());
+  // Group names are searched unless the filter says not to (see Filter.groupNames).
+  const byGroup = f.groupNames !== false;
   return model.nodes.map((n) => {
     let ok = true;
     if (f.topic !== null) ok = n.topic === f.topic;
@@ -46,7 +48,7 @@ export function lit(model: MapModel, f: Filter): boolean[] {
       ok =
         ok &&
         (n.title.toLowerCase().includes(q) ||
-          (n.topic >= 0 && topicName[n.topic]!.includes(q)));
+          (byGroup && n.topic >= 0 && topicName[n.topic]!.includes(q)));
     if (sel) ok = ok && (n.i === sel.i || near.has(n.i));
     if (n.kind === "root" && !sel && !q) ok = true;
     return ok;

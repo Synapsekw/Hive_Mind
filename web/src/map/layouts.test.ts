@@ -273,6 +273,21 @@ describe("ringsLayout scale", () => {
     }
   });
 
+  it("puts the agent ring 30 past the last arc that holds a note when a group has no files", () => {
+    // One group of 900 notes and no files fills nine arcs, out to 285.
+    const nodes: MapNode[] = [];
+    for (let j = 0; j < 900; j++) nodes.push(note(`n${j}`, "Only notes"));
+    const model = buildModel(base(nodes));
+    const r = ringsLayout(model);
+    const last = Math.max(
+      ...model.nodes
+        .filter((n) => n.kind === "note")
+        .map((n) => radius(r.pos[n.i]!) / r.scale),
+    );
+    expect(last).toBeGreaterThan(270);
+    expect(r.agentR / r.scale).toBeCloseTo(Math.max(300, last + 30), 6);
+  });
+
   it("cuts a long group name to 44 characters", () => {
     const long =
       "A folder name that runs on for far longer than any label should";

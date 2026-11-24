@@ -9,7 +9,7 @@ export const SOFT = "var(--fg2)";
 const KIND_WORD: Record<ModelNode["kind"], string> = {
   note: "note",
   file: "file",
-  hub: "topic",
+  hub: "group",
   agent: "agent",
   root: "index",
 };

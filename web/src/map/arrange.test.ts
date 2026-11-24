@@ -200,6 +200,45 @@ describe("grouping by links", () => {
     expect(g.of[0]).toBe(1);
   });
 
+  it("counts a pair linked both ways as one link, so 13 such pairs make no hub", () => {
+    const nodes = [node("centre"), ...many("leaf", 13)];
+    const links = nodes
+      .slice(1)
+      .flatMap((n) => [link("centre", n.id), link(n.id, "centre")]);
+    expect(links).toHaveLength(26);
+    const g = grouping({ nodes, links }, "links", NOW);
+    // Degree 13, not 26: one cluster named after the centre, no Hub notes.
+    expect(g.names).toEqual(["centre"]);
+    expect(sizes(g)).toEqual([14]);
+  });
+
+  it("still makes a hub of a centre with 26 distinct neighbours linked both ways", () => {
+    const nodes = [node("centre"), ...many("leaf", 26)];
+    const links = nodes
+      .slice(1)
+      .flatMap((n) => [link("centre", n.id), link(n.id, "centre")]);
+    const g = grouping({ nodes, links }, "links", NOW);
+    expect(g.names).toEqual(["Unlinked", "Hub notes"]);
+    expect(sizes(g)).toEqual([26, 1]);
+  });
+
+  it("does not name a cluster after a member whose title is blank", () => {
+    const nodes = [
+      node("a", { title: "first" }),
+      node("b", { title: "   " }),
+      node("c", { title: "third" }),
+      node("d", { title: "tail" }),
+    ];
+    // b has degree 3, the most, but nothing to read.
+    const links = [link("a", "b"), link("b", "c"), link("b", "d")];
+    expect(grouping({ nodes, links }, "links", NOW).names).toEqual(["first"]);
+    const blank = ["a", "b", "c"].map((id) => node(id, { title: " \t" }));
+    const tri = [link("a", "b"), link("b", "c"), link("a", "c")];
+    expect(grouping({ nodes: blank, links: tri }, "links", NOW).names).toEqual([
+      "Cluster 1",
+    ]);
+  });
+
   it("names a cluster with no readable member Cluster N", () => {
     const nodes = ["a", "b", "c"].map((id) =>
       node(id, { locked: true, title: null }),

@@ -67,6 +67,11 @@ export type Filter = {
   member: string | null;
   q: string;
   sel: number | null;
+  /**
+   * Does the search also match an item's group name? Default true. False where a group name is
+   * not a word the user filed by (in Rings, a cluster named after a note, or a month).
+   */
+  groupNames?: boolean;
 };
 
 export type Activity = {
