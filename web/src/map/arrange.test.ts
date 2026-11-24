@@ -214,13 +214,22 @@ describe("grouping by links", () => {
     expect(g.of[8]).toBe(3);
   });
 
-  it("puts a hub in Hub notes and its leaves in Unlinked", () => {
+  it("puts a hub in Hub notes and its leaves in Linked to hubs", () => {
     const nodes = [node("hub"), ...many("leaf", 26)];
     const links = nodes.slice(1).map((n) => link("hub", n.id));
     const g = grouping({ nodes, links }, "links", NOW);
-    expect(g.names).toEqual(["Unlinked", "Hub notes"]);
+    expect(g.names).toEqual(["Linked to hubs", "Hub notes"]);
     expect(sizes(g)).toEqual([26, 1]);
     expect(g.of[0]).toBe(1);
+  });
+
+  it("keeps a note with no link at all apart from a hub's leaves", () => {
+    const nodes = [node("hub"), ...many("leaf", 26), node("alone")];
+    const links = nodes.slice(1, 27).map((n) => link("hub", n.id));
+    const g = grouping({ nodes, links }, "links", NOW);
+    expect(g.names).toEqual(["Linked to hubs", "Hub notes", "Unlinked"]);
+    expect(sizes(g)).toEqual([26, 1, 1]);
+    expect(g.of[27]).toBe(2);
   });
 
   it("counts a pair linked both ways as one link, so 13 such pairs make no hub", () => {
@@ -241,7 +250,7 @@ describe("grouping by links", () => {
       .slice(1)
       .flatMap((n) => [link("centre", n.id), link(n.id, "centre")]);
     const g = grouping({ nodes, links }, "links", NOW);
-    expect(g.names).toEqual(["Unlinked", "Hub notes"]);
+    expect(g.names).toEqual(["Linked to hubs", "Hub notes"]);
     expect(sizes(g)).toEqual([26, 1]);
   });
 
