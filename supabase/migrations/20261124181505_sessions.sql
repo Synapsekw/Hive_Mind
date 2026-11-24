@@ -93,19 +93,24 @@ declare
   v_path text;
   v_n int := 1;
   v_note uuid;
+  v_notes int;
+  v_files int;
 begin
   select * into s from public.sessions where id = p_id for update;
   if not found then raise exception 'no such session'; end if;
   if s.ended_at is not null then return s.note_id; end if;
 
   v_title := coalesce(nullif(btrim(p_title), ''), public._session_title(s));
+  -- Counts only: titles, paths and file names of what the session produced may
+  -- be private, and this note's sharing is inherited. The app lists the
+  -- contents from session_id, under each reader's own access.
+  select count(*) into v_notes from public.notes n where n.session_id = s.id;
+  select count(*) into v_files from public.files f where f.session_id = s.id;
   v_body := coalesce(nullif(btrim(p_summary), ''), 'Closed automatically.')
     || E'\n\n## Produced in this session\n'
-    || coalesce((select string_agg('- note: ' || n.title || ' (' || n.path || ')', E'\n' order by n.created_at)
-                   from public.notes n where n.session_id = s.id), '')
-    || E'\n'
-    || coalesce((select string_agg('- file: ' || f.name, E'\n' order by f.created_at)
-                   from public.files f where f.session_id = s.id), '');
+    || v_notes || case when v_notes = 1 then ' note, ' else ' notes, ' end
+    || v_files || case when v_files = 1 then ' file' else ' files' end
+    || '. Open the session in the gallery to see them.';
 
   v_base := 'Sessions/' || to_char(s.started_at at time zone 'UTC', 'YYYY-MM-DD') || ' '
     || left(regexp_replace(v_title, '[/\\\[\]#|^]', '-', 'g'), 80);

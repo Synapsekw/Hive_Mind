@@ -120,7 +120,8 @@ test("session_end writes the session note, homes homeless files, and closes", as
   assert.equal(note.visibility, null);
   assert.equal(note.session_id, r.session_id);
   assert.match(note.body, /Drafted deck/);
-  assert.match(note.body, /s7-a\.pdf/);
+  assert.match(note.body, /1 note, 2 files/);
+  assert.doesNotMatch(note.body, /s7-a\.pdf|s7-b\.pdf|s7 home/); // counts only: names may be private
   assert.doesNotMatch(note.body, /\[\[/); // no wiki links: they would propose links
   const homes = await h.as(
     dani(),
