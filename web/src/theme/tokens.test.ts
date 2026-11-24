@@ -284,7 +284,10 @@ describe("surfaceSamples", () => {
       bloomFactor: 0,
     });
     const full = surfaceSamples("keystone", "dark", "subtle");
-    const stops = data.themes[0]!.dark.wash.map(fromHex);
+    // The same theme the samples are taken from (the first theme in the list is Hive).
+    const stops = data.themes
+      .find((t) => t.id === "keystone")!
+      .dark.wash.map(fromHex);
     // The rail's top-left corner sits on the first stop's side of the 168° wash.
     const corner = bare.rail[0]!;
     expect(lum(corner)).toBeLessThanOrEqual(lum(stops[0]!) + 1e-9);
@@ -327,6 +330,30 @@ describe("adjustments", () => {
       expect(a.from).not.toBe(a.to);
       expect(a.reach).toBe("any");
     }
+  });
+});
+
+describe("honey rings", () => {
+  it("gives the hubs' colour and a stronger glow only to the theme whose seed asks for it", () => {
+    for (const t of THEMES)
+      for (const m of MODES) {
+        const tokens = baseTokens(t.id, m);
+        if (t.id === "hive") {
+          expect(tokens["--rings-hub"]).toBe(tokens["--brand"]);
+          expect(tokens["--rings-glow"]).toBe("1.9");
+        } else {
+          // Stated, not left out: the default theme's values must not leak into this one.
+          expect(tokens["--rings-hub"]).toBe("initial");
+          expect(tokens["--rings-glow"]).toBe("initial");
+        }
+      }
+  });
+
+  it("darkens only Hive's dark mode", () => {
+    const hive = data.themes.find((t) => t.id === "hive")!;
+    expect(hive.dark.wash).toEqual(["#140d06", "#090603", "#030201"]);
+    expect(hive.dark.surface).toBe("#0e0905");
+    expect(hive.light.wash).toEqual(["#844a0b", "#733e0d", "#52260a"]);
   });
 });
 

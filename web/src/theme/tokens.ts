@@ -759,6 +759,10 @@ function resolve(theme: string, mode: Mode): Resolved {
   const markFill = (
     data.themes.find((x) => x.id === theme) as { mark?: string }
   ).mark;
+  // A theme may ask for the Rings view in honey: hubs in the brand colour and a stronger glow.
+  const honeyRings =
+    (data.themes.find((x) => x.id === theme) as { rings?: string }).rings ===
+    "honey";
 
   const base: Tokens = {
     "--brand": css(s.brand),
@@ -783,6 +787,10 @@ function resolve(theme: string, mode: Mode): Resolved {
     "--wash": `linear-gradient(168deg, ${css(s.wash[0]!)} 0%, ${css(s.wash[1]!)} 46%, ${css(s.wash[2]!)} 100%)`,
     "--bloom": bloomCss(blooms(s, mode)),
     "--mark": markFill === "brand" ? "var(--grad)" : "var(--fg)",
+    // Stated for every theme: the default theme's values must not leak into the others.
+    // `initial` leaves the property unset, so `var(--rings-hub, …)` takes its fallback.
+    "--rings-hub": honeyRings ? css(s.brand) : "initial",
+    "--rings-glow": honeyRings ? "1.9" : "initial",
   };
 
   // Light mode "bold frame": white text on the saturated wash (prototype line 36).

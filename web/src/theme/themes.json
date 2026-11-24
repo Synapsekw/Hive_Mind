@@ -6,6 +6,7 @@
       "id": "hive",
       "label": "Hive",
       "mark": "brand",
+      "rings": "honey",
       "dark": {
         "brand": "#f5b544",
         "brand2": "#ef8a3c",
@@ -13,8 +14,8 @@
         "content": "#1a1208",
         "text": "#fbf3e4",
         "textMuted": "#cfbb9c",
-        "surface": "#1d160c",
-        "wash": ["#3b2811", "#1d140a", "#090604"]
+        "surface": "#0e0905",
+        "wash": ["#140d06", "#090603", "#030201"]
       },
       "light": {
         "brand": "#a05a0c",

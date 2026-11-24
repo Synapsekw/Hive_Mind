@@ -468,13 +468,17 @@ async function hubAndHue(page: Page) {
         1,
       ).data;
     const probe = document.createElement("span");
-    probe.style.color = "var(--hue-1)";
+    const rgb = (value: string) => {
+      probe.style.color = value;
+      return (getComputedStyle(probe).color.match(/[\d.]+/g) ?? [])
+        .map(Number)
+        .slice(0, 3);
+    };
     document.body.append(probe);
-    const hue = (getComputedStyle(probe).color.match(/[\d.]+/g) ?? []).map(
-      Number,
-    );
+    const hue = rgb("var(--hue-1)");
+    const brand = rgb("var(--brand)");
     probe.remove();
-    return { dot: [px[0], px[1], px[2]], hue: hue.slice(0, 3) };
+    return { dot: [px[0], px[1], px[2]], hue, brand };
   }, p);
 }
 
@@ -492,6 +496,17 @@ test("a hub takes the theme's first group colour", async ({
   const classic = await hubAndHue(page);
   expect(classic.dot).toEqual(classic.hue);
   expect(classic.dot).not.toEqual(theme.dot);
+});
+
+test("in the Hive theme the hubs are honey, like the dots", async ({
+  page,
+  context,
+}) => {
+  await setLook(context, "hive.dark.tinted.theme");
+  await open(page);
+  const hive = await hubAndHue(page);
+  expect(hive.dot).toEqual(hive.brand);
+  expect(hive.dot).not.toEqual(hive.hue);
 });
 
 for (const look of [undefined, "aurora.light.vivid.classic"])
