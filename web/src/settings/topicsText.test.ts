@@ -5,9 +5,11 @@ describe("the sentences of the Topics section", () => {
   it("names each kind in the plural", () => {
     expect(t.KIND_NAMES).toEqual({
       client: "Customers",
+      partner: "Partners",
       project: "Projects",
       vendor: "Vendors",
       product: "Products",
+      solution: "Solutions",
       person: "People",
       subject: "Subjects",
     });

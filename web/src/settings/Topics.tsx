@@ -5,7 +5,7 @@
 // does not have yet, ticked by kind; Save sends the ticked ones. Below, the hive's topics by
 // kind, each with Delete, asked once. The database decides whether the person may; this only
 // asks. Nothing here reads a note's text.
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { candidates } from "../topics/candidates";
 import { normal } from "../topics/normal";
 import {
@@ -337,76 +337,81 @@ export function Topics({
           const of = shown.filter((x) => x.kind === kind);
           if (of.length === 0) return null;
           return (
-            <ul
-              key={kind}
-              role="list"
-              aria-label={t.KIND_NAMES[kind]}
-              className={s.rows}
-            >
-              {of.map((topic) => {
-                const notes = t.topicNotes(topic.notes);
-                const isAsking = asking === topic.id;
-                const off = busy === topic.id || undefined;
-                return (
-                  <li key={topic.id} className={s.item} aria-busy={off}>
-                    <div className={s.text}>
-                      <p className={s.what}>
-                        <span className={s.name}>{topic.name}</span>
-                      </p>
-                      <p className={s.meta}>
-                        <span>{t.KIND_NAMES[kind]}</span>
-                        {notes && <span>{notes}</span>}
-                      </p>
-                    </div>
-                    {!closing && (
-                      <div className={s.side}>
-                        <div
-                          role="group"
-                          aria-label={`${t.DELETE} ${topic.name}`}
-                          className={s.actions}
-                        >
-                          {isAsking ? (
-                            <>
-                              <p className={s.ask}>
-                                {t.deleteQuestion(topic.name)}
-                              </p>
-                              <button
-                                type="button"
-                                className={s.confirm}
-                                aria-disabled={off}
-                                onClick={() => void remove(topic)}
-                              >
-                                {t.DELETE}
-                              </button>
+            <Fragment key={kind}>
+              <h3 className={s.fieldLabel}>
+                {t.KIND_NAMES[kind]}{" "}
+                <span className={s.count}>{of.length}</span>
+              </h3>
+              <ul
+                role="list"
+                aria-label={t.KIND_NAMES[kind]}
+                className={s.rows}
+              >
+                {of.map((topic) => {
+                  const notes = t.topicNotes(topic.notes);
+                  const isAsking = asking === topic.id;
+                  const off = busy === topic.id || undefined;
+                  return (
+                    <li key={topic.id} className={s.item} aria-busy={off}>
+                      <div className={s.text}>
+                        <p className={s.what}>
+                          <span className={s.name}>{topic.name}</span>
+                        </p>
+                        <p className={s.meta}>
+                          <span>{t.KIND_NAMES[kind]}</span>
+                          {notes && <span>{notes}</span>}
+                        </p>
+                      </div>
+                      {!closing && (
+                        <div className={s.side}>
+                          <div
+                            role="group"
+                            aria-label={`${t.DELETE} ${topic.name}`}
+                            className={s.actions}
+                          >
+                            {isAsking ? (
+                              <>
+                                <p className={s.ask}>
+                                  {t.deleteQuestion(topic.name)}
+                                </p>
+                                <button
+                                  type="button"
+                                  className={s.confirm}
+                                  aria-disabled={off}
+                                  onClick={() => void remove(topic)}
+                                >
+                                  {t.DELETE}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={s.secondary}
+                                  aria-disabled={off}
+                                  onClick={() => setAsking(null)}
+                                >
+                                  {t.KEEP}
+                                </button>
+                              </>
+                            ) : (
                               <button
                                 type="button"
                                 className={s.secondary}
-                                aria-disabled={off}
-                                onClick={() => setAsking(null)}
+                                aria-label={`${t.DELETE} ${topic.name}`}
+                                onClick={() => setAsking(topic.id)}
                               >
-                                {t.KEEP}
+                                {t.DELETE}
                               </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              className={s.secondary}
-                              aria-label={`${t.DELETE} ${topic.name}`}
-                              onClick={() => setAsking(topic.id)}
-                            >
-                              {t.DELETE}
-                            </button>
+                            )}
+                          </div>
+                          {isAsking && (
+                            <p className={s.aside}>{t.DELETE_ASIDE}</p>
                           )}
                         </div>
-                        {isAsking && (
-                          <p className={s.aside}>{t.DELETE_ASIDE}</p>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Fragment>
           );
         })
       )}

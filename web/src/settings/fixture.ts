@@ -122,6 +122,13 @@ export function fixtureHeads(): NoteHead[] {
       aliases: [],
       tags: [],
     },
+    {
+      path: "Knowledge/Categories/Underwater ROVs.md",
+      title: "Underwater ROVs",
+      type: "category",
+      aliases: [],
+      tags: [],
+    },
     ...tagged,
   ];
 }

@@ -26,9 +26,11 @@ export const FAILED = "That didn't work. Try again.";
 
 export const KIND_NAMES: Record<Kind, string> = {
   client: "Customers",
+  partner: "Partners",
   project: "Projects",
   vendor: "Vendors",
   product: "Products",
+  solution: "Solutions",
   person: "People",
   subject: "Subjects",
 };

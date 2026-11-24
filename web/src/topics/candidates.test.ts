@@ -59,7 +59,8 @@ describe("proposalOf", () => {
   it.each([
     ["client", "client"],
     ["client-entity", "client"],
-    ["partner-entity", "client"],
+    ["partner-entity", "partner"],
+    ["partner", "partner"],
     ["project", "project"],
     ["internal-project", "project"],
     ["person", "person"],
@@ -67,7 +68,8 @@ describe("proposalOf", () => {
     ["vendor", "vendor"],
     ["concept", "subject"],
     ["cluster-topic", "subject"],
-    ["category", "subject"],
+    ["category", "solution"],
+    ["solution", "solution"],
     [" Vendor ", "vendor"],
   ])("a note of type %s proposes a %s named after its file", (type, kind) => {
     expect(proposalOf(head("Knowledge/x/Terra Drone.md", { type }))).toEqual({
@@ -250,9 +252,22 @@ describe("candidates", () => {
     expect(out).toEqual([]);
   });
 
+  it("keeps a partner and a vendor of the same name as two candidates, partner first", () => {
+    const out = candidates([
+      head("Knowledge/Vendors/Qualcomm.md", { type: "vendor" }),
+      head("Employers/Zain/Partners/Qualcomm.md", { type: "partner-entity" }),
+    ]);
+    expect(out.map((c) => `${c.kind}:${c.name}`)).toEqual([
+      "partner:Qualcomm",
+      "vendor:Qualcomm",
+    ]);
+  });
+
   it("orders by kind, then by name", () => {
     const out = candidates([
       head("x/Beta.md", { type: "concept", title: "Beta" }),
+      head("x/Rov.md", { type: "category", title: "Rov" }),
+      head("x/Qual.md", { type: "partner-entity", title: "Qual" }),
       head("x/Zed.md", { type: "client", title: "Zed" }),
       head("x/Alpha.md", { type: "client", title: "Alpha" }),
       head("x/Mid.md", { type: "vendor", title: "Mid" }),
@@ -260,7 +275,9 @@ describe("candidates", () => {
     expect(out.map((c) => `${c.kind}:${c.name}`)).toEqual([
       "client:Alpha",
       "client:Zed",
+      "partner:Qual",
       "vendor:Mid",
+      "solution:Rov",
       "subject:Beta",
     ]);
   });

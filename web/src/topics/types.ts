@@ -1,9 +1,11 @@
 // Shapes shared by everything about topics. Types and constants only: safe to import anywhere.
 export const KINDS = [
   "client",
+  "partner",
   "project",
   "vendor",
   "product",
+  "solution",
   "person",
   "subject",
 ] as const;
