@@ -1,16 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildModel } from "./graph";
-import { forceIterations, layout, orbit } from "./layouts";
+import { layout, orbit } from "./layouts";
 import { fixturePayload } from "./fixture";
-import type { MapNode, MapPayload, View } from "./types";
+import type { MapNode, MapPayload } from "./types";
 
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
-const FLAT: Exclude<View, "orbit" | "hive">[] = [
-  "rings",
-  "topics",
-  "links",
-  "timeline",
-];
+const FLAT: ("rings" | "timeline")[] = ["rings", "timeline"];
 
 function note(id: string, topic: string): MapNode {
   return {
@@ -94,15 +89,6 @@ describe.each(CASES)("layouts on %s", (_name, payload) => {
 
   it("puts the root at the centre in rings", () => {
     expect(layout("rings", model, NOW)[0]).toEqual([500, 380]);
-  });
-});
-
-describe("forceIterations", () => {
-  it("is 170 up to 1,500 nodes, then shrinks so pair work stays bounded", () => {
-    expect(forceIterations(10)).toBe(170);
-    expect(forceIterations(1500)).toBe(170);
-    expect(forceIterations(5000)).toBe(15);
-    expect(forceIterations(100_000)).toBe(12);
   });
 });
 

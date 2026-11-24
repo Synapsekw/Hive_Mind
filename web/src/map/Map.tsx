@@ -4,7 +4,7 @@
 // labels. Everything is computed from the payload in memory; nothing here touches the network.
 // Every view, Orbit included, is drawn on one canvas (MapCanvas); a visually hidden list of
 // real buttons (DotList) carries the keyboard and screen readers. Hover and keyboard focus make a
-// dot hot (the peek card, firing links, the soft dim); the Hive's agent marks move (useMarks).
+// dot hot (the peek card, firing links, the soft dim).
 import {
   startTransition,
   useCallback,
@@ -14,7 +14,6 @@ import {
   useState,
 } from "react";
 import { activity, agentStatus, buildModel } from "./graph";
-import { hiveComb } from "./hive";
 import { layout, orbit } from "./layouts";
 import { lit, nodeIndex, nodeKey, topicIndexOf } from "./select";
 import { buildScene } from "./scene";
@@ -25,12 +24,10 @@ import { DetailRail } from "./DetailRail";
 import { DotList } from "./DotList";
 import { MapCanvas, type CameraApi, type Preview } from "./MapCanvas";
 import { Peek } from "./Peek";
-import { Presence } from "./Presence";
-import { useMarks } from "./useMarks";
 import { Shell, type AgentRow } from "../shell/Shell";
 import s from "./map.module.css";
 
-type Flat = Exclude<View, "orbit" | "hive">;
+type Flat = Exclude<View, "orbit">;
 
 const PAN = 60;
 /** How long the pointer rests on a dot before it becomes hot. */
@@ -46,7 +43,7 @@ export function HiveMap({
   /** How much waits in the inbox, for the rail. */
   inbox?: number;
 }) {
-  const [view, setView] = useState<View>("hive");
+  const [view, setView] = useState<View>("rings");
   // The topic filter and the selection are kept by name and by key, not by index, so they
   // follow the same topic and node when a refresh shifts the indices (see `nodeKey`).
   const [topicName, setTopicName] = useState<string | null>(null);
@@ -81,25 +78,9 @@ export function HiveMap({
   if (topicName !== null && topic === null) setTopicName(null);
   if (memberId !== null && member === null) setMemberId(null);
 
-  // The comb moves only with the model and the minute (agent marks are live/today/idle).
-  const minuteNow = Math.floor(now / 60_000) * 60_000;
   const lastUsed = useMemo(
     () => new Map(payload.agents.map((a) => [a.id, a.last_used_at] as const)),
     [payload],
-  );
-  const comb = useMemo(
-    () => hiveComb(model, minuteNow, lastUsed),
-    [model, minuteNow, lastUsed],
-  );
-  const markStates = useMemo(
-    () => new Map(comb.marks.map((m) => [m.node, { state: m.state }] as const)),
-    [comb],
-  );
-  const agentMarks = useMarks(
-    comb,
-    model,
-    now,
-    view === "hive" && hot === null,
   );
 
   // Layouts are computed the first time a view is opened, then kept for this model. Only the
@@ -112,7 +93,8 @@ export function HiveMap({
     }),
     [model],
   );
-  const flatView: Flat = view === "orbit" || view === "hive" ? "topics" : view;
+  // Orbit falls back to the rings' flat positions (for the hidden list and picking frames).
+  const flatView: Flat = view === "orbit" ? "rings" : view;
   if (flatView === "timeline" && cache.timelineAt !== now) {
     cache.flat.delete("timeline");
     cache.timelineAt = now;
@@ -122,22 +104,9 @@ export function HiveMap({
     flatPos = layout(flatView, model, now);
     cache.flat.set(flatView, flatPos);
   }
-  const basePos = view === "hive" ? comb.pos : flatPos;
+  const pos = flatPos;
   const isOrbit = view === "orbit";
   if (isOrbit && !cache.orbit) cache.orbit = orbit(model);
-  const pos = basePos;
-  // In the Hive the agents sit where their marks are now. The marks move, the comb does not: the
-  // canvas reads the marks as a small override, so a move never touches the cached dot batches.
-  const markPos = useMemo(
-    () =>
-      new Map(
-        agentMarks.marks.map(
-          (m) => [m.node, m.pos] as [number, [number, number]],
-        ),
-      ),
-    [agentMarks.marks],
-  );
-  const moved = view === "hive" ? markPos : null;
 
   // The hidden list's positions follow the canvas only once a glide has landed, so a view switch
   // never waits on 5,000 buttons' data-x/data-y before its first frame.
@@ -152,22 +121,14 @@ export function HiveMap({
       ),
     [],
   );
-  const listBase = listAt.model === model ? listAt.pos : pos;
+  // The list's own positions and view, so a view switch changes nothing there until the glide
+  // lands.
+  const listPos = listAt.model === model ? listAt.pos : pos;
   const listView = listAt.model === model ? listAt.view : view;
-  // Keyed on the list's own positions and view, so a view switch changes nothing here until the
-  // glide lands.
-  const listPos = useMemo(() => {
-    if (listView !== "hive") return listBase;
-    const out = listBase.slice();
-    for (const [i, at] of markPos) out[i] = at;
-    return out;
-  }, [listBase, listView, markPos]);
 
-  // The scene is built from the comb's own positions, so a mark's move never rebuilds it.
   const scene = useMemo(
-    () =>
-      buildScene(model, view, basePos, act, now, view === "hive" ? comb : null),
-    [model, view, basePos, act, now, comb],
+    () => buildScene(model, view, pos, act, now),
+    [model, view, pos, act, now],
   );
 
   const agentInfo = useMemo(() => {
@@ -201,18 +162,6 @@ export function HiveMap({
         }),
     [model, agentInfo, lastUsed],
   );
-  // The same names for "At the hive", by node.
-  const agentNames = useMemo(() => {
-    const byId = new Map(agents.map((a) => [a.id, a] as const));
-    const m = new Map<number, { name: string; lastUsedAt: string | null }>();
-    for (const n of model.nodes) {
-      const a =
-        n.kind === "agent" && n.id !== null ? byId.get(n.id) : undefined;
-      if (a) m.set(n.i, { name: a.name, lastUsedAt: a.lastUsedAt ?? null });
-    }
-    return m;
-  }, [agents, model]);
-
   const query = q.trim();
   const on = useMemo(
     () => lit(model, { topic, kind, member, q, sel }),
@@ -437,13 +386,10 @@ export function HiveMap({
             focusRing={focusDot}
             labelsOn={names}
             labels={labels}
-            marks={markStates}
             onHover={setHot}
             onPick={canvasPick}
             cameraRef={cameraRef}
             fire={fire}
-            flare={agentMarks.flare}
-            moved={moved}
             onLanded={onLanded}
           />
           <DotList
@@ -455,14 +401,6 @@ export function HiveMap({
             onFocusDot={onFocusDot}
             onPick={pick}
           />
-          {view === "hive" && (
-            <Presence
-              marks={agentMarks.marks}
-              names={agentNames}
-              now={now}
-              onHot={setHot}
-            />
-          )}
           <Dock
             model={model}
             topic={topic}

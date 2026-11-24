@@ -20,7 +20,7 @@ export function colour(model: MapModel, n: ModelNode): string {
   return t ? `var(--hue-${t.hue + 1})` : SOFT;
 }
 
-/** The mark's diameter in screen pixels, outside the Hive view. */
+/** The mark's diameter in screen pixels. */
 export function size(n: ModelNode): number {
   if (n.kind === "root") return 28;
   if (n.kind === "hub") return 16;

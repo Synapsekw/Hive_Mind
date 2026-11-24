@@ -1,7 +1,7 @@
 // One pure function per view, from the model to positions in the 1000 x 760 box (orbit: 3D).
-// Ported from the prototype's geometry in docs/ui/map.dc.html (`build()` and `force()`).
+// Ported from the prototype's geometry in docs/ui/map.dc.html (`build()`).
 import { BOX, dayIndex, DAYS } from "./graph";
-import type { MapModel, View } from "./types";
+import type { MapModel } from "./types";
 
 type P2 = [number, number];
 type P3 = [number, number, number];
@@ -121,25 +121,6 @@ function rings(model: MapModel, p: Parts): P2[] {
   return out;
 }
 
-function topics(model: MapModel, p: Parts): P2[] {
-  const out = new Array<P2>(model.nodes.length);
-  out[0] = [CX, CY];
-  const A = p.agents.length;
-  p.agents.forEach((id, t) => {
-    out[id] = polar(64, (t * TAU) / A);
-  });
-  p.items.forEach((list, i) => {
-    const c = polar(240, p.sec[i]!.mid);
-    out[p.hubs[i]!] = c;
-    list.forEach((id, j) => {
-      const rr = 5.6 * Math.sqrt(j + 2);
-      const an = j * 2.39996 + i;
-      out[id] = [c[0] + rr * Math.cos(an), c[1] + rr * Math.sin(an)];
-    });
-  });
-  return out;
-}
-
 const X0 = 250;
 const CW = 51;
 const ITEM_Y0 = 430;
@@ -195,90 +176,6 @@ function timeline(model: MapModel, p: Parts, now: number): P2[] {
   return out;
 }
 
-const ITERATIONS = 170;
-const FULL_NODES = 1500;
-
-/**
- * Passes of the force layout for `n` nodes: 170 up to 1,500 nodes, then fewer, so the pair
- * work (n^2 per pass) never exceeds the 1,500-node cost. Never fewer than 12.
- */
-export function forceIterations(n: number): number {
-  if (n <= FULL_NODES) return ITERATIONS;
-  return Math.max(12, Math.floor(ITERATIONS * (FULL_NODES / n) ** 2));
-}
-
-function force(model: MapModel, start: P2[]): P2[] {
-  const N = model.nodes.length;
-  const ITER = forceIterations(N);
-  const px = new Float64Array(N);
-  const py = new Float64Array(N);
-  start.forEach((q, i) => {
-    px[i] = q[0];
-    py[i] = q[1];
-  });
-  const E = model.edges.length;
-  const rest = new Float64Array(E);
-  const stiff = new Float64Array(E);
-  model.edges.forEach(([u, v], e) => {
-    const a = model.nodes[u]!;
-    const b = model.nodes[v]!;
-    const top =
-      a.kind === "root" ||
-      a.kind === "agent" ||
-      b.kind === "root" ||
-      b.kind === "agent";
-    const same = !top && a.topic === b.topic;
-    rest[e] = top ? 170 : same ? 18 : 150;
-    stiff[e] = top ? 0.015 : same ? 0.08 : 0.008;
-  });
-  const fx = new Float64Array(N);
-  const fy = new Float64Array(N);
-  for (let it = 0; it < ITER; it++) {
-    const cool = 1 - it / ITER;
-    fx.fill(0);
-    fy.fill(0);
-    for (let i = 0; i < N; i++) {
-      for (let j = i + 1; j < N; j++) {
-        const dx = px[i]! - px[j]!;
-        const dy = py[i]! - py[j]!;
-        const d2 = Math.max(dx * dx + dy * dy, 16);
-        const d = Math.sqrt(d2);
-        const f = 260 / d2;
-        const ux = (dx / d) * f;
-        const uy = (dy / d) * f;
-        fx[i]! += ux;
-        fy[i]! += uy;
-        fx[j]! -= ux;
-        fy[j]! -= uy;
-      }
-    }
-    for (let e = 0; e < E; e++) {
-      const [u, v] = model.edges[e]!;
-      const dx = px[v]! - px[u]!;
-      const dy = py[v]! - py[u]!;
-      const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-      const f = (d - rest[e]!) * stiff[e]!;
-      fx[u]! += (dx / d) * f;
-      fy[u]! += (dy / d) * f;
-      fx[v]! -= (dx / d) * f;
-      fy[v]! -= (dy / d) * f;
-    }
-    for (let i = 1; i < N; i++) {
-      fx[i]! += (CX - px[i]!) * 0.004;
-      fy[i]! += (CY - py[i]!) * 0.004;
-      px[i] = Math.min(
-        970,
-        Math.max(30, px[i]! + Math.max(-8, Math.min(8, fx[i]!)) * cool),
-      );
-      py[i] = Math.min(
-        735,
-        Math.max(25, py[i]! + Math.max(-8, Math.min(8, fy[i]!)) * cool),
-      );
-    }
-  }
-  return Array.from({ length: N }, (_, i): P2 => [px[i]!, py[i]!]);
-}
-
 const clamp = (v: number, hi: number, fallback: number): number =>
   Number.isFinite(v) ? Math.min(hi, Math.max(0, v)) : fallback;
 
@@ -288,12 +185,9 @@ function inBox(pos: P2[]): P2[] {
   );
 }
 
-/**
- * Flat positions in the 1000 x 760 box, one per model node. `links` is O(n^2) per pass with
- * `forceIterations(n)` passes (bounded at the 1,500-node cost): cache it.
- */
+/** Flat positions in the 1000 x 760 box, one per model node. */
 export function layout(
-  view: Exclude<View, "orbit" | "hive">,
+  view: "rings" | "timeline",
   model: MapModel,
   now: number,
 ): [number, number][] {
@@ -301,12 +195,8 @@ export function layout(
   switch (view) {
     case "rings":
       return inBox(rings(model, p));
-    case "topics":
-      return inBox(topics(model, p));
     case "timeline":
       return inBox(timeline(model, p, now));
-    case "links":
-      return inBox(force(model, inBox(topics(model, p))));
   }
 }
 

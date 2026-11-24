@@ -408,99 +408,6 @@
   color: var(--fg2);
 }
 
-/* ---- "At the hive": who is at the hive, top right of the stage ---- */
-
-.presence {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 2;
-  min-width: 168px;
-  max-width: 240px;
-  padding: 9px 12px 10px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
-  font-size: 12px;
-}
-
-.presenceHead {
-  margin: 0 0 6px;
-  font-family: var(--font-mono), monospace;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.presenceList {
-  display: grid;
-  gap: 2px;
-  margin: 0 0 4px;
-  padding: 0;
-  list-style: none;
-}
-
-.presenceList li {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 -6px;
-  padding: 3px 6px;
-  border-radius: 7px;
-  transition: background var(--dur-fast) var(--ease);
-}
-
-.presenceList li:hover,
-.presenceList li:focus-visible {
-  background: var(--fill);
-}
-
-.presenceMark {
-  flex: none;
-}
-
-.presenceMark polygon {
-  fill: var(--bg);
-  stroke: var(--brand);
-  stroke-width: 1.4;
-}
-
-.presenceMark circle {
-  fill: var(--fg2);
-}
-
-.presenceMark[data-state="live"] circle {
-  fill: var(--brand);
-}
-
-.presenceName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--fg);
-}
-
-.presenceLive {
-  color: var(--brand);
-  font-weight: 600;
-}
-
-.presenceAgo {
-  font-family: var(--font-mono), monospace;
-  font-size: 11px;
-  color: var(--quiet);
-}
-
-.presenceIdle {
-  margin: 0;
-  color: var(--quiet);
-}
-
 /* ---- The legend dock ---- */
 
 .dock {
@@ -1074,7 +981,6 @@
   }
 
   .zoom,
-  .presence,
   .peek {
     background: var(--surface);
   }

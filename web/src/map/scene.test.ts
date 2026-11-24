@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fixturePayload } from "./fixture";
 import { activity, buildModel } from "./graph";
-import { hiveComb } from "./hive";
 import { layout } from "./layouts";
 import { buildScene } from "./scene";
 
@@ -12,32 +11,12 @@ const act = activity(model, NOW);
 
 describe("buildScene", () => {
   it("groups every topic node once and lists agents and the root apart", () => {
-    const s = buildScene(
-      model,
-      "rings",
-      layout("rings", model, NOW),
-      act,
-      NOW,
-      null,
-    );
+    const s = buildScene(model, "rings", layout("rings", model, NOW), act, NOW);
     const grouped = s.byTopic.flat();
     expect(new Set(grouped).size).toBe(grouped.length);
     expect(grouped.length + s.agents.length + 1).toBe(model.nodes.length);
     expect(s.edges.length).toBe(model.edges.length * 4);
     expect(s.guides.rings).toEqual([143, 228, 272]);
-  });
-  it("draws the comb only in the hive view", () => {
-    const lastUsed = new Map(
-      payload.agents.map((a) => [a.id, a.last_used_at] as const),
-    );
-    const comb = hiveComb(model, NOW, lastUsed);
-    expect(
-      buildScene(model, "hive", comb.pos, act, NOW, comb).combCells.length,
-    ).toBe(comb.cells.length);
-    expect(
-      buildScene(model, "topics", layout("topics", model, NOW), act, NOW, comb)
-        .combCells,
-    ).toEqual([]);
   });
   it("grows the fixture to the asked number of items, ids unique", () => {
     const big = fixturePayload(NOW, { items: 5000 });
@@ -47,18 +26,12 @@ describe("buildScene", () => {
   });
   it("has the timeline axis only in the timeline", () => {
     expect(
-      buildScene(
-        model,
-        "timeline",
-        layout("timeline", model, NOW),
-        act,
-        NOW,
-        null,
-      ).guides.axis,
+      buildScene(model, "timeline", layout("timeline", model, NOW), act, NOW)
+        .guides.axis,
     ).not.toBeNull();
     expect(
-      buildScene(model, "topics", layout("topics", model, NOW), act, NOW, null)
-        .guides.axis,
+      buildScene(model, "rings", layout("rings", model, NOW), act, NOW).guides
+        .axis,
     ).toBeNull();
   });
 });

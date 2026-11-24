@@ -1,20 +1,9 @@
 // The map's geometry for one model, view and layout, as plain data: edge segments, node groups
-// per topic, the comb, guides and their labels, the core swarm and the timeline ticks. Pure;
-// colours are not decided here (the renderer reads them from tokens), and the renderer builds
-// its batched Path2Ds from this once per scene.
+// per topic, guides and their labels, the core swarm and the timeline ticks. Pure; colours are
+// not decided here (the renderer reads them from tokens), and the renderer builds its batched
+// Path2Ds from this once per scene.
 import { DAYS } from "./graph";
-import type { Comb } from "./hive";
 import type { Activity, MapModel, View } from "./types";
-
-export type CombCell = {
-  topic: number;
-  x: number;
-  y: number;
-  kind: "hub" | "item" | "root" | "empty";
-  capped: boolean;
-  honey: number;
-  node: number | null;
-};
 
 export type GuideLabel = {
   text: string;
@@ -28,15 +17,10 @@ export type Scene = {
   byTopic: number[][]; // node indices per topic (notes, files, hubs)
   agents: number[];
   root: number;
-  combCells: CombCell[];
   guides: { rings: number[]; axis: [number, number, number] | null }; // ring radii; timeline axis x0,x1,y
   guideLabels: GuideLabel[];
   core: [number, number][]; // swarm points, last-24h writes
   ticks: [number, number][]; // timeline agent-write ticks
-  /** The comb's cell size (box units), 0 outside the Hive view. */
-  combSize: number;
-  /** The entrance arch under the comb (Hive only). */
-  entrance: [number, number] | null;
 };
 
 const CX = 500;
@@ -154,7 +138,6 @@ export function buildScene(
   pos: [number, number][],
   act: Activity,
   now: number,
-  comb: Comb | null,
 ): Scene {
   const edges = new Float32Array(model.edges.length * 4);
   model.edges.forEach(([u, v], e) => {
@@ -173,34 +156,18 @@ export function buildScene(
     else if (n.kind !== "root" && n.topic >= 0) byTopic[n.topic]!.push(n.i);
   }
 
-  const hive = view === "hive" && comb !== null;
-  const combCells: CombCell[] = hive
-    ? comb.cells.map((c) => ({
-        topic: c.topic,
-        x: c.x,
-        y: c.y,
-        kind: c.kind,
-        capped: c.capped,
-        honey: c.honey,
-        node: c.node,
-      }))
-    : [];
-
   const isTime = view === "timeline";
   return {
     edges,
     byTopic,
     agents,
     root: 0,
-    combCells,
     guides: {
       rings: view === "rings" ? RINGS : [],
       axis: isTime ? [X0, 964, 392] : null,
     },
     guideLabels: guideLabels(view, now),
-    core: !isTime && view !== "hive" && act.today > 0 ? swarm(act.today) : [],
+    core: !isTime && act.today > 0 ? swarm(act.today) : [],
     ticks: isTime ? ticks(model, pos, act) : [],
-    combSize: hive ? comb.size : 0,
-    entrance: hive ? comb.entrance : null,
   };
 }

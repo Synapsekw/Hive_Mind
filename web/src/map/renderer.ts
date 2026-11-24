@@ -1,6 +1,6 @@
 // Draws one frame of the map on a 2D canvas context. No React, no DOM writes: MapCanvas owns the
-// element and the loop. Geometry that only changes with the scene (edges, comb cells per topic)
-// is built once per scene as batched Path2Ds; a frame is a few dozen fills and strokes. Colours
+// element and the loop. Geometry that only changes with the scene (the edges) is built once per
+// scene as batched Path2Ds; a frame is a few dozen fills and strokes. Colours
 // come from the theme's tokens (readPalette), never from literals; transparency is always
 // `globalAlpha`. Line widths and radii are divided by the scale, so they keep their screen size.
 import type { Cam } from "./camera";
@@ -20,9 +20,7 @@ export type FrameState = {
   sel: number | null;
   focusRing: number | null; // keyboard-focused dot
   labels: Set<number>;
-  marks: Map<number, { state: "live" | "today" | "idle" }>; // agent node -> mark state (Hive)
   pulses: Pulse[];
-  flares: Map<number, number>; // comb cell node -> flare start time
   time: number; // performance.now() for animations
   reducedMotion: boolean;
   /** The camera is moving (wheel, drag, glide): the resting layer is moved, not redrawn. */
@@ -32,11 +30,6 @@ export type FrameState = {
    * keeps its identity for the whole growth, so the dot batches are rebuilt once, not per frame.
    */
   grow?: { nodes: Set<number>; k: number } | null;
-  /**
-   * Agents drawn somewhere other than `pos` (the Hive's marks mid-move). Read only where a single
-   * node's position is needed, never by the cached dot batches, so a mark move rebuilds nothing.
-   */
-  moved?: Map<number, [number, number]> | null;
   /** The resting layer's opacity (it fades in while the dots glide to a new view). */
   layerAlpha?: number;
   /** Orbit only: this frame's projection of the 3D positions (orbit3d.ts). */
@@ -67,7 +60,6 @@ export type Palette = {
 
 const TAU = Math.PI * 2;
 const SQ2 = Math.SQRT2;
-const FLARE_MS = 1400;
 const LABEL_MAX = 220;
 
 /** The theme's colours, read once per theme change (getComputedStyle is not free). */
@@ -89,27 +81,16 @@ export function readPalette(el: Element): Palette {
 
 // ---- Per-scene cache ----
 
-type TopicPath = { topic: number; path: Path2D };
 type SceneCache = {
   edges: Path2D;
-  combFill: { topic: number; alpha: number; path: Path2D }[];
-  combStroke: TopicPath[];
-  capped: TopicPath[];
-  hubs: TopicPath[];
-  empty: Path2D;
-  root: Path2D | null;
-  hexR: number;
-  cellOf: Map<number, number>; // node -> index in scene.combCells
-  dimCells: WeakMap<boolean[], Path2D>;
-  softCells: WeakMap<Set<number>, Path2D>;
   litEdges: WeakMap<boolean[], Path2D>;
   filtered: WeakMap<boolean[], boolean>;
 };
 
 const caches = new WeakMap<Scene, SceneCache>();
 
-/** A pointy-top hexagon (the comb's orientation) of circumradius r, added to `p`. */
-function hex(p: Path2D, x: number, y: number, r: number, turn = Math.PI / 6) {
+/** A hexagon of circumradius r, turned by `turn` (radians), added to `p`. */
+function hex(p: Path2D, x: number, y: number, r: number, turn: number) {
   for (let i = 0; i < 6; i++) {
     const a = turn + (i * Math.PI) / 3;
     const hx = x + r * Math.cos(a);
@@ -129,54 +110,8 @@ function cacheFor(scene: Scene): SceneCache {
     edges.moveTo(e[i]!, e[i + 1]!);
     edges.lineTo(e[i + 2]!, e[i + 3]!);
   }
-  // One hex per cell, appended straight into its batch (the same as addPath of one translated hex).
-  const hexR = Math.max(0.5, scene.combSize - 1.2);
-  const fills = new Map<
-    string,
-    { topic: number; alpha: number; path: Path2D }
-  >();
-  const strokes = new Map<number, Path2D>();
-  const capped = new Map<number, Path2D>();
-  const hubs = new Map<number, Path2D>();
-  const empty = new Path2D();
-  let root: Path2D | null = null;
-  const cellOf = new Map<number, number>();
-  const get = (m: Map<number, Path2D>, t: number) => {
-    let p = m.get(t);
-    if (!p) m.set(t, (p = new Path2D()));
-    return p;
-  };
-  scene.combCells.forEach((c, i) => {
-    if (c.node !== null) cellOf.set(c.node, i);
-    if (c.kind === "empty") return hex(empty, c.x, c.y, hexR);
-    if (c.kind === "root") {
-      root = new Path2D();
-      return hex(root, c.x, c.y, hexR);
-    }
-    if (c.capped) return hex(get(capped, c.topic), c.x, c.y, hexR);
-    // Fill alphas in steps of 0.05, so a topic is a handful of fills rather than one per cell.
-    const alpha = Math.max(0.05, Math.round(c.honey / 0.05) * 0.05);
-    const key = `${c.topic}|${alpha}`;
-    let f = fills.get(key);
-    if (!f) fills.set(key, (f = { topic: c.topic, alpha, path: new Path2D() }));
-    hex(f.path, c.x, c.y, hexR);
-    hex(get(strokes, c.topic), c.x, c.y, hexR);
-    if (c.kind === "hub") hex(get(hubs, c.topic), c.x, c.y, hexR);
-  });
-  const list = (m: Map<number, Path2D>): TopicPath[] =>
-    [...m].map(([topic, path]) => ({ topic, path }));
   const out: SceneCache = {
     edges,
-    combFill: [...fills.values()],
-    combStroke: list(strokes),
-    capped: list(capped),
-    hubs: list(hubs),
-    empty,
-    root,
-    hexR,
-    cellOf,
-    dimCells: new WeakMap(),
-    softCells: new WeakMap(),
     litEdges: new WeakMap(),
     filtered: new WeakMap(),
   };
@@ -191,19 +126,6 @@ function isFiltered(c: SceneCache, lit: boolean[]): boolean {
     c.filtered.set(lit, v);
   }
   return v;
-}
-
-/** The comb cells whose item is outside `keep`, as one path (cached per keep-set). */
-function cellsOutside(
-  scene: Scene,
-  c: SceneCache,
-  keep: (node: number) => boolean,
-): Path2D {
-  const p = new Path2D();
-  for (const cell of scene.combCells)
-    if (cell.node !== null && cell.kind !== "root" && !keep(cell.node))
-      hex(p, cell.x, cell.y, c.hexR + 0.6);
-  return p;
 }
 
 // ---- Text ----
@@ -260,7 +182,7 @@ export function clearTextCache(): void {
 // ---- The frame ----
 
 /**
- * What a frame leaves running: "motion" (a glide, drag, zoom, pulse or flare: draw again on the
+ * What a frame leaves running: "motion" (a glide, drag, zoom or pulse: draw again on the
  * next animation frame), "ambient" (only the calm breathing and turning: a throttled ~12 fps is
  * enough) or false (nothing: draw again only when something changes).
  */
@@ -281,8 +203,6 @@ type Frame = {
   px: number; // one css px in box units
   cssW: number;
   cssH: number;
-  hive: boolean;
-  small: boolean;
   still: boolean;
   T: number;
   filtered: boolean;
@@ -297,8 +217,7 @@ type Frame = {
 };
 
 const CENTRE: [number, number] = [500, 380];
-const P = (F: Frame, i: number): [number, number] =>
-  F.f.moved?.get(i) ?? F.f.pos[i] ?? CENTRE;
+const P = (F: Frame, i: number): [number, number] => F.f.pos[i] ?? CENTRE;
 const hueOf = (F: Frame, topic: number) =>
   F.pal.hue[F.model.topics[topic]?.hue ?? -1] ?? F.pal.fg2;
 const colourOf = (F: Frame, n: ModelNode) =>
@@ -316,19 +235,10 @@ const alphaOf = (F: Frame, i: number) =>
 const theirs = (n: ModelNode) =>
   !n.mine && !n.locked && (n.kind === "note" || n.kind === "file");
 
-/** A dot's drawn diameter in screen px (the Hive draws smaller marks on its cells). */
-export function dotDiameter(
-  n: ModelNode,
-  hive: boolean,
-  smallComb: boolean,
-): number {
-  if (!hive) return size(n);
-  if (n.kind === "hub") return smallComb ? 8 : 11;
-  if (n.kind === "note" || n.kind === "file") return smallComb ? 4 : 6;
-  if (n.kind === "root") return smallComb ? 14 : 22;
-  return 12;
+/** A dot's drawn diameter in screen px. */
+export function dotDiameter(n: ModelNode): number {
+  return size(n);
 }
-const diam = (F: Frame, n: ModelNode) => dotDiameter(n, F.hive, F.small);
 
 const kindOf = (n: ModelNode): Kind =>
   n.kind === "hub"
@@ -389,8 +299,6 @@ export function drawFrame(
     px: 1 / s,
     cssW,
     cssH,
-    hive: f.view === "hive",
-    small: scene.combSize > 0 && scene.combSize < 10,
     still: f.reducedMotion,
     T: Math.max(1, model.topics.length),
     filtered,
@@ -406,7 +314,6 @@ export function drawFrame(
   ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * f.cam.tx, dpr * f.cam.ty);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  drawFlares(F);
   drawFocusLinks(F);
   drawPulses(F);
   drawCore(F);
@@ -481,8 +388,6 @@ function drawOrbit(
     px: 1,
     cssW,
     cssH,
-    hive: false,
-    small: false,
     still: f.reducedMotion,
     T: Math.max(1, model.topics.length),
     filtered: false,
@@ -572,85 +477,13 @@ const special = (F: Frame, i: number) =>
 /** Orbit: a node's perspective scale (near dots larger); 1 in the flat views. */
 const depthOf = (F: Frame, i: number) => (F.depth ? (F.depth[i] ?? 1) : 1);
 
-// ---- The resting layer: comb, guides, resting edges ----
+// ---- The resting layer: guides, resting edges ----
 
 /** Draws the resting layer into `g`, whose transform is already set to the box. */
 function drawStatic(F: Frame, g: CanvasRenderingContext2D) {
   const { scene, c, pal, px, f, model } = F;
   g.lineCap = "round";
   g.lineJoin = "round";
-  if (scene.combCells.length) {
-    for (const b of c.combFill) {
-      g.globalAlpha = b.alpha;
-      g.fillStyle = hueOf(F, b.topic);
-      g.fill(b.path);
-    }
-    g.lineWidth = px;
-    g.globalAlpha = 0.28;
-    for (const b of c.combStroke) {
-      g.strokeStyle = hueOf(F, b.topic);
-      g.stroke(b.path);
-    }
-    g.globalAlpha = 1;
-    g.strokeStyle = pal.line;
-    g.stroke(c.empty);
-    if (c.root) {
-      g.globalAlpha = 0.22;
-      g.fillStyle = pal.brand;
-      g.fill(c.root);
-    }
-    g.setLineDash([2 * px, 2 * px]);
-    for (const b of c.capped) {
-      g.globalAlpha = 1;
-      g.fillStyle = pal.bg;
-      g.fill(b.path);
-      g.globalAlpha = 0.8;
-      g.strokeStyle = hueOf(F, b.topic);
-      g.stroke(b.path);
-    }
-    g.setLineDash([]);
-    g.lineWidth = 1.5 * px;
-    g.globalAlpha = 0.9;
-    for (const b of c.hubs) {
-      g.strokeStyle = hueOf(F, b.topic);
-      g.stroke(b.path);
-    }
-    // Cells outside the filter (or the soft keep-set) drop to a near-empty frame.
-    g.fillStyle = pal.bg;
-    if (F.filtered) {
-      let p = c.dimCells.get(f.lit);
-      if (!p) {
-        const lit = f.lit;
-        p = cellsOutside(scene, c, (n) => !!lit[n]);
-        c.dimCells.set(lit, p);
-      }
-      g.globalAlpha = 0.8;
-      g.fill(p);
-    }
-    if (f.soft) {
-      let p = c.softCells.get(f.soft);
-      if (!p) {
-        const soft = f.soft;
-        p = cellsOutside(scene, c, (n) => soft.has(n));
-        c.softCells.set(soft, p);
-      }
-      g.globalAlpha = 0.55;
-      g.fill(p);
-    }
-    if (scene.entrance) {
-      const [ex, ey] = scene.entrance;
-      const idle = scene.agents.filter(
-        (i) => (f.marks.get(i)?.state ?? "idle") === "idle",
-      ).length;
-      g.globalAlpha = 1;
-      g.lineWidth = px;
-      g.strokeStyle = pal.line;
-      g.beginPath();
-      g.arc(ex, ey + 6, Math.max(14, idle * 9 + 6), Math.PI, TAU);
-      g.stroke();
-    }
-  }
-
   g.globalAlpha = 1;
   g.lineWidth = px;
   g.strokeStyle = pal.line;
@@ -668,11 +501,11 @@ function drawStatic(F: Frame, g: CanvasRenderingContext2D) {
     g.stroke();
   }
 
-  // Edges: none at rest in Hive; the timeline draws only the focused links.
-  if (!F.hive && f.view !== "timeline") {
+  // Edges: the timeline draws only the focused links.
+  if (f.view !== "timeline") {
     g.strokeStyle = pal.edge;
     g.lineWidth = 0.6 * px;
-    g.globalAlpha = F.busy ? 0.08 : f.view === "links" ? 0.55 : 0.3;
+    g.globalAlpha = F.busy ? 0.08 : 0.3;
     g.stroke(c.edges);
     if (F.filtered && f.sel === null && f.hot === null) {
       let p = c.litEdges.get(f.lit);
@@ -699,9 +532,7 @@ type Layer = {
   scene: Scene | null;
   pal: Palette | null;
   lit: boolean[] | null;
-  soft: Set<number> | null;
   busy: boolean;
-  marks: FrameState["marks"] | null;
   dpr: number;
   ww: number;
   W: number;
@@ -721,9 +552,7 @@ function layerFor(ctx: CanvasRenderingContext2D): Layer {
       scene: null,
       pal: null,
       lit: null,
-      soft: null,
       busy: false,
-      marks: null,
       dpr: 0,
       ww: 0,
       W: 0,
@@ -754,15 +583,13 @@ function drawLayer(F: Frame) {
   const W = ctx.canvas.width;
   const H = ctx.canvas.height;
   const cam = f.cam;
-  // Hover changes `busy`, which only the resting edges show: Hive and Timeline have none.
-  const busy = !F.hive && f.view !== "timeline" && F.busy;
+  // Hover changes `busy`, which only the resting edges show: the timeline has none.
+  const busy = f.view !== "timeline" && F.busy;
   const same =
     L.scene === scene &&
     L.pal === pal &&
     L.lit === f.lit &&
-    L.soft === f.soft &&
     L.busy === busy &&
-    L.marks === f.marks &&
     L.W === W &&
     L.H === H &&
     L.dpr === dpr &&
@@ -796,9 +623,7 @@ function drawLayer(F: Frame) {
       scene,
       pal,
       lit: f.lit,
-      soft: f.soft,
       busy,
-      marks: f.marks,
       dpr,
       ww: f.world.w,
       W,
@@ -824,26 +649,6 @@ function drawLayer(F: Frame) {
 }
 
 // ---- Live layers ----
-
-/** Flares: a cell's honey brightens to 0.9 and fades back over 1.4 s. */
-function drawFlares(F: Frame) {
-  const { ctx, scene, c, f } = F;
-  if (!scene.combCells.length) return;
-  for (const [node, t0] of f.flares) {
-    const p = (f.time - t0) / FLARE_MS;
-    const ci = c.cellOf.get(node);
-    if (p >= 1 || ci === undefined) continue;
-    // A slow fade: the calm ambient rate is enough.
-    F.ambient = true;
-    if (p < 0) continue;
-    const cell = scene.combCells[ci]!;
-    const path = new Path2D();
-    hex(path, cell.x, cell.y, c.hexR);
-    ctx.globalAlpha = cell.honey + (0.9 - cell.honey) * (1 - p);
-    ctx.fillStyle = hueOf(F, cell.topic);
-    ctx.fill(path);
-  }
-}
 
 /** The hot and selected dots' own links, in their colour. */
 function drawFocusLinks(F: Frame) {
@@ -939,7 +744,7 @@ function groupPaths(
     return p;
   };
   const rad = (i: number) =>
-    (diam(F, model.nodes[i]!) / 2) * scale * depthOf(F, i) * px;
+    (dotDiameter(model.nodes[i]!) / 2) * scale * depthOf(F, i) * px;
   if (kind === "hub")
     return [
       at((i) => rad(i) + 1.5 * px),
@@ -1080,47 +885,13 @@ function drawDots(F: Frame) {
     fillGroup(F, b.kind, hueOf(F, b.topic), b.alpha, b.paths, 0, b.topic);
 }
 
-/** Agents: a ring with a centre point, or in Hive a hexagon mark by state. */
+/** Agents: a ring with a centre point. */
 function drawAgent(F: Frame, i: number, s0: number, glow: number) {
-  const { ctx, model, f, pal, px, still } = F;
+  const { ctx, model, pal, px } = F;
   const n = model.nodes[i]!;
   const scale = s0 * depthOf(F, i);
   const [x, y] = P(F, i);
   const a = alphaOf(F, i);
-  if (F.hive) {
-    const state = f.marks.get(i)?.state ?? "idle";
-    const p = new Path2D();
-    hex(p, x, y, 6 * scale * px, -Math.PI / 2);
-    ctx.globalAlpha = a * (state === "idle" ? 0.4 : 1);
-    ctx.fillStyle = pal.bg;
-    ctx.fill(p);
-    ctx.strokeStyle = pal.brand;
-    ctx.lineWidth = 1.6 * px;
-    if (glow) {
-      ctx.shadowColor = pal.brand;
-      ctx.shadowBlur = glow;
-    }
-    ctx.stroke(p);
-    ctx.shadowBlur = 0;
-    if (state === "live") {
-      // The glow swells on a 2.6 s cycle, and holds still while a dot is hot.
-      const calm = still || f.hot !== null;
-      if (!calm) F.ambient = true;
-      ctx.shadowColor = pal.brand;
-      ctx.shadowBlur = calm ? 7 : 7 + 5 * Math.sin((TAU * f.time) / 2600);
-      ctx.fillStyle = pal.brand;
-      ctx.beginPath();
-      ctx.arc(x, y, 2.6 * scale * px, 0, TAU);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    } else if (state === "today") {
-      ctx.fillStyle = pal.fg2;
-      ctx.beginPath();
-      ctx.arc(x, y, 1.2 * scale * px, 0, TAU);
-      ctx.fill();
-    }
-    return;
-  }
   const r = (size(n) / 2) * scale * px;
   ctx.globalAlpha = a;
   if (glow) {
@@ -1153,12 +924,11 @@ function drawRoot(F: Frame, s0: number, glow: number) {
   if (!still) F.ambient = true;
   const turn = still ? 0 : (TAU * (f.time % 30_000)) / 30_000;
   const p = new Path2D();
-  hex(p, x, y, (diam(F, n) / 2) * scale * px, turn);
+  hex(p, x, y, (dotDiameter(n) / 2) * scale * px, turn);
   ctx.globalAlpha = alphaOf(F, scene.root);
-  const colour = F.hive ? pal.brand : pal.fg;
-  ctx.fillStyle = colour;
+  ctx.fillStyle = pal.fg;
   if (glow) {
-    ctx.shadowColor = colour;
+    ctx.shadowColor = pal.fg;
     ctx.shadowBlur = glow;
   }
   ctx.fill(p);
@@ -1195,7 +965,13 @@ function drawHot(F: Frame) {
   ctx.globalAlpha = 1;
   ctx.fillStyle = pal.bg;
   ctx.beginPath();
-  ctx.arc(x, y, ((diam(F, n) / 2) * 1.7 * depthOf(F, f.hot) + 2) * px, 0, TAU);
+  ctx.arc(
+    x,
+    y,
+    ((dotDiameter(n) / 2) * 1.7 * depthOf(F, f.hot) + 2) * px,
+    0,
+    TAU,
+  );
   ctx.fill();
   drawOne(F, f.hot, 1.7, 14);
 }
@@ -1207,7 +983,7 @@ function drawRings(F: Frame) {
     const n = model.nodes[i];
     if (!n) return;
     const [x, y] = P(F, i);
-    const r = (diam(F, n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
+    const r = (dotDiameter(n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = colour;
     ctx.lineWidth = w * px;
@@ -1258,7 +1034,7 @@ function drawLabels(F: Frame) {
     const font = `${weight} 12px ${fam}`;
     ctx.font = font;
     const m = fit(ctx, font, n.title, LABEL_MAX - 12);
-    const r = (diam(F, n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
+    const r = (dotDiameter(n) / 2) * (i === f.hot ? 1.7 : 1) * depthOf(F, i);
     const w = m.w + 12;
     const lx = bx > F.flipX ? x - r - 6 - w : x + r + 6;
     const a = alphaOf(F, i);

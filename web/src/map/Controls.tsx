@@ -7,10 +7,7 @@ import pill from "../shell/SlidingPill.module.css";
 import s from "./map.module.css";
 
 export const VIEWS: [View, string][] = [
-  ["hive", "Hive"],
   ["rings", "Rings"],
-  ["topics", "Topics"],
-  ["links", "Links"],
   ["timeline", "Timeline"],
   ["orbit", "Orbit"],
 ];
