@@ -27,6 +27,28 @@ const ZAIN = topic("z", "client", "Zain", ["ZainTech"]);
 const TERRA = topic("t", "vendor", "Terra Drone");
 const ready = prepare([ZAIN, TERRA]);
 
+describe("an index alias", () => {
+  const saved = prepare([topic("z", "client", "Zain", ["_Index", "ZainTech"])]);
+
+  it("gives a topic only the keys of its name and its real aliases", () => {
+    expect(saved[0]!.keys).toEqual(["zain", "zaintech"]);
+  });
+
+  it("does not match a note titled Sessions index", () => {
+    expect(
+      topicsFor(note("Sessions/a.md", { title: "Sessions index" }), saved),
+    ).toEqual([]);
+  });
+
+  it("gives a topic named Index no keys, so it matches nothing", () => {
+    const idx = prepare([topic("i", "subject", "Index")]);
+    expect(idx[0]!.keys).toEqual([]);
+    expect(
+      topicsFor(note("a.md", { title: "Index", body: "the index" }), idx),
+    ).toEqual([]);
+  });
+});
+
 describe("prose", () => {
   it("drops fenced code blocks and inline code", () => {
     expect(prose("a\n```\nZain\n```\nb `Zain` c\n~~~\nZain\n~~~\nd")).toBe(

@@ -22,11 +22,14 @@ export type Ready = {
   keys: string[];
 };
 
+/** Words that name a kind of file, not a subject: no topic is found through them. */
+const NOT_A_NAME = new Set(["index", "readme"]);
+
 export function prepare(topics: Topic[]): Ready[] {
   return topics.map((t) => {
     const own = normal(t.name);
     const keys = [...new Set([own, ...t.aliases.map(normal)])].filter(
-      (k) => k.length >= MIN_NAME,
+      (k) => k.length >= MIN_NAME && !NOT_A_NAME.has(k),
     );
     return { id: t.id, kind: t.kind, name: t.name, own, keys };
   });

@@ -132,6 +132,74 @@ describe("proposalOf", () => {
   });
 });
 
+describe("proposalOf: a file name is never an alias", () => {
+  it.each([
+    ["Employers/Zain/_Index.md", "_Index"],
+    ["Employers/Zain/README.md", "README"],
+    ["Employers/Zain/index.md", "index"],
+  ])("%s titled %s proposes Zain with no aliases", (path, title) => {
+    expect(proposalOf(head(path, { type: "client-entity", title }))).toEqual({
+      kind: "client",
+      name: "Zain",
+      aliases: [],
+    });
+  });
+
+  it("never takes index or readme from the title or the aliases field", () => {
+    expect(
+      proposalOf(
+        head("Employers/Zain/_Index.md", {
+          type: "client-entity",
+          title: "Index",
+          aliases: ["README", "ZainTech"],
+        }),
+      )?.aliases,
+    ).toEqual(["ZainTech"]);
+  });
+
+  it("takes no alias that is the note's own file stem in another spelling", () => {
+    for (const title of ["terra drone", "Terra-Drone", "Terra Drone"])
+      expect(
+        proposalOf(head("v/Terra Drone.md", { type: "vendor", title }))
+          ?.aliases,
+      ).toEqual([]);
+  });
+
+  it("still keeps a real title that differs", () => {
+    expect(
+      proposalOf(
+        head("Employers/Orbit/_Index.md", {
+          type: "client-entity",
+          title: "Orbit Aerospace",
+        }),
+      )?.aliases,
+    ).toEqual(["Orbit Aerospace"]);
+  });
+});
+
+describe("headOf: a plain-string tags field", () => {
+  it("splits a string on commas and white space", () => {
+    expect(headOf("a.md", "A", { tags: "zain" }).tags).toEqual(["zain"]);
+    expect(headOf("a.md", "A", { tags: "kuwait, vendor" }).tags).toEqual([
+      "kuwait",
+      "vendor",
+    ]);
+    expect(headOf("a.md", "A", { tags: " a  b,\nc ,, " }).tags).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+
+  it("drops items over 80 characters, caps at 50, and does not do this for aliases", () => {
+    const long = "x".repeat(81);
+    expect(headOf("a.md", "A", { tags: `ok ${long}` }).tags).toEqual(["ok"]);
+    const many = Array.from({ length: 60 }, (_, i) => `t${i}`).join(" ");
+    expect(headOf("a.md", "A", { tags: many }).tags).toHaveLength(50);
+    expect(headOf("a.md", "A", { aliases: "ZainTech" }).aliases).toEqual([]);
+  });
+});
+
 describe("candidates", () => {
   it("merges two notes that propose the same kind and name, ignoring case and accents", () => {
     const out = candidates([

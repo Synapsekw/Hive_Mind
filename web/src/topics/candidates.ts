@@ -43,6 +43,11 @@ function texts(v: unknown, max: number): string[] {
     .slice(0, max);
 }
 
+/** Obsidian lets `tags` be one string: split it on commas and white space. */
+function tagList(v: unknown): unknown {
+  return typeof v === "string" ? v.split(/[\s,]+/) : v;
+}
+
 /** What the rules read of a note. */
 export function headOf(
   path: string,
@@ -60,7 +65,7 @@ export function headOf(
     title,
     type: typeof f.type === "string" ? f.type : null,
     aliases: texts(f.aliases, MAX_ALIASES),
-    tags: texts(f.tags, MAX_HEAD_TAGS),
+    tags: texts(tagList(f.tags), MAX_HEAD_TAGS),
   };
 }
 
@@ -94,7 +99,8 @@ export function proposalOf(h: NoteHead): Proposal | null {
   const key = normal(name);
   if (name.length > MAX_NAME || key.length < MIN_NAME) return null;
 
-  const seen = new Set([key]);
+  // A file name is no other name for a topic, and neither is "index" or "readme".
+  const seen = new Set([key, normal(file), "index", "readme"]);
   const aliases: string[] = [];
   for (const a of [h.title.trim(), ...h.aliases]) {
     const k = normal(a);
