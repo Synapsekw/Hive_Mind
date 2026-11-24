@@ -23,6 +23,7 @@ export function TopBar({
   onNames,
   q,
   onQ,
+  today,
 }: {
   stats: string;
   view: View;
@@ -33,6 +34,8 @@ export function TopBar({
   onNames: () => void;
   q: string;
   onQ: (q: string) => void;
+  /** The Today button, last in the bar. */
+  today: React.ReactNode;
 }) {
   const group = useRef<HTMLDivElement>(null);
   const pillStyle = useSlidingPill(group, '[aria-pressed="true"]', view);
@@ -112,6 +115,7 @@ export function TopBar({
           value={q}
           onChange={(e) => onQ(e.target.value)}
         />
+        {today}
       </div>
     </div>
   );

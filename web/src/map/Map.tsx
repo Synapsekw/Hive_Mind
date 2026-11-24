@@ -32,6 +32,7 @@ import { lit, nodeIndex, nodeKey, shown, topicIndexOf } from "./select";
 import { buildScene } from "./scene";
 import type { MapModel, MapPayload, NodeKind, View } from "./types";
 import { TopBar } from "./Controls";
+import { TodayButton } from "./TodayButton";
 import { DetailRail } from "./DetailRail";
 import { DotList } from "./DotList";
 import { FilterBar } from "./FilterBar";
@@ -94,7 +95,7 @@ export function HiveMap({
   const cameraRef = useRef<CameraApi | null>(null);
   const hotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hotRef = useRef<number | null>(null);
-  const { togglePanel, openPanel } = useFold();
+  const { fold, togglePanel, openPanel } = useFold();
   const sidePresent = useFoldSidePresent();
 
   // A refresh that delivers the same payload keeps the model, so no layout runs again.
@@ -510,6 +511,15 @@ export function HiveMap({
           onNames={() => setNames((v) => !v)}
           q={q}
           onQ={filter(setQ)}
+          today={
+            <TodayButton
+              today={act.today}
+              needs={inbox ?? 0}
+              open={fold.panel === "open"}
+              controls="hv-details"
+              onToggle={togglePanel}
+            />
+          }
         />
         <div className={s.stageFit} data-map-stage="">
           <MapCanvas

@@ -11,25 +11,33 @@ import {
 } from "./fold";
 
 describe("parseFold", () => {
-  it("names the cookie and opens both sides by default", () => {
+  it("names the cookie and opens the rail but not the panel by default", () => {
     expect(FOLD_COOKIE).toBe("hive-fold");
-    expect(DEFAULT_FOLD).toEqual({ rail: "open", panel: "open" });
+    expect(DEFAULT_FOLD).toEqual({ rail: "open", panel: "shut" });
   });
 
-  it("reads a missing, empty or garbage value as open", () => {
-    for (const value of [undefined, "", "garbage", "..", "SHUT.SHUT", "x.y"])
-      expect(parseFold(value)).toEqual({ rail: "open", panel: "open" });
+  it("reads a missing, empty or garbage value as the default", () => {
+    for (const value of [
+      undefined,
+      "",
+      "nope",
+      "garbage",
+      "..",
+      "SHUT.SHUT",
+      "x.y",
+    ])
+      expect(parseFold(value)).toEqual({ rail: "open", panel: "shut" });
   });
 
-  it("reads one part as the rail and leaves the panel open", () => {
-    expect(parseFold("shut")).toEqual({ rail: "shut", panel: "open" });
+  it("reads one part as the rail and leaves the panel shut", () => {
+    expect(parseFold("shut")).toEqual({ rail: "shut", panel: "shut" });
   });
 
   it("reads each part on its own", () => {
     expect(parseFold("shut.open")).toEqual({ rail: "shut", panel: "open" });
     expect(parseFold("open.shut")).toEqual({ rail: "open", panel: "shut" });
     expect(parseFold("shut.shut")).toEqual({ rail: "shut", panel: "shut" });
-    expect(parseFold("shut.nope")).toEqual({ rail: "shut", panel: "open" });
+    expect(parseFold("shut.nope")).toEqual({ rail: "shut", panel: "shut" });
   });
 
   it("ignores a third part", () => {
@@ -51,7 +59,7 @@ describe("parseFold", () => {
 describe("formatFold", () => {
   it("writes the rail then the panel", () => {
     expect(formatFold({ rail: "open", panel: "shut" })).toBe("open.shut");
-    expect(formatFold(DEFAULT_FOLD)).toBe("open.open");
+    expect(formatFold(DEFAULT_FOLD)).toBe("open.shut");
   });
 
   it("is stable through a parse", () => {

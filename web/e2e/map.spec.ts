@@ -13,16 +13,22 @@ import { setLook } from "./look";
  * Folds both sides, so the stage is wide enough for the filter bar to show its chips: with the
  * rail and panel open, the bar's cap leaves room for one or two, and the rest give way to "+N".
  */
-async function roomForChips(context: BrowserContext) {
+async function setFold(context: BrowserContext, value: string) {
   await context.addCookies([
     {
       name: "hive-fold",
-      value: "shut.shut",
+      value,
       url: "http://localhost:3100",
       sameSite: "Lax",
     },
   ]);
 }
+
+const roomForChips = (context: BrowserContext) => setFold(context, "shut.shut");
+
+/** The Today button in the top bar, which opens and closes the side panel. */
+const todayButton = (page: Page) =>
+  page.getByRole("button", { name: /^Today, \d+ notes? written or changed/ });
 
 const VIEWS = ["Rings", "Timeline", "Orbit"];
 
@@ -596,6 +602,7 @@ test("the side panel shows today, the 14-day line and what needs you", async ({
   page,
 }) => {
   await open(page);
+  await todayButton(page).click();
   const panel = rail(page);
   await expect(panel).toContainText("Today");
   await expect(panel.locator("svg[data-spark]")).toBeVisible();
@@ -1064,7 +1071,7 @@ test("Escape closes a list and returns focus to its button", async ({
 test("pressing outside a list closes it", async ({ page }) => {
   await open(page);
   const list = await openList(page, "People");
-  await rail(page).getByText("Today", { exact: true }).click();
+  await todayButton(page).click();
   await expect(list).toHaveCount(0);
   await expect(listButton(page, "People")).toHaveAttribute(
     "aria-expanded",
@@ -1267,9 +1274,11 @@ test("several choices at once: any within a list, all across lists", async ({
 
 test("chips that do not fit give way to a +N chip that counts them", async ({
   page,
+  context,
 }) => {
   // Wide enough for some chips to show whole, so the test sees chips and "+N" side by side.
   await page.setViewportSize({ width: 1600, height: 1000 });
+  await setFold(context, "open.open");
   await open(page);
   const folders = await openList(page, "Folders");
   for (const name of ["DMT", "ADNOC", "Hiring", "Emsteel"])
@@ -1296,9 +1305,11 @@ const chipNames = (page: Page) =>
 
 test("with both sides open at 1600 px two folders get two chips and no +N", async ({
   page,
+  context,
 }) => {
   // The project's device sets 1280 x 720; this test is about a 1600 px window.
   await page.setViewportSize({ width: 1600, height: 1000 });
+  await setFold(context, "open.open");
   await open(page);
   await expect(page.locator("html")).toHaveAttribute("data-rail", "open");
   await expect(page.locator("html")).toHaveAttribute("data-panel", "open");
@@ -1314,8 +1325,10 @@ test("with both sides open at 1600 px two folders get two chips and no +N", asyn
 
 test("at 1280 px with both sides open many choices give way to +N and the bar keeps clear of the zoom control", async ({
   page,
+  context,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
+  await setFold(context, "open.open");
   await open(page);
   const folders = await openList(page, "Folders");
   for (const name of ["DMT", "Tower inspections", "Airspace approvals"])

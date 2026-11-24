@@ -32,7 +32,9 @@ const rightPanel = (page: Page) =>
 const railButton = (page: Page) =>
   page.getByRole("button", { name: /^(Fold|Unfold) navigation$/ });
 const panelButton = (page: Page) =>
-  page.getByRole("button", { name: /^(Fold|Unfold) details$/ });
+  page.getByRole("button", { name: "Close details", exact: true });
+const todayButton = (page: Page) =>
+  page.getByRole("button", { name: /^Today, \d+ notes? written or changed/ });
 
 /** Waits until a box is about `want` px wide (the fold is a short transition). */
 async function widthIs(box: Locator, want: number) {
@@ -114,6 +116,11 @@ test("a reload keeps the fold: the server already draws it", async ({
   const tag = /<html\b[^>]*>/.exec(await res.text())?.[0] ?? "";
   expect(tag).toContain('data-rail="shut"');
   expect(tag).toContain('data-panel="open"');
+  await context.clearCookies();
+  const plain = await page.request.get("/dev/map");
+  const tag2 = /<html\b[^>]*>/.exec(await plain.text())?.[0] ?? "";
+  expect(tag2).toContain('data-rail="open"');
+  expect(tag2).toContain('data-panel="shut"');
 
   // And after a real fold and reload, the browser sends the cookie it wrote.
   await context.clearCookies();
@@ -124,7 +131,7 @@ test("a reload keeps the fold: the server already draws it", async ({
   await expect(html(page)).toHaveAttribute("data-rail", "shut");
   await widthIs(leftRail(page), 60);
   const cookies = await context.cookies(ORIGIN);
-  expect(cookies.find((c) => c.name === "hive-fold")?.value).toBe("shut.open");
+  expect(cookies.find((c) => c.name === "hive-fold")?.value).toBe("shut.shut");
 });
 
 test("folded, every destination and the account and agents buttons keep their names", async ({
@@ -157,7 +164,7 @@ test("typing [ in the search field does not fold and lands in the field", async 
   await page.keyboard.type("a[b]c");
   await expect(search).toHaveValue("a[b]c");
   await expect(html(page)).toHaveAttribute("data-rail", "open");
-  await expect(html(page)).toHaveAttribute("data-panel", "open");
+  await expect(html(page)).toHaveAttribute("data-panel", "shut");
 });
 
 test("a window narrower than 700 px does not fold and shows no fold button", async ({
@@ -188,64 +195,66 @@ test("a window narrower than 700 px does not fold and shows no fold button", asy
 
 // ---- The right panel ----
 
-test("the fold button and the ] key fold the details panel to a strip and back", async ({
+test("the page starts with the panel hidden, and Today opens it and Close details shuts it", async ({
   page,
 }) => {
   await open(page);
-  await expect(html(page)).toHaveAttribute("data-panel", "open");
-  const full = (await rightPanel(page).boundingBox())!.width;
-  expect(full).toBeGreaterThan(150);
-
-  await page.getByRole("button", { name: "Fold details" }).click();
   await expect(html(page)).toHaveAttribute("data-panel", "shut");
-  await widthIs(rightPanel(page), 52);
-  const unfold = page.getByRole("button", { name: "Unfold details" });
-  await expect(unfold).toHaveAttribute("aria-expanded", "false");
-  await unfold.click();
-  await expect(html(page)).toHaveAttribute("data-panel", "open");
-  await widthIs(rightPanel(page), full);
+  await expect(rightPanel(page)).toBeHidden();
+  await expect(todayButton(page)).toHaveAttribute("aria-expanded", "false");
 
+  await todayButton(page).click();
+  await expect(html(page)).toHaveAttribute("data-panel", "open");
+  await expect(rightPanel(page)).toBeVisible();
+  expect((await rightPanel(page).boundingBox())!.width).toBeGreaterThan(150);
+  await expect(todayButton(page)).toHaveAttribute("aria-expanded", "true");
+
+  await panelButton(page).click();
+  await expect(html(page)).toHaveAttribute("data-panel", "shut");
+  await expect(rightPanel(page)).toBeHidden();
+});
+
+test("the ] key toggles the panel, and holding it toggles once", async ({
+  page,
+}) => {
+  await open(page);
+  await page.keyboard.press("]");
+  await expect(html(page)).toHaveAttribute("data-panel", "open");
   await page.keyboard.press("]");
   await expect(html(page)).toHaveAttribute("data-panel", "shut");
-  await widthIs(rightPanel(page), 52);
-  await page.keyboard.press("]");
-  await expect(html(page)).toHaveAttribute("data-panel", "open");
 
-  // Held down: one toggle.
   await page.keyboard.down("]");
   await page.keyboard.down("]");
   await page.keyboard.down("]");
   await page.keyboard.up("]");
-  await expect(html(page)).toHaveAttribute("data-panel", "shut");
+  await expect(html(page)).toHaveAttribute("data-panel", "open");
   await page.waitForTimeout(150);
-  await expect(html(page)).toHaveAttribute("data-panel", "shut");
+  await expect(html(page)).toHaveAttribute("data-panel", "open");
+});
+
+test("a cookie of open.open starts with the panel open", async ({
+  page,
+  context,
+}) => {
+  await setFold(context, "open.open");
+  await open(page);
+  await expect(html(page)).toHaveAttribute("data-panel", "open");
+  await expect(rightPanel(page)).toBeVisible();
 });
 
 test("] does nothing on a page without a panel", async ({ page }) => {
   await open(page, "/dev/vault");
   await page.keyboard.press("]");
-  await expect(html(page)).toHaveAttribute("data-panel", "open");
+  await expect(html(page)).toHaveAttribute("data-panel", "shut");
   await expect(panelButton(page)).toHaveCount(0);
+  await expect(todayButton(page)).toHaveCount(0);
 });
 
-test("folded, the strip shows how many need you", async ({ page, context }) => {
-  await setFold(context, "open.shut");
-  await open(page, "/dev/map?inbox=2");
-  await widthIs(rightPanel(page), 52);
-  await expect(rightPanel(page).getByText("2 need you")).toBeAttached();
-  await expect(rightPanel(page).locator('[class*="stripBadge"]')).toBeVisible();
-  await expect(
-    rightPanel(page).locator('[class*="stripBadge"] > [aria-hidden="true"]'),
-  ).toHaveText("2");
-});
-
-test("selecting a dot with the keyboard while folded unfolds the panel on its details", async ({
+test("selecting a dot with the keyboard while the panel is hidden opens it on the details", async ({
   page,
-  context,
 }) => {
-  await setFold(context, "open.shut");
   await open(page);
-  await widthIs(rightPanel(page), 52);
+  await expect(rightPanel(page)).toBeHidden();
   const dot = page.locator('[data-map-dot][aria-label^="<img src=x"]');
   await dot.focus();
   await page.keyboard.press("Enter");
@@ -253,10 +262,27 @@ test("selecting a dot with the keyboard while folded unfolds the panel on its de
   await expect(rightPanel(page).getByRole("heading", { level: 2 })).toHaveText(
     HOSTILE_TITLE,
   );
-  await expect(
-    rightPanel(page).getByRole("heading", { level: 2 }),
-  ).toBeVisible();
   await expect(dot).toHaveAttribute("aria-pressed", "true");
+});
+
+test("shutting the panel keeps the selected dot selected", async ({ page }) => {
+  await open(page);
+  const dot = page.locator('[data-map-dot][aria-label^="<img src=x"]');
+  await dot.focus();
+  await page.keyboard.press("Enter");
+  await expect(html(page)).toHaveAttribute("data-panel", "open");
+  await panelButton(page).click();
+  await expect(html(page)).toHaveAttribute("data-panel", "shut");
+  await expect(dot).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the Today button's name carries today's count and how many need you", async ({
+  page,
+}) => {
+  await open(page, "/dev/map?inbox=2");
+  await expect(todayButton(page)).toHaveAccessibleName(
+    /^Today, \d+ notes? written or changed, 2 need you$/,
+  );
 });
 
 test("a By person row is a button that adds that person to the filter bar and narrows the count", async ({
@@ -284,9 +310,11 @@ test("a By person row is a button that adds that person to the filter bar and na
   await expect(countText(page)).toHaveText(/^All \d+ shown$/);
 });
 
-test("folding the panel from a focused By person row ends the preview and keeps focus on the fold button", async ({
+test("shutting the panel from a focused By person row ends the preview and moves focus to the Today button", async ({
   page,
+  context,
 }) => {
+  await setFold(context, "open.open");
   await open(page);
   const canvas = page.locator("[data-map-canvas]");
   const person = rightPanel(page).getByRole("button", { name: /^Ahmed/ });
@@ -295,9 +323,7 @@ test("folding the panel from a focused By person row ends the preview and keeps 
   await page.keyboard.press("]");
   await expect(html(page)).toHaveAttribute("data-panel", "shut");
   await expect(canvas).toHaveAttribute("data-preview", "");
-  await expect(
-    page.getByRole("button", { name: "Unfold details", exact: true }),
-  ).toBeFocused();
+  await expect(todayButton(page)).toBeFocused();
 });
 
 // ---- Folding keeps the map's view, and nothing collides ----
@@ -311,7 +337,7 @@ async function zoomPct(page: Page): Promise<number> {
   return Number.parseInt(text ?? "", 10);
 }
 
-test("folding either side keeps a zoomed-in view zoomed in", async ({
+test("folding the rail or opening the panel keeps a zoomed-in view zoomed in", async ({
   page,
 }) => {
   await open(page);
@@ -323,20 +349,25 @@ test("folding either side keeps a zoomed-in view zoomed in", async ({
   await expect.poll(() => zoomPct(page)).toBeGreaterThan(100);
   const zoomed = await zoomPct(page);
 
-  for (const [button, box, want, attr, side] of [
-    [railButton(page), leftRail(page), 60, "data-rail", "Navigation"],
-    [panelButton(page), rightPanel(page), 52, "data-panel", "Details"],
-  ] as const) {
-    await button.click();
-    await expect(html(page)).toHaveAttribute(attr, "shut");
-    await widthIs(box, want);
-    await settle(page);
-    expect(await zoomPct(page), `folded ${side}`).toBeGreaterThan(100);
-    await button.click();
-    await expect(html(page)).toHaveAttribute(attr, "open");
-    await settle(page);
-    expect(await zoomPct(page), `unfolded ${side}`).toBeGreaterThan(100);
-  }
+  // Fold the rail and back, then open the panel and shut it again.
+  await railButton(page).click();
+  await expect(html(page)).toHaveAttribute("data-rail", "shut");
+  await widthIs(leftRail(page), 60);
+  await settle(page);
+  expect(await zoomPct(page), "folded rail").toBeGreaterThan(100);
+  await railButton(page).click();
+  await expect(html(page)).toHaveAttribute("data-rail", "open");
+  await settle(page);
+  expect(await zoomPct(page), "unfolded rail").toBeGreaterThan(100);
+
+  await todayButton(page).click();
+  await expect(html(page)).toHaveAttribute("data-panel", "open");
+  await settle(page);
+  expect(await zoomPct(page), "opened panel").toBeGreaterThan(100);
+  await panelButton(page).click();
+  await expect(html(page)).toHaveAttribute("data-panel", "shut");
+  await settle(page);
+  expect(await zoomPct(page), "shut panel").toBeGreaterThan(100);
   // Not a reset to Fit and a zoom back in: the view is where it was.
   expect(Math.abs((await zoomPct(page)) - zoomed)).toBeLessThanOrEqual(1);
 });

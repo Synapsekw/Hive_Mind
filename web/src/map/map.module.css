@@ -960,10 +960,6 @@
   display: contents;
 }
 
-.strip {
-  display: none;
-}
-
 /* A narrow window stacks the page: nothing folds there, so there is no fold button. */
 @media not (min-width: 700px) {
   .foldBtn {
@@ -971,53 +967,55 @@
   }
 }
 
-/* Folded: a 52 px strip with today's count and, when anything waits, how many. Set on <html>
-   from the cookie (see FoldProvider), so the first paint is already folded. No animation. */
+/* Shut: the panel is gone and the map takes its column. Set on <html> from the cookie (see
+   FoldProvider), so the first paint is already right. A narrow window stacks the page and
+   shows the panel always. */
 @media (min-width: 700px) {
   :global(html[data-panel="shut"]) .details {
-    flex: 0 0 52px;
-    width: 52px;
-    padding: 12px 0;
-    gap: 14px;
-    align-items: center;
-    overflow: hidden;
-  }
-
-  :global(html[data-panel="shut"]) .foldBtn {
-    align-self: center;
-    margin: 0;
-  }
-
-  :global(html[data-panel="shut"]) .detailBody {
     display: none;
   }
-
-  :global(html[data-panel="shut"]) .strip {
-    flex: 1;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    cursor: pointer;
-  }
 }
 
-.stripNum {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.stripBadge {
-  min-width: 22px;
-  padding: 1px 6px;
-  border-radius: 11px;
-  background: var(--fill-on);
+/* The Today button, last in the top bar: a muted word and the count, and a dot when
+   something waits for the person. Hidden when the window is too narrow to fold. */
+.todayBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
   color: var(--fg);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s var(--ease),
+    background 0.18s var(--ease);
+}
+
+.todayBtn:hover,
+.todayBtn[aria-expanded="true"] {
+  border-color: var(--line-hi);
+}
+
+.todayBtnWord {
+  color: var(--muted);
+}
+
+.todayBtnDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--acc);
+}
+
+@media not (min-width: 700px) {
+  .todayBtn {
+    display: none;
+  }
 }
 
 .track {
