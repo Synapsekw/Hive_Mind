@@ -1,5 +1,5 @@
-/* The left rail, after docs/ui/map.dc.html: no background of its own, straight on the wash.
-   Colours are tokens only; the rail is data-scope="chrome". */
+/* The left rail, after docs/ui/map.dc.html: no background of its own, straight on the page colour.
+   Colours are tokens only. */
 
 .rail {
   flex: 1 1 208px;
@@ -259,8 +259,8 @@
 }
 
 .row[aria-current="page"] {
-  background: var(--sel);
-  color: var(--fg);
+  background: var(--active-bg);
+  color: var(--active-fg);
 }
 
 /* The hover fill grows from the left; the row's own contents sit above it. */
@@ -367,8 +367,6 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--glass2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  backdrop-filter: blur(20px) saturate(1.4);
 }
 
 .agentsHead {
@@ -567,7 +565,7 @@
   color: var(--muted);
 }
 
-/* Opens upwards from the button; data-scope="reset" gives it the solid surface and dark text. */
+/* Opens upwards from the button. */
 .menu {
   position: absolute;
   left: 0;
@@ -704,8 +702,8 @@
 }
 
 .segment[aria-checked="true"] {
-  background: var(--fill-on);
-  color: var(--fg);
+  background: var(--active-bg);
+  color: var(--active-fg);
 }
 
 .swatches {
@@ -953,8 +951,7 @@
 }
 
 /* ---- The banner of a hive that is being deleted ----
-   One line above the rail and the page, straight on the wash like the rail (data-scope
-   "chrome"), and part of the flow: it covers nothing, and the one-window pages give it its
+   One line above the rail and the page, straight on the page colour like the rail, and part of the flow: it covers nothing, and the one-window pages give it its
    height back through --closing-banner (ClosingBanner.tsx measures it). */
 
 .closing {

@@ -397,7 +397,7 @@ export function DetailRail({
     <aside
       id={panelId}
       aria-label="Details"
-      data-scope="chrome"
+
       className={s.details}
     >
       <button

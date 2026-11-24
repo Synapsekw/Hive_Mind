@@ -225,7 +225,7 @@ export function Details({
       ref={box}
       role="group"
       aria-label={`Details for ${file.name}`}
-      data-scope="reset"
+
       className={s.details}
       onKeyDown={(e) => {
         if (e.key === "Escape") {

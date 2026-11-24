@@ -24,14 +24,12 @@ function Radios<T extends string>({
   value,
   onChange,
   label,
-  labelledBy,
   swatches,
 }: {
   options: Option<T>[];
   value: T;
   onChange(v: T): void;
   label?: string;
-  labelledBy?: string;
   swatches?: boolean;
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -55,7 +53,6 @@ function Radios<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      aria-labelledby={labelledBy}
       className={swatches ? s.swatches : s.segments}
       onKeyDown={onKeyDown}
     >
@@ -93,7 +90,7 @@ export function AppearancePanel({ id }: { id?: string }) {
   const own = useId();
   const panelId = id ?? own;
   return (
-    <div id={`${panelId}-panel`} data-scope="reset" className={s.popover}>
+    <div id={`${panelId}-panel`} className={s.popover}>
       <Radios
         label="Theme"
         options={THEME_OPTIONS}

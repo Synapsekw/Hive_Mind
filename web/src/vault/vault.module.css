@@ -1,7 +1,7 @@
-/* The vault screen in Keystone glass, in the map's grammar (map.module.css): the rail
-   (web/src/shell/) on the wash, then one frosted card holding the tabs, the filter and the three
+/* The vault screen, in the map's grammar (map.module.css): the rail
+   (web/src/shell/) on the page colour, then one card holding the tabs, the filter and the three
    columns, split by hairlines. The sharing control and the release box open inside the card as
-   reset popovers (data-scope="reset"). Colours are tokens only (themes.generated.css). */
+   popovers. Colours are tokens only (themes.generated.css). */
 
 .root {
   min-height: 100vh;
@@ -45,8 +45,6 @@
   border: 1px solid var(--edge-card);
   border-radius: 20px;
   background: var(--glow), var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
   box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
@@ -554,8 +552,6 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
   color: var(--fg);
 }
 
@@ -832,8 +828,6 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
 }
 
 .saidText {
@@ -995,22 +989,6 @@
   color: var(--muted);
 }
 
-/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
-
-@supports not (
-  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
-) {
-  .panel {
-    background: var(--glow), var(--bg);
-  }
-
-  .control,
-  .release,
-  .said {
-    background: var(--surface);
-  }
-}
-
 /* ---- Side by side from 1100 x 560 ----
    The page is exactly one window tall and each column scrolls on its own. Narrower or very
    short windows stack the columns and let the page scroll. */
@@ -1095,9 +1073,8 @@
   }
 
   /* The list header stays put and only the list under it scrolls, so no row ever passes
-     beneath the header and it needs no ground of its own on the glass. (A blurred veil does
-     not work here: inside the card's own backdrop-filter the nested blur has nothing to blur,
-     and a solid ground shows as a band on the light card.) */
+     beneath the header and it needs no ground of its own on the card. (A solid ground
+     shows as a band on the light card.) */
   .notes {
     display: flex;
     flex-direction: column;

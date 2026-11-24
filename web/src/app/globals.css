@@ -1,6 +1,5 @@
-/* Global look. Every colour token comes from the generated stylesheet, switched by the four
-   attributes on <html> (data-theme, data-mode, data-reach, data-dots). CSS Modules only read
-   tokens with var(). */
+/* Global look. Every colour token comes from the generated stylesheet, switched by the
+   data-theme attribute on <html>. CSS Modules only read tokens with var(). */
 @import "../theme/themes.generated.css";
 
 :root {
@@ -42,30 +41,14 @@ textarea {
   font-family: inherit;
 }
 
-/* A scope redefines the text tokens; its own colour has to follow them. */
-[data-scope] {
-  color: var(--fg);
-}
-
 :focus-visible {
   outline: 2px solid var(--acc);
   outline-offset: 2px;
 }
 
-/* Without backdrop-filter the glass would show the wash straight through: shared surfaces go
-   solid. Screens add the same for their own cards (var(--bg)) and side panels
-   (var(--panel-solid)). */
-@supports not (
-  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
-) {
-  :root [data-scope="reset"] {
-    background: var(--surface);
-  }
-}
-
 /* Print: dark text on white paper in either mode. The page takes the system colours with a
-   light scheme (Canvas, CanvasText), the wash, bloom and glass go, and the text tokens follow
-   CanvasText / GrayText, also inside the chrome and reset scopes. */
+   light scheme (Canvas, CanvasText), the card fill and glow go, and the text tokens follow
+   CanvasText / GrayText. */
 @media print {
   :root {
     color-scheme: light !important;
@@ -74,8 +57,7 @@ textarea {
     --glass2: transparent !important;
   }
 
-  :root,
-  [data-scope] {
+  :root {
     --fg: CanvasText !important;
     --fg2: CanvasText !important;
     --muted: GrayText !important;
@@ -90,13 +72,11 @@ textarea {
   *,
   *::before,
   *::after {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
     box-shadow: none !important;
   }
 }
 
-/* Forced colours: the system's colours, no gradients and no glass. An element marked
+/* Forced colours: the system's colours, no gradients. An element marked
    data-keep-colours (the theme swatches) opts out with forced-color-adjust: none. */
 @media (forced-colors: active) {
   body {
@@ -108,13 +88,6 @@ textarea {
   :not([data-keep-colours])::before,
   :not([data-keep-colours])::after {
     background-image: none !important;
-  }
-
-  *,
-  *::before,
-  *::after {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
   }
 
   :focus-visible {

@@ -38,7 +38,7 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // The cookie is not trusted: only the four checked values reach the page.
+  // The cookie is not trusted: only the checked theme id reaches the page.
   const jar = await cookies();
   const look = parseLook(jar.get(LOOK_COOKIE)?.value);
   // Likewise which sides are folded, so the first paint has the right widths.

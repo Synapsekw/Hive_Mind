@@ -1,5 +1,5 @@
-/* The map screen in Keystone glass, after docs/ui/map.dc.html: the map on one frosted card, the
-   details on a second glass slab (data-scope="chrome"), the rail (web/src/shell/) on the wash.
+/* The map screen, after docs/ui/map.dc.html: the map on one card, the
+   details on a second slab, the rail (web/src/shell/) on the page colour.
    Colours are tokens only (themes.generated.css), read with var(). */
 
 .root {
@@ -43,9 +43,7 @@
   padding: 16px 20px;
   border: 1px solid var(--edge-card);
   border-radius: 20px;
-  background: var(--glow), var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
+  background: var(--card-tint), var(--glass);
   box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
@@ -112,7 +110,8 @@
 
 /* The highlight is the sliding pill under the group (shell/SlidingPill.module.css). */
 .tab[aria-pressed="true"] {
-  color: var(--fg);
+  background: var(--active-bg);
+  color: var(--active-fg);
   font-weight: 500;
 }
 
@@ -241,8 +240,6 @@
   border: 1px solid var(--line);
   border-radius: 11px;
   background: color-mix(in srgb, var(--surface) 70%, transparent);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
   color: var(--fg2);
   font-size: 12px;
 }
@@ -348,8 +345,6 @@
   border: 1px solid var(--line-hi);
   border-radius: 12px;
   background: color-mix(in srgb, var(--surface) 86%, transparent);
-  -webkit-backdrop-filter: blur(24px);
-  backdrop-filter: blur(24px);
   box-shadow: var(--lift);
   color: var(--fg);
   pointer-events: none;
@@ -440,8 +435,6 @@
   border: 1px solid var(--line);
   border-radius: 13px;
   background: color-mix(in srgb, var(--surface) 86%, transparent);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
   font-size: 12.5px;
   animation: filter-in 0.8s 0.5s var(--ease) both;
 }
@@ -819,8 +812,6 @@
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--glass2);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
   color: var(--fg);
   display: flex;
   flex-direction: column;
@@ -1259,26 +1250,6 @@
 /* "Open in vault" in the side panel. */
 .openLink {
   align-self: flex-start;
-}
-
-/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
-
-@supports not (
-  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
-) {
-  .panel {
-    background: var(--glow), var(--bg);
-  }
-
-  .details {
-    background: var(--panel-solid);
-  }
-
-  .zoom,
-  .filterBar,
-  .peek {
-    background: var(--surface);
-  }
 }
 
 /* ---- Fit the screen ----

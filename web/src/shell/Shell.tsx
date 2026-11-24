@@ -156,7 +156,7 @@ export function Shell({
     <aside
       id={railId}
       aria-label="Navigation"
-      data-scope="chrome"
+
       className={`${s.rail} rise`}
     >
       <div className={s.brand}>

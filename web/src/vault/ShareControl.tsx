@@ -222,7 +222,7 @@ export function ShareControl(props: Props) {
           id={groupId}
           role="group"
           aria-label={label}
-          data-scope="reset"
+
           className={s.control}
           onKeyDown={(e) => {
             if (e.key === "Escape") {

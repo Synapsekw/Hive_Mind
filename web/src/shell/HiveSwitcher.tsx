@@ -272,7 +272,6 @@ export function HiveSwitcher({ actions }: { actions?: HiveActions | null }) {
           aria-busy={switching || undefined}
           data-popover=""
           className={`${s.menu} ${s.menuDown}`}
-          data-scope="reset"
         >
           {hives.map((hive) => (
             <button

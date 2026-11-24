@@ -108,7 +108,7 @@ const MAX_REACH = 24;
 const MIN_REACH = 8;
 /** The smallest hit radius in Rings, whose big hives pack dots tighter. */
 const MIN_REACH_RINGS = 6;
-const THEME_ATTRS = ["data-theme", "data-mode", "data-dots", "data-reach"];
+const THEME_ATTRS = ["data-theme"];
 const GLIDE_MS = 900;
 /** A move within one view (the timeline's columns as the day turns): no wave. */
 const MOVE_MS = 800;

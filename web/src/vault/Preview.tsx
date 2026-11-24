@@ -56,7 +56,7 @@ function Release({
     else setRefused(true);
   }
   return (
-    <div data-scope="reset" className={s.release}>
+    <div className={s.release}>
       <p className={s.sentence}>{releaseSentence(noteMark(note, members))}</p>
       {refused && (
         <p role="alert" className={s.refused}>
@@ -167,7 +167,7 @@ function Ask({
       role="group"
       aria-label={group}
       aria-busy={off}
-      data-scope="reset"
+
       className={`${s.release} ${s.wide}`}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
