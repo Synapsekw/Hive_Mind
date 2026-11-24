@@ -10757,3 +10757,276 @@ test("the last workspace still goes with its member, and the database's owner is
   // Nobody was signed in: no record.
   assert.deepEqual(await spaceAudits(mark), []);
 });
+
+// ---------------------------------------------------------------- topics
+// <stamp>_topics.sql. A topic is a row of public.entities; a note is attached
+// to it by a row of public.note_entities.
+
+const TP_POLICY = /row-level security/;
+const addTopic = (who, hiveId, kind, name, aliases = []) =>
+  as(
+    who,
+    `insert into public.entities (hive_id, type, canonical_name, aliases)
+     values ($1, $2, $3, $4) returning id, canonical_name, aliases`,
+    [hiveId, kind, name, aliases],
+  ).then((r) => r[0]);
+const tpNote = (name, path) =>
+  as(
+    person(name),
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+     values ($1, $2, $3, $4, $4, 'text') returning id`,
+    [hive, members[name], ws[name], path],
+  ).then((r) => r[0].id);
+const attachTopic = (who, note, topic, confidence = 0.9) =>
+  as(
+    who,
+    `insert into public.note_entities (note_id, entity_id, confidence)
+     values ($1, $2, $3) returning note_id`,
+    [note, topic, confidence],
+  );
+const detachTopic = (who, note, topic, at = "2026-11-24T12:00:00Z") =>
+  as(
+    who,
+    `update public.note_entities set detached_at = $3
+      where note_id = $1 and entity_id = $2 returning note_id`,
+    [note, topic, at],
+  );
+const pairsOf = (who, note) =>
+  as(
+    who,
+    `select entity_id, detached_at is not null as detached
+       from public.note_entities where note_id = $1`,
+    [note],
+  );
+// Refused outright or answered with no row, by the grants and the policies.
+const nothingDone = async (run) => {
+  const out = await run.catch((e) => e);
+  assert.ok(
+    Array.isArray(out)
+      ? out.length === 0
+      : /row-level security|permission denied/.test(String(out)),
+    String(out),
+  );
+};
+
+test("only the hive's owner, as a person, makes a topic; a vendor and a subject are kinds", async () => {
+  const vendor = await addTopic(
+    person("dani"),
+    hive,
+    "vendor",
+    "tp Terra Drone",
+  );
+  const subject = await addTopic(
+    person("dani"),
+    hive,
+    "subject",
+    "tp Flare inspection",
+  );
+  assert.ok(vendor.id && subject.id);
+
+  await assert.rejects(
+    addTopic(person("ahmed"), hive, "vendor", "tp By Ahmed"),
+    TP_POLICY,
+  );
+  await assert.rejects(
+    addTopic(await agentFor("dani"), hive, "vendor", "tp By an agent"),
+    TP_POLICY,
+  );
+  await assert.rejects(
+    addTopic(passOf(person("dani")), hive, "vendor", "tp By an app"),
+    TP_POLICY,
+  );
+
+  // Every member of the hive reads the list; nobody outside it does.
+  const seen = async (who) =>
+    (
+      await as(who, `select id from public.entities where id = any($1)`, [
+        [vendor.id, subject.id],
+      ])
+    ).length;
+  assert.equal(await seen(person("ahmed")), 2);
+  assert.equal(await seen(person("outsider")), 0);
+});
+
+test("a topic's name and aliases are trimmed and bounded", async () => {
+  const dani = person("dani");
+  for (const name of ["", "   ", null])
+    await assert.rejects(
+      addTopic(dani, hive, "client", name),
+      /a topic needs a name/,
+    );
+  await assert.rejects(
+    addTopic(dani, hive, "client", "x".repeat(81)),
+    /that topic name is too long/,
+  );
+  const made = await addTopic(dani, hive, "client", "  tp Zain \t", [
+    " ZainTech ",
+    "",
+    "ZainTech",
+    "Zain KSA",
+  ]);
+  assert.equal(made.canonical_name, "tp Zain");
+  assert.deepEqual(made.aliases, ["ZainTech", "Zain KSA"]);
+
+  await assert.rejects(
+    addTopic(dani, hive, "client", "tp Long alias", ["y".repeat(81)]),
+    /that topic alias is too long/,
+  );
+  await assert.rejects(
+    addTopic(
+      dani,
+      hive,
+      "client",
+      "tp Many aliases",
+      Array.from({ length: 21 }, (_, i) => `alias ${i}`),
+    ),
+    /a topic has at most 20 aliases/,
+  );
+  // The same name of the same kind, once trimmed, is the same topic.
+  await assert.rejects(
+    addTopic(dani, hive, "client", " tp Zain "),
+    /unique|duplicate/,
+  );
+});
+
+test("a hive has at most 2000 topics, and nobody outside learns how many it has", async () => {
+  const who = await hivePerson();
+  const full = await startHive(who, `Topics cap ${Date.now()}`);
+  await asDbOwner(
+    null,
+    `insert into public.entities (hive_id, type, canonical_name)
+     select $1, 'subject', 'cap ' || g from generate_series(1, 2000) g`,
+    [full],
+  );
+  await assert.rejects(
+    addTopic(who, full, "subject", "One too many"),
+    /this hive already has 2000 topics/,
+  );
+  // The trigger binds the database's owner as well.
+  await assert.rejects(
+    asDbOwner(
+      null,
+      `insert into public.entities (hive_id, type, canonical_name) values ($1, 'subject', 'Also too many')`,
+      [full],
+    ),
+    /this hive already has 2000 topics/,
+  );
+  // Somebody who does not own the hive gets the policy's answer, not the count.
+  const stranger = await addTopic(
+    person("ahmed"),
+    full,
+    "subject",
+    "Probe",
+  ).catch((e) => e);
+  assert.match(String(stranger), TP_POLICY);
+  assert.doesNotMatch(String(stranger), /2000/);
+});
+
+test("a person attaches their own notes; a colleague reads a note's topics only with the note", async () => {
+  const topic = await addTopic(
+    person("dani"),
+    hive,
+    "client",
+    "tp Attach client",
+  );
+  const note = await tpNote("ahmed", "tp/attach.md");
+
+  await assert.rejects(attachTopic(person("dani"), note, topic.id), TP_POLICY);
+  assert.equal((await attachTopic(person("ahmed"), note, topic.id)).length, 1);
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+
+  // The note is private: Sara reads neither it nor what it is attached to.
+  assert.deepEqual(await pairsOf(person("sara"), note), []);
+  // Shared with the hive's group, the way the sharing tests above this one do it. If this
+  // statement is refused, copy the share from "every sharing change leaves one audit row".
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [note],
+  );
+  assert.deepEqual(await pairsOf(person("sara"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+});
+
+test("only the note's owner, as a person, detaches and re-attaches; nothing else of the pair changes", async () => {
+  const topic = await addTopic(
+    person("dani"),
+    hive,
+    "client",
+    "tp Detach client",
+  );
+  const note = await tpNote("ahmed", "tp/detach.md");
+  await attachTopic(person("ahmed"), note, topic.id);
+
+  await nothingDone(detachTopic(person("dani"), note, topic.id));
+  await nothingDone(detachTopic(person("sara"), note, topic.id));
+  await nothingDone(detachTopic(await agentFor("ahmed"), note, topic.id));
+  await nothingDone(detachTopic(passOf(person("ahmed")), note, topic.id));
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+
+  assert.equal((await detachTopic(person("ahmed"), note, topic.id)).length, 1);
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: true },
+  ]);
+  // A detached pair is still a pair: a second insert cannot bring it back.
+  await assert.rejects(
+    attachTopic(person("ahmed"), note, topic.id),
+    /unique|duplicate/,
+  );
+  // Only detached_at may be written.
+  await assert.rejects(
+    as(
+      person("ahmed"),
+      `update public.note_entities set confidence = 0.1 where note_id = $1 and entity_id = $2`,
+      [note, topic.id],
+    ),
+    /permission denied/,
+  );
+  // Clearing it attaches the note again.
+  assert.equal(
+    (await detachTopic(person("ahmed"), note, topic.id, null)).length,
+    1,
+  );
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+});
+
+test("a note and its topic are in one hive, and a hive that is being deleted takes neither", async () => {
+  const other = (
+    await db.query(
+      `select h.id from public.hives h join public.members m on m.hive_id = h.id
+        where m.user_id = $1 and h.name = 'Other hive'`,
+      [users.outsider],
+    )
+  ).rows[0].id;
+  const foreign = await addTopic(
+    person("outsider"),
+    other,
+    "client",
+    "tp Foreign",
+  );
+  const note = await tpNote("dani", "tp/one-hive.md");
+  await assert.rejects(attachTopic(person("dani"), note, foreign.id));
+
+  const who = await hivePerson();
+  const name = `Topics frozen ${Date.now()}`;
+  const closing = await startHive(who, name);
+  const kept = await addTopic(who, closing, "client", "Before closing");
+  await as(who, `select public.request_hive_deletion($1, $2)`, [closing, name]);
+  await assert.rejects(
+    addTopic(who, closing, "client", "After closing"),
+    FROZEN,
+  );
+  await assert.rejects(
+    as(who, `delete from public.entities where id = $1 returning id`, [
+      kept.id,
+    ]),
+    FROZEN,
+  );
+});
