@@ -114,7 +114,7 @@ describe("saveNoteIn", () => {
       ["eq", ["user_id", "u-me"]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
-      ["limit", [1]],
+      ["limit", [50]],
     ]);
     expect(args(t.calls[1]!, "eq")).toEqual(["hive_id", HIVE]);
     // The id is the one the auth server answered with, asked for once.

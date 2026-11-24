@@ -287,12 +287,39 @@ describe("waitingIn: the invitations waiting for the signed-in person", () => {
 describe("acceptIn: Join", () => {
   it("calls accept_invitation with the invitation's id and nothing else", async () => {
     const t = stub({ rpc: { data: HIVE, error: null } });
-    expect(await acceptIn(t.db, INVITATION)).toEqual({ ok: true });
+    expect(await acceptIn(t.db, INVITATION)).toEqual({
+      ok: true,
+      hiveId: HIVE,
+    });
     expect(t.rpc).toHaveBeenCalledTimes(1);
     expect(t.rpc).toHaveBeenCalledWith("accept_invitation", {
       p_invitation: INVITATION,
     });
   });
+
+  it("answers the joined hive's id in lower case", async () => {
+    const t = stub({ rpc: { data: HIVE.toUpperCase(), error: null } });
+    expect(await acceptIn(t.db, INVITATION)).toEqual({
+      ok: true,
+      hiveId: HIVE,
+    });
+  });
+
+  it.each([
+    ["nothing", null],
+    ["a word", "joined"],
+    ["a row", { hive_id: HIVE }],
+    ["a list", [HIVE]],
+  ])(
+    "has joined, with no hive id, when the database answers %s",
+    async (_n, data) => {
+      const t = stub({ rpc: { data, error: null } });
+      expect(await acceptIn(t.db, INVITATION)).toEqual({
+        ok: true,
+        hiveId: null,
+      });
+    },
+  );
 
   it.each([
     ["not a uuid", "x"],

@@ -1,7 +1,7 @@
 ---
 type: design
 status: active
-last-updated: 2026-11-23
+last-updated: 2026-11-24
 tags: [project/hive-mind, ui, design]
 ---
 
@@ -120,13 +120,32 @@ real buttons carries keyboard and screen-reader access. The same dots are shown 
   it and what it connects to. An unshared note shows only "Private note" and its topic.
 - **Search:** matching dots stay lit and get labels when there are few enough.
 
-Layout: a left rail on the wash (mark, five destinations with icons, agents
+Layout: a left rail on the wash (mark and the hive's name, five destinations with icons, agents
 summary, account button), the map on the glass card with the view switch as one segmented control,
 and a glass side panel. It shows Today until something is selected (a count-up of today's writes,
 a 14-day sparkline of agent writes, By person, and Needs you), then Selected. The housekeeper's last
 run sits below. The rail's active bar marks the current page (each page renders its own rail, so the bar does
 not slide between pages), the agents card collapses, and an account popover holds Appearance,
 Settings and Sign out; the member's name, role and hive load in the root layout.
+
+**The hive switcher.** The hive's name beside the mark at the top of the rail is a button. It
+opens a popover, in the way the account button does, with:
+
+- the person's hives, each with their role there and a tick on the current one. Choosing
+  another switches to it and reloads the page the person is on;
+- **New hive**, which opens a small form in the same popover with two fields, "Hive name" and
+  "Your name in this hive" (filled in with the person's current display name), then **Create**
+  and **Cancel**. After Create the new hive opens on the map. A refusal shows one line under
+  the form: the name rules (1 to 60 characters each), "You already own 5 hives.", or the usual
+  failure line.
+
+A person in one hive still gets the button and New hive. Escape closes the popover and returns
+focus to the button. The list is drawn from what the page already loaded, so opening it costs
+no round-trip. It reuses the rail's tokens and the account popover's classes; the account
+popover keeps showing the current hive and role. There is no rename, delete or leave yet.
+
+**No hive yet.** A signed-in person who is in no hive sees the home page's empty state with the
+same New hive form, so a first hive can be started without an invitation.
 
 Known follow-ups: make the rail persistent across pages so the bar slides.
 
@@ -183,6 +202,8 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 | Contradiction resolver   | Two facts side by side with owners and dates                |
 | Token dialog             | Name, workspace, trust tier, expiry; token shown once       |
 | First run                | Empty map with the onboarding steps and a connect action    |
+| No hive yet              | The home page's empty state with the New hive form          |
+| Hive switcher            | Popover from the hive's name: hives, role, tick, New hive   |
 | Token revoked or expired | Inbox item with a regenerate action                         |
 | Write rejected           | Inbox item with the attempted path and the reason           |
 | Synthesis failed         | Entity page shows the last good version with a retry        |

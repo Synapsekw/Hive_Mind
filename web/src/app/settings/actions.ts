@@ -45,14 +45,19 @@ export async function revokeAgent(id: string): Promise<Result> {
   return withSession<Result>((db) => revokeIn(db, id), { ok: false });
 }
 
+/**
+ * `hiveId` is the hive the settings page was showing; the page binds it, so the browser sends it
+ * back sealed. An invitation goes to that hive or nowhere.
+ */
 export async function inviteMember(
+  hiveId: string,
   email: string,
   name: string,
 ): Promise<Invited> {
-  return withSession<Invited>((db) => inviteIn(db, email, name, fetch), {
-    ok: false,
-    reason: "failed",
-  });
+  return withSession<Invited>(
+    (db) => inviteIn(db, email, name, fetch, hiveId),
+    { ok: false, reason: "failed" },
+  );
 }
 
 export async function resendInvitation(id: string): Promise<Sent> {

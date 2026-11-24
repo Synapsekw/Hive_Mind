@@ -12,9 +12,14 @@
 //
 // A first invitation link (type `invite`) also leaves a short-lived cookie, which makes Join
 // lead on to the optional password page; `password.ts` says what the cookie is and is not.
+//
+// Joining makes the joined hive the one the screens show, by the same cookie the rail's
+// switcher sets (`chosen-hive.ts`). That cookie grants nothing: it picks among the person's own
+// memberships, and the id put in it is the one the database answered, never one from the browser.
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "../../lib/supabase/server";
+import { hiveCookie } from "../chosen-hive";
 import type { Joined, PasswordSaved } from "../../join/types";
 import { acceptIn, continueIn } from "./join";
 import { isNew, newCookie, noNewCookie, setPasswordIn } from "./password";
@@ -50,9 +55,18 @@ export async function continueWithLink(formData: FormData): Promise<void> {
 /** Joins one hive and answers where to go: the map, or first the optional password page. */
 export async function join(id: string): Promise<Joined> {
   try {
-    const { ok } = await acceptIn(await createServerSupabase(), id);
-    if (!ok) return { ok: false };
-    return { ok: true, next: isNew(await cookies()) ? "/join/password" : "/" };
+    const joined = await acceptIn(await createServerSupabase(), id);
+    if (!joined.ok) return { ok: false };
+    const jar = await cookies();
+    if (joined.hiveId) {
+      try {
+        jar.set(hiveCookie(joined.hiveId, production()));
+      } catch (e) {
+        // The person has joined; only the choice of hive could not be remembered.
+        console.error("join cookie failed", e instanceof Error ? e.name : "");
+      }
+    }
+    return { ok: true, next: isNew(jar) ? "/join/password" : "/" };
   } catch (e) {
     console.error("join action failed", e instanceof Error ? e.name : "");
     return { ok: false };

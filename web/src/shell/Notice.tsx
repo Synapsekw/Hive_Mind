@@ -15,10 +15,13 @@ const SCREENS = {
 export function Notice({
   children,
   tryAgain,
+  after,
   current = "map",
 }: {
   children: ReactNode;
   tryAgain?: boolean;
+  /** Anything that follows the sentence: the New hive form for a person in no hive. */
+  after?: ReactNode;
   current?: "map" | "vault" | "gallery" | "inbox" | "settings";
 }) {
   const screen = SCREENS[current];
@@ -33,6 +36,7 @@ export function Notice({
               Try again
             </a>
           )}
+          {after}
         </div>
       </main>
     </div>

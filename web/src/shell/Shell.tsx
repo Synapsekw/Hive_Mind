@@ -1,5 +1,5 @@
 // The left rail, shared by the map, the vault, the gallery, the inbox and the settings: the mark,
-// the destinations (Map, Vault, Gallery, Inbox with the number waiting, Settings), the agents when
+// the hive's name (the switcher between the person's hives, with New hive), the destinations (Map, Vault, Gallery, Inbox with the number waiting, Settings), the agents when
 // given (folded into one card) and the account menu (Appearance, Settings, sign out). It sits
 // straight on the wash, so it is the "chrome" scope (white text in light mode).
 "use client";
@@ -9,6 +9,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { badge } from "../inbox/text";
 import { AccountMenu } from "./AccountMenu";
 import { AgentsCard } from "./AgentsCard";
+import { useHiveActions, type HiveActions } from "./HiveActions";
+import { HiveSwitcher } from "./HiveSwitcher";
 import s from "./shell.module.css";
 
 export type AgentRow = {
@@ -99,6 +101,7 @@ export function Shell({
   agents = [],
   inbox,
   now: nowProp,
+  hiveActions,
 }: {
   current: "map" | "vault" | "gallery" | "inbox" | "settings";
   agents?: AgentRow[];
@@ -106,7 +109,13 @@ export function Shell({
   inbox?: number;
   /** The page's own clock (the map passes its `now`); otherwise read once after mount. */
   now?: number;
+  /**
+   * Switching hives and starting one. Left out, they come from the nearest HiveActionsProvider;
+   * with neither, the switcher only shows the person's hives.
+   */
+  hiveActions?: HiveActions;
 }) {
+  const provided = useHiveActions();
   const waiting = inbox ?? 0;
   const count = badge(waiting);
   const nav = useRef<HTMLElement>(null);
@@ -133,7 +142,7 @@ export function Shell({
     >
       <div className={s.brand}>
         <span aria-hidden="true" className={s.mark} />
-        <span className={s.brandName}>Hive</span>
+        <HiveSwitcher actions={hiveActions ?? provided} />
       </div>
       <nav ref={nav} aria-label="Main" className={s.links}>
         {barY !== null && (

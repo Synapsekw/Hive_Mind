@@ -21,6 +21,8 @@
   gap: 10px;
   min-height: 32px;
   padding: 0 3px;
+  /* The hive popover hangs from the whole row, so it is as wide as the rail. */
+  position: relative;
 }
 
 .mark {
@@ -40,6 +42,160 @@
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+/* ---- The hive switcher: the hive's name as a button, its popover and the New hive form ---- */
+
+.hive {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.hiveButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0 4px 0 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hiveButton .brandName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hiveButton .chevron {
+  color: var(--muted);
+}
+
+.hiveButton:hover .chevron {
+  color: var(--fg);
+}
+
+/* The account menu's surface, opening downwards from the top of the rail. */
+.menu.menuDown {
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform-origin: top center;
+}
+
+.menuItem[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* A hive in the list: its name over the person's role there, as on the account button. */
+.hiveItem {
+  padding-block: 4px;
+}
+
+.tick {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  display: flex;
+}
+
+.hiveInput {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  transition: border-color 0.24s var(--ease);
+}
+
+.hiveInput:hover {
+  border-color: var(--line-hi);
+}
+
+.formRow {
+  display: flex;
+  gap: 8px;
+}
+
+.formButton {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.24s var(--ease);
+}
+
+.formButton:hover {
+  border-color: var(--line-hi);
+}
+
+.formButton[data-primary] {
+  border-color: transparent;
+  background: var(--grad);
+  color: var(--on-brand);
+}
+
+/* While its action runs a control keeps its place and its focus, and does nothing. */
+.formButton[aria-disabled="true"] {
+  border: 1px dashed var(--line-hi);
+  background: none;
+  color: var(--quiet);
+  cursor: default;
+}
+
+.hiveInput:focus-visible,
+.formButton:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+/* A refusal is said in words; the bar beside it only draws the eye. */
+.refused {
+  margin: 2px 0;
+  padding-left: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--hue-6);
+}
+
+/* New hive on the no-hive notice: the same form, on the card. */
+.start {
+  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: left;
+}
+
+.start > form {
+  width: 100%;
+  margin: 0;
+}
+
+.start > .formButton {
+  flex: none;
 }
 
 /* ---- Rows: the destinations ---- */
@@ -233,6 +389,7 @@
 }
 
 .agents[data-open] .chevron,
+.hiveButton[aria-expanded="true"] .chevron,
 .accountButton[aria-expanded="true"] .chevron {
   transform: rotate(180deg);
 }
@@ -563,6 +720,8 @@
   .mark,
   .chevron,
   .agentsBody,
+  .hiveInput,
+  .formButton,
   .menuItem {
     transition: none;
   }

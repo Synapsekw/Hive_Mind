@@ -1487,13 +1487,18 @@ test("only the hive owner reads the audit log", async () => {
   assert.ok(
     (await as(person("dani"), `select id from public.audit_log`)).length,
   );
-  for (const who of [
-    person("ahmed"),
-    person("sara"),
-    person("outsider"),
-    await agentFor("dani"),
-  ])
+  for (const who of [person("ahmed"), person("sara"), await agentFor("dani")])
     assert.deepEqual(await as(who, `select id from public.audit_log`), []);
+  // The outsider owns another hive, whose log holds its own start
+  // (hive.created). That is all they read: nothing of this hive.
+  assert.deepEqual(
+    await as(
+      person("outsider"),
+      `select action, hive_id = $1 as here from public.audit_log`,
+      [hive],
+    ),
+    [{ action: "hive.created", here: false }],
+  );
   assert.deepEqual(await as(null, `select id from public.audit_log`), []);
   // Nobody writes it by hand.
   await assert.rejects(
@@ -6364,4 +6369,239 @@ test("only a signed-in identity may ask who it is", async () => {
   // A visitor with no token still gets an empty answer from a table, not the
   // failure of a policy that calls these functions.
   assert.deepEqual(await titles(null), []);
+});
+
+// ---------------------------------------------------------------------------
+// Starting a hive: create_hive checks both names and caps the hives one
+// person owns (20261124082437_hive_cap.sql).
+// ---------------------------------------------------------------------------
+
+const HIVE_CAP = /you already own 5 hives/;
+// Every character create_hive trims: space, tab, newline, carriage return,
+// form feed and the vertical tab.
+const ALL_SPACE = " \t\n\r\f\u000B";
+let hivePeople = 0;
+const hivePerson = async () =>
+  asUser(await addUser(`hive-cap-${++hivePeople}@example.com`));
+const startHive = async (who, name, displayName = "Owner") =>
+  (
+    await as(who, `select public.create_hive($1, $2) as id`, [
+      name,
+      displayName,
+    ])
+  )[0].id;
+// Read as the database owner, in the order of the hives' names.
+const hivesOwnedBy = async (who) =>
+  (
+    await db.query(
+      `select h.name, m.display_name from public.members m
+         join public.hives h on h.id = m.hive_id
+        where m.user_id = $1 and m.role = 'owner' order by h.name`,
+      [who.sub],
+    )
+  ).rows;
+
+test("a hive needs a name of 1 to 60 characters", async () => {
+  const me = await hivePerson();
+  for (const name of ["", "   ", ALL_SPACE, null])
+    await assert.rejects(
+      startHive(me, name),
+      /a hive needs a name/,
+      JSON.stringify(name),
+    );
+  await assert.rejects(
+    startHive(me, "n".repeat(61)),
+    /that hive name is too long/,
+  );
+  // Characters are counted, not bytes.
+  await assert.rejects(
+    startHive(me, "é".repeat(61)),
+    /that hive name is too long/,
+  );
+  assert.deepEqual(await hivesOwnedBy(me), []);
+
+  // Sixty is allowed, and the white space around it is not counted.
+  assert.match(await startHive(me, "n".repeat(60)), UUID);
+  assert.match(await startHive(me, `  ${"é".repeat(60)}\n`), UUID);
+  assert.deepEqual(
+    (await hivesOwnedBy(me)).map((r) => r.name).sort(),
+    ["n".repeat(60), "é".repeat(60)].sort(),
+  );
+});
+
+test("the person starting a hive needs a name of 1 to 60 characters in it", async () => {
+  const me = await hivePerson();
+  for (const name of ["", "   ", ALL_SPACE, null])
+    await assert.rejects(
+      startHive(me, "Hive", name),
+      /you need a name in the hive/,
+      JSON.stringify(name),
+    );
+  await assert.rejects(
+    startHive(me, "Hive", "n".repeat(61)),
+    /that name is too long/,
+  );
+  await assert.rejects(
+    startHive(me, "Hive", "é".repeat(61)),
+    /that name is too long/,
+  );
+  assert.deepEqual(await hivesOwnedBy(me), []);
+
+  assert.match(await startHive(me, "Hive sixty a", "n".repeat(60)), UUID);
+  assert.match(
+    await startHive(me, "Hive sixty b", `\t${"é".repeat(60)}  `),
+    UUID,
+  );
+  assert.deepEqual(
+    (await hivesOwnedBy(me)).map((r) => r.display_name).sort(),
+    ["n".repeat(60), "é".repeat(60)].sort(),
+  );
+});
+
+test("a refused hive says what is wrong with the hive's name first", async () => {
+  const me = await hivePerson();
+  await assert.rejects(startHive(me, " ", " "), /a hive needs a name/);
+  await assert.rejects(
+    startHive(me, "n".repeat(61), ""),
+    /that hive name is too long/,
+  );
+  await assert.rejects(
+    startHive(me, "n".repeat(61), "n".repeat(61)),
+    /that hive name is too long/,
+  );
+  assert.deepEqual(await hivesOwnedBy(me), []);
+});
+
+test("a hive's name and its owner's name are stored trimmed, and keep a v at either end", async () => {
+  const me = await hivePerson();
+  const id = await startHive(
+    me,
+    `${ALL_SPACE}vessel of Liv${ALL_SPACE}`,
+    `${ALL_SPACE}viv${ALL_SPACE}`,
+  );
+  assert.deepEqual(
+    (await db.query(`select name from public.hives where id = $1`, [id])).rows,
+    [{ name: "vessel of Liv" }],
+  );
+  assert.deepEqual(await hivesOwnedBy(me), [
+    { name: "vessel of Liv", display_name: "viv" },
+  ]);
+  // White space inside a name is the person's own.
+  const inner = await startHive(me, "  two  words  ", " A  B ");
+  assert.deepEqual(
+    (
+      await db.query(
+        `select h.name, m.display_name from public.hives h
+           join public.members m on m.hive_id = h.id where h.id = $1`,
+        [inner],
+      )
+    ).rows,
+    [{ name: "two  words", display_name: "A  B" }],
+  );
+});
+
+test("starting a hive makes its owner, a Main workspace and one audit entry", async () => {
+  const me = await hivePerson();
+  const mark = await lastAudit();
+  const id = await startHive(me, "  Hive with a log  ", " Olga ");
+  assert.match(id, UUID);
+
+  const mine = await membershipsOf(me.sub);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].hive_id, id);
+  assert.equal(mine[0].display_name, "Olga");
+  assert.equal(mine[0].role, "owner");
+  assert.deepEqual(mine[0].workspaces, ["Main"]);
+  // The owner reads the new hive and its workspace as themselves.
+  assert.deepEqual(
+    await as(me, `select name from public.hives where id = $1`, [id]),
+    [{ name: "Hive with a log" }],
+  );
+  assert.deepEqual(
+    await as(me, `select name from public.workspaces where hive_id = $1`, [id]),
+    [{ name: "Main" }],
+  );
+
+  const entries = async () =>
+    (
+      await db.query(
+        `select hive_id, member_id, agent_id, action, note_id, detail
+           from public.audit_log where id > $1 order by id`,
+        [mark],
+      )
+    ).rows;
+  const expected = [
+    {
+      hive_id: id,
+      member_id: mine[0].id,
+      agent_id: null,
+      action: "hive.created",
+      note_id: null,
+      detail: { name: "Hive with a log" },
+    },
+  ];
+  assert.deepEqual(await entries(), expected);
+
+  // A refused hive leaves no entry.
+  await assert.rejects(startHive(me, " "), /a hive needs a name/);
+  assert.deepEqual(await entries(), expected);
+});
+
+test("a person owns at most 5 hives; hives they only belong to do not count", async () => {
+  const me = await hivePerson();
+  const other = await hivePerson();
+  // A plain member of two hives somebody else owns.
+  for (const n of [1, 2])
+    await addMember(await startHive(other, `Cap theirs ${n}`), me.sub, "Guest");
+
+  for (let n = 1; n <= 5; n++)
+    assert.match(await startHive(me, `Cap mine ${n}`), UUID);
+  const mark = await lastAudit();
+  await assert.rejects(startHive(me, "Cap mine 6"), HIVE_CAP);
+  await assert.rejects(startHive(me, "Cap mine 6"), HIVE_CAP);
+  // A name that is wrong is said before the limit.
+  await assert.rejects(startHive(me, " "), /a hive needs a name/);
+  await assert.rejects(
+    startHive(me, "Cap mine 6", " "),
+    /you need a name in the hive/,
+  );
+
+  assert.deepEqual(
+    (await hivesOwnedBy(me)).map((r) => r.name),
+    [1, 2, 3, 4, 5].map((n) => `Cap mine ${n}`),
+  );
+  assert.equal((await membershipsOf(me.sub)).length, 7);
+  assert.equal(
+    (
+      await db.query(
+        `select count(*)::int as n from public.hives where name = 'Cap mine 6'`,
+      )
+    ).rows[0].n,
+    0,
+  );
+  assert.equal(await lastAudit(), mark);
+
+  // The limit is each person's own.
+  assert.match(await startHive(other, "Cap theirs 3"), UUID);
+});
+
+test("only a signed-in person starts a hive: no agent, no app pass, no visitor", async () => {
+  const count = async () =>
+    (await db.query(`select count(*)::int as n from public.hives`)).rows[0].n;
+  const before = await count();
+  const call = `select public.create_hive('Not by a person', 'Nobody')`;
+  const NOT_A_PERSON = /sign in as a person to create a hive/;
+
+  for (const tier of ["vendor", "self_hosted"])
+    await assert.rejects(as(await agentFor("sara", tier), call), NOT_A_PERSON);
+  await assert.rejects(as(passOf(person("sara")), call), PASS_REFUSED);
+  // Who is asking is settled before the names are looked at.
+  const unnamed = `select public.create_hive('', '')`;
+  await assert.rejects(as(passOf(person("sara")), unnamed), PASS_REFUSED);
+  await assert.rejects(as(await agentFor("sara"), unnamed), NOT_A_PERSON);
+  // A visitor may not call it at all.
+  await assert.rejects(as(null, call), /permission denied/);
+  // A signed-in token with nobody behind it.
+  await assert.rejects(as({ role: "authenticated" }, call), NOT_A_PERSON);
+  assert.equal(await count(), before);
 });

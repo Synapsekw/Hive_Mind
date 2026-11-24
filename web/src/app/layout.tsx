@@ -3,9 +3,11 @@ import localFont from "next/font/local";
 import { cookies } from "next/headers";
 import { createServerSupabase } from "../lib/supabase/server";
 import { AccountProvider } from "../shell/AccountContext";
+import { HiveActionsProvider } from "../shell/HiveActions";
 import { LookProvider } from "../shell/LookProvider";
 import { LOOK_COOKIE, parseLook } from "../theme/look";
 import { loadAccount, type Account } from "./account";
+import { createHive, switchHive } from "./hives/actions";
 import "./globals.css";
 
 // Self-hosted variable fonts (latin, normal style), copied from @fontsource-variable/* with
@@ -55,7 +57,11 @@ export default async function RootLayout({
     >
       <body>
         <LookProvider initial={look}>
-          <AccountProvider account={account}>{children}</AccountProvider>
+          <AccountProvider account={account}>
+            <HiveActionsProvider actions={{ switchHive, createHive }}>
+              {children}
+            </HiveActionsProvider>
+          </AccountProvider>
         </LookProvider>
       </body>
     </html>

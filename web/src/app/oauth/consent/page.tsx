@@ -2,8 +2,8 @@
 // ChatGPT) asks to connect: `/oauth/consent?authorization_id=…`. The proxy has already made sure
 // the person is signed in, returning here afterwards.
 //
-// One server render: the request's details, the person's own hive (one indexed read) and their
-// workspaces in it (indexed on `member_id`, 50 at most), read in `load.ts`. Choosing a workspace
+// One server render: the request's details, the person's chosen hive (one indexed read), which
+// the window names, and their workspaces in it (indexed on `member_id`, 50 at most), read in `load.ts`. Choosing a workspace
 // costs nothing; approving or denying is one server action. The app's name and the host it
 // returns to are shown for the person to read; neither decides how far the app is trusted.
 import { redirect } from "next/navigation";
@@ -44,7 +44,7 @@ export default async function ConsentPage({
   if (loaded.state === "no-hive") return <Line>{NO_HIVE}</Line>;
   if (loaded.state === "error") return <Line>{COULD_NOT_LOAD}</Line>;
 
-  const { details, workspaces } = loaded;
+  const { details, hive, workspaces } = loaded;
   const initial = workspaces.find((w) => w.name === "Main") ?? workspaces[0]!;
   return (
     <Frame>
@@ -52,6 +52,7 @@ export default async function ConsentPage({
         authorizationId={raw}
         appName={details.name}
         host={details.host}
+        hiveName={hive}
         workspaces={workspaces}
         initialWorkspaceId={initial.id}
         decide={decide}

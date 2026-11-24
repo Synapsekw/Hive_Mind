@@ -22,7 +22,19 @@ const post = (query = "") =>
   );
 const to = (res: Response) => res.headers.get("location");
 
-afterEach(() => vi.resetAllMocks());
+afterEach(() => {
+  vi.resetAllMocks();
+  vi.unstubAllEnvs();
+});
+
+/** The hm_hive cookie the response sets, as its attributes in lower case. */
+function hiveCookieOf(res: Response): string[] {
+  const all = res.headers
+    .getSetCookie()
+    .filter((c) => c.startsWith("hm_hive="));
+  expect(all).toHaveLength(1);
+  return all[0]!.split(";").map((p) => p.trim().toLowerCase());
+}
 
 describe("POST /auth/signout", () => {
   it("signs this browser out and goes to sign-in", async () => {
@@ -31,6 +43,28 @@ describe("POST /auth/signout", () => {
     expect(t.signOut).toHaveBeenCalledWith({ scope: "local" });
     expect(res.status).toBe(303);
     expect(to(res)).toBe(`${ORIGIN}/login`);
+  });
+
+  it("clears the chosen hive: the same cookie, empty and with no life left", async () => {
+    client();
+    const parts = hiveCookieOf(await post());
+    expect(parts[0]).toBe("hm_hive=");
+    expect(parts).toContain("max-age=0");
+    expect(parts).toContain("path=/");
+    expect(parts).toContain("httponly");
+    expect(parts).toContain("samesite=lax");
+    expect(parts).not.toContain("secure");
+  });
+
+  it("clears it with Secure in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    client();
+    expect(hiveCookieOf(await post())).toContain("secure");
+  });
+
+  it("clears it even when signing out fails or the app is not configured", async () => {
+    mocks.createServerSupabase.mockRejectedValue(new Error("not configured"));
+    expect(hiveCookieOf(await post("?next=%2Fjoin"))).toContain("max-age=0");
   });
 
   it("carries a same-site next, so sign-in returns to the Join page", async () => {

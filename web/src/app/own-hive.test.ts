@@ -1,10 +1,27 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { ownHive, sessionUserId } from "./own-hive";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ cookies: vi.fn() }));
+vi.mock("next/headers", () => ({ cookies: mocks.cookies }));
+
+import { currentOf, myHives, ownHive, sessionUserId } from "./own-hive";
 
 const ME = "00000000-0000-4000-8000-0000000000a1";
 const STRANGER = "00000000-0000-4000-8000-0000000000a2";
 const MINE = "00000000-0000-4000-8000-000000000b01";
 const THEIRS = "00000000-0000-4000-8000-000000000b02";
+const NOT_MINE = "00000000-0000-4000-8000-000000000b09";
+
+/** The browser's cookies as the request carries them; with no argument there is no request. */
+function browser(has?: Record<string, string>) {
+  if (!has) {
+    mocks.cookies.mockRejectedValue(new Error("outside a request scope"));
+    return;
+  }
+  mocks.cookies.mockResolvedValue({
+    get: (name: string) =>
+      name in has ? { name, value: has[name]! } : undefined,
+  });
+}
 
 type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
@@ -89,9 +106,25 @@ const member = (over: Row): Row => ({
   ...over,
 });
 
+beforeEach(() => browser());
+
 afterEach(() => {
   vi.restoreAllMocks();
+  mocks.cookies.mockReset();
 });
+
+/** Two hives of the person's own: Synapse joined first, Side later. */
+const both = () => [
+  member({
+    id: "00000000-0000-4000-8000-00000000c002",
+    hive_id: THEIRS,
+    created_at: "2026-11-23T12:00:00+00:00",
+    display_name: "Dani",
+    role: "member",
+    hive: { name: "Side" },
+  }),
+  member({ id: "00000000-0000-4000-8000-00000000c001" }),
+];
 
 describe("sessionUserId", () => {
   it("is the subject of the session's access token, with no call to the auth server", async () => {
@@ -159,7 +192,7 @@ describe("ownHive", () => {
     expect(await ownHive(t.db)).toMatchObject({ id: MINE });
   });
 
-  it("asks once: the person's own rows, oldest first, then by id, one row", async () => {
+  it("asks once: the person's own rows, oldest first, then by id, 50 at most", async () => {
     const t = table([member({})]);
     await ownHive(t.db);
     expect(t.calls).toHaveLength(1);
@@ -169,8 +202,16 @@ describe("ownHive", () => {
       ["eq", ["user_id", ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
-      ["limit", [1]],
+      ["limit", [50]],
     ]);
+  });
+
+  it("asks once whichever hive is chosen", async () => {
+    browser({ hm_hive: THEIRS });
+    const t = table(both());
+    await ownHive(t.db);
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]!.ops).toContainEqual(["limit", [50]]);
   });
 
   it("uses the user id it is given and does not read the session", async () => {
@@ -226,6 +267,233 @@ describe("ownHive", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(await ownHive(answering({ data, error: null }).db)).toBe("error");
     expect(log).toHaveBeenCalledWith("own hive answer has an unexpected shape");
+  });
+});
+
+describe("ownHive: the chosen hive", () => {
+  it("is the oldest membership's hive when the browser carries no choice", async () => {
+    browser({});
+    expect(await ownHive(table(both()).db)).toMatchObject({ id: MINE });
+  });
+
+  it("is the hive the cookie names when the person is in it", async () => {
+    browser({ hm_hive: THEIRS });
+    expect(await ownHive(table(both()).db)).toEqual({
+      id: THEIRS,
+      name: "Side",
+      memberId: "00000000-0000-4000-8000-00000000c002",
+    });
+  });
+
+  it("answers who the person is in the chosen hive, not in the oldest", async () => {
+    browser({ hm_hive: THEIRS });
+    expect(
+      await ownHive(table(both()).db, undefined, { profile: true }),
+    ).toEqual({
+      id: THEIRS,
+      name: "Side",
+      memberId: "00000000-0000-4000-8000-00000000c002",
+      displayName: "Dani",
+      role: "member",
+    });
+  });
+
+  it("matches the id whatever its case", async () => {
+    browser({ hm_hive: THEIRS.toUpperCase() });
+    expect(await ownHive(table(both()).db)).toMatchObject({ id: THEIRS });
+  });
+
+  it.each([
+    ["a hive the person is not in", NOT_MINE],
+    ["junk", "synapse"],
+    ["nothing", ""],
+    ["a filter", `${THEIRS},hive_id.neq.x`],
+  ])(
+    "is the oldest membership's hive for a cookie naming %s",
+    async (_n, v) => {
+      browser({ hm_hive: v });
+      const t = table(both());
+      expect(await ownHive(t.db)).toMatchObject({ id: MINE });
+      // The cookie's value never reaches the query.
+      expect(JSON.stringify(t.calls)).not.toContain(v || "hm_hive");
+    },
+  );
+
+  it("never answers a hive that only someone else is in, even when the cookie names it", async () => {
+    browser({ hm_hive: NOT_MINE });
+    const t = table([
+      ...both(),
+      member({
+        id: "00000000-0000-4000-8000-00000000c009",
+        hive_id: NOT_MINE,
+        user_id: STRANGER,
+        hive: { name: "Stranger's" },
+      }),
+    ]);
+    expect(await ownHive(t.db)).toMatchObject({ id: MINE });
+  });
+
+  it("is the oldest membership's hive outside a request", async () => {
+    browser();
+    expect(await ownHive(table(both()).db)).toMatchObject({ id: MINE });
+  });
+
+  it("uses opts.chosen in place of the cookie, and does not read the cookie", async () => {
+    browser({ hm_hive: THEIRS });
+    expect(
+      await ownHive(table(both()).db, undefined, { chosen: null }),
+    ).toMatchObject({ id: MINE });
+    expect(
+      await ownHive(table(both()).db, undefined, { chosen: MINE }),
+    ).toMatchObject({ id: MINE });
+    browser({});
+    expect(
+      await ownHive(table(both()).db, undefined, { chosen: THEIRS }),
+    ).toMatchObject({ id: THEIRS });
+    expect(
+      await ownHive(table(both()).db, undefined, {
+        profile: true,
+        chosen: THEIRS,
+      }),
+    ).toMatchObject({ id: THEIRS, role: "member" });
+    expect(
+      await ownHive(table(both()).db, undefined, { chosen: NOT_MINE }),
+    ).toMatchObject({ id: MINE });
+    expect(mocks.cookies).not.toHaveBeenCalled();
+  });
+
+  it("is still null for a person in no hive, and error when the read fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    browser({ hm_hive: THEIRS });
+    expect(await ownHive(table([]).db)).toBeNull();
+    expect(
+      await ownHive(answering({ data: null, error: { message: "x" } }).db),
+    ).toBe("error");
+  });
+
+  it("is error when the chosen row is malformed", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    browser({ hm_hive: THEIRS });
+    const data = [member({}), member({ hive_id: THEIRS, hive: null })];
+    expect(await ownHive(answering({ data, error: null }).db)).toBe("error");
+    expect(log).toHaveBeenCalledWith("own hive answer has an unexpected shape");
+  });
+});
+
+describe("myHives", () => {
+  it("lists the person's hives, oldest membership first, in one bounded read", async () => {
+    const t = table(both());
+    expect(await myHives(t.db)).toEqual([
+      {
+        id: MINE,
+        name: "Synapse",
+        role: "owner",
+        memberId: "00000000-0000-4000-8000-00000000c001",
+        displayName: "Danijel",
+      },
+      {
+        id: THEIRS,
+        name: "Side",
+        role: "member",
+        memberId: "00000000-0000-4000-8000-00000000c002",
+        displayName: "Dani",
+      },
+    ]);
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]!.table).toBe("members");
+    expect(t.calls[0]!.ops).toEqual([
+      ["select", ["id, hive_id, display_name, role, hive:hives!hive_id(name)"]],
+      ["eq", ["user_id", ME]],
+      ["order", ["created_at", { ascending: true }]],
+      ["order", ["id", { ascending: true }]],
+      ["limit", [50]],
+    ]);
+  });
+
+  it("is the same list whichever hive is chosen", async () => {
+    browser({ hm_hive: THEIRS });
+    const hives = await myHives(table(both()).db);
+    expect(hives).toMatchObject([{ id: MINE }, { id: THEIRS }]);
+  });
+
+  it("uses the user id it is given and does not read the session", async () => {
+    const t = table([member({ user_id: STRANGER, hive_id: THEIRS })]);
+    expect(await myHives(t.db, STRANGER)).toMatchObject([{ id: THEIRS }]);
+    expect(t.auth.getSession).not.toHaveBeenCalled();
+  });
+
+  it("leaves out rows that are not memberships", async () => {
+    const data = [
+      "x",
+      null,
+      member({ hive: null }),
+      member({ role: 3 }),
+      member({ display_name: undefined }),
+      member({ id: "00000000-0000-4000-8000-00000000c007" }),
+    ];
+    expect(await myHives(answering({ data, error: null }).db)).toEqual([
+      {
+        id: MINE,
+        name: "Synapse",
+        role: "owner",
+        memberId: "00000000-0000-4000-8000-00000000c007",
+        displayName: "Danijel",
+      },
+    ]);
+  });
+
+  it("is empty for a person in no hive", async () => {
+    expect(await myHives(table([]).db)).toEqual([]);
+  });
+
+  it("is error without a session, when the read fails, and for an answer that is not a list", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = table([member({})], null);
+    expect(await myHives(t.db)).toBe("error");
+    expect(t.from).not.toHaveBeenCalled();
+    expect(
+      await myHives(
+        answering({
+          data: null,
+          error: {
+            message: "denied",
+            code: "42501",
+            details: "secret payload",
+          },
+        }).db,
+      ),
+    ).toBe("error");
+    expect(await myHives(answering({ data: {}, error: null }).db)).toBe(
+      "error",
+    );
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+});
+
+describe("currentOf", () => {
+  const hives = [
+    {
+      id: MINE,
+      name: "Synapse",
+      role: "owner",
+      memberId: "m1",
+      displayName: "D",
+    },
+    {
+      id: THEIRS,
+      name: "Side",
+      role: "member",
+      memberId: "m2",
+      displayName: "D",
+    },
+  ];
+  it("is the chosen hive when it is in the list, else the first", () => {
+    expect(currentOf(hives, THEIRS)).toBe(hives[1]);
+    expect(currentOf(hives, THEIRS.toUpperCase())).toBe(hives[1]);
+    expect(currentOf(hives, NOT_MINE)).toBe(hives[0]);
+    expect(currentOf(hives, "junk")).toBe(hives[0]);
+    expect(currentOf(hives, null)).toBe(hives[0]);
+    expect(currentOf([], THEIRS)).toBeUndefined();
   });
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
-// The approval window's form: which app asks, where it returns to, the workspace it will write
-// into, and the two answers. Choosing a workspace is this screen's own state. A decision is one
+// The approval window's form: which app asks, which hive it is connected to, where it returns
+// to, the workspace it will write into, and the two answers. Choosing a workspace is this screen's own state. A decision is one
 // call; the answer is the address to go to, and the browser goes there.
 import { useState } from "react";
 import styles from "../../login/login.module.css";
@@ -12,6 +12,7 @@ import {
   CHECK,
   DENY,
   FAILED,
+  HIVE,
   WHAT_IT_MAY_DO,
   WORKING,
   WORKSPACE,
@@ -24,6 +25,7 @@ export function ConsentForm({
   authorizationId,
   appName,
   host,
+  hiveName,
   workspaces,
   initialWorkspaceId,
   decide,
@@ -33,6 +35,8 @@ export function ConsentForm({
   appName: string;
   /** The host the app returns to; empty when it could not be read. Shown only, never sent. */
   host: string;
+  /** The hive the app is being connected to. Shown as text, never as markup. */
+  hiveName: string;
   workspaces: Workspace[];
   initialWorkspaceId: string;
   decide: (
@@ -74,6 +78,9 @@ export function ConsentForm({
     >
       <p className={styles.status}>
         <strong data-testid="app-name">{appName}</strong> {ASKS}
+      </p>
+      <p className={styles.status}>
+        {HIVE} <strong data-testid="hive-name">{hiveName}</strong>
       </p>
       <p className={styles.status} data-testid="returns-to">
         {returnsTo(host)}

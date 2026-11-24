@@ -54,6 +54,7 @@ export function DevConsent({
       authorizationId={DEV_AUTHORIZATION}
       appName={appName}
       host={host}
+      hiveName="Synapse"
       workspaces={workspaces}
       initialWorkspaceId={initialWorkspaceId}
       decide={decide}

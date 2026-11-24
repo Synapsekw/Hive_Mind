@@ -209,11 +209,15 @@ export async function waitingIn(
   }
 }
 
-/** Joins the hive of one invitation. The database refuses one that is not the caller's. */
+/**
+ * Joins the hive of one invitation. The database refuses one that is not the caller's. On
+ * success `hiveId` is the joined hive's id as `accept_invitation` answers it (lower case), or
+ * null when the answer is not an id: the person has joined either way.
+ */
 export async function acceptIn(
   db: Pick<SupabaseClient, "rpc">,
   id: unknown,
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: false } | { ok: true; hiveId: string | null }> {
   if (!isUuid(id)) return { ok: false };
   try {
     const res = (await db.rpc("accept_invitation", {
@@ -227,7 +231,10 @@ export async function acceptIn(
       );
       return { ok: false };
     }
-    return { ok: true };
+    return {
+      ok: true,
+      hiveId: isUuid(res.data) ? res.data.toLowerCase() : null,
+    };
   } catch (e) {
     console.error("accept_invitation failed", e instanceof Error ? e.name : "");
     return { ok: false };
