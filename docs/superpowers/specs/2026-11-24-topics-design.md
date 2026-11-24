@@ -228,3 +228,27 @@ browser. The MCP server is not touched and gains no permission logic.
 3. A note keeps at most **five** topics, and the map places it under the strongest one.
 4. Only the **owner** makes topics. A member's notes attach to the hive's topics, but a member
    cannot add a topic of their own in this slice.
+
+## Amendments for part 2 (2026-11-24, after the first real run)
+
+Part 1 (find and attach) is merged. On Synapse it saved 287 topics and gave 1,309 of 1,641 notes a
+topic; 479 of the 692 notes that had no link now have one. Danijel then looked for his customers
+and solutions on the map and in the vault and found nothing, because part 1 shows topics only in
+Settings. Agreed in chat the same day:
+
+1. **Eight kinds, not six.** The vault files partners (`partner-entity`, under
+   `Employers/*/Partners`) apart from customers, and solution categories (`category`, under
+   `Knowledge/Categories`) apart from loose subjects. Part 1 filed partners as customers and
+   categories as subjects. New kinds **partner** and **solution**; the order everywhere is
+   client, partner, project, vendor, product, solution, person, subject, shown as Customers,
+   Partners, Projects, Vendors, Products, Solutions, People, Subjects. Every kind but subject
+   starts ticked. The 17 partner topics already saved as customers on Synapse are re-filed once,
+   by hand, after the migration.
+2. **The map groups two ways.** "Group by" gains **Category** (one ring per kind, plus "No
+   topic"; a note sits under the kind of its strongest topic) and **Topic** (one ring per topic,
+   largest first, the rest folded into "Other topics" as the other groupings fold).
+3. **The vault browses by topic.** The left column has a switch, Folders or Topics. Topics lists
+   the kinds, each opening to its topics with the number of notes in the open tab; choosing one
+   filters the note list. This is in addition to the Topics line on the open note (remove, add).
+4. **Adding by hand respects the five.** A note that already has five topics takes no sixth; the
+   person removes one first.

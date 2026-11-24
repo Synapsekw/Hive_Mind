@@ -18,6 +18,7 @@ function note(path: string, extra: Partial<VaultNote> = {}): VaultNote {
     effective_with: [],
     rule_folder: null,
     access: "own",
+    topics: [],
     ...extra,
   };
 }
@@ -108,5 +109,38 @@ describe("notesIn", () => {
     expect(
       notesIn(notes, { kind: "all" }, "CLIENTSX/").map((n) => n.path),
     ).toEqual(["clientsx/y.md"]);
+  });
+});
+
+describe("notesIn by topic", () => {
+  const notes = [
+    note("a.md", { topics: ["t1", "t2"] }),
+    note("b.md", { topics: ["t2"] }),
+    note("c.md", { topics: [], title: "Pricing sheet" }),
+    note("d.md", { topics: ["t1"], title: "Pricing call" }),
+  ];
+
+  it("keeps the notes that carry the topic, at any position", () => {
+    const paths = (id: string) =>
+      notesIn(notes, { kind: "topic", id }, "").map((n) => n.path);
+    expect(paths("t1")).toEqual(["a.md", "d.md"]);
+    expect(paths("t2")).toEqual(["a.md", "b.md"]);
+    expect(paths("nope")).toEqual([]);
+  });
+
+  it("keeps the notes with no topic", () => {
+    expect(
+      notesIn(notes, { kind: "untopiced" }, "").map((n) => n.path),
+    ).toEqual(["c.md"]);
+  });
+
+  it("applies the text filter on top", () => {
+    expect(
+      notesIn(notes, { kind: "topic", id: "t1" }, "pricing").map((n) => n.path),
+    ).toEqual(["d.md"]);
+    expect(
+      notesIn(notes, { kind: "untopiced" }, "pricing").map((n) => n.path),
+    ).toEqual(["c.md"]);
+    expect(notesIn(notes, { kind: "untopiced" }, "call")).toEqual([]);
   });
 });

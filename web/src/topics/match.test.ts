@@ -136,12 +136,16 @@ describe("topicsFor", () => {
       topic("p1", "person", "Echo"),
       topic("s2", "subject", "Foxtrot"),
       topic("x", "client", "Golf"),
+      topic("pa", "partner", "Hotel"),
+      topic("so", "solution", "India"),
     ]);
     const hits = topicsFor(
-      note("Golf/a.md", { body: "Alpha Bravo Charlie Delta Echo Foxtrot" }),
+      note("Golf/a.md", {
+        body: "Alpha Bravo Charlie Delta Echo Foxtrot Hotel India",
+      }),
       many,
     );
-    expect(hits.map((h) => h.id)).toEqual(["x", "c1", "c2", "v1", "p1"]);
+    expect(hits.map((h) => h.id)).toEqual(["x", "c1", "c2", "pa", "v1"]);
     expect(hits[0]!.confidence).toBe(0.9);
   });
 

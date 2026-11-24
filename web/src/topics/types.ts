@@ -1,13 +1,26 @@
 // Shapes shared by everything about topics. Types and constants only: safe to import anywhere.
 export const KINDS = [
   "client",
+  "partner",
   "project",
   "vendor",
   "product",
+  "solution",
   "person",
   "subject",
 ] as const;
 export type Kind = (typeof KINDS)[number];
+
+export const KIND_NAMES: Record<Kind, string> = {
+  client: "Customers",
+  partner: "Partners",
+  project: "Projects",
+  vendor: "Vendors",
+  product: "Products",
+  solution: "Solutions",
+  person: "People",
+  subject: "Subjects",
+};
 
 export const MAX_NAME = 80;
 export const MAX_ALIASES = 20;

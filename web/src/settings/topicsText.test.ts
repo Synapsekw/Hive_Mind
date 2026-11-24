@@ -5,9 +5,11 @@ describe("the sentences of the Topics section", () => {
   it("names each kind in the plural", () => {
     expect(t.KIND_NAMES).toEqual({
       client: "Customers",
+      partner: "Partners",
       project: "Projects",
       vendor: "Vendors",
       product: "Products",
+      solution: "Solutions",
       person: "People",
       subject: "Subjects",
     });
@@ -33,6 +35,25 @@ describe("the sentences of the Topics section", () => {
     expect(t.pickLabel("Customers", "Orbit", ["Orbit Aerospace", "OA"])).toBe(
       "Customers: Orbit, also: Orbit Aerospace, OA",
     );
+  });
+
+  it("says which kinds a candidate is already saved under", () => {
+    expect(t.alreadyUnder(["Customers"])).toBe("already under Customers");
+    expect(t.alreadyUnder(["Customers", "Vendors"])).toBe(
+      "already under Customers and Vendors",
+    );
+    expect(t.alreadyUnder(["Customers", "Vendors", "Products"])).toBe(
+      "already under Customers, Vendors and Products",
+    );
+  });
+
+  it("adds those words to a candidate's checkbox name, after the old format", () => {
+    expect(
+      t.pickLabel("Partners", "Zain", [], t.alreadyUnder(["Customers"])),
+    ).toBe("Partners: Zain, already under Customers");
+    expect(
+      t.pickLabel("Partners", "Zain", ["Z"], t.alreadyUnder(["Customers"])),
+    ).toBe("Partners: Zain, also: Z, already under Customers");
   });
 
   it("tells the owner who will see a topic's names", () => {

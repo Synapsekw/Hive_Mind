@@ -270,7 +270,11 @@ export function HiveMap({
   const query = q.trim();
   // In Rings by Links or Time a group's name is a note's title or a month, not a word the user
   // filed by, so the search does not light whole groups by it.
-  const groupNames = view !== "rings" || arrange === "folder";
+  const groupNames =
+    view !== "rings" ||
+    arrange === "folder" ||
+    arrange === "category" ||
+    arrange === "topic";
   // What the filter and the search light, without the selection. The bar's count follows only
   // this, so selecting a dot runs `lit` once (for `on`) and leaves the count alone.
   const base = useMemo(

@@ -2,6 +2,7 @@
 // it and what it connects to. Every title is rendered as a text node.
 import Link from "next/link";
 import {
+  Fragment,
   useEffect,
   useId,
   useLayoutEffect,
@@ -11,6 +12,7 @@ import {
 } from "react";
 import type { Preview } from "./MapCanvas";
 import type { Activity, MapModel, ModelNode } from "./types";
+import { KIND_NAMES } from "../topics/types";
 import { foldWide, useFold, useFoldSide } from "../shell/FoldProvider";
 import { Shape } from "./Shape";
 import { daySeries, sparkPath } from "./sparkline";
@@ -216,12 +218,13 @@ function Facts({
   owner: string;
   now: number;
 }) {
-  const topic = model.topics[n.topic]?.name ?? "";
+  const folder = n.folder ?? "";
   if (n.locked)
     return (
       <p className={s.meta}>
-        {topic}. {owner} has not shared this, so you see where it sits but not
-        what it says.
+        {folder ? `${folder}. ` : ""}
+        {owner} has not shared this, so you see where it sits but not what it
+        says.
       </p>
     );
   return (
@@ -233,8 +236,21 @@ function Facts({
             <dd title={n.path}>{n.path}</dd>
           </>
         )}
-        <dt>Topic</dt>
-        <dd>{topic}</dd>
+        <dt>Folder</dt>
+        <dd>{folder}</dd>
+        {n.held && (
+          <>
+            <dt>Topics</dt>
+            <dd>
+              {n.held.map((t, i) => (
+                <Fragment key={i}>
+                  {i > 0 && ", "}
+                  {t.name} <span className={s.meta}>{KIND_NAMES[t.kind]}</span>
+                </Fragment>
+              ))}
+            </dd>
+          </>
+        )}
         <dt>Owner</dt>
         <dd>{owner}</dd>
         <dt>Written</dt>

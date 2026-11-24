@@ -539,6 +539,7 @@ const STUB_KEYS = [
   "path",
   "title",
   "topic",
+  "topics",
   "updated_at",
   "workspace_id",
 ];
@@ -11075,4 +11076,145 @@ test("an agent never removes a note from a topic: only the note's owner, as a pe
 
   assert.equal((await removeTopic(person("ahmed"))).length, 1);
   assert.deepEqual(await pairsOf(person("ahmed"), note), []);
+});
+
+// ---------------------------------------------------------------- topics on the map
+// <stamp>_topics_view.sql. Two more kinds, and map_graph carries each
+// readable note's topics and the hive's topic list.
+
+const TV_KINDS = [
+  "client",
+  "partner",
+  "project",
+  "vendor",
+  "product",
+  "solution",
+  "person",
+  "subject",
+];
+
+test("a partner and a solution are kinds, and they order as the app does", async () => {
+  const partner = await addTopic(person("dani"), hive, "partner", "tv Partner");
+  const solution = await addTopic(
+    person("dani"),
+    hive,
+    "solution",
+    "tv Solution",
+  );
+  assert.ok(partner.id && solution.id);
+
+  const ranks = (
+    await db.query(
+      `select k, public.topic_rank(k::public.entity_type) as r
+         from unnest($1::text[]) with ordinality as t(k, i) order by i`,
+      [TV_KINDS],
+    )
+  ).rows.map((r) => r.r);
+  assert.deepEqual(ranks, [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test("the map gives a readable note its topics, strongest first, at most five, and none that were detached", async () => {
+  const dani = person("dani");
+  const note = await tpNote("dani", "tv/seven.md");
+  const mk = (kind, name) => addTopic(dani, hive, kind, name);
+  const top = await mk("subject", "tv Zeta top");
+  const vendor = await mk("vendor", "tv Same conf vendor");
+  const partner = await mk("partner", "tv Same conf partner");
+  const alpha = await mk("client", "tv Alpha");
+  const beta = await mk("client", "tv Beta");
+  const cut = await mk("project", "tv Sixth");
+  const gone = await mk("product", "tv Detached");
+  await attachTopic(dani, note, top.id, 0.95);
+  await attachTopic(dani, note, vendor.id, 0.8);
+  await attachTopic(dani, note, partner.id, 0.8);
+  await attachTopic(dani, note, beta.id, 0.7);
+  await attachTopic(dani, note, alpha.id, 0.7);
+  await attachTopic(dani, note, cut.id, 0.5);
+  await attachTopic(dani, note, gone.id, 0.99);
+  await detachTopic(dani, note, gone.id);
+
+  assert.deepEqual(nodeOf(await map(dani), note).topics, [
+    top.id,
+    partner.id,
+    vendor.id,
+    alpha.id,
+    beta.id,
+  ]);
+});
+
+test("the map gives a note the viewer cannot read no topic", async () => {
+  const topic = await addTopic(person("dani"), hive, "client", "tv Private");
+  const note = await tpNote("ahmed", "tv/private.md");
+  await attachTopic(person("ahmed"), note, topic.id);
+
+  const locked = nodeOf(await map(person("dani")), note);
+  assert.equal(locked.locked, true);
+  assert.deepEqual(locked.topics, []);
+  assert.deepEqual(nodeOf(await map(person("ahmed")), note).topics, [topic.id]);
+
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [note],
+  );
+  const seen = nodeOf(await map(person("sara")), note);
+  assert.equal(seen.locked, false);
+  assert.deepEqual(seen.topics, [topic.id]);
+});
+
+test("the map lists the hive's topics by kind, then name, and nobody else's", async () => {
+  const other = (
+    await as(
+      person("outsider"),
+      `select hive_id from public.members where user_id = $1`,
+      [users.outsider],
+    )
+  )[0].hive_id;
+  const theirs = await addTopic(
+    person("outsider"),
+    other,
+    "client",
+    "tv Outsider only",
+  );
+
+  const expected = (
+    await db.query(
+      `select id, canonical_name as name, type::text as kind
+         from public.entities where hive_id = $1
+        order by public.topic_rank(type), canonical_name, id`,
+      [hive],
+    )
+  ).rows;
+  assert.ok(expected.length > 5);
+  const got = (await map(person("dani"))).topics;
+  assert.deepEqual(got, expected);
+  assert.ok(!JSON.stringify(got).includes(theirs.id));
+  const theirMap = (await map(person("outsider"), other)).topics.map(
+    (t) => t.id,
+  );
+  assert.ok(theirMap.includes(theirs.id));
+  for (const t of got) assert.ok(!theirMap.includes(t.id), t.id);
+});
+
+test("a file's node carries no topic", async () => {
+  const note = await tpNote("dani", "tv/with-file.md");
+  await addFile(person("dani"), "dani", "tv-with-file.pdf", note);
+  const m = await map(person("dani"));
+  const files = m.nodes.filter((n) => n.kind === "file");
+  assert.ok(files.length > 0);
+  for (const f of files) assert.deepEqual(f.topics, [], f.id);
+  for (const n of m.nodes) assert.ok(Array.isArray(n.topics), n.id);
+});
+
+test("an agent and an app pass are still refused the map", async () => {
+  await assert.rejects(map(await agentFor("dani")), /map_graph is for people/);
+  await assert.rejects(
+    map(await agentFor("ahmed", "self_hosted")),
+    /map_graph is for people/,
+  );
+  await assert.rejects(
+    map(passOf(person("dani"))),
+    /an app pass cannot do this/,
+  );
+  await assert.rejects(map(person("outsider")), /not a member of this hive/);
 });

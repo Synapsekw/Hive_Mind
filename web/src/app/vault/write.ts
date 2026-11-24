@@ -3,7 +3,13 @@
 // database decides whether the change is allowed, and the screen re-reads what it now says.
 // Only an error's code and message are logged.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Choice, Result, SharePreview } from "../../vault/types";
+import { MAX_TOPICS_PER_NOTE } from "../../topics/types";
+import type {
+  Choice,
+  Result,
+  SharePreview,
+  TopicChange,
+} from "../../vault/types";
 import { ownHive } from "../own-hive";
 import { cleanChoice, cleanPath, isUuid, othersIn } from "./validate";
 
@@ -172,6 +178,74 @@ export async function unlinkIn(db: Db, linkId: unknown): Promise<Result> {
   const res = (await db.rpc("unlink", { p_link: id })) as Res;
   if (failed("unlink", res)) return NO;
   return YES;
+}
+
+// The database decides who may take a topic off a note or put one on (the note's owner, as a
+// person) and refuses anyone else; a detached pair is kept, not deleted. Its reason for a
+// refusal is logged, never returned.
+export async function detachTopicIn(
+  db: Db,
+  noteId: unknown,
+  topicId: unknown,
+): Promise<Result> {
+  if (!isUuid(noteId) || !isUuid(topicId)) return NO;
+  if (!(await userId(db))) return NO;
+  const res = (await db
+    .from("note_entities")
+    .update({ detached_at: new Date().toISOString() })
+    .eq("note_id", noteId.toLowerCase())
+    .eq("entity_id", topicId.toLowerCase())
+    .is("detached_at", null)
+    .select("note_id")) as Res;
+  if (failed("detachTopic", res)) return NO;
+  return Array.isArray(res.data) && res.data.length === 1 ? YES : NO;
+}
+
+const TOPIC_FAILED: TopicChange = { ok: false, reason: "failed" };
+const UNIQUE_VIOLATION = "23505";
+
+export async function addTopicIn(
+  db: Db,
+  noteId: unknown,
+  topicId: unknown,
+): Promise<TopicChange> {
+  if (!isUuid(noteId) || !isUuid(topicId)) return TOPIC_FAILED;
+  if (!(await userId(db))) return TOPIC_FAILED;
+  const note = noteId.toLowerCase();
+  const topic = topicId.toLowerCase();
+  const pairs = (await db
+    .from("note_entities")
+    .select("entity_id, detached_at")
+    .eq("note_id", note)) as Res;
+  if (failed("addTopic", pairs) || !Array.isArray(pairs.data))
+    return TOPIC_FAILED;
+  let existing: { attached: boolean } | null = null;
+  let attached = 0;
+  for (const p of pairs.data as Record<string, unknown>[]) {
+    const isAttached = p?.detached_at === null || p?.detached_at === undefined;
+    if (isAttached) attached += 1;
+    if (typeof p?.entity_id === "string" && p.entity_id.toLowerCase() === topic)
+      existing = { attached: isAttached };
+  }
+  if (existing?.attached) return { ok: true };
+  if (attached >= MAX_TOPICS_PER_NOTE) return { ok: false, reason: "full" };
+  if (existing) {
+    const res = (await db
+      .from("note_entities")
+      .update({ detached_at: null })
+      .eq("note_id", note)
+      .eq("entity_id", topic)
+      .select("note_id")) as Res;
+    if (failed("addTopic", res)) return TOPIC_FAILED;
+    return changed(res) ? { ok: true } : TOPIC_FAILED;
+  }
+  const res = (await db
+    .from("note_entities")
+    .insert({ note_id: note, entity_id: topic, confidence: 1 })) as Res;
+  // A pair made since it was read (two requests at once) is the pair asked for.
+  if (res.error?.code === UNIQUE_VIOLATION) return { ok: true };
+  if (failed("addTopic", res)) return TOPIC_FAILED;
+  return { ok: true };
 }
 
 export async function previewIn(

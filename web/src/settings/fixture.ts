@@ -98,7 +98,10 @@ const TOPICS: TopicRow[] = [
   },
 ];
 
-/** The heads the dev page's scan answers: one new customer, one known, a tag on five notes. */
+/**
+ * The heads the dev page's scan answers: one new customer, one known, a partner named like the
+ * saved customer, a solution, a tag on five notes.
+ */
 export function fixtureHeads(): NoteHead[] {
   const tagged = Array.from({ length: 5 }, (_, i) => ({
     path: `Sessions/s${i}.md`,
@@ -119,6 +122,20 @@ export function fixtureHeads(): NoteHead[] {
       path: "Employers/Zain/_Index.md",
       title: "Zain",
       type: "client-entity",
+      aliases: [],
+      tags: [],
+    },
+    {
+      path: "Employers/Zain/Partners/Zain.md",
+      title: "Zain",
+      type: "partner-entity",
+      aliases: [],
+      tags: [],
+    },
+    {
+      path: "Knowledge/Categories/Underwater ROVs.md",
+      title: "Underwater ROVs",
+      type: "category",
       aliases: [],
       tags: [],
     },

@@ -20,7 +20,8 @@ export const MIN_NAME = 3;
 const TYPE_KIND: Record<string, Kind> = {
   client: "client",
   "client-entity": "client",
-  "partner-entity": "client",
+  partner: "partner",
+  "partner-entity": "partner",
   project: "project",
   "internal-project": "project",
   person: "person",
@@ -28,7 +29,8 @@ const TYPE_KIND: Record<string, Kind> = {
   vendor: "vendor",
   concept: "subject",
   "cluster-topic": "subject",
-  category: "subject",
+  solution: "solution",
+  category: "solution",
 };
 const INDEX = /^(_index|index|readme)$/i;
 const FOLDER_INDEX = /^_index$/i;

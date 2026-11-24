@@ -105,6 +105,27 @@ describe("fixtureVault", () => {
     expect(linksOf("Readme")).toEqual([]);
   });
 
+  it("gives six topics across four kinds, and notes that carry some", () => {
+    const d = fixtureVault(NOW);
+    expect(d.topics).toHaveLength(6);
+    expect(new Set(d.topics.map((t) => t.kind)).size).toBe(5);
+    const ids = new Set(d.topics.map((t) => t.id));
+    const all = [
+      ...d.notes,
+      ...fixtureVault(NOW, { ws: d.workspaces[1]!.id }).notes,
+    ];
+    for (const n of all) {
+      expect(n.topics.length, n.path).toBeLessThanOrEqual(5);
+      for (const id of n.topics) expect(ids.has(id), n.path).toBe(true);
+    }
+    expect(all.some((n) => n.topics.length === 5)).toBe(true);
+    expect(all.some((n) => n.topics.length === 0)).toBe(true);
+    expect(all.filter((n) => n.topics.length > 0).length).toBeGreaterThan(3);
+    const shared = fixtureVault(NOW, { tab: "shared" });
+    for (const n of shared.notes)
+      for (const id of n.topics) expect(ids.has(id)).toBe(true);
+  });
+
   it("opens the hostile note with the hostile body", () => {
     const d = fixtureVault(NOW, { note: HOSTILE_NOTE_ID });
     expect(d.open).not.toBeNull();

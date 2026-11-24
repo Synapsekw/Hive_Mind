@@ -5,7 +5,7 @@
 // does not have yet, ticked by kind; Save sends the ticked ones. Below, the hive's topics by
 // kind, each with Delete, asked once. The database decides whether the person may; this only
 // asks. Nothing here reads a note's text.
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { candidates } from "../topics/candidates";
 import { normal } from "../topics/normal";
 import {
@@ -28,6 +28,8 @@ type Stage =
   | {
       kind: "picking";
       found: Candidate[];
+      /** Per candidate: the words for the other kinds its name is already saved under. */
+      under: ReadonlyMap<number, string>;
       ticked: ReadonlySet<number>;
       saving: boolean;
     };
@@ -140,11 +142,22 @@ export function Topics({
       setStage({ kind: "idle" });
       return say(t.NOTHING_NEW);
     }
+    // A name the hive already has under another kind is still offered, but is not ticked.
+    const kindsOf = new Map<string, Set<Kind>>();
+    for (const x of shown) {
+      const set = kindsOf.get(normal(x.name));
+      if (set) set.add(x.kind);
+      else kindsOf.set(normal(x.name), new Set([x.kind]));
+    }
+    const under = new Map<number, string>();
     const ticked = new Set<number>();
     found.forEach((c, i) => {
-      if (c.kind !== "subject") ticked.add(i);
+      const other = KINDS.filter((k) => kindsOf.get(normal(c.name))?.has(k));
+      if (other.length > 0)
+        under.set(i, t.alreadyUnder(other.map((k) => t.KIND_NAMES[k])));
+      else if (c.kind !== "subject") ticked.add(i);
     });
-    setStage({ kind: "picking", found, ticked, saving: false });
+    setStage({ kind: "picking", found, under, ticked, saving: false });
   }
 
   async function save() {
@@ -269,6 +282,7 @@ export function Topics({
                   {of.map(({ c, i }) => {
                     const extra = t.candidateNotes(c.kind, c.notes);
                     const also = t.alsoKnown(c.aliases);
+                    const elsewhere = stage.under.get(i) ?? null;
                     return (
                       <li key={i} className={s.item}>
                         <label className={s.text}>
@@ -280,6 +294,7 @@ export function Topics({
                               t.KIND_NAMES[kind],
                               c.name,
                               c.aliases,
+                              elsewhere,
                             )}
                             onChange={(e) => {
                               const ticked = new Set(stage.ticked);
@@ -291,6 +306,9 @@ export function Topics({
                           <span className={s.name}>{c.name}</span>
                           {extra && <span className={s.mark}>{extra}</span>}
                           {also && <span className={s.meta}>{also}</span>}
+                          {elsewhere && (
+                            <span className={s.meta}>{elsewhere}</span>
+                          )}
                         </label>
                       </li>
                     );
@@ -337,76 +355,81 @@ export function Topics({
           const of = shown.filter((x) => x.kind === kind);
           if (of.length === 0) return null;
           return (
-            <ul
-              key={kind}
-              role="list"
-              aria-label={t.KIND_NAMES[kind]}
-              className={s.rows}
-            >
-              {of.map((topic) => {
-                const notes = t.topicNotes(topic.notes);
-                const isAsking = asking === topic.id;
-                const off = busy === topic.id || undefined;
-                return (
-                  <li key={topic.id} className={s.item} aria-busy={off}>
-                    <div className={s.text}>
-                      <p className={s.what}>
-                        <span className={s.name}>{topic.name}</span>
-                      </p>
-                      <p className={s.meta}>
-                        <span>{t.KIND_NAMES[kind]}</span>
-                        {notes && <span>{notes}</span>}
-                      </p>
-                    </div>
-                    {!closing && (
-                      <div className={s.side}>
-                        <div
-                          role="group"
-                          aria-label={`${t.DELETE} ${topic.name}`}
-                          className={s.actions}
-                        >
-                          {isAsking ? (
-                            <>
-                              <p className={s.ask}>
-                                {t.deleteQuestion(topic.name)}
-                              </p>
-                              <button
-                                type="button"
-                                className={s.confirm}
-                                aria-disabled={off}
-                                onClick={() => void remove(topic)}
-                              >
-                                {t.DELETE}
-                              </button>
+            <Fragment key={kind}>
+              <h3 className={s.fieldLabel}>
+                {t.KIND_NAMES[kind]}{" "}
+                <span className={s.count}>{of.length}</span>
+              </h3>
+              <ul
+                role="list"
+                aria-label={t.KIND_NAMES[kind]}
+                className={s.rows}
+              >
+                {of.map((topic) => {
+                  const notes = t.topicNotes(topic.notes);
+                  const isAsking = asking === topic.id;
+                  const off = busy === topic.id || undefined;
+                  return (
+                    <li key={topic.id} className={s.item} aria-busy={off}>
+                      <div className={s.text}>
+                        <p className={s.what}>
+                          <span className={s.name}>{topic.name}</span>
+                        </p>
+                        <p className={s.meta}>
+                          <span>{t.KIND_NAMES[kind]}</span>
+                          {notes && <span>{notes}</span>}
+                        </p>
+                      </div>
+                      {!closing && (
+                        <div className={s.side}>
+                          <div
+                            role="group"
+                            aria-label={`${t.DELETE} ${topic.name}`}
+                            className={s.actions}
+                          >
+                            {isAsking ? (
+                              <>
+                                <p className={s.ask}>
+                                  {t.deleteQuestion(topic.name)}
+                                </p>
+                                <button
+                                  type="button"
+                                  className={s.confirm}
+                                  aria-disabled={off}
+                                  onClick={() => void remove(topic)}
+                                >
+                                  {t.DELETE}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={s.secondary}
+                                  aria-disabled={off}
+                                  onClick={() => setAsking(null)}
+                                >
+                                  {t.KEEP}
+                                </button>
+                              </>
+                            ) : (
                               <button
                                 type="button"
                                 className={s.secondary}
-                                aria-disabled={off}
-                                onClick={() => setAsking(null)}
+                                aria-label={`${t.DELETE} ${topic.name}`}
+                                onClick={() => setAsking(topic.id)}
                               >
-                                {t.KEEP}
+                                {t.DELETE}
                               </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              className={s.secondary}
-                              aria-label={`${t.DELETE} ${topic.name}`}
-                              onClick={() => setAsking(topic.id)}
-                            >
-                              {t.DELETE}
-                            </button>
+                            )}
+                          </div>
+                          {isAsking && (
+                            <p className={s.aside}>{t.DELETE_ASIDE}</p>
                           )}
                         </div>
-                        {isAsking && (
-                          <p className={s.aside}>{t.DELETE_ASIDE}</p>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Fragment>
           );
         })
       )}

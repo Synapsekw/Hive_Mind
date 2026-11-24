@@ -2,13 +2,14 @@
 
 // The open note: title, path, last change, who wrote it, the sharing control and Delete for the
 // person's own notes (a colleague's note says how it reached you instead), release for a held
-// note, the notes it is linked with and Unlink for each, then the rendered text.
+// note, the notes it is linked with and Unlink for each, its topics, then the rendered text.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { longDate } from "./format";
 import { folderMark, noteMark } from "./marks";
 import { Markdown } from "./Markdown";
+import { NoteTopics } from "./NoteTopics";
 import {
   DELETE_QUESTION,
   keepLinkName,
@@ -21,7 +22,14 @@ import {
   YOU,
 } from "./sentences";
 import { ShareControl } from "./ShareControl";
-import type { Choice, NoteLink, Result, VaultData, VaultNote } from "./types";
+import type {
+  Choice,
+  NoteLink,
+  Result,
+  TopicChange,
+  VaultData,
+  VaultNote,
+} from "./types";
 import s from "./vault.module.css";
 
 /**
@@ -280,6 +288,8 @@ export function Preview({
   onRelease,
   onDelete,
   onUnlink,
+  onRemoveTopic,
+  onAddTopic,
   hrefNote,
 }: {
   data: VaultData;
@@ -289,6 +299,10 @@ export function Preview({
   onDelete: (noteId: string) => Promise<boolean>;
   /** Ends a link of the open note and says whether it worked. */
   onUnlink: (linkId: string) => Promise<boolean>;
+  /** Takes a topic off the open note and says whether it worked. */
+  onRemoveTopic: (noteId: string, topicId: string) => Promise<boolean>;
+  /** Puts a topic on the open note and says what came of it. */
+  onAddTopic: (noteId: string, topicId: string) => Promise<TopicChange>;
   /** The address of another note in the vault. */
   hrefNote: (noteId: string) => string;
 }) {
@@ -375,6 +389,15 @@ export function Preview({
             owner={owner}
             hrefNote={hrefNote}
             onUnlink={onUnlink}
+          />
+          <NoteTopics
+            key={`topics-${n.id}`}
+            noteId={n.id}
+            served={n.topics}
+            topics={data.topics}
+            own={mine}
+            onRemove={onRemoveTopic}
+            onAdd={onAddTopic}
           />
         </header>
         {open.cut && (

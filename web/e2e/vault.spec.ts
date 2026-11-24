@@ -21,6 +21,7 @@ import {
   unlinkQuestion,
 } from "../src/vault/sentences";
 import * as A from "../src/vault/attachText";
+import * as P from "../src/vault/topicText";
 import * as C from "../src/vault/connectText";
 import * as T from "../src/vault/importText";
 import { setLook } from "./look";
@@ -2464,4 +2465,398 @@ test("Attach topics on one's own workspace: one sentence, Start, progress, then 
   // Not on "Shared with me".
   await page.getByRole("link", { name: "Shared with me" }).click();
   await expect(attachButton(page)).toHaveCount(0);
+});
+
+// ---- Topics: browsing by topic, and a note's topics ----
+
+const topicId = (name: string) => DATA.topics.find((x) => x.name === name)!.id;
+const KICKOFF = idOf("Kickoff notes");
+const SCOPE = idOf("Scope and assumptions");
+const INTERVIEW_1 = idOf("Interview summary 1");
+const SHARED_SITE_VISIT = SHARED_DATA.notes.find(
+  (n) => n.title === "Site visit",
+)!.id;
+const SHARED_REPORTING = SHARED_DATA.notes.find(
+  (n) => n.title === "Decision: reporting format",
+)!.id;
+
+const switchGroup = (page: Page) => page.getByRole("group", { name: P.SWITCH });
+const topicNav = (page: Page) =>
+  page.getByRole("navigation", { name: P.BY_TOPICS });
+const topicsSection = (page: Page) =>
+  preview(page).getByRole("region", { name: P.TOPICS_HEADING });
+const chips = (page: Page) => topicsSection(page).getByRole("listitem");
+const removeButton = (page: Page, name: string) =>
+  topicsSection(page).getByRole("button", { name: P.removeName(name) });
+const addSelect = (page: Page) =>
+  topicsSection(page).getByRole("combobox", { name: P.ADD_TOPIC });
+const addButton = (page: Page) =>
+  topicsSection(page).getByRole("button", { name: P.ADD, exact: true });
+const listHeading = (page: Page, name: string) =>
+  page.getByRole("heading", { level: 2, name, exact: true });
+const chipNames = (page: Page) =>
+  chips(page).evaluateAll((els) =>
+    els.map((el) => el.firstElementChild?.textContent ?? ""),
+  );
+
+test("the switch browses notes by topic, with no request", async ({ page }) => {
+  await open(page);
+  const requests = watch(page);
+  const all = DATA.notes.length;
+  const withTopics = DATA.notes.filter((n) => n.topics.length > 0).length;
+
+  await expect(
+    switchGroup(page).getByRole("button", { name: P.BY_FOLDERS }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    switchGroup(page).getByRole("button", { name: P.BY_TOPICS }),
+  ).toHaveAttribute("aria-pressed", "false");
+  await expect(folders(page)).toBeVisible();
+
+  await switchGroup(page).getByRole("button", { name: P.BY_TOPICS }).click();
+  await expect(folders(page)).toHaveCount(0);
+  const nav = topicNav(page);
+  await expect(
+    nav.getByRole("button", { name: new RegExp(`^${P.ALL_NOTES} ${all}$`) }),
+  ).toHaveAttribute("aria-pressed", "true");
+  // The kinds that carry a note, in kind order, each closed, with its count.
+  const kinds = nav.getByRole("button", { expanded: false });
+  await expect(kinds).toHaveText([
+    "Customers5",
+    "Partners2",
+    "Vendors2",
+    "Solutions2",
+    "Subjects3",
+  ]);
+  await expect(
+    nav.getByRole("button", { name: `${P.NO_TOPIC} ${all - withTopics}` }),
+  ).toBeVisible();
+  await expect(
+    nav.getByRole("button", { name: /^Harbor Logistics/ }),
+  ).toHaveCount(0);
+
+  await nav.getByRole("button", { name: /^Customers/ }).click();
+  await expect(nav.getByRole("button", { name: /^Customers/ })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await expect(
+    nav.getByRole("button", { name: /^Harbor Logistics/ }),
+  ).toHaveText("Harbor Logistics3");
+  await expect(
+    nav.getByRole("button", { name: /^Northfield Foods/ }),
+  ).toHaveText("Northfield Foods2");
+
+  await nav.getByRole("button", { name: /^Harbor Logistics/ }).click();
+  await expect(
+    nav.getByRole("button", { name: /^Harbor Logistics/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(listHeading(page, "Harbor Logistics")).toBeVisible();
+  await expect(noteLinks(page)).toHaveCount(3);
+  await expect(
+    noteLinks(page).filter({ hasText: "Scope and assumptions" }),
+  ).toHaveCount(1);
+
+  await nav.getByRole("button", { name: /^No topic/ }).click();
+  await expect(listHeading(page, P.NO_TOPIC)).toBeVisible();
+  await expect(noteLinks(page)).toHaveCount(all - withTopics);
+
+  await switchGroup(page).getByRole("button", { name: P.BY_FOLDERS }).click();
+  await expect(
+    folders(page).getByRole("button", { name: /^All notes/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(listHeading(page, "All notes")).toBeVisible();
+  await expect(noteLinks(page)).toHaveCount(all);
+
+  await page.waitForTimeout(400);
+  expect(requests()).toEqual([]);
+});
+
+test("the topic and the switch survive choosing a note", async ({ page }) => {
+  await open(page);
+  await switchGroup(page).getByRole("button", { name: P.BY_TOPICS }).click();
+  const nav = topicNav(page);
+  await nav.getByRole("button", { name: /^Customers/ }).click();
+  await nav.getByRole("button", { name: /^Harbor Logistics/ }).click();
+  await noteLinks(page).filter({ hasText: "Kickoff notes" }).click();
+  await expect(page).toHaveURL(/note=/);
+  await expect(
+    switchGroup(page).getByRole("button", { name: P.BY_TOPICS }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(noteLinks(page)).toHaveCount(3);
+  await expect(listHeading(page, "Harbor Logistics")).toBeVisible();
+
+  await expect(
+    nav.getByRole("button", { name: /^Harbor Logistics/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the kinds open and close without a request, and the text filter narrows a topic", async ({
+  page,
+}) => {
+  await open(page);
+  const requests = watch(page);
+  await switchGroup(page).getByRole("button", { name: P.BY_TOPICS }).click();
+  const nav = topicNav(page);
+  await nav.getByRole("button", { name: /^Subjects/ }).click();
+  await nav.getByRole("button", { name: /^Pricing/ }).click();
+  await expect(noteLinks(page)).toHaveCount(3);
+  await page.getByRole("searchbox", { name: "Filter notes" }).fill("workshop");
+  await expect(noteLinks(page)).toHaveCount(1);
+  await nav.getByRole("button", { name: /^Subjects/ }).click();
+  await expect(nav.getByRole("button", { name: /^Pricing/ })).toHaveCount(0);
+  await page.waitForTimeout(400);
+  expect(requests()).toEqual([]);
+});
+
+test("a note's chips are its topics in order, with their kind", async ({
+  page,
+}) => {
+  await open(page, `?note=${SCOPE}`);
+  await expect(
+    topicsSection(page).getByRole("heading", { name: P.TOPICS_HEADING }),
+  ).toBeVisible();
+  expect(await chipNames(page)).toEqual([
+    "Harbor Logistics",
+    "Route optimisation",
+    "Pricing",
+    "Bluewater Partners",
+    "Survey Kit Co",
+  ]);
+  await expect(chips(page).first()).toContainText("Customers");
+  await expect(chips(page).nth(1)).toContainText("Solutions");
+  await expect(chips(page).nth(2)).toContainText("Subjects");
+  await expect(chips(page).nth(3)).toContainText("Partners");
+  await expect(chips(page).nth(4)).toContainText("Vendors");
+  // Five topics: Remove on each, no Add control.
+  await expect(
+    topicsSection(page).getByRole("button", { name: /^Remove / }),
+  ).toHaveCount(5);
+  await expect(addSelect(page)).toHaveCount(0);
+  await expect(addButton(page)).toHaveCount(0);
+  // The section sits under the sharing control.
+  const tools = await page
+    .getByRole("button", { name: /^Sharing: / })
+    .boundingBox();
+  const section = await topicsSection(page).boundingBox();
+  expect(section!.y).toBeGreaterThan(tools!.y);
+});
+
+test("Remove takes a topic off at once, says so and records one call", async ({
+  page,
+}) => {
+  await open(page, `?note=${INTERVIEW_1}`);
+  expect(await chipNames(page)).toEqual([
+    "Harbor Logistics",
+    "Route optimisation",
+  ]);
+  await removeButton(page, "Harbor Logistics").click();
+  await expect(status(page)).toHaveText(P.removed("Harbor Logistics"));
+  expect(await chipNames(page)).toEqual(["Route optimisation"]);
+  // The focus lands on the next chip's Remove.
+  await expect(removeButton(page, "Route optimisation")).toBeFocused();
+  expect(await calls(page)).toEqual([
+    {
+      name: "detachTopic",
+      args: [INTERVIEW_1, topicId("Harbor Logistics")],
+    },
+  ]);
+  // The last one: no chip is left, the Add control takes the focus.
+  await removeButton(page, "Route optimisation").click();
+  await expect(status(page)).toHaveText(P.removed("Route optimisation"));
+  await expect(chips(page)).toHaveCount(0);
+  await expect(topicsSection(page).getByText(P.NO_TOPICS_YET)).toBeVisible();
+  await expect(addSelect(page)).toBeFocused();
+  expect(await calls(page)).toHaveLength(2);
+});
+
+test("removing the last chip of several moves the focus to the one before", async ({
+  page,
+}) => {
+  await open(page, `?note=${SCOPE}`);
+  await removeButton(page, "Survey Kit Co").click();
+  await expect(status(page)).toHaveText(P.removed("Survey Kit Co"));
+  await expect(removeButton(page, "Bluewater Partners")).toBeFocused();
+  // Under five now, the Add control is there, with the removed topic in it.
+  await expect(addSelect(page)).toBeVisible();
+  await expect(addSelect(page).locator("option")).toHaveText([
+    "Northfield Foods",
+    "Survey Kit Co",
+  ]);
+});
+
+test("Add offers the topics the note does not carry, by kind, and adds the chosen one", async ({
+  page,
+}) => {
+  await open(page, `?note=${KICKOFF}`);
+  expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  await expect(addSelect(page).locator("optgroup")).toHaveCount(5);
+  expect(
+    await addSelect(page)
+      .locator("optgroup")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("label"))),
+  ).toEqual(["Customers", "Partners", "Vendors", "Solutions", "Subjects"]);
+  await expect(addSelect(page).locator("option")).toHaveText([
+    "Northfield Foods",
+    "Bluewater Partners",
+    "Survey Kit Co",
+    "Route optimisation",
+    "Pricing",
+  ]);
+  await addSelect(page).selectOption({ label: "Pricing" });
+  await addButton(page).click();
+  await expect(status(page)).toHaveText(P.added("Pricing"));
+  expect(await chipNames(page)).toEqual(["Harbor Logistics", "Pricing"]);
+  expect(await calls(page)).toEqual([
+    { name: "addTopic", args: [KICKOFF, topicId("Pricing")] },
+  ]);
+  await expect(addSelect(page).locator("option")).toHaveCount(4);
+});
+
+test("a refused add or remove says so and leaves the chips as they were", async ({
+  page,
+}) => {
+  await open(page, `?fail=1&note=${KICKOFF}`);
+  await addButton(page).click();
+  await expect(topicsSection(page).getByRole("alert")).toHaveText(P.REFUSED);
+  expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  await removeButton(page, "Harbor Logistics").click();
+  await expect(topicsSection(page).getByRole("alert")).toHaveText(P.REFUSED);
+  expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  await expect(removeButton(page, "Harbor Logistics")).toBeFocused();
+  await expect(status(page)).toHaveText("");
+  expect(await calls(page)).toHaveLength(2);
+});
+
+test("while a change runs, another press does nothing", async ({ page }) => {
+  await open(page, `?slow=1&note=${INTERVIEW_1}`);
+  await removeButton(page, "Harbor Logistics").click();
+  await expect(removeButton(page, "Route optimisation")).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await removeButton(page, "Route optimisation").evaluate((el: HTMLElement) =>
+    el.click(),
+  );
+  await removeButton(page, "Harbor Logistics").evaluate((el: HTMLElement) =>
+    el.click(),
+  );
+  await expect(status(page)).toHaveText(P.removed("Harbor Logistics"));
+  expect(await chipNames(page)).toEqual(["Route optimisation"]);
+  expect(await calls(page)).toEqual([
+    {
+      name: "detachTopic",
+      args: [INTERVIEW_1, topicId("Harbor Logistics")],
+    },
+  ]);
+});
+
+test("a colleague's note shows its chips and nothing to change", async ({
+  page,
+}) => {
+  await open(page, `?tab=shared&note=${SHARED_SITE_VISIT}`);
+  expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  await expect(topicsSection(page).getByRole("button")).toHaveCount(0);
+  await expect(addSelect(page)).toHaveCount(0);
+  // And no switch, as there is no folder column.
+  await expect(switchGroup(page)).toHaveCount(0);
+  // Without topics there is no section at all.
+  await open(page, `?tab=shared&note=${SHARED_REPORTING}`);
+  await expect(topicsSection(page)).toHaveCount(0);
+});
+
+test("a note with no topics of one's own offers to add one", async ({
+  page,
+}) => {
+  await open(page, `?note=${README}`);
+  await expect(topicsSection(page).getByText(P.NO_TOPICS_YET)).toBeVisible();
+  await expect(addSelect(page)).toBeVisible();
+  await expect(addSelect(page).locator("option")).toHaveCount(
+    DATA.topics.length,
+  );
+});
+
+test("by keyboard: the switch, a kind, a topic and the chips are reached by Tab and worked by Enter or Space", async ({
+  page,
+}) => {
+  await open(page);
+  const nav = topicNav(page);
+  await switchGroup(page).getByRole("button", { name: P.BY_FOLDERS }).focus();
+  await page.keyboard.press("Tab");
+  await expect(
+    switchGroup(page).getByRole("button", { name: P.BY_TOPICS }),
+  ).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(
+    switchGroup(page).getByRole("button", { name: P.BY_TOPICS }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Tab");
+  await expect(nav.getByRole("button", { name: /^All notes/ })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(nav.getByRole("button", { name: /^Customers/ })).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(nav.getByRole("button", { name: /^Customers/ })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await page.keyboard.press("Tab");
+  await expect(
+    nav.getByRole("button", { name: /^Harbor Logistics/ }),
+  ).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(listHeading(page, "Harbor Logistics")).toBeVisible();
+  await expect(noteLinks(page)).toHaveCount(3);
+
+  // The chips: Remove, Remove, the Add control, its button.
+  await page.goto(`/dev/vault?note=${INTERVIEW_1}`, {
+    waitUntil: "networkidle",
+  });
+  await removeButton(page, "Harbor Logistics").focus();
+  await page.keyboard.press("Tab");
+  await expect(removeButton(page, "Route optimisation")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(addSelect(page)).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(addButton(page)).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(status(page)).toHaveText(
+    P.added(DATA.topics.find((x) => x.name === "Northfield Foods")!.name),
+  );
+  await removeButton(page, "Harbor Logistics").focus();
+  await page.keyboard.press("Enter");
+  await expect(status(page)).toHaveText(P.removed("Harbor Logistics"));
+  await expect(removeButton(page, "Route optimisation")).toBeFocused();
+});
+
+test("at 390 px the column and the chips stay inside the window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await open(page, `?note=${SCOPE}`);
+  await switchGroup(page).getByRole("button", { name: P.BY_TOPICS }).click();
+  const nav = topicNav(page);
+  await nav.getByRole("button", { name: /^Customers/ }).click();
+  for (const control of [
+    switchGroup(page),
+    nav.getByRole("button", { name: /^Customers/ }),
+    nav.getByRole("button", { name: /^Harbor Logistics/ }),
+    nav.getByRole("button", { name: /^No topic/ }),
+    ...(await chips(page).all()),
+    ...(await topicsSection(page).getByRole("button").all()),
+  ]) {
+    await control.scrollIntoViewIfNeeded();
+    const box = (await control.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  expect((await scrolls(page)).across).toBe(false);
+  await removeButton(page, "Survey Kit Co").click();
+  await expect(status(page)).toHaveText(P.removed("Survey Kit Co"));
+  for (const control of [addSelect(page), addButton(page)]) {
+    await control.scrollIntoViewIfNeeded();
+    const box = (await control.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  expect((await scrolls(page)).across).toBe(false);
 });

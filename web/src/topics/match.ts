@@ -2,13 +2,8 @@
 // nothing else is done with it.
 import { headOf, MIN_NAME, proposalOf } from "./candidates";
 import { normal } from "./normal";
-import {
-  KINDS,
-  MAX_TOPICS_PER_NOTE,
-  type Hit,
-  type Kind,
-  type Topic,
-} from "./types";
+import { compareRanked } from "./order";
+import { MAX_TOPICS_PER_NOTE, type Hit, type Kind, type Topic } from "./types";
 
 /** A name must be this long, once normalised, to be looked for in a note's text. */
 const MIN_IN_TEXT = 4;
@@ -82,11 +77,11 @@ export function topicsFor(
       confidence = 0.5;
     if (confidence > 0) found.push({ t, confidence });
   }
-  found.sort(
-    (a, b) =>
-      b.confidence - a.confidence ||
-      KINDS.indexOf(a.t.kind) - KINDS.indexOf(b.t.kind) ||
-      (a.t.name < b.t.name ? -1 : a.t.name > b.t.name ? 1 : 0),
+  found.sort((a, b) =>
+    compareRanked(
+      { id: a.t.id, confidence: a.confidence, kind: a.t.kind, name: a.t.name },
+      { id: b.t.id, confidence: b.confidence, kind: b.t.kind, name: b.t.name },
+    ),
   );
   return found
     .slice(0, MAX_TOPICS_PER_NOTE)

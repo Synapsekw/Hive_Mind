@@ -4,7 +4,7 @@
 // `window.__vaultCalls` (for the browser tests) and answers as the database would. A deleted
 // note or an ended link leaves this page's sample data until the page is loaded again; a
 // colleague's note that was read only through that link goes with it. With `fail`, every write
-// is refused and the folder count is unavailable; with `slow`, deleting and unlinking take over
+// is refused and the folder count is unavailable; with `slow`, deleting, unlinking and changing a note's topics take over
 // a second.
 // The import's stand-ins keep what was imported in memory, per workspace, with each note's two
 // dates, so a second import answers "unchanged", and "updated" when only a date is another. `failbatch` refuses a batch by its number ("2"), or every batch ("all");
@@ -26,7 +26,12 @@ import type {
   ImportActions,
   Outcome,
 } from "../../../import/types";
-import type { VaultActions, VaultData } from "../../../vault/types";
+import { MAX_TOPICS_PER_NOTE } from "../../../topics/types";
+import type {
+  TopicChange,
+  VaultActions,
+  VaultData,
+} from "../../../vault/types";
 import { Vault } from "../../../vault/Vault";
 
 declare global {
@@ -84,15 +89,22 @@ export function DevVault({
   const attachNo = useRef(0);
   const [deleted, setDeleted] = useState<readonly string[]>([]);
   const [unlinked, setUnlinked] = useState<readonly string[]>([]);
+  // Each note's topics once changed here, by note id; a note not in it shows its sample's.
+  const [changed, setChanged] = useState<Readonly<Record<string, string[]>>>(
+    {},
+  );
   // The sample data without the notes deleted and the links ended here; asking for a deleted
   // note finds nothing, and neither does a colleague's note whose only link was ended.
   const data = useMemo<VaultData>(() => {
     if (
       deleted.length === 0 &&
       unlinked.length === 0 &&
-      madeWorkspaces.length === 0
+      madeWorkspaces.length === 0 &&
+      Object.keys(changed).length === 0
     )
       return sample;
+    const withTopics = <N extends { id: string; topics: string[] }>(n: N): N =>
+      changed[n.id] ? { ...n, topics: changed[n.id]! } : n;
     let open = sample.open;
     let closed: string | null = null;
     if (open && "note" in open) {
@@ -106,12 +118,21 @@ export function DevVault({
     return {
       ...sample,
       workspaces: [...sample.workspaces, ...madeWorkspaces],
-      notes: sample.notes.filter(
-        (n) => !deleted.includes(n.id) && n.id !== closed,
-      ),
+      notes: sample.notes
+        .filter((n) => !deleted.includes(n.id) && n.id !== closed)
+        .map(withTopics),
       open,
     };
-  }, [sample, deleted, unlinked, madeWorkspaces]);
+  }, [sample, deleted, unlinked, madeWorkspaces, changed]);
+  /** A note's topics as this page shows them now. */
+  const topicsNow = (noteId: string): string[] => {
+    if (changed[noteId]) return changed[noteId]!;
+    const open = sample.open && "note" in sample.open ? sample.open.note : null;
+    const found =
+      sample.notes.find((n) => n.id === noteId) ??
+      (open?.id === noteId ? open : null);
+    return found ? found.topics : [];
+  };
   const answer = async () =>
     fail ? { ok: false as const } : { ok: true as const };
   const actions: VaultActions = {
@@ -138,6 +159,37 @@ export function DevVault({
       if (slow) await wait(SLOW_WAIT);
       if (!fail) setUnlinked((ids) => [...ids, linkId]);
       return answer();
+    },
+    detachTopic: async (noteId, topicId) => {
+      record("detachTopic", [noteId, topicId]);
+      if (slow) await wait(SLOW_WAIT);
+      // As the server: only a pair that is still attached is taken off.
+      const carried = topicsNow(noteId);
+      if (fail || !carried.includes(topicId)) return { ok: false };
+      setChanged((c) => ({
+        ...c,
+        [noteId]: carried.filter((t) => t !== topicId),
+      }));
+      return { ok: true };
+    },
+    addTopic: async (noteId, topicId): Promise<TopicChange> => {
+      record("addTopic", [noteId, topicId]);
+      if (slow) await wait(SLOW_WAIT);
+      if (fail) return { ok: false, reason: "failed" };
+      // As the database: a note that is not the person's own is refused.
+      const open =
+        sample.open && "note" in sample.open ? sample.open.note : null;
+      const found =
+        sample.notes.find((n) => n.id === noteId) ??
+        (open?.id === noteId ? open : null);
+      if (!found || found.member_id !== sample.me || found.access !== "own")
+        return { ok: false, reason: "failed" };
+      const carried = topicsNow(noteId);
+      if (carried.includes(topicId)) return { ok: true };
+      if (carried.length >= MAX_TOPICS_PER_NOTE)
+        return { ok: false, reason: "full" };
+      setChanged((c) => ({ ...c, [noteId]: [...carried, topicId] }));
+      return { ok: true };
     },
     preview: async (workspaceId, path) => {
       record("preview", [workspaceId, path]);

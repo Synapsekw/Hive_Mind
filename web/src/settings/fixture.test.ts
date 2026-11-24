@@ -127,9 +127,9 @@ describe("fixtureSettings", () => {
     expect(fixtureSettings({ member: true }).topics).toEqual([]);
   });
 
-  it("heads: a new customer, a known one and a tag on five notes", () => {
+  it("heads: a new customer, a known one, a partner named like a saved customer, a solution and a tag on five notes", () => {
     const heads = fixtureHeads();
-    expect(heads).toHaveLength(7);
+    expect(heads).toHaveLength(9);
     expect(heads.filter((h) => h.tags.includes("flare-stack"))).toHaveLength(5);
     expect(fixtureHeads()).toEqual(heads);
   });

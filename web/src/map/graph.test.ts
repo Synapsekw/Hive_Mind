@@ -197,6 +197,28 @@ describe("buildModel", () => {
     expect(m.nodes[6]!.title).toBe("Ahmed, Ollama, self-hosted");
   });
 
+  it("carries a note's own folder, the payload's topic, under a grouping that is not the folder", () => {
+    const p = payload(
+      [
+        note("a", "Clients/Acme", { topics: ["c1"] }),
+        note("b", "Clients/Acme"),
+        LOCKED_NOTE,
+      ],
+      { topics: [{ id: "c1", name: "Acme", kind: "client" }] },
+    );
+    for (const a of ["category", "topic", "time", "links"] as const) {
+      const m = buildModel(p, grouping(p, a, NOW));
+      const byId = (id: string) => m.nodes.find((x) => x.id === id)!;
+      expect(byId("a").folder).toBe("Clients/Acme");
+      expect(byId("b").folder).toBe("Clients/Acme");
+      expect(byId("locked-1").folder).toBe("Kestrel");
+      for (const x of m.nodes.filter(
+        (x) => x.id === null || x.kind === "agent",
+      ))
+        expect(x.folder).toBeUndefined();
+    }
+  });
+
   it("shows a locked note as Private note and a locked file as Private file", () => {
     const leaky: MapNode = {
       ...LOCKED_NOTE,

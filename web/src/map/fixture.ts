@@ -2,6 +2,7 @@
 // 3 members, 4 agents, files, links and locked nodes. Dates are relative to `now`: everything was
 // written and last changed within the last 14 days, so the Timeline shows days. With `old` the
 // items were written over the last 1,000 days (and last changed as before), so it shows quarters.
+import type { Kind } from "../topics/types";
 import type { MapNode, MapPayload } from "./types";
 
 const TOPICS: [string, number][] = [
@@ -16,6 +17,19 @@ const TOPICS: [string, number][] = [
   ["Hiring", 14],
   ["Ops handbook", 10],
 ];
+/** The hive's topics: five kinds, and "Qualcomm" is both a partner and a vendor. */
+const HIVE_TOPICS: { id: string; name: string; kind: Kind }[] = [
+  ["t-adnoc", "ADNOC", "client"],
+  ["t-emsteel", "Emsteel", "client"],
+  ["t-qcom-p", "Qualcomm", "partner"],
+  ["t-qcom-v", "Qualcomm", "vendor"],
+  ["t-skydio", "Skydio", "vendor"],
+  ["t-kestrel", "Kestrel", "product"],
+  ["t-inspect", "Tower inspection", "solution"],
+  ["t-regs", "Airspace rules", "subject"],
+].map(
+  ([id, name, kind]) => ({ id, name, kind }) as (typeof HIVE_TOPICS)[number],
+);
 const NOTE_TITLES = [
   "Overview",
   "Pricing basis",
@@ -132,6 +146,16 @@ export function fixturePayload(
                 : AGENT_CHATGPT
               : null,
           note_id: !locked && file ? lastNote : null,
+          // A note carries none to three topics; a file or a locked note none.
+          topics:
+            locked || file
+              ? []
+              : Array.from(
+                  { length: (j + ti) % 4 },
+                  (_, k) =>
+                    HIVE_TOPICS[(j * 3 + ti * 5 + k * 3) % HIVE_TOPICS.length]!
+                      .id,
+                ),
         });
         if (!locked) {
           readable.push(id);
@@ -157,6 +181,7 @@ export function fixturePayload(
     by_agent: true,
     agent_id: AGENT_CLAUDE,
     note_id: null,
+    topics: [],
   });
 
   const links: MapPayload["links"] = [];
@@ -217,6 +242,7 @@ export function fixturePayload(
     ],
     nodes,
     links,
+    topics: HIVE_TOPICS,
     truncated: false,
   };
 }

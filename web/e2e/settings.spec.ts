@@ -1534,10 +1534,25 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
   // Zain is there already: only Orbit and the tag are offered.
   const orbit = found.getByRole("checkbox", { name: "Customers: Orbit" });
   const flare = found.getByRole("checkbox", { name: "Subjects: flare-stack" });
+  const rovs = found.getByRole("checkbox", {
+    name: "Solutions: Underwater ROVs",
+  });
   await expect(orbit).toBeChecked();
+  await expect(rovs).toBeChecked();
   await expect(flare).not.toBeChecked();
-  await expect(found.getByRole("checkbox", { name: /Zain/ })).toHaveCount(0);
+  await expect(
+    found.getByRole("checkbox", { name: "Customers: Zain" }),
+  ).toHaveCount(0);
   await expect(found).toContainText("tag on 5 notes");
+  // A partner named like the saved customer is offered, unticked, and says where it is.
+  const zainPartner = found.getByRole("checkbox", {
+    name: "Partners: Zain, already under Customers",
+  });
+  await expect(zainPartner).toBeVisible();
+  await expect(zainPartner).not.toBeChecked();
+  await expect(
+    found.getByRole("listitem").filter({ hasText: "already under Customers" }),
+  ).toHaveCount(1);
   // What is saved with a topic is shown, and so is who will see it.
   await expect(found.getByText("also: Orbit Aerospace")).toBeVisible();
   await expect(
@@ -1549,15 +1564,18 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
   await found.getByRole("button", { name: "Save topics" }).click();
   await expect(found).toHaveCount(0);
   await expect(live(page)).toHaveText(
-    "1 topic saved. Now open the vault and press Attach topics.",
+    "2 topics saved. Now open the vault and press Attach topics.",
   );
   // Seen as well as announced, and the focus is on Find, not lost with the form.
   await expect(
     topics(page).getByText(
-      "1 topic saved. Now open the vault and press Attach topics.",
+      "2 topics saved. Now open the vault and press Attach topics.",
     ),
   ).toBeVisible();
   await expect(findTopics(page)).toBeFocused();
+  await expect(
+    topics(page).getByRole("heading", { name: /^Customers/ }),
+  ).toBeVisible();
   await expect(
     topics(page).getByRole("list", { name: "Customers" }),
   ).toContainText("Orbit");
@@ -1565,7 +1583,12 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
   expect(saves).toEqual([
     {
       name: "saveTopics",
-      args: [[{ kind: "client", name: "Orbit", aliases: ["Orbit Aerospace"] }]],
+      args: [
+        [
+          { kind: "client", name: "Orbit", aliases: ["Orbit Aerospace"] },
+          { kind: "solution", name: "Underwater ROVs", aliases: [] },
+        ],
+      ],
     },
   ]);
   // Both of the owner's workspaces were read, from the start.
@@ -1628,10 +1651,13 @@ test("Topics: Cancel closes the candidates and puts the focus on Find; with noth
   // Tick the subject too and save both: the hive then has everything the notes name.
   await findTopics(page).click();
   await found.getByRole("checkbox", { name: "Subjects: flare-stack" }).check();
+  await found
+    .getByRole("checkbox", { name: /^Partners: Zain, already under/ })
+    .check();
   await found.getByRole("button", { name: "Save topics" }).click();
   await expect(
     topics(page).getByText(
-      "2 topics saved. Now open the vault and press Attach topics.",
+      "4 topics saved. Now open the vault and press Attach topics.",
     ),
   ).toBeVisible();
   await expect(findTopics(page)).toBeFocused();

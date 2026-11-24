@@ -126,15 +126,25 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
   the rings, as "name · count". A dot's own links show when it is hot (hovered),
   focused or selected.
 - **Group by:** a menu in the top bar that appears only in Rings. The button reads "Group by
-  Folder" (or Links, Time) and opens a menu of three radio rows, the current one ticked. Folder
-  groups by topic (the largest first, up to twelve groups, the rest folded into "Other"). Links
+  Folder" (or Category, Topic, Links, Time) and opens a menu of five radio rows in the order
+  Folder, Category, Topic, Links, Time, the current one ticked. Folder
+  groups by folder (the largest first, up to twelve groups, the rest folded into "Other"). Category
+  draws one ring per kind of topic, in the fixed kind order (customers, partners, projects,
+  vendors, products, solutions, people, subjects), and a note sits under the kind of its strongest
+  topic; notes with no topic go last in "No topic", and nothing folds. Topic draws one ring per
+  topic, the largest first, up to twelve groups, the rest folded into "Other topics" (or "More
+  topics" when a topic already has that name; "No topic" is always the last ring, is never folded
+  and takes one of the twelve places), and a name that two kinds share carries its kind in
+  brackets, as "Atlas (Projects)". Links
   groups items that link to each other into clusters, named after their best-linked note, with
   "Hub notes", "Small clusters", "Linked to hubs" (notes whose only links go to hub notes) and
   "Unlinked" for the rest. Time groups by month, with "Last 2 weeks" first when anything changed
   in that time. Changing it moves the dots in one glide, keeps the selected item selected, clears
   a chosen group filter, since the groups are new, and closes the menu. Escape or a press outside
   also closes it and returns focus to the button. It is client
-  state only and sends no request.
+  state only and sends no request. The side panel of a selected note shows its topics under a
+  **Topics** row, each with its kind; the row that shows the folder is labelled **Folder**. A
+  note the viewer cannot read, and a file, show no Topics row.
 - **Timeline and Orbit** keep the per-topic colours (at most eight topics, the rest folded into
   "Other"), and the filter list calls its first column "Topics".
 - **Zoom and pan:** wheel or pinch toward the cursor, drag to pan, double-click to zoom in, a
@@ -255,7 +265,21 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   again." A declined pair of notes stays declined.
 - **Entities** — synthesis at the top with every fact citing its source on hover; contradictions
   pinned; linked notes and files below.
-- **Vault** — folder tree, note list, note preview. Visibility shown inline and changed in place;
+- **Vault** — folder tree, note list, note preview. The left column has a switch, **Browse
+  notes by**, with **Folders** and **Topics**. Topics lists **All notes**, then each kind that
+  has notes in the open tab, in the fixed kind order, with the number of notes under it; a kind
+  opens to its topics, each with its own count, and a last row **No topic** appears when some
+  notes have none. Choosing a topic, **No topic** or **All notes** filters the
+  note list; switching back to Folders shows the folder tree with all notes again. A hive with
+  no topics shows "This hive has no topics yet. Its owner finds them in Settings, under
+  Topics." Choosing a grouping sends no request. Under **Linked with**, the open note shows
+  its **Topics** as chips, each with the topic's name and kind. On one's own note each chip has
+  **Remove**, which acts at once with no question, and **Add topic** offers the hive's other
+  topics, grouped by kind, with **Add**; it appears only while the note has fewer than five
+  topics. If the app's server step refuses an add because the note is already full, the page says "A note
+  has at most five topics. Remove one first."; any other refusal says "That didn't work. Try
+  again." A note with none shows "No topics yet." A colleague's note shows
+  its chips without Remove or Add. Visibility shown inline and changed in place;
   quarantine is a folder with a release action. The preview of your own note has a quiet
   **Delete** after the sharing control. The first click asks "Delete this note? It is gone for
   good, with its history and its links. Files attached to it stay in the gallery." with
@@ -321,11 +345,12 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   The only workspace shows no Delete, and neither does any workspace while the hive is being
   deleted.
 
-  The owner also has **Topics**: the hive's customers, projects, vendors, products, people and
-  subjects, by kind, each with the number of notes under it and **Delete** (asked once; the
-  notes stay). **Find topics in my notes** reads the owner's own notes, never their text, and
-  lists the topics they name that the hive does not have yet, ticked by kind with subjects
-  unticked; **Save topics** adds the ticked ones.
+  The owner also has **Topics**: the hive's customers, partners, projects, vendors, products,
+  solutions, people and subjects, in eight kinds, each kind's list under its own heading with
+  the number of notes under each topic and **Delete** (asked once; the notes stay). **Find
+  topics in my notes** reads the owner's own notes, never their text, and lists the topics they
+  name that the hive does not have yet, under a heading for each kind, ticked except subjects,
+  which start unticked; **Save topics** adds the ticked ones.
 
   Owners also have a **Delete this hive** section. It shows how many members, notes and files
   the hive holds and a field for the hive's name; **Delete hive** is enabled only when the

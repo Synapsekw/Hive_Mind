@@ -1,6 +1,8 @@
 // The `map_graph` payload (see docs/superpowers/plans/2026-11-22-web-map.md, "The payload
 // contract") and the drawing model the map is built from.
 
+import type { Kind } from "../topics/types";
+
 export type MapPayload = {
   members: { id: string; display_name: string; is_me: boolean }[];
   agents: {
@@ -13,6 +15,8 @@ export type MapPayload = {
   }[];
   nodes: MapNode[];
   links: { from: string; to: string; tier: number; score: number }[];
+  /** The hive's topics. Absent from an older database: the map then has no topic groupings. */
+  topics?: { id: string; name: string; kind: Kind }[];
   truncated: boolean;
 };
 
@@ -34,6 +38,8 @@ export type MapNode = {
   agent_id: string | null;
   // only on a readable file:
   note_id: string | null;
+  /** Topic ids, strongest first, at most five; [] for a file or a locked note. Absent from an older database. */
+  topics?: string[];
 };
 
 export type View = "rings" | "timeline" | "orbit";
@@ -52,6 +58,10 @@ export type ModelNode = {
   updatedAt: number; // epoch ms; 0 for root and hubs
   createdAt: number; // epoch ms; `updatedAt` when the payload has no usable created date
   byAgent: boolean;
+  /** The note's or file's own folder, as the payload names it, whatever the grouping. Absent on root, hubs and agents. */
+  folder?: string;
+  /** A readable note's topics, strongest first. Absent when it has none. */
+  held?: { name: string; kind: Kind }[];
   nb: number[]; // neighbours
 };
 

@@ -24,14 +24,8 @@ export const KEEP = "Keep";
 export const DELETE_ASIDE = "Notes stay. They are no longer under this topic.";
 export const FAILED = "That didn't work. Try again.";
 
-export const KIND_NAMES: Record<Kind, string> = {
-  client: "Customers",
-  project: "Projects",
-  vendor: "Vendors",
-  product: "Products",
-  person: "People",
-  subject: "Subjects",
-};
+// Kept here for the settings screens; the map reads it from `topics/types`.
+export { KIND_NAMES } from "../topics/types";
 
 const many = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
@@ -59,11 +53,22 @@ export const deleted = (name: string) => `${name} deleted.`;
 export const alsoKnown = (aliases: string[]): string | null =>
   aliases.length === 0 ? null : `also: ${aliases.join(", ")}`;
 
+/** Beside a candidate whose name is already a topic of another kind: which kinds. */
+export function alreadyUnder(kindNames: string[]): string {
+  const last = kindNames[kindNames.length - 1] ?? "";
+  const list =
+    kindNames.length > 1
+      ? `${kindNames.slice(0, -1).join(", ")} and ${last}`
+      : last;
+  return `already under ${list}`;
+}
+
 export const pickLabel = (
   kindName: string,
   name: string,
   aliases: string[] = [],
+  under: string | null = null,
 ) => {
   const also = alsoKnown(aliases);
-  return `${kindName}: ${name}${also ? `, ${also}` : ""}`;
+  return `${kindName}: ${name}${also ? `, ${also}` : ""}${under ? `, ${under}` : ""}`;
 };

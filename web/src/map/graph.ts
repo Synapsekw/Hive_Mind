@@ -102,13 +102,22 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
     }),
   );
   const byId = new Map<string, number>();
+  const topicById = new Map((payload.topics ?? []).map((t) => [t.id, t]));
   for (const [at, n] of payload.nodes.entries()) {
+    // A readable note's topics by name and kind; an id the payload does not list is skipped.
+    const held: NonNullable<ModelNode["held"]> = [];
+    if (!n.locked && n.kind === "note")
+      for (const id of n.topics ?? []) {
+        const t = topicById.get(id);
+        if (t) held.push({ name: t.name, kind: t.kind });
+      }
     const locked = n.locked;
     const updatedAt = parseTime(n.updated_at);
     const i = add({
       id: n.id,
       kind: n.kind,
       topic: g.of[at] ?? 0,
+      folder: n.topic,
       member: n.member_id,
       mine: meIds.has(n.member_id),
       locked,
@@ -122,6 +131,7 @@ export function buildModel(payload: MapPayload, groups?: Grouping): MapModel {
       // A payload without a usable created date (an older database) falls back to the change.
       createdAt: parseTime(n.created_at) || updatedAt,
       byAgent: !locked && n.by_agent === true,
+      ...(held.length > 0 ? { held } : {}),
     });
     byId.set(n.id, i);
   }

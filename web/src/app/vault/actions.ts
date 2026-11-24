@@ -13,12 +13,14 @@ import type {
 } from "../../import/types";
 import { createServerSupabase } from "../../lib/supabase/server";
 import type { AttachResult } from "../../topics/types";
-import type { Result, SharePreview } from "../../vault/types";
+import type { Result, SharePreview, TopicChange } from "../../vault/types";
 import { attachBatchIn } from "./attach";
 import { connectBatchIn } from "./connect";
 import { createImportWorkspaceIn, importBatchIn } from "./import";
 import {
+  addTopicIn,
   deleteNoteIn,
+  detachTopicIn,
   previewIn,
   releaseIn,
   saveFolderIn,
@@ -67,6 +69,24 @@ export async function deleteNote(noteId: string): Promise<Result> {
 
 export async function unlink(linkId: string): Promise<Result> {
   return withSession<Result>({ ok: false }, (db) => unlinkIn(db, linkId));
+}
+
+export async function detachTopic(
+  noteId: string,
+  topicId: string,
+): Promise<Result> {
+  return withSession<Result>({ ok: false }, (db) =>
+    detachTopicIn(db, noteId, topicId),
+  );
+}
+
+export async function addTopic(
+  noteId: string,
+  topicId: string,
+): Promise<TopicChange> {
+  return withSession<TopicChange>({ ok: false, reason: "failed" }, (db) =>
+    addTopicIn(db, noteId, topicId),
+  );
 }
 
 export async function preview(
