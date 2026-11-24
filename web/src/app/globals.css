@@ -24,14 +24,10 @@ body {
   padding: 0;
 }
 
-/* The page: the bloom radials over the theme wash, fixed to the window so a scrolling page
-   does not tile or stretch it. */
+/* The page: one flat colour from the theme. */
 body {
   min-height: 100vh;
   background-color: var(--bg);
-  background-image: var(--bloom), var(--wash);
-  background-attachment: fixed;
-  background-repeat: no-repeat;
   color: var(--fg);
   font-family: var(--font-sans), system-ui, sans-serif;
   font-size: 14px;
@@ -73,8 +69,6 @@ textarea {
 @media print {
   :root {
     color-scheme: light !important;
-    --wash: none !important;
-    --bloom: none !important;
     --glow: none !important;
     --glass: transparent !important;
     --glass2: transparent !important;
