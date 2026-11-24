@@ -773,28 +773,44 @@ function drawFocusLinks(F: Frame) {
   }
 }
 
-/** Pulses: a 7%-long segment of light running along a link. */
+/**
+ * Pulses: a 7%-long segment of light running along a link. All pulses of one colour and kind
+ * are stroked as one path: a shadow blur is a full pass per draw call, and a hub fires 160 at
+ * once (one stroke each made a big hub's hover run at a few frames a second).
+ */
 function drawPulses(F: Frame) {
   const { ctx, f, px } = F;
-  for (const p of f.pulses) {
-    const k = (f.time - p.t0) / p.dur;
+  const paths = new Map<
+    string,
+    { p: Path2D; colour: string; ambient: boolean }
+  >();
+  for (const q of f.pulses) {
+    const k = (f.time - q.t0) / q.dur;
     if (k >= 1) continue;
-    if (p.ambient) F.ambient = true;
+    if (q.ambient) F.ambient = true;
     else F.motion = true;
     if (k < 0) continue;
-    const a = P(F, p.from);
-    const b = P(F, p.to);
+    const a = P(F, q.from);
+    const b = P(F, q.to);
     const k0 = Math.max(0, k - 0.035);
     const k1 = Math.min(1, k + 0.035);
-    ctx.globalAlpha = p.ambient ? 0.55 : 1;
-    ctx.strokeStyle = p.colour;
-    ctx.shadowColor = p.colour;
-    ctx.shadowBlur = p.ambient ? 4 : 6;
-    ctx.lineWidth = (p.ambient ? 1.4 : 2.2) * px;
-    ctx.beginPath();
-    ctx.moveTo(a[0] + (b[0] - a[0]) * k0, a[1] + (b[1] - a[1]) * k0);
-    ctx.lineTo(a[0] + (b[0] - a[0]) * k1, a[1] + (b[1] - a[1]) * k1);
-    ctx.stroke();
+    const key = `${q.ambient ? 1 : 0}${q.colour}`;
+    let g = paths.get(key);
+    if (!g)
+      paths.set(
+        key,
+        (g = { p: new Path2D(), colour: q.colour, ambient: !!q.ambient }),
+      );
+    g.p.moveTo(a[0] + (b[0] - a[0]) * k0, a[1] + (b[1] - a[1]) * k0);
+    g.p.lineTo(a[0] + (b[0] - a[0]) * k1, a[1] + (b[1] - a[1]) * k1);
+  }
+  for (const { p, colour, ambient } of paths.values()) {
+    ctx.globalAlpha = ambient ? 0.55 : 1;
+    ctx.strokeStyle = colour;
+    ctx.shadowColor = colour;
+    ctx.shadowBlur = ambient ? 4 : 6;
+    ctx.lineWidth = (ambient ? 1.4 : 2.2) * px;
+    ctx.stroke(p);
   }
   ctx.shadowBlur = 0;
 }
@@ -1178,11 +1194,127 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
   );
 }
 
+/** At most this many of the hot dot's neighbours are drawn in front with the soft glow. */
+const NEAR_MAX = 400;
+/** The neighbours' glow, in screen px. */
+const NEAR_GLOW = 10;
+
+/** A batch of the hot dot's neighbours. `tone`: a group (>= 0), the brand (-1) or fg2 (-2). */
+type NearBatch = {
+  tone: number;
+  kind: Kind;
+  alpha: number;
+  outline: number;
+  paths: Path2D[];
+};
+type NearCache = Omit<DotCache, "batches" | "grow"> & {
+  batches: NearBatch[];
+  /** Agents and the index among the neighbours: drawn one by one (there are few). */
+  loose: number[];
+};
+const nearCaches = new WeakMap<Scene, NearCache>();
+
+/**
+ * The hot dot's neighbours, batched per kind, colour, alpha and outline exactly as drawOne would
+ * colour each one. A shadow blur costs a full pass per draw call, so one fill per batch instead of
+ * one per dot is what keeps hovering a big hub (hundreds of neighbours) smooth.
+ */
+function nearBatches(F: Frame): Pick<NearCache, "batches" | "loose"> {
+  const { model, f } = F;
+  const groups = new Map<string, Omit<NearBatch, "paths"> & { n: number[] }>();
+  const loose: number[] = [];
+  let budget = NEAR_MAX;
+  for (const i of F.near) {
+    if (i === f.hot) continue;
+    if (budget-- <= 0) break;
+    const n = model.nodes[i];
+    if (!n) continue;
+    if (n.kind === "agent" || n.kind === "root") {
+      loose.push(i);
+      continue;
+    }
+    const kind = kindOf(n);
+    let tone: number;
+    let alpha: number;
+    let outline = 0;
+    if (F.fresh && kind !== "hub") {
+      const dim = alphaOf(F, i);
+      const locked = kind === "lnote" || kind === "lfile";
+      const level = locked ? 0 : (F.fresh[i] ?? 0);
+      tone = -1;
+      alpha = locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim;
+      outline = locked ? 0 : outlineOf(diam(F, n), dim);
+    } else {
+      tone = kind === "hub" || n.topic >= 0 ? n.topic : -2;
+      alpha = alphaOf(F, i) * (theirs(n) ? 0.72 : 1);
+    }
+    const key = `${kind}|${tone}|${alpha}|${outline}`;
+    const g = groups.get(key);
+    if (g) g.n.push(i);
+    else groups.set(key, { tone, kind, alpha, outline, n: [i] });
+  }
+  // Plain dots first, hubs on top.
+  const batches = [...groups.values()]
+    .sort((x, y) => +(x.kind === "hub") - +(y.kind === "hub"))
+    .map(({ n, ...g }) => ({ ...g, paths: groupPaths(F, g.kind, n, 1) }));
+  return { batches, loose };
+}
+
+/** The neighbours' batches, cached like the resting dots' (a hover frame only fills). */
+function drawNear(F: Frame) {
+  const { scene, f, s, pal } = F;
+  let nc = nearCaches.get(scene);
+  if (
+    !nc ||
+    nc.pos !== f.pos ||
+    nc.lit !== f.lit ||
+    nc.soft !== f.soft ||
+    nc.hot !== f.hot ||
+    nc.sel !== f.sel ||
+    nc.focus !== f.focusRing ||
+    nc.s !== s ||
+    // Orbit: the projection (sizes per depth) changes while it turns.
+    F.depth !== null
+  ) {
+    nc = {
+      pos: f.pos,
+      lit: f.lit,
+      soft: f.soft,
+      hot: f.hot,
+      sel: f.sel,
+      focus: f.focusRing,
+      s,
+      ...nearBatches(F),
+    };
+    nearCaches.set(scene, nc);
+  }
+  for (const b of nc.batches) {
+    const colour =
+      b.kind === "hub"
+        ? hubColour(F, b.tone)
+        : b.tone === -1
+          ? pal.brand
+          : b.tone === -2
+            ? pal.fg2
+            : hueOf(F, b.tone);
+    fillGroup(
+      F,
+      b.kind,
+      colour,
+      b.alpha,
+      b.paths,
+      NEAR_GLOW,
+      b.tone >= 0 ? b.tone : -1,
+      b.outline,
+    );
+  }
+  for (const i of nc.loose) drawOne(F, i, 1, NEAR_GLOW);
+}
+
 /** The hot dot grown x1.7 with a glow, and its neighbours with a softer one. */
 function drawHot(F: Frame) {
   const { ctx, f, model, pal, px } = F;
-  let budget = 400;
-  for (const i of F.near) if (i !== f.hot && budget-- > 0) drawOne(F, i, 1, 10);
+  if (F.near.size) drawNear(F);
   if (f.hot === null || !model.nodes[f.hot]) return;
   const n = model.nodes[f.hot]!;
   const [x, y] = P(F, f.hot);
