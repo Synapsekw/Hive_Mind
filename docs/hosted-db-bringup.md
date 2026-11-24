@@ -43,10 +43,10 @@ sign-ups afterwards, is in [Invitation email](#invitation-email).
   `unlink` and `note_links` for the vault. Checked before applying: no pair of notes had link
   rows in both directions (the new unique index refuses them, so on another project look for
   such pairs first; which row to keep is the owner's decision).
-- Migration `20261124082437_hive_cap` is **not applied yet**. It replaces `create_hive`, with
-  the same signature, and adds three things: a cap of 5 hives owned by one person, checks on
-  the two names (trimmed, 1 to 60 characters each) and a `hive.created` entry in the audit
-  log.
+- Migration `20261124082437_hive_cap` is applied (2026-11-24) with
+  `supabase db query --linked -f <file>` in one transaction and recorded under that version. It
+  replaces `create_hive`: at most 5 hives owned by one person, both names 1 to 60 characters
+  after trimming, and a `hive.created` entry in the audit log.
 - The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
   the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
   still the build from before its signing code moved to `_shared/`; behaviour is the same.
