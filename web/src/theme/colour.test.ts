@@ -6,6 +6,7 @@ import {
   fromHex,
   fromOklch,
   mix,
+  mixOklab,
   over,
   parseColour,
   toHex,
@@ -53,10 +54,10 @@ describe("contrast", () => {
 });
 
 describe("oklch", () => {
-  const brands = data.themes.flatMap((t) => [t.dark.brand, t.light.brand]);
+  const brands = data.themes.map((t) => t.accent);
 
-  it("round-trips the 36 brand seeds within 1/255", () => {
-    expect(brands).toHaveLength(36);
+  it("round-trips the 8 accent seeds within 1/255", () => {
+    expect(brands).toHaveLength(8);
     for (const hex of brands) {
       const c = fromHex(hex);
       const o = toOklch(c);
@@ -102,5 +103,20 @@ describe("css and parseColour", () => {
     expect(toHex(p)).toBe("#8ea2eb");
     expect(p.a).toBe(0.14);
     expect(() => parseColour("var(--brand)")).toThrow();
+  });
+});
+
+describe("mixOklab", () => {
+  const a = fromHex("#3a2c14");
+  const b = fromHex("#ffd98a");
+
+  it("returns the ends exactly", () => {
+    expect(mixOklab(a, b, 0)).toEqual(a);
+    expect(mixOklab(a, b, 1)).toEqual(b);
+  });
+
+  it("is halfway in lightness at the middle", () => {
+    const mid = toOklch(mixOklab(a, b, 0.5)).l;
+    expect(mid).toBeCloseTo((toOklch(a).l + toOklch(b).l) / 2, 2);
   });
 });

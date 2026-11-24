@@ -122,6 +122,27 @@ export function fromOklch(l: number, c: number, h: number): RGB {
   return { r: r!, g: g!, b: b! };
 }
 
+/** A straight line between two colours in OKLab: even steps in lightness, no hue detour. */
+export function mixOklab(a: RGB, b: RGB, t: number): RGB {
+  if (t <= 0) return a;
+  if (t >= 1) return b;
+  const lab = (c: RGB): [number, number, number] => {
+    const o = toOklch(c);
+    const rad = (o.h * Math.PI) / 180;
+    return [o.l, o.c * Math.cos(rad), o.c * Math.sin(rad)];
+  };
+  const x = lab(a);
+  const y = lab(b);
+  const l = x[0] + (y[0] - x[0]) * t;
+  const A = x[1] + (y[1] - x[1]) * t;
+  const B = x[2] + (y[2] - x[2]) * t;
+  return fromOklch(
+    l,
+    Math.hypot(A, B),
+    ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360,
+  );
+}
+
 const alpha3 = (a: number) => Math.round(a * 1000) / 1000;
 
 /** "#rrggbb" for an opaque colour, otherwise "rgba(r, g, b, a)" with the alpha to 3 decimals. */

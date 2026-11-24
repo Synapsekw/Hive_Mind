@@ -1,441 +1,167 @@
 {
-  "default": "hive",
-  "note": "Seed values per theme and mode. brandMid null means the midpoint of brand and brand2. wash is the three stops of the 168deg background gradient. Everything else is derived; see docs/ui-concept.md section 2.",
+  "default": "honey",
+  "note": "One record per theme, tuned by hand. tint is the opacity of the glow colour behind the centre of the map card; grid (Blueprint only) is the opacity of the accent in the card's grid lines; ramp is old, middle, fresh. Nothing is derived except the eight ramp steps and the eight topic colours; see docs/ui-concept.md section 2.",
   "themes": [
     {
-      "id": "hive",
-      "label": "Hive",
-      "mark": "brand",
-      "rings": "honey",
-      "dark": {
-        "brand": "#f5b544",
-        "brand2": "#ef8a3c",
-        "brandMid": null,
-        "content": "#0a0704",
-        "text": "#fbf3e4",
-        "textMuted": "#cfbb9c",
-        "surface": "#0e0905",
-        "bloom": 0.3,
-        "wash": ["#140d06", "#090603", "#030201"]
-      },
-      "light": {
-        "brand": "#a05a0c",
-        "brand2": "#ab4a12",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#24190c",
-        "textMuted": "#5e4a30",
-        "surface": "#fffaf0",
-        "wash": ["#844a0b", "#733e0d", "#52260a"]
-      }
+      "id": "honey",
+      "label": "Honey",
+      "scheme": "dark",
+      "bg": "#060606",
+      "card": "#0c0c0d",
+      "line": "#222224",
+      "text": "#f3efe8",
+      "muted": "#8d8a84",
+      "fg2": "#c6c7cf",
+      "quiet": "#7c7e88",
+      "accent": "#f5b544",
+      "onAccent": "#0e0e10",
+      "glow": "#ffb640",
+      "hub": "#f5b544",
+      "ramp": ["#3a2c14", "#b9791f", "#ffd98a"],
+      "tint": 0.07,
+      "activeBg": "#1e1a12",
+      "activeFg": "#ffd98a"
     },
     {
-      "id": "keystone",
-      "label": "Keystone",
-      "dark": {
-        "brand": "#8ea2eb",
-        "brand2": "#8ea2eb",
-        "brandMid": null,
-        "content": "#0e0e10",
-        "text": "#f4f4f6",
-        "textMuted": "#b2b2ba",
-        "surface": "#161619",
-        "wash": ["#212540", "#141728", "#08090d"]
-      },
-      "light": {
-        "brand": "#5a6ed5",
-        "brand2": "#5a6ed5",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#1a1a1f",
-        "textMuted": "#5b5b62",
-        "surface": "#ffffff",
-        "wash": ["#3643a7", "#2c3699", "#222c72"]
-      }
+      "id": "abyss",
+      "label": "Abyss",
+      "scheme": "dark",
+      "bg": "#02060b",
+      "card": "#050b13",
+      "line": "#132231",
+      "text": "#e3f1f6",
+      "muted": "#7592a3",
+      "fg2": "#c6c7cf",
+      "quiet": "#7c7e88",
+      "accent": "#3fe0d0",
+      "onAccent": "#0e0e10",
+      "glow": "#35e6d8",
+      "hub": "#8ff5ea",
+      "ramp": ["#0f2c44", "#1f7fa6", "#a5fff3"],
+      "tint": 0.07,
+      "activeBg": "#0b2230",
+      "activeFg": "#9ff5ec"
     },
     {
-      "id": "graphite",
-      "label": "Graphite",
-      "dark": {
-        "brand": "#c9c9d2",
-        "brand2": "#c9c9d2",
-        "brandMid": null,
-        "content": "#0f0f10",
-        "text": "#f4f4f6",
-        "textMuted": "#babac2",
-        "surface": "#171718",
-        "wash": ["#26262b", "#16161a", "#09090b"]
-      },
-      "light": {
-        "brand": "#4b4b55",
-        "brand2": "#4b4b55",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#1a1a1e",
-        "textMuted": "#595960",
-        "surface": "#ffffff",
-        "wash": ["#515259", "#46464d", "#34353a"]
-      }
+      "id": "ember",
+      "label": "Ember",
+      "scheme": "dark",
+      "bg": "#090505",
+      "card": "#0f0808",
+      "line": "#2a1917",
+      "text": "#f6ece8",
+      "muted": "#a08a84",
+      "fg2": "#c6c7cf",
+      "quiet": "#7c7e88",
+      "accent": "#ff6a3d",
+      "onAccent": "#0e0e10",
+      "glow": "#ff5a2a",
+      "hub": "#ff9a5c",
+      "ramp": ["#4a1612", "#e2452a", "#ffe9a8"],
+      "tint": 0.08,
+      "activeBg": "#2a1410",
+      "activeFg": "#ffc2a8"
     },
     {
       "id": "aurora",
       "label": "Aurora",
-      "dark": {
-        "brand": "#5fd6c4",
-        "brand2": "#9d8df7",
-        "brandMid": null,
-        "content": "#0e1111",
-        "text": "#f1f6f5",
-        "textMuted": "#b5c6c3",
-        "surface": "#161919",
-        "wash": ["#182f2d", "#17192c", "#08090d"]
-      },
-      "light": {
-        "brand": "#0f7d71",
-        "brand2": "#6b59d3",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#141a19",
-        "textMuted": "#4b5c59",
-        "surface": "#ffffff",
-        "wash": ["#015a4f", "#004572", "#36236c"]
-      }
+      "scheme": "dark",
+      "bg": "#040807",
+      "card": "#070f0d",
+      "line": "#17272a",
+      "text": "#e8f4ef",
+      "muted": "#7f9a92",
+      "fg2": "#c6c7cf",
+      "quiet": "#7c7e88",
+      "accent": "#5ef2a8",
+      "onAccent": "#0e0e10",
+      "glow": "#56f0a6",
+      "hub": "#b79cf7",
+      "ramp": ["#3b2a6e", "#3f8fc4", "#8dffc4"],
+      "tint": 0.06,
+      "activeBg": "#0f2a22",
+      "activeFg": "#a8ffd2"
     },
     {
-      "id": "sunset",
-      "label": "Sunset",
-      "dark": {
-        "brand": "#f7a45c",
-        "brand2": "#ee6fa3",
-        "brandMid": null,
-        "content": "#12100f",
-        "text": "#f6f2f1",
-        "textMuted": "#c1b1ab",
-        "surface": "#1a1817",
-        "wash": ["#33231a", "#23151b", "#0d0809"]
-      },
-      "light": {
-        "brand": "#b65318",
-        "brand2": "#c0386f",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#1e1613",
-        "textMuted": "#66544c",
-        "surface": "#ffffff",
-        "wash": ["#8e3800", "#8e0a20", "#600e38"]
-      }
+      "id": "moonstone",
+      "label": "Moonstone",
+      "scheme": "dark",
+      "bg": "#07080a",
+      "card": "#0d0f12",
+      "line": "#23262c",
+      "text": "#eef0f4",
+      "muted": "#8b909b",
+      "fg2": "#c6c7cf",
+      "quiet": "#7c7e88",
+      "accent": "#dfe6f5",
+      "onAccent": "#0e0e10",
+      "glow": "#cfe0ff",
+      "hub": "#ffffff",
+      "ramp": ["#30343d", "#8a93a6", "#ffffff"],
+      "tint": 0.05,
+      "activeBg": "#1b1e24",
+      "activeFg": "#ffffff"
     },
     {
-      "id": "nebula",
-      "label": "Nebula",
-      "dark": {
-        "brand": "#b79cf7",
-        "brand2": "#6fa8ee",
-        "brandMid": null,
-        "content": "#0f0e12",
-        "text": "#f4f3f7",
-        "textMuted": "#b6b2c2",
-        "surface": "#17161a",
-        "wash": ["#261f40", "#131a2c", "#08090d"]
-      },
-      "light": {
-        "brand": "#7450d6",
-        "brand2": "#2f6cc0",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#19171f",
-        "textMuted": "#5a5666",
-        "surface": "#ffffff",
-        "wash": ["#6639a0", "#323ca0", "#00346c"]
-      }
+      "id": "ultraviolet",
+      "label": "Ultraviolet",
+      "scheme": "dark",
+      "bg": "#07040e",
+      "card": "#0c0815",
+      "line": "#251b3a",
+      "text": "#f1ebfb",
+      "muted": "#9486ad",
+      "fg2": "#c6c7cf",
+      "quiet": "#7c7e88",
+      "accent": "#c77dff",
+      "onAccent": "#0e0e10",
+      "glow": "#d05cff",
+      "hub": "#ff9ae0",
+      "ramp": ["#2d1b55", "#9b4de0", "#ffa8e6"],
+      "tint": 0.08,
+      "activeBg": "#22143a",
+      "activeFg": "#e6c6ff"
     },
     {
-      "id": "lagoon",
-      "label": "Lagoon",
-      "dark": {
-        "brand": "#37d6dd",
-        "brand2": "#85b6fe",
-        "brandMid": null,
-        "content": "#0b0f0f",
-        "text": "#f0f4f5",
-        "textMuted": "#aec2c3",
-        "surface": "#141818",
-        "wash": ["#002d2f", "#07162c", "#04060a"]
-      },
-      "light": {
-        "brand": "#02787d",
-        "brand2": "#1c65c8",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#101a1b",
-        "textMuted": "#455a5b",
-        "surface": "#ffffff",
-        "wash": ["#015a5e", "#024967", "#013271"]
-      }
+      "id": "blueprint",
+      "label": "Blueprint",
+      "scheme": "dark",
+      "bg": "#061021",
+      "card": "#0a1830",
+      "line": "#1d3359",
+      "text": "#e6efff",
+      "muted": "#7f97c0",
+      "fg2": "#c6c7cf",
+      "quiet": "#7c7e88",
+      "accent": "#7fb4ff",
+      "onAccent": "#0e0e10",
+      "glow": "#8fc0ff",
+      "hub": "#ffd166",
+      "ramp": ["#1f3d6e", "#6ea0e8", "#ffffff"],
+      "tint": 0.08,
+      "grid": 0.07,
+      "activeBg": "#132a52",
+      "activeFg": "#cfe2ff"
     },
     {
-      "id": "tropic",
-      "label": "Tropic",
-      "dark": {
-        "brand": "#57d8b4",
-        "brand2": "#9bc462",
-        "brandMid": null,
-        "content": "#0c0f0e",
-        "text": "#f0f5f3",
-        "textMuted": "#b0c3bc",
-        "surface": "#151817",
-        "wash": ["#002e23", "#0f1a01", "#050603"]
-      },
-      "light": {
-        "brand": "#047b62",
-        "brand2": "#527700",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#111b17",
-        "textMuted": "#485a54",
-        "surface": "#ffffff",
-        "wash": ["#005b48", "#015114", "#273c00"]
-      }
-    },
-    {
-      "id": "orchid",
-      "label": "Orchid",
-      "dark": {
-        "brand": "#ef9ede",
-        "brand2": "#b6a5fe",
-        "brandMid": null,
-        "content": "#100d0f",
-        "text": "#f6f2f5",
-        "textMuted": "#c7b9c3",
-        "surface": "#191618",
-        "wash": ["#381a32", "#17112a", "#060509"]
-      },
-      "light": {
-        "brand": "#9d3d8d",
-        "brand2": "#6e4fc1",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#1d161b",
-        "textMuted": "#5e505b",
-        "surface": "#ffffff",
-        "wash": ["#8d2d7d", "#692c8f", "#39246c"]
-      }
-    },
-    {
-      "id": "peach",
-      "label": "Peach",
-      "dark": {
-        "brand": "#ffa28f",
-        "brand2": "#dfab40",
-        "brandMid": null,
-        "content": "#110d0d",
-        "text": "#f7f2f1",
-        "textMuted": "#cbb9b5",
-        "surface": "#1a1615",
-        "wash": ["#3f1a13", "#201400", "#080502"]
-      },
-      "light": {
-        "brand": "#b23a26",
-        "brand2": "#876204",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#1f1614",
-        "textMuted": "#62504d",
-        "surface": "#ffffff",
-        "wash": ["#951b05", "#742c00", "#5b2000"]
-      }
-    },
-    {
-      "id": "glacier",
-      "label": "Glacier",
-      "dark": {
-        "brand": "#8ac8e4",
-        "brand2": "#74c5be",
-        "brandMid": null,
-        "content": "#0d0f10",
-        "text": "#f1f4f5",
-        "textMuted": "#b5c0c4",
-        "surface": "#161718",
-        "wash": ["#112a34", "#031a19", "#040606"]
-      },
-      "light": {
-        "brand": "#147394",
-        "brand2": "#027972",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#14191c",
-        "textMuted": "#4d575c",
-        "surface": "#ffffff",
-        "wash": ["#005874", "#004e54", "#003f3b"]
-      }
-    },
-    {
-      "id": "dusk",
-      "label": "Dusk",
-      "dark": {
-        "brand": "#aab9ff",
-        "brand2": "#fc8ea4",
-        "brandMid": null,
-        "content": "#0d0e11",
-        "text": "#f2f3f7",
-        "textMuted": "#b9bdcc",
-        "surface": "#16171a",
-        "wash": ["#1e2343", "#280b12", "#090405"]
-      },
-      "light": {
-        "brand": "#515bc3",
-        "brand2": "#b42f56",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#16181f",
-        "textMuted": "#515464",
-        "surface": "#ffffff",
-        "wash": ["#3a40a5", "#70126b", "#640c29"]
-      }
-    },
-    {
-      "id": "berry",
-      "label": "Berry",
-      "dark": {
-        "brand": "#ff9ea6",
-        "brand2": "#d898ec",
-        "brandMid": null,
-        "content": "#110d0d",
-        "text": "#f7f2f2",
-        "textMuted": "#ccb8b9",
-        "surface": "#1a1616",
-        "wash": ["#3f181d", "#1f0e24", "#070508"]
-      },
-      "light": {
-        "brand": "#b2354a",
-        "brand2": "#9041a7",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#1f1616",
-        "textMuted": "#625051",
-        "surface": "#ffffff",
-        "wash": ["#931232", "#770a5d", "#4e1a5c"]
-      }
-    },
-    {
-      "id": "candy",
-      "label": "Candy",
-      "dark": {
-        "brand": "#eca5c6",
-        "brand2": "#5dc5dc",
-        "brandMid": null,
-        "content": "#100e0f",
-        "text": "#f5f2f4",
-        "textMuted": "#c7babf",
-        "surface": "#191617",
-        "wash": ["#371d29", "#001a21", "#030607"]
-      },
-      "light": {
-        "brand": "#9a4873",
-        "brand2": "#02768a",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#1c1619",
-        "textMuted": "#5e5157",
-        "surface": "#ffffff",
-        "wash": ["#7a2b56", "#283b80", "#003b47"]
-      }
-    },
-    {
-      "id": "citrus",
-      "label": "Citrus",
-      "dark": {
-        "brand": "#b7c967",
-        "brand2": "#eca24a",
-        "brandMid": null,
-        "content": "#0e0f0c",
-        "text": "#f3f4f0",
-        "textMuted": "#bcc0b0",
-        "surface": "#171815",
-        "wash": ["#242a02", "#231100", "#080503"]
-      },
-      "light": {
-        "brand": "#637103",
-        "brand2": "#935a00",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#181912",
-        "textMuted": "#545748",
-        "surface": "#ffffff",
-        "wash": ["#495400", "#6e2a00", "#592000"]
-      }
-    },
-    {
-      "id": "prism",
-      "label": "Prism",
-      "dark": {
-        "brand": "#3bd4e8",
-        "brand2": "#f48fc0",
-        "brandMid": "#b9a9ff",
-        "content": "#0b0f10",
-        "text": "#f0f4f5",
-        "textMuted": "#aec2c5",
-        "surface": "#141819",
-        "wash": ["#012c32", "#260b19", "#090406"]
-      },
-      "light": {
-        "brand": "#077783",
-        "brand2": "#ab3276",
-        "brandMid": "#6e4fc1",
-        "content": "#ffffff",
-        "text": "#101a1c",
-        "textMuted": "#45595d",
-        "surface": "#ffffff",
-        "wash": ["#004d56", "#401981", "#520134"]
-      }
-    },
-    {
-      "id": "mocha",
-      "label": "Mocha",
-      "dark": {
-        "brand": "#e0b392",
-        "brand2": "#e0a39a",
-        "brandMid": null,
-        "content": "#0f0e0d",
-        "text": "#f5f3f2",
-        "textMuted": "#c4bcb6",
-        "surface": "#181716",
-        "wash": ["#332216", "#21110f", "#080505"]
-      },
-      "light": {
-        "brand": "#8f5b32",
-        "brand2": "#97524a",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#1b1715",
-        "textMuted": "#5b544e",
-        "surface": "#ffffff",
-        "wash": ["#784025", "#6c331e", "#522722"]
-      }
-    },
-    {
-      "id": "neon",
-      "label": "Neon",
-      "dark": {
-        "brand": "#6ed88f",
-        "brand2": "#d595fb",
-        "brandMid": null,
-        "content": "#0c0f0d",
-        "text": "#f1f5f1",
-        "textMuted": "#b2c3b6",
-        "surface": "#151816",
-        "wash": ["#023014", "#1f0d28", "#070509"]
-      },
-      "light": {
-        "brand": "#037e3f",
-        "brand2": "#8e3ab8",
-        "brandMid": null,
-        "content": "#ffffff",
-        "text": "#121b14",
-        "textMuted": "#4a5a4d",
-        "surface": "#ffffff",
-        "wash": ["#005226", "#003b65", "#41055b"]
-      }
+      "id": "paper",
+      "label": "Paper",
+      "scheme": "light",
+      "bg": "#e9e5dc",
+      "card": "#f8f6f1",
+      "line": "#d9d3c6",
+      "text": "#1d1a16",
+      "muted": "#645e54",
+      "fg2": "#3d3d45",
+      "quiet": "#7d776b",
+      "accent": "#b8540b",
+      "onAccent": "#ffffff",
+      "glow": "#f5a524",
+      "hub": "#b8540b",
+      "ramp": ["#d3ccbe", "#7b7265", "#1d1a16"],
+      "tint": 0.1,
+      "activeBg": "#e6e0d3",
+      "activeFg": "#1d1a16"
     }
   ]
 }

@@ -83,7 +83,6 @@ export function AccountMenu() {
           aria-label="Account"
           data-popover=""
           className={s.menu}
-          data-scope="reset"
         >
           <button
             type="button"

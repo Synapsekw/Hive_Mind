@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dotDiameter, fitGroupLabel } from "./renderer";
+import { dotDiameter, fitGroupLabel, haloAlpha } from "./renderer";
 import type { ModelNode } from "./types";
 
 function node(kind: ModelNode["kind"], nb: number[] = []): ModelNode {
@@ -72,5 +72,28 @@ describe("fitGroupLabel", () => {
   it("drops a trailing space before the ellipsis", () => {
     // 96 px = 16 characters: "Quadruped " (10) trimmed to "Quadruped" leaves room for "…".
     expect(fitGroupLabel(label, 96, m)).toBe("Quadruped… · 384");
+  });
+});
+
+describe("haloAlpha", () => {
+  it("is nothing below level 6", () => {
+    for (let level = 0; level < 6; level++)
+      expect(haloAlpha(level, 1234, false)).toBe(0);
+  });
+
+  it("is 0.3 at level 6, moving or still", () => {
+    expect(haloAlpha(6, 0, false)).toBe(0.3);
+    expect(haloAlpha(6, 999, true)).toBe(0.3);
+  });
+
+  it("is 0.5 at level 7 when still", () => {
+    expect(haloAlpha(7, 777, true)).toBe(0.5);
+  });
+
+  it("breathes between 0.42 and 0.58 at level 7 on a four-second cycle", () => {
+    expect(haloAlpha(7, 0, false)).toBeCloseTo(0.5, 10);
+    expect(haloAlpha(7, 1000, false)).toBeCloseTo(0.58, 10);
+    expect(haloAlpha(7, 3000, false)).toBeCloseTo(0.42, 10);
+    expect(haloAlpha(7, 4000, false)).toBeCloseTo(0.5, 10);
   });
 });

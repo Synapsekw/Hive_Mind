@@ -447,19 +447,20 @@ test("every dot is a labelled button", async ({ page }) => {
   expect(hubs).toEqual([10, 8]);
 });
 
-test("the map sits on frosted glass", async ({ page }) => {
+test("the map is a solid card with no blur", async ({ page }) => {
   await open(page);
-  const blur = await page
+  const flat = await page
     .getByRole("main", { name: "Hive map" })
     .evaluate((el) => {
       const cs = getComputedStyle(el);
-      return (
-        cs.backdropFilter ||
-        cs.getPropertyValue("-webkit-backdrop-filter") ||
-        ""
-      );
+      return {
+        blur:
+          cs.backdropFilter || cs.getPropertyValue("-webkit-backdrop-filter"),
+        background: cs.backgroundColor,
+      };
     });
-  expect(blur).toContain("blur(30px)");
+  expect(flat.blur === "" || flat.blur === "none").toBe(true);
+  expect(flat.background).not.toBe("rgba(0, 0, 0, 0)");
 });
 
 test("no control on the map is a pill", async ({ page }) => {
@@ -513,39 +514,30 @@ async function hubAndHue(page: Page) {
     document.body.append(probe);
     const hue = rgb("var(--hue-1)");
     const brand = rgb("var(--brand)");
+    const hub = rgb("var(--hub)");
     probe.remove();
-    return { dot: [px[0], px[1], px[2]], hue, brand };
+    return { dot: [px[0], px[1], px[2]], hue, brand, hub };
   }, p);
 }
 
-test("a hub takes the theme's first group colour", async ({
+test("in Rings a hub takes the theme's hub colour", async ({
   page,
   context,
 }) => {
-  await setLook(context, "aurora.dark.tinted.theme");
+  await setLook(context, "aurora");
   await open(page);
-  const theme = await hubAndHue(page);
-  expect(theme.dot).toEqual(theme.hue);
+  const aurora = await hubAndHue(page);
+  expect(aurora.dot).toEqual(aurora.hub);
+  expect(aurora.dot).not.toEqual(aurora.brand);
 
-  await setLook(context, "aurora.dark.tinted.classic");
+  await setLook(context, "honey");
   await open(page);
-  const classic = await hubAndHue(page);
-  expect(classic.dot).toEqual(classic.hue);
-  expect(classic.dot).not.toEqual(theme.dot);
+  const honey = await hubAndHue(page);
+  expect(honey.dot).toEqual(honey.hub);
+  expect(honey.dot).not.toEqual(aurora.dot);
 });
 
-test("in the Hive theme the hubs are honey, like the dots", async ({
-  page,
-  context,
-}) => {
-  await setLook(context, "hive.dark.tinted.theme");
-  await open(page);
-  const hive = await hubAndHue(page);
-  expect(hive.dot).toEqual(hive.brand);
-  expect(hive.dot).not.toEqual(hive.hue);
-});
-
-for (const look of [undefined, "aurora.light.vivid.classic"])
+for (const look of [undefined, "paper"])
   for (const size of [
     { width: 1920, height: 1080 },
     { width: 1600, height: 1000 },
@@ -610,13 +602,15 @@ test("the side panel shows today, the 14-day line and what needs you", async ({
   await expect(panel).toContainText("By person");
 });
 
-test("a fresh note is drawn in the brand colour", async ({ page }) => {
+test("a fresh note is drawn in the top colour of the theme's ramp", async ({
+  page,
+}) => {
   await open(page);
   await settle(page);
-  // The hostile note changed two hours ago, so it is at the freshest level (opacity 0.94).
+  // The hostile note changed two hours ago, so it is at the freshest step of the ramp.
   const dot = page.locator('[data-map-dot][aria-label^="<img src=x"]');
   const p = await dotPoint(page, dot);
-  const { px, brand } = await page.evaluate(({ x, y }) => {
+  const { px, fresh } = await page.evaluate(({ x, y }) => {
     const canvas =
       document.querySelector<HTMLCanvasElement>("[data-map-canvas]")!;
     const r = canvas.getBoundingClientRect();
@@ -630,17 +624,17 @@ test("a fresh note is drawn in the brand colour", async ({ page }) => {
         1,
       ).data;
     const probe = document.createElement("span");
-    probe.style.color = "var(--brand)";
+    probe.style.color = "var(--fresh-7)";
     document.body.append(probe);
     const c = (getComputedStyle(probe).color.match(/[\d.]+/g) ?? []).map(
       Number,
     );
     probe.remove();
-    return { px: [d[0]!, d[1]!, d[2]!], brand: c.slice(0, 3) };
+    return { px: [d[0]!, d[1]!, d[2]!], fresh: c.slice(0, 3) };
   }, p);
-  // 6% of the card shows through, so allow a little off the exact brand colour.
+  // The dot is crisp, so allow only rounding off the exact ramp colour.
   for (let i = 0; i < 3; i++)
-    expect(Math.abs(px[i]! - brand[i]!)).toBeLessThanOrEqual(24);
+    expect(Math.abs(px[i]! - fresh[i]!)).toBeLessThanOrEqual(4);
 });
 
 test('"Arrange by" is visible in Rings and absent in Timeline and Orbit', async ({

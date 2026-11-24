@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRESH_ALPHA, FRESH_LEVELS, freshLevel } from "./freshness";
+import { FRESH_LEVELS, freshLevel } from "./freshness";
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 10, 24, 12);
@@ -26,10 +26,7 @@ describe("freshLevel", () => {
     expect(freshLevel(0, NOW)).toBe(0);
     expect(freshLevel(Number.NaN, NOW)).toBe(0);
   });
-  it("has eight rising opacities", () => {
+  it("has eight levels", () => {
     expect(FRESH_LEVELS).toBe(8);
-    expect([...FRESH_ALPHA]).toEqual([
-      0.11, 0.15, 0.23, 0.33, 0.45, 0.6, 0.76, 0.94,
-    ]);
   });
 });

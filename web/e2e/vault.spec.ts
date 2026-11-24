@@ -62,8 +62,8 @@ function watch(page: Page) {
       .map((r) => `${r.resourceType()} ${r.url()}`);
 }
 
-// The default look, and a light, vivid one whose glass and type differ the most from it.
-const LOOKS = [undefined, "aurora.light.vivid.classic"] as const;
+// The default look, and the light theme, which differs the most from it.
+const LOOKS = [undefined, "paper"] as const;
 const named = (look: string | undefined) => (look ? ` (${look})` : "");
 
 for (const look of LOOKS)
@@ -97,19 +97,20 @@ for (const look of LOOKS)
     });
   }
 
-test("the vault sits on frosted glass", async ({ page }) => {
+test("the vault is a solid card with no blur", async ({ page }) => {
   await open(page, `?note=${README}`);
-  const blur = await page
+  const flat = await page
     .getByRole("main", { name: "Vault" })
     .evaluate((el) => {
       const cs = getComputedStyle(el);
-      return (
-        cs.backdropFilter ||
-        cs.getPropertyValue("-webkit-backdrop-filter") ||
-        ""
-      );
+      return {
+        blur:
+          cs.backdropFilter || cs.getPropertyValue("-webkit-backdrop-filter"),
+        background: cs.backgroundColor,
+      };
     });
-  expect(blur).toContain("blur(30px)");
+  expect(flat.blur === "" || flat.blur === "none").toBe(true);
+  expect(flat.background).not.toBe("rgba(0, 0, 0, 0)");
 });
 
 test("no control in the vault is a pill", async ({ page }) => {
@@ -133,7 +134,7 @@ test("in light mode the open control has dark text on a surface of its own", asy
   page,
   context,
 }) => {
-  await setLook(context, "aurora.light.vivid.classic");
+  await setLook(context, "paper");
   await open(page, `?note=${README}`);
   await page.getByRole("button", { name: /^Sharing: / }).click();
   const look = await noteControl(page).evaluate((el) => {
@@ -143,8 +144,6 @@ test("in light mode the open control has dark text on a surface of its own", asy
   expect(look.color).not.toBe("rgb(255, 255, 255)");
   expect(look.background).not.toBe("rgba(0, 0, 0, 0)");
   expect(look.background).not.toBe("transparent");
-  // A reset scope: the light card's text tokens, not the chrome's white.
-  await expect(noteControl(page)).toHaveAttribute("data-scope", "reset");
 });
 
 test("choosing a folder and filtering narrow the list without a request", async ({

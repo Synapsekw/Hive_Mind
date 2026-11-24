@@ -70,8 +70,8 @@ const viewer = (page: Page) => page.getByRole("dialog");
 const actionsIn = (page: Page, within: ReturnType<typeof viewer>) =>
   within.getByRole("group", { name: "File actions" });
 
-// The default look, and a light, vivid one whose glass and type differ the most from it.
-const LOOKS = [undefined, "aurora.light.vivid.classic"] as const;
+// The default look, and the light theme, which differs the most from it.
+const LOOKS = [undefined, "paper"] as const;
 const named = (look: string | undefined) => (look ? ` (${look})` : "");
 
 test("the rail marks Gallery as the current page", async ({ page }) => {
@@ -286,7 +286,6 @@ test("a deck opens the details: Download, and no viewer", async ({ page }) => {
   await card(page, DECK).click();
   const box = details(page, DECK);
   await expect(box).toBeVisible();
-  await expect(box).toHaveAttribute("data-scope", "reset");
   await expect(card(page, DECK)).toHaveAttribute("aria-expanded", "true");
   await expect(box).toContainText(DECK.name);
   await expect(box).toContainText(sharingText(DECK));
@@ -616,21 +615,22 @@ for (const look of LOOKS)
       expect(cover.pageScrolls).toBe(false);
     });
 
-test("the gallery sits on frosted glass and no control is a pill", async ({
+test("the gallery is a solid card with no blur and no control is a pill", async ({
   page,
 }) => {
   await open(page);
-  const blur = await page
+  const flat = await page
     .getByRole("main", { name: "Gallery" })
     .evaluate((el) => {
       const cs = getComputedStyle(el);
-      return (
-        cs.backdropFilter ||
-        cs.getPropertyValue("-webkit-backdrop-filter") ||
-        ""
-      );
+      return {
+        blur:
+          cs.backdropFilter || cs.getPropertyValue("-webkit-backdrop-filter"),
+        background: cs.backgroundColor,
+      };
     });
-  expect(blur).toContain("blur(30px)");
+  expect(flat.blur === "" || flat.blur === "none").toBe(true);
+  expect(flat.background).not.toBe("rgba(0, 0, 0, 0)");
   await card(page, DECK).click();
   await expect(details(page, DECK)).toBeVisible();
   const pills = await page.evaluate(() =>
@@ -647,7 +647,7 @@ test("in light mode the details have dark text on a surface of their own", async
   page,
   context,
 }) => {
-  await setLook(context, "aurora.light.vivid.classic");
+  await setLook(context, "paper");
   await open(page);
   await card(page, DECK).click();
   const look = await details(page, DECK).evaluate((el) => {

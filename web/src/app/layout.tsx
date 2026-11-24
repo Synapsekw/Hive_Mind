@@ -8,7 +8,7 @@ import { FoldProvider } from "../shell/FoldProvider";
 import { HiveActionsProvider } from "../shell/HiveActions";
 import { LookProvider } from "../shell/LookProvider";
 import { FOLD_COOKIE, parseFold } from "../shell/fold";
-import { LOOK_COOKIE, parseLook } from "../theme/look";
+import { LOOK_COOKIE, parseLook, schemeOf } from "../theme/look";
 import { loadAccount, type Account } from "./account";
 import { cancelHiveDeletion, createHive, switchHive } from "./hives/actions";
 import "./globals.css";
@@ -38,7 +38,7 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // The cookie is not trusted: only the four checked values reach the page.
+  // The cookie is not trusted: only the checked theme id reaches the page.
   const jar = await cookies();
   const look = parseLook(jar.get(LOOK_COOKIE)?.value);
   // Likewise which sides are folded, so the first paint has the right widths.
@@ -56,9 +56,7 @@ export default async function RootLayout({
       lang="en"
       className={`${inter.variable} ${mono.variable}`}
       data-theme={look.theme}
-      data-mode={look.mode}
-      data-reach={look.reach}
-      data-dots={look.dots}
+      data-mode={schemeOf(look.theme)}
       data-rail={fold.rail}
       data-panel={fold.panel}
     >

@@ -1,13 +1,15 @@
 ---
 type: adr
 date: 2026-11-22
-status: accepted
+status: superseded
 tags: [decision]
 related:
   - "[[2026-11-20-decision-07-brain-dashboard-is-the-map]]"
 ---
 
 # Decision 13 — The look is Keystone glass, with themes
+
+Superseded by [[2026-11-24-decision-16-eight-hand-tuned-themes-replace-keystone-glass]].
 
 ## Context
 

@@ -18,9 +18,9 @@ The live canvas is the "Hive Mind UI Samples" artifact.
 
 - **One idea per screen.** The map is a map; the chat is a chat. No dashboards of widgets.
 - **Light is information.** Brightness means yours and recent; a hollow dot means not shared with
-  you. The only decorative light is the theme's colour behind the glass.
-- **The frame carries the colour, the data stays readable.** Navigation and panels are neutral or
-  white-on-colour; hue is spent on the theme wash and on the dots.
+  you. The only decorative light is a faint tint of the theme's glow colour behind the centre of the map.
+- **The data carries the colour.** Navigation and panels are neutral and flat; hue is spent on the
+  dots and on the one accent.
 - **Humans decide, the system suggests.** Every suggestion arrives as a quiet item in "Needs you",
   never a modal that blocks work.
 - **Familiar where it must be.** Chat keeps the three-column shape of Claude and ChatGPT.
@@ -29,72 +29,67 @@ The live canvas is the "Hive Mind UI Samples" artifact.
 
 ## 2. Visual language
 
-The look is "Keystone glass": the layout grammar of our Monolith app (a rail and a side panel
-sitting directly on a coloured wash, content on one inset card) with frosted glass panels and
-theme-driven dot colours, which are Hive's own
-([[2026-11-22-decision-13-keystone-glass-look-with-themes]]). It replaces the navy look the first
-map was built with.
+The look is flat: the layout grammar of our Monolith app (a rail and a side panel sitting directly
+on the page colour, content on one inset card) with solid surfaces and a colour ramp that shows
+how fresh a note is, which is Hive's own
+([[2026-11-24-decision-16-eight-hand-tuned-themes-replace-keystone-glass]]). There is no wash,
+no bloom and no frosted glass. It replaces the Keystone glass look
+([[2026-11-22-decision-13-keystone-glass-look-with-themes]]), which replaced the navy look the
+first map was built with.
 
 | Token      | Choice                                                                                                                                                                                                                                             |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Background | The theme's wash: a 168° three-stop gradient, with soft radial glows of the theme's two accents on top (three at the edges, two pooled behind the map card). The map's stage adds one faint glow of its own                                        |
-| Map card   | Frosted glass: the card colour at 56% (dark) or 78% (light) opacity, `backdrop-filter: blur(30px) saturate(1.5)`, 20 px radius, a 1 px light edge                                                                                                  |
-| Side panel | A second, lighter glass slab: white at 4.5% (dark) or 13% (light), same blur, 1 px hairline                                                                                                                                                        |
-| Left rail  | No panel; it sits on the wash                                                                                                                                                                                                                      |
-| Text       | From the theme: `text`, `textMuted`. On the light-mode wash all text is white (muted is white at 90%)                                                                                                                                              |
-| Accent     | The theme's `brand`. Fills that mark "active" or "primary" use the gradient `brand → brandMid → brand2`                                                                                                                                            |
+| Background | One flat colour, the theme's page colour, behind the rail and the side panel                                                                                                                                                                       |
+| Map card   | A solid card colour, 20 px radius, a 1 px line. Behind the centre of the map sits one faint radial tint of the theme's glow colour (5% to 10%), gone by 58% of the radius. Blueprint also draws a fine grid on the card                            |
+| Side panel | The same solid card colour, with a 1 px line                                                                                                                                                                                                       |
+| Left rail  | No panel; it sits on the page colour                                                                                                                                                                                                               |
+| Text       | From the theme: `text`, `muted`. Every theme, Paper included, uses its own text colour on the rail, the side panel and the card alike                                                                                                              |
+| Accent     | The theme's one accent. Fills that mark "active" or "primary" use it as a single colour; the chosen segment and the active nav row use the theme's own active fill and text                                                                        |
 | Type       | Inter 400 / 500 / 600; JetBrains Mono for counts and section labels (11 px, uppercase, 0.12em tracking); tabular numbers                                                                                                                           |
-| Controls   | 8 px radius (7 px inside the 10 px view-switch track). Hairlines brighten on hover, never thicken: white 10% to 26% in dark; in light, black 10% to 24% on the card and white 24% to 55% on the rail and side panel                                |
-| Nav rows   | 24 px icon slot, then the label. Active row: a faint brand tint plus a 3 px gradient bar on the rail's outer edge                                                                                                                                  |
-| Depth      | No drop shadows on controls. The card carries one soft shadow (`--lift`); otherwise the glass edge and blur do the separating                                                                                                                      |
+| Controls   | 8 px radius (7 px inside the 10 px view-switch track). Hairlines brighten on hover, never thicken: the line colour moves 25% towards the text colour                                                                                               |
+| Nav rows   | 24 px icon slot, then the label. Active row: the theme's active fill plus a 3 px bar of the accent on the rail's outer edge                                                                                                                        |
+| Depth      | No drop shadows on controls and no blur. In the dark themes nothing is lifted; in Paper the card carries one soft shadow (`--lift`)                                                                                                                |
 | Motion     | Dots glide between views and between arrangements in a staggered wave; hubs and the freshest dots breathe; the orbit turns; links fire a pulse. Shared tokens `--dur-fast`, `--dur`, `--dur-slow`, `.rise`; easing `cubic-bezier(0.16, 1, 0.3, 1)` |
 
-### Themes, mode and reach
+### Themes
 
-Appearance is four independent choices (theme, mode, reach and dot colours), kept per browser, changed in an Appearance panel inside the account popover at
-the bottom of the left rail.
+Appearance is one choice, the theme, kept per browser and changed in an Appearance panel inside the
+account popover at the bottom of the left rail. The panel is a single list of eight swatches; each
+swatch is the theme's card colour split on the diagonal with the freshest colour of its ramp.
 
-- **Theme (18):** Hive (default; honey and amber, colour only, no texture), Keystone, Graphite, Aurora, Sunset, Nebula, Lagoon, Tropic, Orchid,
-  Peach, Glacier, Dusk, Berry, Candy, Citrus, Prism, Mocha, Neon. Keystone and Graphite have one
-  accent; the rest have two. The seed values for every theme in both modes are in
-  [`ui/themes.json`](ui/themes.json); the 17 other than Hive were copied from Monolith's `develop` on
-  2026-11-18. Hive's light seeds are darkened so white text on the wash keeps its contrast. Hive's
-  dark mode is near-black (wash, card colour, and the coloured glows over the wash turned down to
-  30% by a `bloom` seed only Hive's dark mode sets), so fresh notes read as honey light in the dark. Hive also sets
-  `"rings": "honey"` in its seeds: in Rings its hubs and the filter bar's group swatches take the brand
-  colour, and the glow on fresh notes is 1.9 times as strong (tokens `--rings-hub` and
-  `--rings-glow`, unset in every other theme, which keep group hues on hubs). Each theme is tuned on
-  its own; nothing here changes the other 17. A `--mark`
-  token carries the colour of the hexagon mark beside the Hive name at the top of the left rail.
-- **Mode:** dark (default) or light. Light is a "bold frame": the wash is a saturated gradient,
-  everything painted on it is white, and the map sits on white glass. A primary button on the
-  light wash is white with brand-coloured text.
-- **Reach:** how much of `brand` is mixed into the card. Subtle 0%, Tinted 5% (default), Vivid 8%
-  in dark; 0%, 2.5%, 2.5% in light. Reach tints the popover surface (`--surface`) too: 0%, 4%, 7%
-  in dark; 0%, 4%, 5% in light. Vivid also adds two faint glows along the card's top edge.
+There are eight themes, each tuned by hand. Honey is the default.
 
-A theme only supplies seeds. Everything else (gradient, glows, glass, selected tint, hairlines) is
-derived from them, so a component never names a theme.
+- **Honey:** near-black with honey and amber; the colour of the hive.
+- **Abyss:** deep blue-black with a cool teal.
+- **Ember:** warm black with orange and red, and a hot yellow at the fresh end.
+- **Aurora:** green-black with a mint accent and violet hubs.
+- **Moonstone:** neutral black and silver, nearly without hue.
+- **Ultraviolet:** purple-black with violet and pink.
+- **Blueprint:** navy with a fine grid on the card and yellow hubs.
+- **Paper:** warm off-white with dark text and a burnt-orange accent.
 
-**Dot colours follow the theme.** The eight topic colours are generated: take the hue midway
-between `brand` and `brand2` (in OKLCH), fan eight hues across 160° around it, and alternate two
+A theme is dark or light by itself; Paper is the light one. There is no light version of the other
+seven and no dark version of Paper. Everything about a theme is a record in
+[`ui/themes.json`](ui/themes.json) (the live copy is `web/src/theme/themes.json`): page, card,
+line, text, muted, accent, glow, hub, the active fill and text, the tint, and the ramp. The
+component CSS never names a theme.
+
+**The ramp.** Each theme sets three colours, old, middle and fresh; eight steps are mixed between
+them (`--fresh-0` to `--fresh-7`, old to fresh). In Rings a note takes its colour from this ramp
+by how recently it changed (section 3). Notes at the fresh end also get a soft halo in the
+theme's glow colour, drawn under a crisp dot (see section 3 for the limit).
+
+**Topic colours.** The eight topic colours are generated: take the hue midway between the theme's
+accent and its glow colour (in OKLCH), fan eight hues across 160° around it, and alternate two
 lightness levels (0.82 / 0.72 in dark, 0.60 / 0.50 in light) at chroma 0.14 (0.15 in light), with
-neighbouring topics placed far apart in the fan. A theme whose `brand` has almost no chroma
-(OKLCH chroma below 0.03; today that is Graphite) gets eight near-greys instead, spaced evenly in
-lightness. The rule is triggered by the chroma, never by the theme's name. A "Classic" switch
-keeps the original fixed eight:
-`#F5B556` `#62B8FF` `#FF8FB3` `#C4A2FF` `#5FE0B0` `#FF9D5C` `#5CD6E6` `#C3E36A`
-(light mode starts from `#C98A1B` `#2F7FD1` `#D9567F` `#8B62D9` `#1FA57A` `#DB6A22` `#1C9BAA`
-`#7F9E1F`; on the light card these are darkened per theme until they reach 3:1, so what is drawn
-is darker than this list).
-The trade-off is known and accepted: in "Follow theme" a topic has no fixed colour across themes,
-and topics sit closer in hue than in Classic. These colours mark groups: the hubs in Rings, and every
-dot in Timeline and Orbit. Dots in Rings are drawn in the theme's brand colour instead (see
-section 3).
+neighbouring topics placed far apart in the fan. A theme whose accent has almost no chroma
+(OKLCH chroma below 0.03; today that is Moonstone) gets eight near-greys instead, spaced evenly
+in lightness. The rule is triggered by the chroma, never by the theme's name. A topic has no fixed
+colour across themes. These colours mark groups in Timeline and Orbit. In Rings the dots take
+their colour from the ramp and the hubs take the theme's hub colour (see section 3).
 
-Contrast is checked by a test for every theme, mode and reach (section 6). Where a derived
-colour falls short, its lightness is adjusted, never a seed; every adjustment is listed in
-`web/src/theme/adjustments.generated.txt`.
+**Contrast.** Every theme is checked by a test (section 6). A colour that fails is changed by hand
+in `themes.json`; nothing adjusts colours automatically.
 
 ## 3. The map (home)
 
@@ -109,11 +104,13 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
 
 - **Rings:** the groups sit in sectors around the circle, and each item is placed by how recently
   it changed: the freshest notes on the arc nearest the hub, older ones further out, files after
-  one empty arc, agents on a ring beyond them. The whole picture shrinks to fit the card. All dots
-  are drawn in the theme's brand colour, and brightness means freshness: an item changed in the
-  last two days is bright and breathes, an old one is faint. A readable dot has a thin outline; the
-  contrast of the faintest dots against the card is a known gap, accepted for now. Only the hubs
-  keep their group colours.
+  one empty arc, agents on a ring beyond them. The whole picture shrinks to fit the card. Every
+  dot takes a colour from the theme's ramp by how recently it changed: an old note sits at the dim
+  end, a note changed in the last two days at the bright end, with a soft halo under it that
+  breathes. Halos are drawn only while at most 400 notes are at the two freshest levels; above that
+  the dots keep their ramp colours and are drawn without halos, so nothing breathes there. This is a
+  deliberate guard for the frame budget. Hubs take the theme's hub colour. A readable dot has a thin outline; the contrast of
+  the faintest dots against the card is a known gap, accepted for now.
 - **Quiet at rest:** Rings draws no ring labels and does not label hubs. At rest it draws only the
   spokes from the index to the hubs, and group names are drawn on the canvas on one circle outside
   the rings, as "name · count". A dot's own links show when it is hot (hovered),
@@ -132,7 +129,7 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
   settles; zoom-driven labels are capped at 60 and never overlap (rule labels are not capped).
 - **Hover peek:** a small card with the title, group and owner; links fire a pulse along their
   length. The index dot's card says "Groups" with a count.
-- **Filter bar:** a glass bar at the bottom left of the map, in place of the old legend dock. It
+- **Filter bar:** a solid bar at the bottom left of the map, in place of the old legend dock. It
   holds three list buttons (the groups, Kind and People), a chip for each choice and for the
   search text, a count, Clear all and a Legend. In Rings the group list is named "Folders",
   "Clusters" or "Months" to follow the arrangement, and the kind row for hubs reads "Groups"; in
@@ -155,9 +152,9 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
   it and what it connects to. An unshared note shows only "Private note" and its topic.
 - **Search:** matching dots stay lit and get labels when there are few enough.
 
-Layout: a left rail on the wash (mark and the hive's name, five destinations with icons, agents
-summary, account button), the map on the glass card with the view switch as one segmented control,
-and a glass side panel. It shows Today until something is selected (a count-up of today's writes,
+Layout: a left rail on the page colour (mark and the hive's name, five destinations with icons, agents
+summary, account button), the map on the card with the view switch as one segmented control,
+and a solid side panel. It shows Today until something is selected (a count-up of today's writes,
 a 14-day sparkline of agent writes, By person, and Needs you), then Selected. The housekeeper's last
 run sits below.
 
@@ -306,12 +303,10 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 - Reduced-motion setting stops everything that moves on its own: the view and arrangement glide and
   waves, hub breathing, the orbit turn, firing pulses, the count-up and ambient frames.
   Nothing moves under it; the map is drawn still.
-- Contrast, in every theme, mode and reach (102 combinations), asserted by
-  `web/src/theme/contrast.test.ts`: text at least 4.5:1; quiet labels, the eight dot colours and
-  the focus ring at least 3:1. The same holds on the solid fallback backgrounds.
+- Contrast, in every theme (8), asserted by `web/src/theme/contrast.test.ts`: text at least 4.5:1;
+  quiet labels, the eight dot colours and the focus ring at least 3:1; the three freshest ramp
+  steps at least 3:1 (older steps are fainter on purpose).
 - Focus ring: 2 px of the accent with a 2 px offset on every interactive element.
-- Glass has a fallback: where `backdrop-filter` is unsupported the card uses the solid page
-  colour, the side panel its solid equivalent and popovers the solid surface colour.
 
 ## 7. Performance budget for the map
 
@@ -321,7 +316,9 @@ drawn on demand; ambient motion (hub breathing, orbit turn) is throttled to abou
 12 fps and pauses when the map is off-screen or the tab hidden. A browser check (`e2e/map-perf.spec.ts`)
 keeps the 95th-percentile frame of a one-second wheel zoom on 5,000 items under 34 ms, and the same
 limit holds for the glide after choosing another arrangement and after switching Rings to
-Timeline; neither glide may have a frame of a second or more. In development, `/dev/map?items=N`
+Timeline; neither glide may have a frame of a second or more. Halos are skipped when more than 400 notes
+are at the two freshest levels, because stamping a halo per fresh note on every frame while all
+the dots move broke the 34 ms limit at 5,000 items. In development, `/dev/map?items=N`
 builds a map of N items to test this.
 
 Three views of one graph, and three arrangements of Rings, must be **one load and zero further
@@ -330,6 +327,6 @@ and switch views and arrangements in client state only. The
 fetch must be bounded: select only the columns the map draws, over indexed columns, never note
 bodies.
 
-Changing theme, mode, reach or dot colours is also **zero round-trips**: it changes CSS variables
+Changing the theme is also **zero round-trips**: it changes CSS variables
 on the root and nothing else. The choice is remembered per person; where it is stored is not
 decided yet.

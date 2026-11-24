@@ -126,7 +126,7 @@ export function ClosingBanner({ actions }: { actions?: HiveActions | null }) {
   const question = cancelQuestion(account.hive);
   const off = busy || undefined;
   return (
-    <div ref={root} data-scope="chrome" data-closing="" className={s.closing}>
+    <div ref={root} data-closing="" className={s.closing}>
       <p role="status" className={s.closingText}>
         {DELETED_ON} <DeletionDate iso={closing} />. {NOTHING_SAVED}
       </p>

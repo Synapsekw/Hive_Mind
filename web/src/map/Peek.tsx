@@ -103,7 +103,7 @@ export function Peek({
             ]
           : [["Groups", String(model.topics.length)]];
 
-  // In <body>: the map's glass panel (backdrop-filter) would otherwise anchor `fixed` to itself.
+  // In <body>: outside the map card, so `fixed` anchors to the window.
   return createPortal(
     <div
       ref={ref}

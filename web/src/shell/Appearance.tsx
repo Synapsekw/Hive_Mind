@@ -1,28 +1,15 @@
 "use client";
 
-// The Appearance panel, shown inside the account popover: mode, theme, dot colours and reach. Every
-// choice applies at once through useLook (no request, no navigation).
+// The Appearance panel, shown inside the account popover: the theme. The choice applies at once
+// through useLook (no request, no navigation).
 import { useId, useRef, type KeyboardEvent } from "react";
-import { THEMES, type DotMode, type Mode, type Reach } from "../theme/look";
+import { THEMES } from "../theme/look";
 import { useLook } from "./LookProvider";
 import s from "./shell.module.css";
 import { swatch } from "./swatch";
 
 type Option<T extends string> = { value: T; label: string };
 
-const MODE_OPTIONS: Option<Mode>[] = [
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-];
-const DOT_OPTIONS: Option<DotMode>[] = [
-  { value: "theme", label: "Follow theme" },
-  { value: "classic", label: "Classic" },
-];
-const REACH_OPTIONS: Option<Reach>[] = [
-  { value: "subtle", label: "Subtle" },
-  { value: "tinted", label: "Tinted" },
-  { value: "vivid", label: "Vivid" },
-];
 const THEME_OPTIONS: Option<string>[] = THEMES.map((t) => ({
   value: t.id,
   label: t.label,
@@ -36,16 +23,10 @@ function Radios<T extends string>({
   options,
   value,
   onChange,
-  label,
-  labelledBy,
-  swatches,
 }: {
   options: Option<T>[];
   value: T;
   onChange(v: T): void;
-  label?: string;
-  labelledBy?: string;
-  swatches?: Mode;
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const at = Math.max(
@@ -67,9 +48,8 @@ function Radios<T extends string>({
   return (
     <div
       role="radiogroup"
-      aria-label={label}
-      aria-labelledby={labelledBy}
-      className={swatches ? s.swatches : s.segments}
+      aria-label="Theme"
+      className={s.swatches}
       onKeyDown={onKeyDown}
     >
       {options.map((o, i) => {
@@ -84,66 +64,32 @@ function Radios<T extends string>({
             role="radio"
             aria-checked={on}
             tabIndex={on ? 0 : -1}
-            className={swatches ? s.swatch : s.segment}
-            data-keep-colours={swatches ? "" : undefined}
-            aria-label={swatches ? o.label : undefined}
-            title={swatches ? o.label : undefined}
-            // The one inline colour in the app: a theme's own seeds, read from themes.json.
-            style={
-              swatches ? { background: swatch(o.value, swatches) } : undefined
-            }
+            className={s.swatch}
+            data-keep-colours=""
+            aria-label={o.label}
+            title={o.label}
+            // The one inline colour in the app: a theme's own colours, read from themes.json.
+            style={{ background: swatch(o.value) }}
             onClick={() => onChange(o.value)}
-          >
-            {swatches ? null : o.label}
-          </button>
+          ></button>
         );
       })}
     </div>
   );
 }
 
-/** The panel's body: mode, theme, dot colours and reach. Rendered inside the account popover. */
+/** The panel's body: the theme. Rendered inside the account popover. */
 export function AppearancePanel({ id }: { id?: string }) {
   const { look, setLook } = useLook();
   const own = useId();
   const panelId = id ?? own;
   return (
-    <div id={`${panelId}-panel`} data-scope="reset" className={s.popover}>
+    <div id={`${panelId}-panel`} className={s.popover}>
       <Radios
-        label="Mode"
-        options={MODE_OPTIONS}
-        value={look.mode}
-        onChange={(mode) => setLook({ mode })}
-      />
-      <Radios
-        label="Theme"
         options={THEME_OPTIONS}
         value={look.theme}
         onChange={(theme) => setLook({ theme })}
-        swatches={look.mode}
       />
-      <div className={s.field}>
-        <span id={`${panelId}-dots`} className={s.fieldLabel}>
-          Dot colours
-        </span>
-        <Radios
-          labelledBy={`${panelId}-dots`}
-          options={DOT_OPTIONS}
-          value={look.dots}
-          onChange={(dots) => setLook({ dots })}
-        />
-      </div>
-      <div className={s.field}>
-        <span id={`${panelId}-reach`} className={s.fieldLabel}>
-          How far the colour reaches
-        </span>
-        <Radios
-          labelledBy={`${panelId}-reach`}
-          options={REACH_OPTIONS}
-          value={look.reach}
-          onChange={(reach) => setLook({ reach })}
-        />
-      </div>
     </div>
   );
 }
@@ -152,5 +98,5 @@ export function AppearancePanel({ id }: { id?: string }) {
 export function useCurrentTheme() {
   const { look } = useLook();
   const theme = THEMES.find((t) => t.id === look.theme) ?? THEMES[0]!;
-  return { label: theme.label, colour: swatch(look.theme, look.mode) };
+  return { label: theme.label, colour: swatch(look.theme) };
 }
