@@ -36,6 +36,7 @@ import { TodayButton } from "./TodayButton";
 import { DetailRail } from "./DetailRail";
 import { DotList } from "./DotList";
 import { FilterBar } from "./FilterBar";
+import { Legend } from "./Legend";
 import { MapCanvas, type CameraApi, type Preview } from "./MapCanvas";
 import { Peek } from "./Peek";
 import {
@@ -507,8 +508,6 @@ export function HiveMap({
           onView={switchView}
           arrange={arrange}
           onArrange={changeArrange}
-          names={names}
-          onNames={() => setNames((v) => !v)}
           q={q}
           onQ={filter(setQ)}
           today={
@@ -535,6 +534,14 @@ export function HiveMap({
             sel={sel}
             focusRing={focusDot}
             labelsOn={names}
+            names={names}
+            onNames={() => setNames((v) => !v)}
+            legend={
+              <Legend
+                rings={view === "rings"}
+                hubs={view === "rings" ? "Group hub" : "Topic hub"}
+              />
+            }
             labels={labels}
             onHover={setHot}
             onPick={canvasPick}

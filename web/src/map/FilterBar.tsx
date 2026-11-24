@@ -1,6 +1,6 @@
 // The filter bar: a glass bar at the stage's bottom-left. Three buttons (the groups, Kind, People)
 // each open a checkbox list above the bar; chips name what is active; a count says how much shows;
-// Clear all and a Legend. Pointing at or focusing a row previews it on the map: that list as just
+// and Clear all. Pointing at or focusing a row previews it on the map: that list as just
 // the row, the other lists and the search kept. Only one list is open at a time. Names are text
 // nodes only.
 import {
@@ -17,6 +17,7 @@ import {
 } from "react";
 import { chipFit } from "./chipFit";
 import type { Preview } from "./MapCanvas";
+import { Mark } from "./Legend";
 import type { MapModel, NodeKind } from "./types";
 import s from "./map.module.css";
 
@@ -30,7 +31,7 @@ const KINDS: [NodeKind, string][] = [
 /** The least room, in px, a chip with a shortened name is shown in rather than counted in "+N". */
 const MIN_CHIP = 64;
 
-type Which = "topics" | "kinds" | "members" | "legend";
+type Which = "topics" | "kinds" | "members";
 
 /** One entry in a list: what it previews, its row and its chip. */
 type Entry = {
@@ -51,27 +52,6 @@ function initials(name: string): string {
   const a = parts[0]?.[0] ?? "?";
   const b = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
   return (a + b).toUpperCase();
-}
-
-/** A node's mark at legend size, in the quiet text colour unless a colour is given. */
-function Mark({
-  kind,
-  locked = false,
-  c = "var(--fg2)",
-}: {
-  kind: NodeKind;
-  locked?: boolean;
-  c?: string;
-}) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`${s.shape} ${s.filterMark}`}
-      style={{ "--c": c, "--d": "9px" } as CSSProperties}
-      data-kind={kind}
-      data-locked={locked || undefined}
-    />
-  );
 }
 
 function toggled<T>(list: T[], v: T): T[] {
@@ -195,7 +175,7 @@ export function FilterBar({
     }) as CSSProperties;
 
   const hubName = heading === "Topics" ? "Topics" : "Groups";
-  const lists: Record<Exclude<Which, "legend">, Entry[]> = {
+  const lists: Record<Which, Entry[]> = {
     topics: model.topics.map((t, i) => ({
       key: `t${i}`,
       name: t.name,
@@ -399,13 +379,13 @@ export function FilterBar({
 
   if (model.nodes.length <= 1) return null;
 
-  const labels: Record<Exclude<Which, "legend">, string> = {
+  const labels: Record<Which, string> = {
     topics: heading,
     kinds: "Kind",
     members: "People",
   };
 
-  const listButton = (w: Exclude<Which, "legend">) => {
+  const listButton = (w: Which) => {
     const list = lists[w];
     const chosen = list.filter((e) => e.on).length;
     return (
@@ -569,59 +549,6 @@ export function FilterBar({
           Clear all
         </button>
       )}
-      <span aria-hidden="true" className={s.filterRule} />
-      <div className={s.filterSlot}>
-        <button
-          ref={(el) => {
-            buttons.current.legend = el;
-          }}
-          type="button"
-          className={s.filterButton}
-          aria-expanded={open === "legend"}
-          aria-controls={open === "legend" ? `${id}-legend` : undefined}
-          onClick={() => toggleOpen("legend")}
-        >
-          Legend
-        </button>
-        {open === "legend" && (
-          <div
-            id={`${id}-legend`}
-            role="group"
-            aria-label="Legend"
-            data-popover=""
-            className={`${s.filterPop} ${s.filterLegend}`}
-          >
-            <ul className={s.legendList}>
-              <li>
-                <Mark kind="note" />
-                Note
-              </li>
-              <li>
-                <Mark kind="file" />
-                File
-              </li>
-              <li>
-                <Mark kind="note" locked />
-                Not shared with you
-              </li>
-              <li>
-                <Mark kind="hub" c="var(--fg)" />
-                {heading === "Topics" ? "Topic hub" : "Group hub"}
-              </li>
-              <li>
-                <Mark kind="agent" />
-                Agent
-              </li>
-              {rings && (
-                <li>
-                  <span aria-hidden="true" className={s.legendRamp} />
-                  Brighter means changed more recently
-                </li>
-              )}
-            </ul>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

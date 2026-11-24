@@ -847,9 +847,6 @@ test("the top bar holds its controls at 1280 px with a dot selected", async ({
   const boxes = [
     await page.getByRole("group", { name: "View" }).boundingBox(),
     await arrangeGroup(page).boundingBox(),
-    await page
-      .getByRole("button", { name: "Labels", exact: true })
-      .boundingBox(),
     await page.getByPlaceholder("Search").boundingBox(),
   ];
   boxes.forEach((b) => expect(b).not.toBeNull());
@@ -1109,7 +1106,8 @@ test("the Legend lists the shapes, and brightness only in Rings", async ({
   page,
 }) => {
   await open(page);
-  const legend = page.getByRole("button", { name: "Legend", exact: true });
+  const zoom = page.getByRole("group", { name: "Zoom", exact: true });
+  const legend = zoom.getByRole("button", { name: "Legend", exact: true });
   await legend.click();
   const list = groups(page, "Legend");
   await expect(list).toBeVisible();
@@ -1138,6 +1136,49 @@ test("the Legend lists the shapes, and brightness only in Rings", async ({
   await expect(
     list.getByText("Brighter means changed more recently"),
   ).toHaveCount(0);
+});
+
+test("Labels sits in the Zoom group and toggles", async ({ page }) => {
+  await open(page);
+  const zoom = page.getByRole("group", { name: "Zoom", exact: true });
+  const labels = zoom.getByRole("button", { name: "Labels", exact: true });
+  await expect(labels).toHaveAttribute("aria-pressed", "true");
+  // The stylesheet applied: a real box, and the pressed state reads differently from the rest.
+  const box = (await labels.boundingBox())!;
+  expect(box.width).toBeGreaterThan(20);
+  expect(box.height).toBeGreaterThan(20);
+  const colour = () => labels.evaluate((e) => getComputedStyle(e).color);
+  const on = await colour();
+  await labels.click();
+  await expect(labels).toHaveAttribute("aria-pressed", "false");
+  await page.mouse.move(0, 0);
+  await expect.poll(colour).not.toBe(on);
+  await labels.click();
+  await expect(labels).toHaveAttribute("aria-pressed", "true");
+  // The divider before it is drawn.
+  const rule = zoom.locator('[aria-hidden="true"][data-zoom-rule]');
+  expect((await rule.boundingBox())!.height).toBeGreaterThan(8);
+});
+
+test("the Legend opens upward, and Escape or an outside press closes it", async ({
+  page,
+}) => {
+  await open(page);
+  const zoom = page.getByRole("group", { name: "Zoom", exact: true });
+  const legend = zoom.getByRole("button", { name: "Legend", exact: true });
+  await legend.click();
+  const list = groups(page, "Legend");
+  await expect(list).toBeVisible();
+  const pop = (await list.boundingBox())!;
+  const z = (await zoom.boundingBox())!;
+  expect(pop.y + pop.height).toBeLessThanOrEqual(z.y + 0.5);
+  await page.keyboard.press("Escape");
+  await expect(list).toHaveCount(0);
+  await expect(legend).toBeFocused();
+  await legend.click();
+  await expect(list).toBeVisible();
+  await page.mouse.click(5, 5);
+  await expect(list).toHaveCount(0);
 });
 
 test("in Timeline and Orbit the group list is named Topics", async ({

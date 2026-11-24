@@ -432,7 +432,7 @@ for (const fold of ["open.open", "shut.open", "open.shut", "shut.shut"]) {
     const filter = page
       .locator("[data-map-overlay]")
       .filter({
-        has: page.getByRole("button", { name: "Legend", exact: true }),
+        has: page.getByRole("button", { name: /^Folders/ }),
       })
       .last();
     const a = (await filter.boundingBox())!;

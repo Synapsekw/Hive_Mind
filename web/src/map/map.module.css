@@ -269,6 +269,39 @@
   color: var(--fg);
 }
 
+/* A fine rule between the zoom's own buttons and Labels / Legend. */
+.zoomRule {
+  align-self: center;
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--line);
+}
+
+/* The Labels switch reads as pressed when names are drawn. */
+.zoomFit[aria-pressed="true"],
+.zoomFit[aria-expanded="true"] {
+  color: var(--fg);
+}
+
+/* The legend opens upward from the control, its right edge on the control's. */
+.zoomLegend {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 4;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100cqw - 24px);
+  padding: 6px;
+  border: 1px solid var(--line-hi);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
 .zoomValue {
   min-width: 42px;
   text-align: center;
@@ -418,10 +451,10 @@
 
 /* ---- The filter bar ---- */
 
-/* It leaves room for the zoom control (about 142 px wide, 12 px in) and a gap, so it never runs
+/* It leaves room for the zoom control (about 200 px wide with Labels and Legend, 12 px in) and a gap, so it never runs
    under it; the chips give way first. The bar reads --filter-gutter to know its cap. */
 .filterBar {
-  --filter-gutter: 180px;
+  --filter-gutter: 256px;
   position: absolute;
   left: 12px;
   bottom: 12px;
@@ -736,13 +769,6 @@
 .filterClear:hover {
   background: var(--fill);
   color: var(--fg);
-}
-
-.filterLegend {
-  left: auto;
-  right: 0;
-  width: max-content;
-  max-width: calc(100cqw - 24px);
 }
 
 .legendList {

@@ -19,8 +19,6 @@ export function TopBar({
   onView,
   arrange,
   onArrange,
-  names,
-  onNames,
   q,
   onQ,
   today,
@@ -30,8 +28,6 @@ export function TopBar({
   onView: (v: View) => void;
   arrange: Arrange;
   onArrange: (a: Arrange) => void;
-  names: boolean;
-  onNames: () => void;
   q: string;
   onQ: (q: string) => void;
   /** The Today button, last in the bar. */
@@ -95,14 +91,6 @@ export function TopBar({
         </div>
       )}
       <div className={s.tools}>
-        <button
-          type="button"
-          className={s.toggle}
-          aria-pressed={names}
-          onClick={onNames}
-        >
-          Labels
-        </button>
         <label htmlFor="hv-search" className={s.srOnly}>
           Search
         </label>

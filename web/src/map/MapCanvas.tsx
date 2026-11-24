@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
   type JSX,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { toScreen } from "./camera";
@@ -73,6 +74,10 @@ type Props = {
   sel: number | null;
   focusRing: number | null;
   labelsOn: boolean;
+  /** The Labels switch (the zoom control holds its button) and the legend it also holds. */
+  names: boolean;
+  onNames(): void;
+  legend: ReactNode;
   /** Labels from the map's own rules (selection, hubs, search, agents); zoom adds more. */
   labels: Set<number>;
   onHover(i: number | null, at: { x: number; y: number } | null): void;
@@ -784,6 +789,9 @@ export function MapCanvas(props: Props): JSX.Element {
         settledK={orbiting ? orbitZoom : settledK}
         onZoom={(f) => (orbiting ? orbitZoomBy(f) : api.current.zoomBy(f))}
         onFit={() => props.cameraRef.current?.fitView()}
+        names={props.names}
+        onNames={props.onNames}
+        legend={props.legend}
       />
     </>
   );
