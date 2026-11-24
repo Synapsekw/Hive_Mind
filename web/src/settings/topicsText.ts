@@ -53,11 +53,22 @@ export const deleted = (name: string) => `${name} deleted.`;
 export const alsoKnown = (aliases: string[]): string | null =>
   aliases.length === 0 ? null : `also: ${aliases.join(", ")}`;
 
+/** Beside a candidate whose name is already a topic of another kind: which kinds. */
+export function alreadyUnder(kindNames: string[]): string {
+  const last = kindNames[kindNames.length - 1] ?? "";
+  const list =
+    kindNames.length > 1
+      ? `${kindNames.slice(0, -1).join(", ")} and ${last}`
+      : last;
+  return `already under ${list}`;
+}
+
 export const pickLabel = (
   kindName: string,
   name: string,
   aliases: string[] = [],
+  under: string | null = null,
 ) => {
   const also = alsoKnown(aliases);
-  return `${kindName}: ${name}${also ? `, ${also}` : ""}`;
+  return `${kindName}: ${name}${also ? `, ${also}` : ""}${under ? `, ${under}` : ""}`;
 };

@@ -37,6 +37,25 @@ describe("the sentences of the Topics section", () => {
     );
   });
 
+  it("says which kinds a candidate is already saved under", () => {
+    expect(t.alreadyUnder(["Customers"])).toBe("already under Customers");
+    expect(t.alreadyUnder(["Customers", "Vendors"])).toBe(
+      "already under Customers and Vendors",
+    );
+    expect(t.alreadyUnder(["Customers", "Vendors", "Products"])).toBe(
+      "already under Customers, Vendors and Products",
+    );
+  });
+
+  it("adds those words to a candidate's checkbox name, after the old format", () => {
+    expect(
+      t.pickLabel("Partners", "Zain", [], t.alreadyUnder(["Customers"])),
+    ).toBe("Partners: Zain, already under Customers");
+    expect(
+      t.pickLabel("Partners", "Zain", ["Z"], t.alreadyUnder(["Customers"])),
+    ).toBe("Partners: Zain, also: Z, already under Customers");
+  });
+
   it("tells the owner who will see a topic's names", () => {
     expect(t.FOUND_NOTE).toMatch(
       /Tick the ones this hive should have\. Every member of the hive can see a topic's name and its other names\.$/,

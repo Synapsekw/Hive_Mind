@@ -28,6 +28,8 @@ type Stage =
   | {
       kind: "picking";
       found: Candidate[];
+      /** Per candidate: the words for the other kinds its name is already saved under. */
+      under: ReadonlyMap<number, string>;
       ticked: ReadonlySet<number>;
       saving: boolean;
     };
@@ -140,11 +142,22 @@ export function Topics({
       setStage({ kind: "idle" });
       return say(t.NOTHING_NEW);
     }
+    // A name the hive already has under another kind is still offered, but is not ticked.
+    const kindsOf = new Map<string, Set<Kind>>();
+    for (const x of shown) {
+      const set = kindsOf.get(normal(x.name));
+      if (set) set.add(x.kind);
+      else kindsOf.set(normal(x.name), new Set([x.kind]));
+    }
+    const under = new Map<number, string>();
     const ticked = new Set<number>();
     found.forEach((c, i) => {
-      if (c.kind !== "subject") ticked.add(i);
+      const other = KINDS.filter((k) => kindsOf.get(normal(c.name))?.has(k));
+      if (other.length > 0)
+        under.set(i, t.alreadyUnder(other.map((k) => t.KIND_NAMES[k])));
+      else if (c.kind !== "subject") ticked.add(i);
     });
-    setStage({ kind: "picking", found, ticked, saving: false });
+    setStage({ kind: "picking", found, under, ticked, saving: false });
   }
 
   async function save() {
@@ -269,6 +282,7 @@ export function Topics({
                   {of.map(({ c, i }) => {
                     const extra = t.candidateNotes(c.kind, c.notes);
                     const also = t.alsoKnown(c.aliases);
+                    const elsewhere = stage.under.get(i) ?? null;
                     return (
                       <li key={i} className={s.item}>
                         <label className={s.text}>
@@ -280,6 +294,7 @@ export function Topics({
                               t.KIND_NAMES[kind],
                               c.name,
                               c.aliases,
+                              elsewhere,
                             )}
                             onChange={(e) => {
                               const ticked = new Set(stage.ticked);
@@ -291,6 +306,9 @@ export function Topics({
                           <span className={s.name}>{c.name}</span>
                           {extra && <span className={s.mark}>{extra}</span>}
                           {also && <span className={s.meta}>{also}</span>}
+                          {elsewhere && (
+                            <span className={s.meta}>{elsewhere}</span>
+                          )}
                         </label>
                       </li>
                     );
