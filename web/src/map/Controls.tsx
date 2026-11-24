@@ -1,5 +1,5 @@
 // The controls around the stage: stats line, view switch, labels toggle and search on top;
-// the legend dock (Dock.tsx) sits on the stage.
+// the filter bar (FilterBar.tsx) sits on the stage.
 import { useRef } from "react";
 import type { View } from "./types";
 import { ARRANGES, type Arrange } from "./arrange";

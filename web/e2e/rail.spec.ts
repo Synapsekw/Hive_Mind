@@ -50,7 +50,7 @@ test("tabbing out of the account popover closes it", async ({ page }) => {
 test("the agents card opens to one line per agent", async ({ page }) => {
   await page.goto("/dev/map", { waitUntil: "networkidle" });
   const card = page.getByRole("button", {
-    name: /^Agents, \d+ of \d+ connected/,
+    name: /^Agents, \d+ of \d+ live/,
   });
   await expect(card).toHaveAttribute("aria-expanded", "false");
   await card.click();
@@ -333,9 +333,13 @@ test("the keyboard walks the button, each hive, New hive and the form in order",
   await expect(form.getByRole("button", { name: "Create" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(form.getByRole("button", { name: "Cancel" })).toBeFocused();
-  await page.keyboard.press("Tab"); // the first destination: out of the switcher
-  await expect(rail.getByRole("link", { name: "Map" })).toBeFocused();
+  await page.keyboard.press("Tab"); // out of the switcher, to the fold button beside it
+  await expect(
+    rail.getByRole("button", { name: "Fold navigation" }),
+  ).toBeFocused();
   await expect(popover).toBeHidden();
+  await page.keyboard.press("Tab"); // then the first destination
+  await expect(rail.getByRole("link", { name: "Map" })).toBeFocused();
 });
 
 test("a person in one hive still has the button, their hive and New hive", async ({

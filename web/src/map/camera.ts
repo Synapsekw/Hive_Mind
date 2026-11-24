@@ -45,6 +45,35 @@ export function fit(w: number, h: number, sw: number, sh: number): Cam {
   return { k: 1, tx: (sw - w) / 2, ty: (sh - h) / 2 };
 }
 
+/** A stage in css px, and the 1000 x 760 box fitted to it at k = 1 (`w` x `h`). */
+export type StageSize = { sw: number; sh: number; w: number; h: number };
+
+/** How far (px, and in k) a camera may sit from the fit and still count as fitted. */
+const FIT_PX = 1;
+const FIT_K = 0.001;
+
+/**
+ * The camera after the stage resizes from `a` to `b`. A fitted camera stays fitted. Any other
+ * view keeps its zoom relative to the fit (k: the box is refitted, so k = 1 is always the fit)
+ * and keeps the same map point under the centre of the stage.
+ */
+export function keepView(c: Cam, a: StageSize, b: StageSize): Cam {
+  const fb = fit(b.w, b.h, b.sw, b.sh);
+  if (a.w <= 0 || a.h <= 0) return fb;
+  const fa = fit(a.w, a.h, a.sw, a.sh);
+  if (
+    Math.abs(c.k - fa.k) < FIT_K &&
+    Math.abs(c.tx - fa.tx) < FIT_PX &&
+    Math.abs(c.ty - fa.ty) < FIT_PX
+  )
+    return fb;
+  // The centre as a share of the box (0..1 across, 0..1 down), then back out at the new size.
+  const u = (a.sw / 2 - c.tx) / c.k / a.w;
+  const v = (a.sh / 2 - c.ty) / c.k / a.h;
+  const k = clampK(c.k);
+  return { k, tx: b.sw / 2 - u * b.w * k, ty: b.sh / 2 - v * b.h * k };
+}
+
 export function toScreen(
   c: Cam,
   x: number,

@@ -37,11 +37,15 @@ export function lit(model: MapModel, f: Filter): boolean[] {
   const topicName = model.topics.map((t) => t.name.toLowerCase());
   // Group names are searched unless the filter says not to (see Filter.groupNames).
   const byGroup = f.groupNames !== false;
+  // An empty list means all, so it builds no set and filters nothing.
+  const topics = f.topics.length ? new Set(f.topics) : null;
+  const kinds = f.kinds.length ? new Set(f.kinds) : null;
+  const members = f.members.length ? new Set(f.members) : null;
   return model.nodes.map((n) => {
     let ok = true;
-    if (f.topic !== null) ok = n.topic === f.topic;
-    if (f.kind !== null) ok = ok && n.kind === f.kind;
-    if (f.member !== null) ok = ok && n.member === f.member;
+    if (topics) ok = topics.has(n.topic);
+    if (kinds) ok = ok && kinds.has(n.kind);
+    if (members) ok = ok && n.member !== null && members.has(n.member);
     // `n.title` is already the shown title ("Private note" when locked), so a locked node can
     // never match on its real one.
     if (q)
@@ -53,4 +57,19 @@ export function lit(model: MapModel, f: Filter): boolean[] {
     if (n.kind === "root" && !sel && !q) ok = true;
     return ok;
   });
+}
+
+/** How many notes and files are lit, and how many there are. */
+export function shown(
+  model: MapModel,
+  on: boolean[],
+): { shown: number; total: number } {
+  let total = 0;
+  let lit = 0;
+  model.nodes.forEach((n, i) => {
+    if (n.kind !== "note" && n.kind !== "file") return;
+    total++;
+    if (on[i]) lit++;
+  });
+  return { shown: lit, total };
 }

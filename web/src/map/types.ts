@@ -62,9 +62,12 @@ export type MapModel = {
 };
 
 export type Filter = {
-  topic: number | null;
-  kind: NodeKind | null;
-  member: string | null;
+  /** Group indices; empty means all. Any within a list, all across lists and the search. */
+  topics: number[];
+  /** Node kinds; empty means all. */
+  kinds: NodeKind[];
+  /** Member ids; empty means all. */
+  members: string[];
   q: string;
   sel: number | null;
   /**

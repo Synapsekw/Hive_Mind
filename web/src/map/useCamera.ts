@@ -15,10 +15,12 @@ import {
   clampK,
   fit,
   frame,
+  keepView,
   pinchCam,
   wheelFactor,
   zoomAt,
   type Cam,
+  type StageSize,
 } from "./camera";
 
 export type CameraApi = {
@@ -45,12 +47,8 @@ export type Gesture = {
   end(): void;
 };
 
-export type Size = {
-  sw: number; // stage, css px
-  sh: number;
-  w: number; // the 1000 x 760 box fitted at k = 1
-  h: number;
-};
+/** sw x sh: the stage, css px; w x h: the 1000 x 760 box fitted at k = 1. */
+export type Size = StageSize;
 
 const GLIDE_MS = 650;
 const DRAG_PX = 4;
@@ -111,15 +109,18 @@ export function useCamera(
     [set, settle, stop],
   );
 
+  // The running glide's ends and start time, so a resize mid-glide can carry them to the new size.
+  const path = useRef<{ from: Cam; to: Cam; t0: number } | null>(null);
   const glideTo = useCallback(
     (to: Cam) => {
       stop();
       if (reducedMotion()) return jump(to);
-      const from = cam.current;
-      const t0 = performance.now();
+      const g = { from: cam.current, to, t0: performance.now() };
+      path.current = g;
       const step = (now: number) => {
-        const p = Math.min(1, (now - t0) / GLIDE_MS);
+        const p = Math.min(1, (now - g.t0) / GLIDE_MS);
         const e = ease(p);
+        const { from, to } = g;
         set(
           p >= 1
             ? to
@@ -158,7 +159,9 @@ export function useCamera(
     k: () => cam.current.k,
   };
 
-  // Size: the box fitted to the stage; a resize refits.
+  // Size: the box fitted to the stage. The first measure fits; a later resize (a rail folding)
+  // keeps the view (keepView: a fitted camera stays fitted, a zoomed one keeps its zoom and the
+  // map point at the centre). A glide under way carries on toward its target at the new size.
   useLayoutEffect(() => {
     const el = stage.current;
     if (!el) return;
@@ -167,9 +170,20 @@ export function useCamera(
       const sw = r.width;
       const sh = r.height;
       const s0 = Math.min(sw / 1000, sh / 760);
-      size.current = { sw, sh, w: 1000 * s0, h: 760 * s0 };
+      const a = size.current;
+      const b = { sw, sh, w: 1000 * s0, h: 760 * s0 };
+      if (a.sw === b.sw && a.sh === b.sh) return;
+      size.current = b;
+      const g = glide.current !== null ? path.current : null;
+      if (g) {
+        g.from = keepView(g.from, a, b);
+        g.to = keepView(g.to, a, b);
+        cam.current = keepView(cam.current, a, b);
+        change.current();
+        return;
+      }
       stop();
-      set(fit(1000 * s0, 760 * s0, sw, sh));
+      set(keepView(cam.current, a, b));
       settle(SETTLE_MS);
     };
     measure();

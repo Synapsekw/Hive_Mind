@@ -1,9 +1,17 @@
 // The right rail: today's activity until something is selected, then what it is, who wrote
 // it and what it connects to. Every title is rendered as a text node.
 import Link from "next/link";
-import { useEffect, useId, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { Preview } from "./MapCanvas";
 import type { Activity, MapModel, ModelNode } from "./types";
+import { useFold, useFoldSide } from "../shell/FoldProvider";
 import { Shape } from "./Shape";
 import { daySeries, sparkPath } from "./sparkline";
 import { reducedMotion } from "./useCamera";
@@ -59,14 +67,28 @@ function Today({
   model,
   act,
   inbox,
+  members,
+  onMembers,
   onPreview,
+  folded,
 }: {
   model: MapModel;
   act: Activity;
   inbox: number;
+  members: string[];
+  onMembers: (ids: string[]) => void;
   onPreview: (p: Preview | null) => void;
+  folded: boolean;
 }) {
   const shown = useCountUp(act.today);
+  // Folding hides this with display: none, and showing it again would replay the sparkline and
+  // bar animations. Once they have been seen and the panel folds, they stay drawn.
+  const seen = useRef(false);
+  const [played, setPlayed] = useState(false);
+  useEffect(() => {
+    if (!folded) seen.current = true;
+    else if (seen.current) setPlayed(true);
+  }, [folded]);
   const grad = useId();
   const series = daySeries(act);
   const total = series.reduce((a, b) => a + b, 0);
@@ -74,7 +96,7 @@ function Today({
   const max = Math.max(1, ...act.perMember.map((m) => m.count));
   const me = new Set(model.members.filter((m) => m.isMe).map((m) => m.id));
   return (
-    <section className={s.today}>
+    <section className={s.today} data-played={played || undefined}>
       <div>
         <p className={s.eyebrow}>Today</p>
         {act.today === 0 ? (
@@ -135,11 +157,22 @@ function Today({
         <p className={s.eyebrow}>By person</p>
         <div className={s.bars}>
           {act.perMember.map((m, i) => (
-            <div
+            <button
               key={m.id}
+              type="button"
               className={s.barRow}
+              aria-pressed={members.includes(m.id)}
+              onClick={() =>
+                onMembers(
+                  members.includes(m.id)
+                    ? members.filter((id) => id !== m.id)
+                    : [...members, m.id],
+                )
+              }
               onPointerEnter={() => onPreview({ member: m.id })}
               onPointerLeave={() => onPreview(null)}
+              onFocus={() => onPreview({ member: m.id })}
+              onBlur={() => onPreview(null)}
             >
               <span>{m.name}</span>
               <span aria-hidden="true" className={s.track}>
@@ -155,7 +188,7 @@ function Today({
                 />
               </span>
               <span className={s.count}>{m.count}</span>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -322,6 +355,8 @@ export function DetailRail({
   agentInfo,
   now,
   inbox = 0,
+  members,
+  onMembers,
   onPick,
   onHot,
   onPreview,
@@ -333,30 +368,106 @@ export function DetailRail({
   agentInfo: Map<string, { status: string; selfHosted: boolean }>;
   now: number;
   inbox?: number;
+  members: string[];
+  onMembers: (ids: string[]) => void;
   onPick: (i: number) => void;
   onHot: (i: number | null) => void;
   onPreview: (p: Preview | null) => void;
   onClear: () => void;
 }) {
+  const { fold, togglePanel, openPanel } = useFold();
+  // Tells the provider a panel is on the page, so the `]` key has something to fold.
+  useFoldSide("panel");
+  const folded = fold.panel === "shut";
+  const panelId = useId();
+  const foldRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // Folding hides the body: a By person row pointed at or focused there ends its preview, and
+  // focus inside it moves to the fold button rather than being lost. Before paint, while the
+  // focused row is still the active element.
+  useLayoutEffect(() => {
+    if (!folded) return;
+    onPreview(null);
+    const active = document.activeElement;
+    if (active && bodyRef.current?.contains(active)) foldRef.current?.focus();
+  }, [folded, onPreview]);
   const n = sel !== null ? model.nodes[sel] : undefined;
   const info = n?.kind === "agent" && n.id ? agentInfo.get(n.id) : undefined;
   return (
-    <aside aria-label="Details" data-scope="chrome" className={s.details}>
-      <div key={sel ?? "today"} className="rise">
-        {n ? (
-          <Selected
-            model={model}
-            n={n}
-            status={info?.status ?? ""}
-            selfHosted={info?.selfHosted ?? false}
-            now={now}
-            onPick={onPick}
-            onHot={onHot}
-            onClear={onClear}
+    <aside
+      id={panelId}
+      aria-label="Details"
+      data-scope="chrome"
+      className={s.details}
+    >
+      <button
+        ref={foldRef}
+        type="button"
+        className={s.foldBtn}
+        aria-expanded={!folded}
+        aria-controls={panelId}
+        aria-keyshortcuts="]"
+        aria-label={folded ? "Unfold details" : "Fold details"}
+        title={folded ? "Unfold details ( ] )" : "Fold details ( ] )"}
+        onClick={togglePanel}
+      >
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="2" y="2.5" width="12" height="11" rx="2" />
+          <path d="M10 2.5v11" />
+          <path
+            d={folded ? "M7 6.5 5.5 8 7 9.5" : "m5.5 6.5 1.5 1.5-1.5 1.5"}
           />
-        ) : (
-          <Today model={model} act={act} inbox={inbox} onPreview={onPreview} />
+        </svg>
+      </button>
+      {/* Folded, the strip shows the two numbers and pressing it unfolds. The CSS shows it only
+          when folded and hides the body then, so the body is out of reach of keys and readers. */}
+      <div className={s.strip} onClick={openPanel}>
+        <span className={s.stripNum}>
+          <span aria-hidden="true">{act.today}</span>
+          <span className={s.srOnly}>{act.today} written or changed today</span>
+        </span>
+        {inbox > 0 && (
+          <span className={s.stripBadge}>
+            <span aria-hidden="true">{inbox}</span>
+            <span className={s.srOnly}>{inbox} need you</span>
+          </span>
         )}
+      </div>
+      <div ref={bodyRef} className={s.detailBody}>
+        <div key={sel ?? "today"} className="rise">
+          {n ? (
+            <Selected
+              model={model}
+              n={n}
+              status={info?.status ?? ""}
+              selfHosted={info?.selfHosted ?? false}
+              now={now}
+              onPick={onPick}
+              onHot={onHot}
+              onClear={onClear}
+            />
+          ) : (
+            <Today
+              model={model}
+              act={act}
+              inbox={inbox}
+              members={members}
+              onMembers={onMembers}
+              onPreview={onPreview}
+              folded={folded}
+            />
+          )}
+        </div>
       </div>
     </aside>
   );

@@ -3,12 +3,14 @@ import {
   clampK,
   fit,
   frame,
+  keepView,
   K_MAX,
   K_MIN,
   pinchCam,
   toScreen,
   wheelFactor,
   zoomAt,
+  type Cam,
 } from "./camera";
 
 describe("camera", () => {
@@ -50,6 +52,74 @@ describe("camera", () => {
     const [x, y] = toScreen(c, 505, 385, 1000, 760);
     expect(x).toBeCloseTo(500);
     expect(y).toBeCloseTo(380);
+  });
+});
+
+describe("keepView", () => {
+  // A stage sized the way useCamera measures it: the box fitted at k = 1.
+  const stage = (sw: number, sh: number) => {
+    const s0 = Math.min(sw / 1000, sh / 760);
+    return { sw, sh, w: 1000 * s0, h: 760 * s0 };
+  };
+  // The map point (0..1000, 0..760) at the centre of the stage.
+  const centre = (c: Cam, s: ReturnType<typeof stage>) => [
+    ((s.sw / 2 - c.tx) / c.k / s.w) * 1000,
+    ((s.sh / 2 - c.ty) / c.k / s.h) * 760,
+  ];
+  const a = stage(1200, 800);
+
+  it("keeps a fitted camera fitted for the new size", () => {
+    for (const b of [stage(960, 800), stage(1440, 800), stage(1200, 500)]) {
+      const c = keepView(fit(a.w, a.h, a.sw, a.sh), a, b);
+      expect(c.k).toBeCloseTo(1);
+      expect(c.tx).toBeCloseTo(fit(b.w, b.h, b.sw, b.sh).tx);
+      expect(c.ty).toBeCloseTo(fit(b.w, b.h, b.sw, b.sh).ty);
+    }
+  });
+  it("treats a camera a hair off the fit as fitted", () => {
+    const f = fit(a.w, a.h, a.sw, a.sh);
+    const b = stage(960, 800);
+    const c = keepView({ k: 1.0001, tx: f.tx + 0.2, ty: f.ty - 0.2 }, a, b);
+    expect(c).toEqual(fit(b.w, b.h, b.sw, b.sh));
+  });
+  it("keeps a 2x zoom and the point at the centre when the stage narrows or widens", () => {
+    // Zoom 2x on the map point (300, 200).
+    const f = fit(a.w, a.h, a.sw, a.sh);
+    const [px, py] = toScreen(f, 300, 200, a.w, a.h);
+    const z = zoomAt(f, 2, px, py);
+    // Pan so (300, 200) sits at the centre.
+    const zc = {
+      k: z.k,
+      tx: z.tx + a.sw / 2 - px,
+      ty: z.ty + a.sh / 2 - py,
+    };
+    expect(centre(zc, a)[0]).toBeCloseTo(300);
+    for (const b of [stage(a.sw - 240, a.sh), stage(a.sw + 240, a.sh)]) {
+      const c = keepView(zc, a, b);
+      expect(c.k).toBeCloseTo(2);
+      const [cx, cy] = centre(c, b);
+      expect(cx).toBeCloseTo(300);
+      expect(cy).toBeCloseTo(200);
+    }
+  });
+  it("keeps an off-centre zoom's centre point too", () => {
+    const zc = { k: 3, tx: -900, ty: -400 };
+    const before = centre(zc, a);
+    const b = stage(a.sw - 240, a.sh);
+    const after = centre(keepView(zc, a, b), b);
+    expect(after[0]).toBeCloseTo(before[0]);
+    expect(after[1]).toBeCloseTo(before[1]);
+  });
+  it("respects the zoom limits", () => {
+    const b = stage(960, 800);
+    expect(keepView({ k: 20, tx: 0, ty: 0 }, a, b).k).toBe(K_MAX);
+    expect(keepView({ k: 0.1, tx: 0, ty: 0 }, a, b).k).toBe(K_MIN);
+  });
+  it("fits when there was no earlier size", () => {
+    const b = stage(960, 800);
+    expect(keepView({ k: 2, tx: 5, ty: 5 }, stage(0, 0), b)).toEqual(
+      fit(b.w, b.h, b.sw, b.sh),
+    );
   });
 });
 

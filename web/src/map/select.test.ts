@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildModel } from "./graph";
-import { lit, nodeIndex, nodeKey, topicIndexOf } from "./select";
+import { lit, nodeIndex, nodeKey, shown, topicIndexOf } from "./select";
 import { fixturePayload } from "./fixture";
 import type { Filter, MapPayload } from "./types";
 
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 const NONE: Filter = {
-  topic: null,
-  kind: null,
-  member: null,
+  topics: [],
+  kinds: [],
+  members: [],
   q: "",
   sel: null,
 };
@@ -21,7 +21,7 @@ describe("lit", () => {
   });
 
   it("lights only the chosen topic, root stays lit", () => {
-    const on = lit(model, { ...NONE, topic: 2 });
+    const on = lit(model, { ...NONE, topics: [2] });
     model.nodes.forEach((n, i) => {
       if (n.kind === "root") expect(on[i]).toBe(true);
       else expect(on[i]).toBe(n.topic === 2);
@@ -31,11 +31,59 @@ describe("lit", () => {
 
   it("filters by kind and member", () => {
     const me = model.members.find((m) => m.isMe)!;
-    const on = lit(model, { ...NONE, kind: "note", member: me.id });
+    const on = lit(model, { ...NONE, kinds: ["note"], members: [me.id] });
     model.nodes.forEach((n, i) => {
       if (n.kind !== "root")
         expect(on[i]).toBe(n.kind === "note" && n.member === me.id);
     });
+  });
+
+  it("lights the union of several groups, plus the root", () => {
+    const on = lit(model, { ...NONE, topics: [0, 2] });
+    model.nodes.forEach((n, i) => {
+      if (n.kind === "root") expect(on[i]).toBe(true);
+      else expect(on[i]).toBe(n.topic === 0 || n.topic === 2);
+    });
+  });
+
+  it("combines lists with all-across: a group and a person", () => {
+    const m2 = model.nodes.find((n) => n.topic === 0 && n.member)!.member!;
+    const on = lit(model, { ...NONE, topics: [0], members: [m2] });
+    model.nodes.forEach((n, i) => {
+      if (n.kind !== "root")
+        expect(on[i]).toBe(n.topic === 0 && n.member === m2);
+    });
+    expect(on.filter(Boolean).length).toBeGreaterThan(1);
+  });
+
+  it("lights notes and files for kinds note and file, not hubs or agents", () => {
+    const on = lit(model, { ...NONE, kinds: ["note", "file"] });
+    model.nodes.forEach((n, i) => {
+      if (n.kind === "root") return;
+      expect(on[i]).toBe(n.kind === "note" || n.kind === "file");
+    });
+    expect(model.nodes.some((n, i) => n.kind === "hub" && !on[i])).toBe(true);
+  });
+
+  it("lights several people as a union", () => {
+    const ids = model.members.slice(0, 2).map((m) => m.id);
+    const on = lit(model, { ...NONE, members: ids });
+    model.nodes.forEach((n, i) => {
+      if (n.kind !== "root")
+        expect(on[i]).toBe(ids.includes(n.member as string));
+    });
+  });
+
+  it("narrows a group list by the search too", () => {
+    // "overview" is a note title in every group, so it matches inside group 0 and outside it.
+    const q = "overview";
+    const hit = (i: number) => model.nodes[i]!.title.toLowerCase().includes(q);
+    const inside = model.nodes.filter((n) => n.topic === 0 && hit(n.i));
+    const outside = model.nodes.filter((n) => n.topic !== 0 && hit(n.i));
+    expect(inside.length).toBeGreaterThan(0);
+    expect(outside.length).toBeGreaterThan(0);
+    const on = lit(model, { ...NONE, topics: [0], q });
+    model.nodes.forEach((n, i) => expect(on[i]).toBe(n.topic === 0 && hit(i)));
   });
 
   it("lights a selection and its neighbours only", () => {
@@ -105,6 +153,27 @@ describe("lit", () => {
     expect(lit(open, { ...NONE, q }).filter(Boolean).length).toBeGreaterThan(0);
     const on = lit(closed, { ...NONE, q });
     expect(on.filter(Boolean).length).toBe(0);
+  });
+});
+
+describe("shown", () => {
+  const model = buildModel(fixturePayload(NOW));
+  const items = model.nodes.filter(
+    (n) => n.kind === "note" || n.kind === "file",
+  );
+
+  it("counts only notes and files, lit and total", () => {
+    expect(shown(model, lit(model, NONE))).toEqual({
+      shown: items.length,
+      total: items.length,
+    });
+    const on = lit(model, { ...NONE, kinds: ["hub"] });
+    expect(shown(model, on)).toEqual({ shown: 0, total: items.length });
+    const g0 = items.filter((n) => n.topic === 0).length;
+    expect(shown(model, lit(model, { ...NONE, topics: [0] }))).toEqual({
+      shown: g0,
+      total: items.length,
+    });
   });
 });
 

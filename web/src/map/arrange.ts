@@ -7,7 +7,7 @@ export const ARRANGES: [Arrange, string][] = [
   ["links", "Links"],
   ["time", "Time"],
 ];
-/** The dock's heading for the groups of an arrangement. */
+/** The filter bar's label for the groups of an arrangement. */
 export const GROUP_HEADING: Record<Arrange, string> = {
   folder: "Folders",
   links: "Clusters",

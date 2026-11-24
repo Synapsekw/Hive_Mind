@@ -4,7 +4,8 @@
 // downwards: the person's hives (name, their role there, a tick on the one on show), then New
 // hive, which opens a small form in place. It follows the account menu: plain Tab order;
 // Escape, an outside press and focus leaving all close it. With nobody signed in (dev pages,
-// the no-hive notice) the rail shows its plain name instead.
+// the no-hive notice) the rail shows its plain name instead. On a folded rail the button lies
+// over the mark, and pressing it unfolds the rail first, then opens the list.
 import {
   useEffect,
   useId,
@@ -15,6 +16,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useAccount } from "./AccountContext";
+import { foldWide, useFold } from "./FoldProvider";
 import type { HiveActions } from "./HiveActions";
 import {
   BRAND,
@@ -171,6 +173,8 @@ export function HiveSwitcher({ actions }: { actions?: HiveActions | null }) {
   const button = useRef<HTMLButtonElement>(null);
   const newHive = useRef<HTMLButtonElement>(null);
   const id = useId();
+  const { fold, openRail } = useFold();
+  const folded = fold.rail === "shut";
 
   const close = (refocus: boolean) => {
     if (busy.current) return;
@@ -189,6 +193,11 @@ export function HiveSwitcher({ actions }: { actions?: HiveActions | null }) {
     document.addEventListener("pointerdown", down);
     return () => document.removeEventListener("pointerdown", down);
   }, [open]);
+
+  // Folding the rail closes the list: it hangs from the rail and would be a sliver.
+  useEffect(() => {
+    if (folded) close(false);
+  }, [folded]);
 
   if (!account) return <span className={s.brandName}>{BRAND}</span>;
 
@@ -238,7 +247,15 @@ export function HiveSwitcher({ actions }: { actions?: HiveActions | null }) {
         aria-expanded={open}
         aria-controls={open ? `${id}-popover` : undefined}
         aria-label={hiveButtonLabel(account.hive)}
-        onClick={() => (open ? close(false) : setOpen(true))}
+        title={folded ? account.hive : undefined}
+        onClick={() => {
+          // Narrow windows never fold, whatever the cookie says.
+          if (folded && foldWide()) {
+            openRail();
+            setOpen(true);
+          } else if (open) close(false);
+          else setOpen(true);
+        }}
       >
         <span aria-hidden="true" className={s.brandName}>
           {account.hive}

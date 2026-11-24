@@ -61,7 +61,7 @@ the bottom of the left rail.
   2026-11-18. Hive's light seeds are darkened so white text on the wash keeps its contrast. Hive's
   dark mode is near-black (wash, card colour, and the coloured glows over the wash turned down to
   30% by a `bloom` seed only Hive's dark mode sets), so fresh notes read as honey light in the dark. Hive also sets
-  `"rings": "honey"` in its seeds: in Rings its hubs and the legend's group swatches take the brand
+  `"rings": "honey"` in its seeds: in Rings its hubs and the filter bar's group swatches take the brand
   colour, and the glow on fresh notes is 1.9 times as strong (tokens `--rings-hub` and
   `--rings-glow`, unset in every other theme, which keep group hues on hubs). Each theme is tuned on
   its own; nothing here changes the other 17. A `--mark`
@@ -126,21 +126,31 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
   selected item selected, and clears a pinned group filter, since the groups are new. It is client
   state only and sends no request.
 - **Timeline and Orbit** keep the per-topic colours (at most eight topics, the rest folded into
-  "Other"), and the dock calls the list "Topics".
+  "Other"), and the filter bar calls the list "Topics".
 - **Zoom and pan:** wheel or pinch toward the cursor, drag to pan, double-click to zoom in, a
   zoom control (+, −, Fit), and keys. Orbit turns by dragging. Labels are chosen once motion
   settles; zoom-driven labels are capped at 60 and never overlap (rule labels are not capped).
 - **Hover peek:** a small card with the title, group and owner; links fire a pulse along their
   length. The index dot's card says "Groups" with a count.
-- **Legend dock:** the group list, Kinds and People. In Rings the group list is headed "Folders",
-  "Clusters" or "Months" to follow the arrangement, and the kind entry for hubs reads "Groups". In
-  Timeline and Orbit the heading and the hubs' kind entry read "Topics". Hover previews the isolation; click pins it.
+- **Filter bar:** a glass bar at the bottom left of the map, in place of the old legend dock. It
+  holds three list buttons (the groups, Kind and People), a chip for each choice and for the
+  search text, a count, Clear all and a Legend. In Rings the group list is named "Folders",
+  "Clusters" or "Months" to follow the arrangement, and the kind row for hubs reads "Groups"; in
+  Timeline and Orbit both read "Topics". A list button opens a list of checkboxes above the bar,
+  one list at a time. Pointing at or focusing a row previews it on the map without choosing it;
+  Escape, a press outside or tabbing out closes the list. Choosing as many rows as you like
+  works by one rule: any within a list, all across lists, so two folders show both, and adding a
+  person narrows that to the person's items in those folders. Each choice shows as a chip with a
+  remove button, and the count reads "All N shown" or "M of N shown". The Legend lists the shapes,
+  and in Rings only, that brighter means changed more recently. Choosing a filter clears the
+  selection, and choosing another arrangement clears the group choice. A "By person" row in the
+  side panel is a button that adds the same person to the filter.
 - **Shapes:** circle = note, diamond = file, ringed circle = hub, hollow = a colleague's item that
   is not shared with you, hexagon = the hive index. In Rings the agents are dots on the outer
   ring. Nothing on the map shows whether an agent is live, wrote today or is idle; the agents card
   in the left rail shows who is connected.
 - **Core:** a swarm at the centre showing the last 24 hours of writes.
-- **Isolate, don't hide:** picking a group, a kind or a person dims everything else.
+- **Isolate, don't hide:** choosing a group, a kind or a person dims everything else.
 - **Click a dot:** it lights up with its connections; the right rail shows what it is, who wrote
   it and what it connects to. An unshared note shows only "Private note" and its topic.
 - **Search:** matching dots stay lit and get labels when there are few enough.
@@ -149,7 +159,17 @@ Layout: a left rail on the wash (mark and the hive's name, five destinations wit
 summary, account button), the map on the glass card with the view switch as one segmented control,
 and a glass side panel. It shows Today until something is selected (a count-up of today's writes,
 a 14-day sparkline of agent writes, By person, and Needs you), then Selected. The housekeeper's last
-run sits below. The rail's active bar marks the current page (each page renders its own rail, so the bar does
+run sits below.
+
+**Folding.** The left rail folds to a 60 px strip of icons, on every page that has a rail, and the
+map's side panel folds to a 52 px strip that shows today's count and, when anything waits, the
+number that needs you. Each has a fold button (named "Fold navigation" or "Unfold navigation",
+"Fold details" or "Unfold details") and a key: `[` for the rail and `]` for the panel (the panel
+only on the map). The keys are ignored while typing, inside a popover or dialog, with a modifier
+held, and on key repeat. The state is kept in one cookie, `hive-fold`, as `<rail>.<panel>` with
+each part `open` or `shut`, and the server draws it on the page, so a reload does not flash.
+Below 700 px the layout stacks and nothing folds. Folding keeps the map's view, so a zoomed-in
+map stays zoomed in. Selecting a dot while the panel is folded opens it. The rail's active bar marks the current page (each page renders its own rail, so the bar does
 not slide between pages), the agents card collapses, and an account popover holds Appearance,
 Settings and Sign out; the member's name, role and hive load in the root layout.
 
