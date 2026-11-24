@@ -95,6 +95,8 @@ function time(p: Input, now: number): Raw {
 
 const HUBS = "Hub notes";
 const SMALL = "Small clusters";
+/** Notes whose every link goes to a hub: linked, but in no cluster. */
+const HUB_LEAVES = "Linked to hubs";
 const UNLINKED = "Unlinked";
 
 function links(p: Input): Raw {
@@ -155,7 +157,10 @@ function links(p: Input): Raw {
   }
 
   const key: string[] = new Array<string>(n).fill(UNLINKED);
-  for (let i = 0; i < n; i++) if (hub[i]) key[i] = HUBS;
+  for (let i = 0; i < n; i++) {
+    if (hub[i]) key[i] = HUBS;
+    else if (degree[i]! > 0 && soft[i]!.length === 0) key[i] = HUB_LEAVES;
+  }
 
   // Real clusters get names in size order, then member index.
   const real = [...clusters.values()]
@@ -165,7 +170,7 @@ function links(p: Input): Raw {
     if (m.length < MIN_CLUSTER) for (const i of m) key[i] = SMALL;
   }
 
-  const used = new Set<string>([HUBS, SMALL, UNLINKED]);
+  const used = new Set<string>([HUBS, SMALL, HUB_LEAVES, UNLINKED]);
   let unnamed = 0;
   for (const m of real) {
     let best = -1;

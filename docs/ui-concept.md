@@ -128,7 +128,8 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
 - **Arrange by:** a switch that appears only in Rings, with Folder, Links and Time. Folder groups
   by topic (the largest first, up to twelve groups, the rest folded into "Other"). Links groups
   items that link to each other into clusters, named after their best-linked note, with "Hub
-  notes", "Small clusters" and "Unlinked" for the rest. Time groups by month, with "Last 2 weeks"
+  notes", "Small clusters", "Linked to hubs" (notes whose only links go to hub notes) and
+  "Unlinked" for the rest. Time groups by month, with "Last 2 weeks"
   first when anything changed in that time. Changing it moves the dots in one glide, keeps the
   selected item selected, and clears a pinned group filter, since the groups are new. It is client
   state only and sends no request.
