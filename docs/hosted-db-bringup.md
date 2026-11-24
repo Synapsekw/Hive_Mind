@@ -37,12 +37,12 @@ sign-ups afterwards, is in [Invitation email](#invitation-email).
   version. It adds connected apps (`connect_app`, `connector_login`) and makes the database
   refuse an app's pass everywhere else. It was applied with
   `supabase db query --linked -f <file>` in one transaction, so the file ran byte for byte.
-- Migration `20261124074246_link_behaviours` is **not applied yet**. It allows one link per pair
-  of notes in either direction, makes a decline final, and adds `unlink` and `note_links` for
-  the vault. Before applying it, check for pairs of notes that have link rows in both
-  directions: the new unique index refuses them, so the migration fails until they are
-  resolved, and which row to keep is the owner's decision. Until it is applied, the vault shows
-  no **Linked with** list.
+- Migration `20261124074246_link_behaviours` is applied (2026-11-24) with
+  `supabase db query --linked -f <file>` in one transaction and recorded under that version. It
+  allows one link per pair of notes in either direction, makes a decline final, and adds
+  `unlink` and `note_links` for the vault. Checked before applying: no pair of notes had link
+  rows in both directions (the new unique index refuses them, so on another project look for
+  such pairs first; which row to keep is the owner's decision).
 - The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
   the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
   still the build from before its signing code moved to `_shared/`; behaviour is the same.
