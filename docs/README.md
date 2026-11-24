@@ -37,7 +37,7 @@ not duplicate content — it points to the canonical home of each topic.
 - [Agent integration](agent-integration.md) — supported agents (the local server, and the remote
   connector at `https://<site>/mcp`), tool surface, guardrail layers, the instruction template,
   the housekeeper.
-- [UI concept](ui-concept.md) — principles, tokens, the map's six views, other pages. Prototypes
+- [UI concept](ui-concept.md) — principles, tokens, the map's three views, other pages. Prototypes
   in [`ui/`](ui/).
 
 ## Roadmap & current state
