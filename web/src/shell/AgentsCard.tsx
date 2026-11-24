@@ -1,9 +1,11 @@
 "use client";
 
-// The agents at the foot of the rail, folded into one glass card: a stack of status dots and
-// "N of M agents connected"; it opens to one line per agent with when it last connected.
-import { useId, useState } from "react";
+// The agents at the foot of the rail, folded into one glass card: a stack of status dots,
+// "Agents" and "N of M live" beneath; it opens to one line per agent with when it last
+// connected. On a folded rail only the dots show, and pressing them unfolds the rail first.
+import { useEffect, useId, useState } from "react";
 import { agentShort } from "./agentShort";
+import { useFold } from "./FoldProvider";
 import s from "./shell.module.css";
 import type { AgentRow } from "./Shell";
 
@@ -16,6 +18,12 @@ export function AgentsCard({
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const { fold, openRail } = useFold();
+  const folded = fold.rail === "shut";
+  // Folding the rail closes the list: there is no room for it in the strip.
+  useEffect(() => {
+    if (folded) setOpen(false);
+  }, [folded]);
   const connected = agents.filter((a) => a.connected).length;
   return (
     <div className={s.agents} data-open={open || undefined}>
@@ -25,7 +33,15 @@ export function AgentsCard({
         aria-expanded={open}
         aria-controls={`${id}-body`}
         aria-label={`Agents, ${connected} of ${agents.length} connected`}
-        onClick={() => setOpen((v) => !v)}
+        title={
+          folded ? `Agents, ${connected} of ${agents.length} live` : undefined
+        }
+        onClick={() => {
+          if (folded) {
+            openRail();
+            setOpen(true);
+          } else setOpen((v) => !v);
+        }}
       >
         <span aria-hidden="true" className={s.dotStack}>
           {agents.map((a) => (
@@ -37,10 +53,10 @@ export function AgentsCard({
           ))}
         </span>
         <span aria-hidden="true" className={s.agentsText}>
-          <b>
-            {connected} of {agents.length}
-          </b>{" "}
-          agents connected
+          <b className={s.agentsTitle}>Agents</b>
+          <span className={s.agentsLive}>
+            {connected} of {agents.length} live
+          </span>
         </span>
         <svg
           aria-hidden="true"
