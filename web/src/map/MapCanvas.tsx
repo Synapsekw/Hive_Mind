@@ -74,8 +74,7 @@ type Props = {
   sel: number | null;
   focusRing: number | null;
   labelsOn: boolean;
-  /** The Labels switch (the zoom control holds its button) and the legend it also holds. */
-  names: boolean;
+  /** Flips `labelsOn` (the zoom control holds the Labels button), and the legend it also holds. */
   onNames(): void;
   legend: ReactNode;
   /** Labels from the map's own rules (selection, hubs, search, agents); zoom adds more. */
@@ -789,7 +788,7 @@ export function MapCanvas(props: Props): JSX.Element {
         settledK={orbiting ? orbitZoom : settledK}
         onZoom={(f) => (orbiting ? orbitZoomBy(f) : api.current.zoomBy(f))}
         onFit={() => props.cameraRef.current?.fitView()}
-        names={props.names}
+        names={props.labelsOn}
         onNames={props.onNames}
         legend={props.legend}
       />

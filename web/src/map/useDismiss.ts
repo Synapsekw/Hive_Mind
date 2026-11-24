@@ -10,11 +10,7 @@ function announceOpen(id: string) {
 }
 
 /** Calls `onClose` when another popover announces it opened (without taking focus). */
-export function useCloseOnOtherOpen(
-  open: boolean,
-  id: string,
-  onClose: () => void,
-) {
+function useCloseOnOtherOpen(open: boolean, id: string, onClose: () => void) {
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {

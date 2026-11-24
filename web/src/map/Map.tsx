@@ -554,7 +554,6 @@ export function HiveMap({
             sel={sel}
             focusRing={focusDot}
             labelsOn={names}
-            names={names}
             onNames={() => setNames((v) => !v)}
             legend={
               <Legend

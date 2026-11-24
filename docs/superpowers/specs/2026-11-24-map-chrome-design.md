@@ -151,7 +151,8 @@ in sequence.
 
 - Every control is a real button or input with a name; the two popovers carry `data-popover` so
   the page's keys stay quiet inside them.
-- Tab order follows the bar left to right, then the map's dot list, then the corner.
+- Tab order follows the bar left to right, then the corner (zoom, Labels, Legend), then the map's dot list,
+  which has one stop per dot.
 - Focus returns to the button that opened a popover when it closes, and to the Today button when
   the panel closes with focus inside.
 - The count is announced politely when it changes.
