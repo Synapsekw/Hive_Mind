@@ -10960,6 +10960,16 @@ test("only the note's owner, as a person, detaches and re-attaches; nothing else
   );
   const note = await tpNote("ahmed", "tp/detach.md");
   await attachTopic(person("ahmed"), note, topic.id);
+  // Shared with the group, so the others read the pair: what stops them is the
+  // update policy's ownership check, not the select policy.
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [note],
+  );
+  assert.deepEqual(await pairsOf(person("sara"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
 
   await nothingDone(detachTopic(person("dani"), note, topic.id));
   await nothingDone(detachTopic(person("sara"), note, topic.id));
