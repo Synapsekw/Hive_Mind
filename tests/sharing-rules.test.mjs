@@ -11040,3 +11040,39 @@ test("a note and its topic are in one hive, and a hive that is being deleted tak
     FROZEN,
   );
 });
+
+test("an agent never removes a note from a topic: only the note's owner, as a person, deletes a pair", async () => {
+  const topic = await addTopic(
+    person("dani"),
+    hive,
+    "client",
+    "tp Delete client",
+  );
+  const note = await tpNote("ahmed", "tp/delete.md");
+  await attachTopic(person("ahmed"), note, topic.id);
+  // Shared with the group, so a colleague reads the pair: the delete policy is what stops them.
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [note],
+  );
+  // The owner said no: the pair is detached, and it has to stay to say so.
+  await detachTopic(person("ahmed"), note, topic.id);
+  const removeTopic = (who) =>
+    as(
+      who,
+      `delete from public.note_entities where note_id = $1 and entity_id = $2 returning note_id`,
+      [note, topic.id],
+    );
+
+  await nothingDone(removeTopic(await agentFor("ahmed")));
+  await nothingDone(removeTopic(passOf(person("ahmed"))));
+  await nothingDone(removeTopic(person("sara")));
+  await nothingDone(removeTopic(person("dani")));
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: true },
+  ]);
+
+  assert.equal((await removeTopic(person("ahmed"))).length, 1);
+  assert.deepEqual(await pairsOf(person("ahmed"), note), []);
+});

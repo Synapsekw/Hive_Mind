@@ -32,7 +32,14 @@
 --   - note_entities_update: the note's owner, signed in as a person (never an
 --     agent; an app pass is refused by note_entities_no_app as everywhere),
 --     may update a row, and the column grant lets only detached_at be
---     written. Insert, delete and select are unchanged.
+--     written. Insert and select are unchanged.
+--   - note_entities_delete gains one condition: the identity must carry no
+--     agent_id claim. The note's owner as a person may still delete a pair;
+--     an agent acting as that owner may not (an app pass is refused by
+--     note_entities_no_app as everywhere). A detached row has to stay: it is
+--     how the next run knows the person said no, and an agent that could
+--     delete it would let the note be attached again against that decision.
+--     The old condition (the note's owner) is kept exactly.
 --
 --   Nobody reads anything they could not read before: a topic's name is the
 --   hive's (entities_select), and a note's topics follow the note
@@ -108,3 +115,8 @@ create policy note_entities_update on public.note_entities for update to authent
 
 revoke update on public.note_entities from authenticated;
 grant update (detached_at) on public.note_entities to authenticated;
+
+alter policy note_entities_delete on public.note_entities
+  using (public.jwt_agent_id() is null
+         and exists (select 1 from public.notes n
+                      where n.id = note_id and n.member_id in (select public.my_member_ids())));
