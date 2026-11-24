@@ -150,3 +150,14 @@ describe("fixtureSettings", () => {
     expect(b.members.find((x) => x.isMe)!.name).toBe("Ahmed");
   });
 });
+
+describe("the sample deletion", () => {
+  it("counts the sample hive's members, and is a fresh copy each time", async () => {
+    const { fixtureDeletion, FIXTURE_DELETE_AFTER } = await import("./fixture");
+    expect(fixtureDeletion()).toEqual({ members: 3, notes: 128, files: 14 });
+    expect(fixtureDeletion()).not.toBe(fixtureDeletion());
+    expect(new Date(FIXTURE_DELETE_AFTER).toISOString()).toBe(
+      FIXTURE_DELETE_AFTER,
+    );
+  });
+});

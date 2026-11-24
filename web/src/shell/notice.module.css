@@ -65,7 +65,8 @@
 
 @media (min-width: 1100px) and (min-height: 560px) {
   .root {
-    height: 100dvh;
+    /* Less the banner of a hive that is being deleted, when there is one. */
+    height: calc(100dvh - var(--closing-banner, 0px));
     min-height: 0;
     flex-wrap: nowrap;
     overflow: hidden;

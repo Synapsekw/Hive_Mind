@@ -10,6 +10,7 @@ import { DevRail } from "./DevRail";
 //   ?limit=1   creating answers that the person already owns 5 hives
 //   ?reason=…  creating answers with that reason (name, display-name)
 //   ?slow=1    each action takes over a second
+//   ?closing=1 the hive on show is being deleted: the banner, and the mark in the list
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 const reasonOf = (v: string | undefined): "name" | "display-name" | null =>
@@ -31,6 +32,7 @@ export default async function DevRailPage({
       limit={one(q.limit) === "1"}
       reason={reasonOf(one(q.reason))}
       slow={one(q.slow) === "1"}
+      closing={one(q.closing) === "1"}
     />
   );
 }

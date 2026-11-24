@@ -438,3 +438,228 @@ test("the no-hive notice without a way to start one is the sentence alone", asyn
   ).toBeVisible();
   await expect(main.getByRole("button")).toHaveCount(0);
 });
+
+// ---- A hive that is being deleted: the banner and the mark in the list ----
+
+const KEYSTONE = "00000000-0000-4000-8000-0000000000a1";
+const GOES = "2026-11-30T12:00:00.000Z";
+const FAILED_LINE = "That didn't work. Try again.";
+const closingBanner = (page: Page) => page.locator("[data-closing]");
+const cancelDeletion = (page: Page) =>
+  closingBanner(page).getByRole("button", { name: "Cancel deletion" });
+const question = (page: Page) =>
+  closingBanner(page).getByRole("group", {
+    name: "Cancel the deletion of Keystone Studio?",
+  });
+const dayOf = (page: Page, iso: string) =>
+  page.evaluate(
+    (v) =>
+      new Date(v).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }),
+    iso,
+  );
+
+test("there is no banner for a hive that is not being deleted", async ({
+  page,
+}) => {
+  await page.goto("/dev/rail", { waitUntil: "networkidle" });
+  await expect(
+    page.getByRole("button", { name: "Hive: Keystone Studio" }),
+  ).toBeVisible();
+  await expect(closingBanner(page)).toHaveCount(0);
+  await expect(page.getByText("Nothing new can be saved.")).toHaveCount(0);
+});
+
+test("a hive that is being deleted has a banner above the rail saying when it goes, in the person's own date", async ({
+  page,
+}) => {
+  await page.goto("/dev/rail?closing=1", { waitUntil: "networkidle" });
+  const said = closingBanner(page).getByRole("status");
+  const day = await dayOf(page, GOES);
+  await expect(said).toHaveText(
+    `This hive will be deleted on ${day}. Nothing new can be saved.`,
+  );
+  await expect(said.locator("time")).toHaveAttribute("datetime", GOES);
+  const [strip, rail, card] = await Promise.all([
+    closingBanner(page).boundingBox(),
+    page.getByRole("complementary", { name: "Navigation" }).boundingBox(),
+    page.getByRole("main", { name: "Hive map" }).boundingBox(),
+  ]);
+  expect(strip!.y).toBe(0);
+  expect(strip!.y + strip!.height).toBeLessThanOrEqual(rail!.y + 0.5);
+  expect(strip!.y + strip!.height).toBeLessThanOrEqual(card!.y);
+});
+
+test("Cancel deletion asks once in place: the focus goes to Keep deleting, and Escape or Keep deleting gives the button back", async ({
+  page,
+}) => {
+  await page.goto("/dev/rail?closing=1", { waitUntil: "networkidle" });
+  await cancelDeletion(page).click();
+  const group = question(page);
+  await expect(group).toBeVisible();
+  await expect(group).toContainText("Cancel the deletion of Keystone Studio?");
+  const keep = group.getByRole("button", { name: "Keep deleting" });
+  await expect(keep).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(group).toHaveCount(0);
+  await expect(cancelDeletion(page)).toBeFocused();
+
+  await cancelDeletion(page).click();
+  await question(page).getByRole("button", { name: "Keep deleting" }).click();
+  await expect(question(page)).toHaveCount(0);
+  await expect(cancelDeletion(page)).toBeFocused();
+  expect(await hiveCalls(page)).toEqual([]);
+});
+
+test("a double click on Cancel deletion cancels nothing; a separate press does, once, and the page loads afresh without the banner", async ({
+  page,
+}) => {
+  await page.goto("/dev/rail?closing=1", { waitUntil: "networkidle" });
+  // The second press of a double click lands on Keep deleting, which is where the button was.
+  await cancelDeletion(page).dblclick();
+  await page.waitForTimeout(300);
+  expect(await hiveCalls(page)).toEqual([]);
+  await expect(question(page)).toHaveCount(0);
+
+  // A press on the question's own button that comes at once is no answer either.
+  await cancelDeletion(page).click();
+  const yes = question(page).getByRole("button", { name: "Cancel deletion" });
+  await yes.click();
+  await page.waitForTimeout(300);
+  expect(await hiveCalls(page)).toEqual([]);
+  await expect(question(page)).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as unknown as { __before?: boolean }).__before = true;
+  });
+  await page.waitForTimeout(400);
+  await yes.click();
+  await expect(closingBanner(page)).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __before?: boolean }).__before,
+    ),
+  ).toBeUndefined();
+  expect(await hiveCalls(page)).toEqual([
+    { name: "cancelHiveDeletion", args: [KEYSTONE] },
+  ]);
+  await expect(
+    page.getByRole("button", { name: "Hive: Keystone Studio" }),
+  ).toBeVisible();
+});
+
+test("a refused Cancel deletion is announced and the banner stays, with the focus back on its button", async ({
+  page,
+}) => {
+  await page.goto("/dev/rail?closing=1&fail=1", { waitUntil: "networkidle" });
+  await cancelDeletion(page).click();
+  await page.waitForTimeout(600);
+  await question(page).getByRole("button", { name: "Cancel deletion" }).click();
+  await expect(closingBanner(page).getByRole("alert")).toHaveText(FAILED_LINE);
+  await expect(question(page)).toHaveCount(0);
+  await expect(cancelDeletion(page)).toBeFocused();
+  await expect(closingBanner(page).getByRole("status")).toContainText(
+    "This hive will be deleted on",
+  );
+  // Asking again takes the line away.
+  await cancelDeletion(page).click();
+  await expect(closingBanner(page).getByRole("alert")).toHaveCount(0);
+});
+
+test("the banner has no Cancel deletion for a member, nor on a page without the action", async ({
+  page,
+}) => {
+  await page.goto("/dev/rail?closing=1", { waitUntil: "networkidle" });
+  await page.evaluate(
+    (id) => sessionStorage.setItem("__hiveChosen", id),
+    ATLAS,
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(
+    page.getByRole("button", { name: "Hive: Atlas Research" }),
+  ).toBeVisible();
+  await expect(closingBanner(page).getByRole("status")).toContainText(
+    "Nothing new can be saved.",
+  );
+  await expect(closingBanner(page).getByRole("button")).toHaveCount(0);
+
+  await page.evaluate(() => sessionStorage.clear());
+  await page.goto("/dev/rail?closing=1&plain=1", { waitUntil: "networkidle" });
+  await expect(closingBanner(page).getByRole("status")).toBeVisible();
+  await expect(closingBanner(page).getByRole("button")).toHaveCount(0);
+});
+
+test("the list marks the hive that is being deleted beside the person's role, and no other", async ({
+  page,
+}) => {
+  const { popover } = await openHives(page, "?closing=1");
+  await expect(popover.getByRole("button")).toHaveText([
+    "Keystone Studioowner, being deleted",
+    "Atlas Researchmember",
+    "Night Shiftowner",
+    "New hive",
+  ]);
+});
+
+test("at 390 px the banner, its question and both answers stay inside the window, above the rail", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/dev/rail?closing=1", { waitUntil: "networkidle" });
+  await cancelDeletion(page).click();
+  const group = question(page);
+  for (const part of [
+    closingBanner(page),
+    group,
+    group.getByRole("button", { name: "Cancel deletion" }),
+    group.getByRole("button", { name: "Keep deleting" }),
+  ]) {
+    const box = (await part.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  const strip = (await closingBanner(page).boundingBox())!;
+  const rail = (await page
+    .getByRole("complementary", { name: "Navigation" })
+    .boundingBox())!;
+  expect(strip.y + strip.height).toBeLessThanOrEqual(rail.y + 0.5);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  // The hive list still opens below the banner, inside the window.
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /^Hive: / }).click();
+  const list = (await page
+    .getByRole("group", { name: "Hives" })
+    .boundingBox())!;
+  expect(list.y).toBeGreaterThanOrEqual(strip.y + strip.height);
+  expect(list.x + list.width).toBeLessThanOrEqual(390);
+});
+
+test("with the banner, a page that is one window tall still is: nothing scrolls at 1100 x 560", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 560 });
+  await page.goto("/dev/rail?closing=1", { waitUntil: "networkidle" });
+  await expect(closingBanner(page)).toBeVisible();
+  const fits = () =>
+    page.evaluate(() => {
+      const root = document.scrollingElement!;
+      const card = document.querySelector("main")!.getBoundingClientRect();
+      return (
+        root.scrollHeight <= window.innerHeight &&
+        root.scrollWidth <= window.innerWidth &&
+        card.bottom <= window.innerHeight
+      );
+    });
+  await expect.poll(fits).toBe(true);
+  // The question makes the banner no taller here, and the page follows it if it did.
+  await cancelDeletion(page).click();
+  await expect(question(page)).toBeVisible();
+  await expect.poll(fits).toBe(true);
+});

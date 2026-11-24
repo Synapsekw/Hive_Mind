@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  BEING_DELETED,
+  CANCEL_DELETION,
+  DELETED_ON,
   FAILED,
+  KEEP_DELETING,
+  NOTHING_SAVED,
+  cancelQuestion,
+  hiveMeta,
+  localDate,
+  stableDate,
   MAX_NAME,
   checkNew,
   createFailure,
@@ -79,5 +88,58 @@ describe("the list of hives", () => {
     expect(
       hiveList({ hive: "Atlas", role: "owner", hiveId: "a", hives: [] }),
     ).toEqual([{ id: "a", name: "Atlas", role: "owner", current: true }]);
+  });
+});
+
+describe("a hive that is being deleted", () => {
+  it("says so in the banner, with the date between the two parts", () => {
+    expect(
+      `${DELETED_ON} ${stableDate("2026-12-01T09:00:00Z")}. ${NOTHING_SAVED}`,
+    ).toBe(
+      "This hive will be deleted on 1 December 2026. Nothing new can be saved.",
+    );
+  });
+
+  it("names the action the same way before and in the question", () => {
+    expect(CANCEL_DELETION).toBe("Cancel deletion");
+    expect(KEEP_DELETING).toBe("Keep deleting");
+    expect(cancelQuestion("Keystone Studio")).toBe(
+      "Cancel the deletion of Keystone Studio?",
+    );
+  });
+
+  it("marks the hive beside its role in the list, and only then", () => {
+    expect(BEING_DELETED).toBe("being deleted");
+    expect(hiveMeta({ role: "owner", closing: true })).toBe(
+      "owner, being deleted",
+    );
+    expect(hiveMeta({ role: "member", closing: false })).toBe("member");
+    expect(hiveMeta({ role: "member" })).toBe("member");
+  });
+
+  it("carries the mark on the one hive of an account without a list", () => {
+    expect(
+      hiveList({
+        hive: "Atlas",
+        role: "owner",
+        hiveId: "a",
+        closing: "2026-12-01T09:00:00Z",
+      }),
+    ).toEqual([
+      { id: "a", name: "Atlas", role: "owner", current: true, closing: true },
+    ]);
+  });
+
+  it("writes the day the same way everywhere, in UTC", () => {
+    expect(stableDate("2026-12-01T09:00:00+00:00")).toBe("1 December 2026");
+    expect(stableDate("2026-12-31T23:30:00-05:00")).toBe("1 January 2027");
+    expect(stableDate("soon")).toBe("");
+  });
+
+  it("writes the day in a locale's own words", () => {
+    expect(localDate("2026-12-01T12:00:00Z", "en-GB")).toBe("1 December 2026");
+    expect(localDate("2026-12-01T12:00:00Z", "en-US")).toBe("December 1, 2026");
+    expect(localDate("2026-12-01T12:00:00Z", "de-DE")).toBe("1. Dezember 2026");
+    expect(localDate("soon")).toBe("");
   });
 });

@@ -29,6 +29,7 @@ import {
   createFailure,
   hiveButtonLabel,
   hiveList,
+  hiveMeta,
   trimName,
   type Created,
   type HiveEntry,
@@ -269,7 +270,7 @@ export function HiveSwitcher({ actions }: { actions?: HiveActions | null }) {
             >
               <span className={s.accountText}>
                 <span className={s.accountName}>{hive.name}</span>
-                <span className={s.accountMeta}>{hive.role}</span>
+                <span className={s.accountMeta}>{hiveMeta(hive)}</span>
               </span>
               <span aria-hidden="true" className={s.tick}>
                 {hive.current && (

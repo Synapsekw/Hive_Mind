@@ -5,6 +5,7 @@
 // reads the clock.
 import type {
   Agent,
+  Deletion,
   Invitation,
   Member,
   SettingsData,
@@ -98,3 +99,11 @@ export function fixtureSettings(
     invitations: opts.member ? [] : INVITATIONS.map((i) => ({ ...i })),
   };
 }
+
+/** What deleting the sample hive would erase. */
+export function fixtureDeletion(): Deletion {
+  return { members: MEMBERS.length, notes: 128, files: 14 };
+}
+
+/** When the sample hive is erased, in the view where it is being deleted. */
+export const FIXTURE_DELETE_AFTER = "2026-11-30T12:00:00.000Z";

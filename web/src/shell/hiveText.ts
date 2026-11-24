@@ -23,6 +23,8 @@ export type HiveEntry = {
   name: string;
   role: string;
   current: boolean;
+  /** True while the hive is being deleted. */
+  closing?: boolean;
 };
 
 export type CreateReason = "name" | "display-name" | "limit" | "failed";
@@ -72,6 +74,7 @@ export function hiveList(account: {
   role: string;
   hiveId?: string;
   hives?: HiveEntry[];
+  closing?: string | null;
 }): HiveEntry[] {
   const hives = Array.isArray(account.hives) ? account.hives : [];
   if (hives.length > 0) return hives;
@@ -81,6 +84,65 @@ export function hiveList(account: {
       name: account.hive,
       role: account.role,
       current: true,
+      ...(account.closing ? { closing: true } : {}),
     },
   ];
+}
+
+// ---- A hive that is being deleted: the banner and the mark in the list ----
+
+/** Beside the role of a hive that is being deleted, in the list. */
+export const BEING_DELETED = "being deleted";
+/** The banner's sentence, before and after the date. */
+export const DELETED_ON = "This hive will be deleted on";
+export const NOTHING_SAVED = "Nothing new can be saved.";
+export const CANCEL_DELETION = "Cancel deletion";
+export const KEEP_DELETING = "Keep deleting";
+
+/** What the banner asks before it cancels. */
+export const cancelQuestion = (hive: string): string =>
+  `Cancel the deletion of ${hive}?`;
+
+/** What a hive's line in the list says under its name. */
+export const hiveMeta = (hive: { role: string; closing?: boolean }): string =>
+  hive.closing ? `${hive.role}, ${BEING_DELETED}` : hive.role;
+
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/**
+ * The day a timestamp names, in UTC and always in the same words ("1 December 2026"): what the
+ * server draws, and the browser too until it has drawn once. Empty for a value that is no date.
+ */
+export function stableDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+/** The same day as the person's own browser writes it, in their time zone. */
+export function localDate(iso: string, locale?: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    return d.toLocaleDateString(locale, {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  } catch {
+    return stableDate(iso);
+  }
 }

@@ -3,11 +3,12 @@ import localFont from "next/font/local";
 import { cookies } from "next/headers";
 import { createServerSupabase } from "../lib/supabase/server";
 import { AccountProvider } from "../shell/AccountContext";
+import { ClosingBanner } from "../shell/ClosingBanner";
 import { HiveActionsProvider } from "../shell/HiveActions";
 import { LookProvider } from "../shell/LookProvider";
 import { LOOK_COOKIE, parseLook } from "../theme/look";
 import { loadAccount, type Account } from "./account";
-import { createHive, switchHive } from "./hives/actions";
+import { cancelHiveDeletion, createHive, switchHive } from "./hives/actions";
 import "./globals.css";
 
 // Self-hosted variable fonts (latin, normal style), copied from @fontsource-variable/* with
@@ -58,7 +59,11 @@ export default async function RootLayout({
       <body>
         <LookProvider initial={look}>
           <AccountProvider account={account}>
-            <HiveActionsProvider actions={{ switchHive, createHive }}>
+            <HiveActionsProvider
+              actions={{ switchHive, createHive, cancelHiveDeletion }}
+            >
+              {/* Draws nothing unless the hive on show is being deleted. */}
+              <ClosingBanner />
               {children}
             </HiveActionsProvider>
           </AccountProvider>

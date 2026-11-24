@@ -15,7 +15,16 @@ export type Account = {
   /** The current hive's id. */
   hiveId: string;
   /** Every hive the person is in, oldest membership first; exactly one is current. */
-  hives: { id: string; name: string; role: string; current: boolean }[];
+  hives: {
+    id: string;
+    name: string;
+    role: string;
+    current: boolean;
+    /** True while that hive is being deleted. */
+    closing: boolean;
+  }[];
+  /** When the current hive will be erased, while it is being deleted; null otherwise. */
+  closing: string | null;
 };
 
 export function initials(name: string): string {
@@ -50,6 +59,8 @@ export async function loadAccount(
       name: h.name,
       role: h.role,
       current: h === own,
+      closing: h.deleteAfter !== null,
     })),
+    closing: own.deleteAfter,
   };
 }

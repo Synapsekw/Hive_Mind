@@ -10,7 +10,12 @@ vi.mock("../../lib/supabase/server", () => ({
 vi.mock("next/headers", () => ({ cookies: mocks.cookies }));
 
 import * as actions from "./actions";
-import { createHive, switchHive } from "./actions";
+import {
+  cancelHiveDeletion,
+  createHive,
+  requestHiveDeletion,
+  switchHive,
+} from "./actions";
 
 const ME = "00000000-0000-4000-8000-0000000000a1";
 const HIVE = "00000000-0000-4000-8000-000000000b01";
@@ -57,8 +62,13 @@ afterEach(() => {
 });
 
 describe("the actions file", () => {
-  it("exposes the two actions and nothing else", () => {
-    expect(Object.keys(actions).sort()).toEqual(["createHive", "switchHive"]);
+  it("exposes the four actions and nothing else", () => {
+    expect(Object.keys(actions).sort()).toEqual([
+      "cancelHiveDeletion",
+      "createHive",
+      "requestHiveDeletion",
+      "switchHive",
+    ]);
   });
 });
 
@@ -145,5 +155,77 @@ describe("createHive", () => {
       reason: "failed",
     });
     expect(JSON.stringify(log.mock.calls)).not.toContain("Side");
+  });
+});
+
+describe("requestHiveDeletion", () => {
+  it("asks the database as the person, with the hive and the typed name", async () => {
+    const t = client({
+      rpc: { data: "2026-12-01T09:00:00+00:00", error: null },
+    });
+    expect(await requestHiveDeletion(HIVE, " Synapse ")).toEqual({ ok: true });
+    expect(t.rpc).toHaveBeenCalledWith("request_hive_deletion", {
+      p_hive: HIVE,
+      p_name: "Synapse",
+    });
+  });
+
+  it("answers the reason, never the database's words", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    client({
+      rpc: {
+        data: null,
+        error: { message: "that is not the name of this hive" },
+      },
+    });
+    expect(await requestHiveDeletion(HIVE, "Sinapse")).toEqual({
+      ok: false,
+      reason: "name",
+    });
+    client({
+      rpc: {
+        data: null,
+        error: { message: "only the owner can delete a hive" },
+      },
+    });
+    expect(await requestHiveDeletion(HIVE, "Synapse")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+  });
+
+  it("answers failed when the app is not configured, saying nothing of what was typed", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.createServerSupabase.mockRejectedValue(
+      new Error("not configured: Synapse"),
+    );
+    expect(await requestHiveDeletion(HIVE, "Synapse")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("Synapse");
+  });
+});
+
+describe("cancelHiveDeletion", () => {
+  it("asks the database as the person, with the hive", async () => {
+    const t = client({ rpc: { data: null, error: null } });
+    expect(await cancelHiveDeletion(HIVE)).toEqual({ ok: true });
+    expect(t.rpc).toHaveBeenCalledWith("cancel_hive_deletion", {
+      p_hive: HIVE,
+    });
+  });
+
+  it("answers no when the database refuses, for an id that is not one, and when the app is not configured", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = client({
+      rpc: { data: null, error: { message: "this hive is not being deleted" } },
+    });
+    expect(await cancelHiveDeletion(HIVE)).toEqual({ ok: false });
+    t.rpc.mockClear();
+    expect(await cancelHiveDeletion("x")).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+    mocks.createServerSupabase.mockRejectedValue(new Error("not configured"));
+    expect(await cancelHiveDeletion(HIVE)).toEqual({ ok: false });
   });
 });

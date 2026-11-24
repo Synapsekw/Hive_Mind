@@ -9,8 +9,22 @@
 // inviting is refused; with `unsent`, an invitation is saved but its email is not sent; with
 // `wait`, Send again answers that one was sent a moment ago; with `limit`, that the invitation
 // has been emailed as often as it may be.
-import { useRef, useState } from "react";
+//
+// Deleting the hive and cancelling that end in a full reload, so those two calls are recorded
+// in `sessionStorage.__hiveDeletionCalls` and the state they leave is remembered there too: the
+// reloaded page shows the hive being deleted, or not, as the real one would. With `closing` the
+// hive is being deleted from the start; with `notName`, Delete hive answers that the name is
+// not the hive's. While the hive is being deleted the page also draws the banner, as the root
+// layout does for a signed-in person.
+import { useEffect, useRef, useState } from "react";
+import {
+  FIXTURE_DELETE_AFTER,
+  fixtureDeletion,
+} from "../../../settings/fixture";
 import { Settings } from "../../../settings/Settings";
+import { AccountProvider } from "../../../shell/AccountContext";
+import { ClosingBanner } from "../../../shell/ClosingBanner";
+import { HiveActionsProvider } from "../../../shell/HiveActions";
 import type {
   InviteReason,
   SettingsActions,
@@ -25,6 +39,20 @@ declare global {
 
 function record(name: string, args: unknown[]) {
   (window.__settingsCalls ??= []).push({ name, args });
+}
+
+const DELETION_CALLS = "__hiveDeletionCalls";
+/** "1" once Delete hive was answered ok, "0" once Cancel deletion was; absent before either. */
+const CLOSING = "__hiveClosing";
+
+function recordDeletion(name: string, args: unknown[]) {
+  const calls = JSON.parse(
+    sessionStorage.getItem(DELETION_CALLS) ?? "[]",
+  ) as unknown[];
+  sessionStorage.setItem(
+    DELETION_CALLS,
+    JSON.stringify([...calls, { name, args }]),
+  );
 }
 
 const WAIT = 150;
@@ -49,6 +77,8 @@ export function DevSettings({
   unsent,
   wait: tooSoon,
   limit,
+  closing: closingAtFirst,
+  notName,
 }: {
   initial: SettingsData;
   now: number;
@@ -58,8 +88,25 @@ export function DevSettings({
   unsent: boolean;
   wait: boolean;
   limit: boolean;
+  closing: boolean;
+  notName: boolean;
 }) {
   const [data, setData] = useState(initial);
+  // Whether the hive is being deleted: the flag, until this tab's own Delete hive or Cancel
+  // deletion says otherwise (read after mount; the server knows nothing of this tab's storage).
+  const [closing, setClosing] = useState(closingAtFirst);
+  useEffect(() => {
+    const stored = sessionStorage.getItem(CLOSING);
+    if (stored !== null) setClosing(stored === "1");
+  }, []);
+
+  const cancelHiveDeletion = async () => {
+    recordDeletion("cancelHiveDeletion", []);
+    await wait();
+    if (fail) return { ok: false };
+    sessionStorage.setItem(CLOSING, "0");
+    return { ok: true };
+  };
   // How many invitations this page has made, so each new one gets its own id.
   const count = useRef(0);
 
@@ -139,6 +186,52 @@ export function DevSettings({
       }));
       return { ok: true };
     },
+    requestHiveDeletion: async (typedName) => {
+      recordDeletion("requestHiveDeletion", [typedName]);
+      await wait();
+      if (fail) return { ok: false, reason: "failed" };
+      if (notName || typedName !== data.hiveName)
+        return { ok: false, reason: "name" };
+      sessionStorage.setItem(CLOSING, "1");
+      return { ok: true };
+    },
+    cancelHiveDeletion,
   };
-  return <Settings data={data} now={now} actions={actions} inbox={0} />;
+  const settings = (
+    <Settings
+      data={data}
+      now={now}
+      actions={actions}
+      inbox={0}
+      deletion={data.isOwner ? fixtureDeletion() : null}
+      closing={closing ? FIXTURE_DELETE_AFTER : null}
+    />
+  );
+  if (!closing) return settings;
+  const me = data.members.find((m) => m.isMe);
+  const role = me?.role ?? "member";
+  return (
+    <AccountProvider
+      account={{
+        name: me?.name ?? "",
+        initials: (me?.name ?? "?").slice(0, 2).toUpperCase(),
+        role,
+        hive: data.hiveName,
+        hiveId: "00000000-0000-4000-8000-0000000000a1",
+        hives: [],
+        closing: FIXTURE_DELETE_AFTER,
+      }}
+    >
+      <HiveActionsProvider actions={null}>
+        <ClosingBanner
+          actions={{
+            switchHive: async () => ({ ok: false }),
+            createHive: async () => ({ ok: false, reason: "failed" }),
+            cancelHiveDeletion,
+          }}
+        />
+        {settings}
+      </HiveActionsProvider>
+    </AccountProvider>
+  );
 }

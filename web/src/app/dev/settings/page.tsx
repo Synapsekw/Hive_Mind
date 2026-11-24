@@ -14,6 +14,8 @@ import { DevSettings } from "./DevSettings";
 //   ?reason=already-member  inviting answers that the person is already in
 //   ?reason=already-invited inviting answers that the email already has an open invitation
 //   ?reason=too-many        inviting answers that the hive has made its invitations for the day
+//   ?closing=1              the hive is being deleted: the banner, and Cancel deletion for the owner
+//   ?notname=1              Delete hive answers that the typed name is not the hive's
 const NOW = Date.UTC(2026, 10, 23, 12, 0, 0);
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -47,6 +49,8 @@ export default async function DevSettingsPage({
       unsent={one(q.unsent) === "1"}
       wait={one(q.wait) === "1"}
       limit={one(q.limit) === "1"}
+      closing={one(q.closing) === "1"}
+      notName={one(q.notname) === "1"}
     />
   );
 }

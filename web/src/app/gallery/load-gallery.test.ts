@@ -233,7 +233,7 @@ describe("loadGallery: the files query", () => {
     expect(t.calls[0]!.table).toBe("own");
     expect(t.from.mock.calls[0]).toEqual(["members"]);
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      ["select", ["id, hive_id, hive:hives!hive_id(name, delete_after)"]],
       ["eq", ["user_id", U_ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],

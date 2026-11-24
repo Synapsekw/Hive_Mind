@@ -1,6 +1,7 @@
 import { createServerSupabase } from "../../lib/supabase/server";
 import { Settings } from "../../settings/Settings";
 import { Notice } from "../../shell/Notice";
+import { cancelHiveDeletion, requestHiveDeletion } from "../hives/actions";
 import { loadInboxCount } from "../inbox/load-inbox";
 import {
   createAgent,
@@ -41,12 +42,17 @@ export default async function SettingsPage() {
       data={result.data}
       now={now}
       inbox={inbox}
+      deletion={result.deletion}
+      closing={result.closing}
       actions={{
         createAgent,
         revokeAgent,
         inviteMember: inviteMember.bind(null, result.hiveId),
         revokeInvitation,
         resendInvitation,
+        // Bound to the hive this page shows, as inviting is.
+        requestHiveDeletion: requestHiveDeletion.bind(null, result.hiveId),
+        cancelHiveDeletion: cancelHiveDeletion.bind(null, result.hiveId),
       }}
     />
   );

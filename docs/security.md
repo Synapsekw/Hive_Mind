@@ -33,7 +33,7 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 | Prompt injection via note content    | A shared note tells agents to exfiltrate data                                       | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine                                                                                                                                                                                          | partly   |
 | Departing member                     | Colleague leaves with access                                                        | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision                                                                                                                                                                                                      | designed |
 | Joining a hive unasked or uninvited  | A stranger signs up, or an owner adds a person who never agreed                     | Sign-ups off; an account exists only through an emailed invitation; a person becomes a member only by pressing Join, and only for their own confirmed email (section 3)                                                                                                                    | built    |
-| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs and the invitation mail function; secrets in a vault; MFA on the owner account                                                                                                                                                                    | designed |
+| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs, the invitation mail function and the function that erases deleted hives; secrets in a vault; MFA on the owner account                                                                                                                            | designed |
 | Overlap detection as a side channel  | Notifications reveal what a colleague works on                                      | Notification names only the entity; content never moves before double accept; mute per folder                                                                                                                                                                                              | designed |
 | The map as a side channel            | Locked dots show that a colleague has notes in a folder                             | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents                                                                                                                                                                                          | built    |
 
@@ -62,9 +62,11 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   that protects it is that it never leaves the function's secrets.
 - Function secrets are readable by every Edge Function of the project, not only by
   `agent-session`. Any function deployed to this project can therefore read the key, so a new
-  function is reviewed as code that holds it. There are three today: `agent-session`, the
-  connector `mcp` (section 10) and `invite-email` (below). The first two sign with it and do
-  not log it; `invite-email` does not read it.
+  function is reviewed as code that holds it. There are four today: `agent-session`, the
+  connector `mcp` (section 10), `invite-email` (below) and `purge-hives` (section 12). The
+  first two sign with it and do not log it; `invite-email` and `purge-hives` do not read it.
+  The same holds for every other function secret, among them `HIVE_SECRET_KEY` and
+  `HIVE_PURGE_SECRET`.
 - What the function itself can sign is narrow. It writes `role` and `aud` as fixed values
   (`authenticated`), and copies only validated ids from `agent_login`: the member's user id as
   `sub`, `agent_id`, `workspace_id`, and a trust tier that must be one of the two known ones.
@@ -356,7 +358,8 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   instruction template repeats it.
 - Agents write to their own workspace only; cross-member writes are refused by the database.
 - Background jobs run with a service role but write only to derived tables, never to members'
-  notes.
+  notes. The one exception is the erase of a hive its owner asked to delete, after the 7 days
+  (section 12).
 - Contradictions are flagged, never auto-resolved.
 
 ## 7. Audit and monitoring
@@ -391,6 +394,11 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - Built: starting a hive writes one row with the action `hive.created`. It holds the new hive,
   the member the person became in it and, in the detail, the hive's name. It is written in the
   same call that creates the hive, so a refused attempt leaves none.
+- Built: asking to delete a hive writes one row with the action `hive.deletion_requested`, and
+  cancelling writes one with `hive.deletion_cancelled`. A row holds the hive, the member who
+  asked or cancelled and, in the detail, the date the hive is to be erased. Asking again for a
+  hive that is already marked writes no row. Both rows are erased with the hive; what remains
+  afterwards is the record in `deleted_hives` (section 12).
 - Every MCP call logged: agent, member, tool, note, time, result.
 - Owner view: reads and writes per agent per day, failed authorisations, token last use.
 - Alerts: a burst of reads across many entities by one agent; repeated authorisation failures. A
@@ -621,9 +629,182 @@ an app once per hive. The approval window names the hive it is connecting to (se
 
 **Known gaps.**
 
-- A hive cannot be renamed or deleted yet, and a member cannot leave one.
+- A hive cannot be renamed yet, and a member cannot leave one. Deleting a hive is in
+  section 12.
 - At most 50 of a person's memberships are read, oldest first. A person in more than 50 hives
   cannot reach the rest from the app.
 - The cap is on hives owned, not on invitations: each hive a person owns can invite, within
   the daily caps of section 3.
 - An agent cannot work across hives.
+
+## 12. Deleting a hive
+
+An owner can delete a hive. It is not erased at once: the hive is marked for deletion and stays
+readable for 7 days, during which nothing in it can be changed and the owner can cancel. After
+the 7 days a scheduled job erases it for good, and once that job has started on the hive it
+can no longer be cancelled. Decided by Danijel on 2026-11-24. A hive that is
+marked is called **closing** below.
+
+**Who may ask, and who may cancel.**
+
+- Only an owner of that hive, signed in as a person. Asking (`request_hive_deletion`),
+  cancelling (`cancel_hive_deletion`) and the count shown beforehand (`hive_deletion_preview`:
+  how many members, notes and files the hive holds) are each refused for an agent identity
+  (`only a person can delete a hive`), for an app's pass (`an app pass cannot do this`) and for
+  a member who is not an owner (`only the owner can delete a hive`). No MCP tool offers any of
+  them.
+- A person who is not a member is told `hive not found`, the same answer as for a hive that
+  does not exist. So the three functions do not reveal whether a hive exists.
+- To ask, the person types the hive's name, and the database compares it with the stored name
+  after trimming surrounding white space. A name that differs is refused with
+  `that is not the name of this hive`. The comparison is made in the database, not only in the
+  page.
+- Asking stamps the hive with the time, the date it will be erased (7 days later) and the
+  account that asked. Asking again for a closing hive answers the same date and changes
+  nothing: the 7 days do not start again.
+- The web app sends the hive's id and the typed name through a server action with the person's
+  session cookie, and the database decides. The page shows a refusal as a line of its own and
+  never the database's words.
+
+**The freeze.**
+
+- While a hive is closing, every write to its data is refused with
+  `this hive is being deleted`: inserts, updates and deletes on every table that holds hive
+  data (notes and their versions, folders, files, links, workspaces, agents, invitations,
+  entities, note entities, synthesis pages, members), and new stored objects under the hive's
+  members.
+- It is one trigger function attached to each of those tables, not a check inside each
+  function. A trigger also fires for writes made by security-definer functions, so it binds
+  them too, together with agents and the connector. There is no per-function guard that a
+  later function could forget.
+- So in a closing hive nobody can invite or join, connect an agent or an app, change sharing,
+  accept, decline or unlink a link, release a held note, write or delete a note, or save a
+  file. That holds for the owner as well.
+- A delete passes the trigger only when it is a cascade from a parent row that is already
+  deleted. A top-level delete in a closing hive never passes.
+- `TRUNCATE` on the hive tables is revoked from the API roles, so the freeze cannot be gone
+  around by emptying a table.
+- The MCP server and the connector have no code for this. A write to a closing hive comes back
+  to the agent as the database's message.
+- Every write in any hive pays for the freeze with one lookup of its hive's row by primary key.
+
+**What deliberately stays open.**
+
+- **Reading**, for everyone who could read before. The freeze changes nothing about who can
+  read what.
+- **The hive row itself and the audit log.** Cancelling changes the hive row, and the request
+  and the cancellation are written to the audit log, so neither can be frozen.
+- **Sign-in of agents and of the connector.** Agents must still be able to read, so the stamps
+  that signing in writes on the agent stay writable.
+- **Revoking an agent.** A leaked token must not stay good for seven days, so an agent in a
+  closing hive can still be revoked, in Settings as usual. It is the one change to an agent
+  that passes the freeze, besides the sign-in stamps. Un-revoking stays refused, and so does
+  every other change to an agent.
+- **Moving a connected app to another hive.** Connecting the app in another hive works, and
+  revokes its agent in the closing hive.
+- **Marking a notification as read.**
+- **The erase itself**, by the server only (below).
+
+**Cancelling.** An owner cancels in Settings or from the banner. The three stamps are cleared
+and the freeze lifts at once. Nothing could be changed in the meantime, apart from agents
+revoked, so the hive is as it was. Cancelling a hive that is not closing is refused with
+`this hive is not being deleted`.
+
+**The point of no return.** Cancelling works during the 7 days, and after the date for as long
+as the scheduled run has not started on the hive; until then nothing has been removed. When
+the run starts on a hive it first stamps it (`begin_hive_purge`), and from that moment
+`cancel_hive_deletion` is refused with `this hive is already being erased`. Without the stamp
+a late cancel could have kept a hive whose stored files were already removed.
+
+**The erase.**
+
+- Four functions do it, and only the server may run them: `hives_due_for_purge`,
+  `begin_hive_purge`, `hive_object_paths` and `purge_hive`. They are revoked from visitors and
+  from signed-in identities, so no person, agent or app can call them.
+- `hives_due_for_purge` lists the hives whose date has come, at most 20. Hives that a run has
+  already attempted come last, so one hive that keeps failing cannot hold up the others.
+- The Edge Function `purge-hives` runs once a day and takes each due hive through three steps,
+  in this order:
+  1. `begin_hive_purge` stamps the hive (the point of no return above) and writes the
+     permanent record (below). It refuses a hive that is not closing or whose date has not
+     come.
+  2. The function removes the hive's stored objects from the `files` bucket, in batches. It
+     finds them by the paths of the hive's members (`hive_object_paths`), not by the file
+     rows, so an object that has no file row is erased too.
+  3. It calls `purge_hive` again and again. Each call deletes at most about 2,000 rows, table by table, and answers
+     whether the hive is gone; the last one deletes the hive row, and what is left goes with
+     it by cascade.
+- A step that fails leaves the hive for a later run, counted as failed. A large hive may take
+  more than one daily run. In between it stays frozen and readable, and cannot be cancelled.
+- **Only the service role may delete during the erase.** People, agents and app passes are
+  still refused every write, exactly as in the 7 days.
+- The steps are small because the hosted API ends a statement after 8 seconds.
+- **Who can call the function.** The database's scheduler (`pg_cron` with `pg_net`) calls it
+  with a shared secret in the header `x-purge-secret`. The function compares it in constant
+  time and answers 401 to a missing or wrong one, before it reads or fetches anything. It
+  answers 405 to anything but `POST` and 503 when one of its secrets is not set. It is deployed
+  without JWT verification, like the other functions, because the scheduler has no identity:
+  the secret is the credential.
+- **The purge secret, `HIVE_PURGE_SECRET`.** It lives in two places only: the function's
+  secrets, and the database's secret store, where the scheduled job reads it at run time. It
+  is made by `scripts/setup-hive-purge.sh`, once per project, which stores it in both places
+  and schedules the daily call. The script runs the extension DDL, the writes to the secret
+  store and the schedule as three separate statements files, so the secret never travels in
+  a batch with DDL. It prints what it did by name and never prints the secret. It is not in the repo, a `.env`, a browser, a prompt or a log. Like every function
+  secret it is readable by every Edge Function of the project (section 3).
+- **The service key.** The function works with the project's secret key (`HIVE_SECRET_KEY`;
+  without it, the Edge runtime's legacy `SUPABASE_SERVICE_ROLE_KEY`), which bypasses every
+  sharing rule and falls under the "server-only" invariant. It is the second function that
+  holds it, after `invite-email`. It uses the key for the four functions above and for
+  removing stored objects, and for nothing else.
+- **The answer carries counts only**: how many hives were erased and how many failed. Neither
+  the answer nor the function's log holds a hive's name, a file path, the secret or a key.
+
+**The permanent record.** `deleted_hives` keeps one row per erased hive, outside the hive: its
+id and name, which account asked and when, when it was erased, and how many members, notes and
+files it held. The row is written when the erase begins, with the counts at that moment, and
+its `purged_at` is filled when the erase completes. A row with no `purged_at` is a hive whose
+erase has begun and not finished. Row-level security is on with no policy, so only the server reads it: no person,
+agent or app can, and there is no screen for it. It holds no note, no file and no member's name
+or email.
+
+**Audit.** Asking writes `hive.deletion_requested` and cancelling writes
+`hive.deletion_cancelled` (section 7). Both rows belong to the hive, so they are erased with
+it. That is why the permanent record exists: after the erase it is the only trace of who asked
+and when.
+
+**Mixed-hive rows are refused at the source.** The erase goes by cascade from the hive, so a
+row tied to two hives could block it. The database therefore refuses such rows when they are
+written: a workspace must belong to its member's hive, and a note can only be tied to an
+entity of its own hive. This closed a way for a member of one hive to block the erase of
+another.
+
+**Known gaps.**
+
+- **Members are told by a banner only.** Every screen of a closing hive shows it, but no email
+  goes out. A member who does not open the app in those 7 days learns of the deletion
+  afterwards.
+- **No export.** A hive cannot be downloaded before it is erased. Members can read their notes
+  and download their files one by one during the 7 days.
+- **No removing one member and no leaving.** Deleting the hive is the only way to end a
+  membership.
+- **The 7 days are fixed.** An owner cannot shorten or lengthen them, and cannot erase at once.
+- **A closing hive still counts toward the cap of 5** hives owned by one person (section 11),
+  until it is erased.
+- **Anyone holding the purge secret can trigger a run early.** A run only erases hives whose
+  date has come, so the secret cannot erase a hive that is not due, shorten the 7 days or pick
+  a hive.
+- **There is no undo after the erase.** The notes, their history, the links and the files are
+  gone; only the record's counts remain.
+- **Anyone signed in who knows a hive's id can learn that it is closing.** An insert that names
+  the hive is refused with `this hive is being deleted`, also for someone who is not a member.
+  It tells them nothing else about the hive.
+- **An account in a closing hive cannot be deleted.** Deleting an account that is a member of a
+  closing hive is refused until the hive is erased or the deletion is cancelled.
+- **Revoking an agent twice.** Revoke on an agent that is already revoked, in a closing hive,
+  shows the general failure line.
+- **Concurrency is reasoned about, not tested.** What happens when a cancel, a write and the
+  erase meet was thought through, but the test database has a single connection and cannot
+  run two at once.
+- **The stepwise erase has not been measured on a large real hive.** It is designed around the
+  hosted API's 8 second statement timeout, and that is so far a design, not a measurement.
