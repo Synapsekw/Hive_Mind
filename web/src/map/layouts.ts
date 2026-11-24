@@ -1,7 +1,7 @@
 // One pure function per view, from the model to positions in the 1000 x 760 box (orbit: 3D).
-// Ported from the prototype's geometry in docs/ui/map.dc.html (`build()` and `force()`).
+// Ported from the prototype's geometry in docs/ui/map.dc.html (`build()`).
 import { BOX, dayIndex, DAYS } from "./graph";
-import type { MapModel, View } from "./types";
+import type { MapModel } from "./types";
 
 type P2 = [number, number];
 type P3 = [number, number, number];
@@ -15,7 +15,7 @@ const GAP = 0.05;
 const MIN_SECTOR = 0.12;
 /**
  * The narrowest sector once widths are shared out: 0.35 rad keeps neighbouring hubs more than
- * 40 apart at the hub radius (120). Eight topics at 0.35 rad fit the circle.
+ * 40 apart at the hub radius (120). Up to twelve groups at 0.35 rad fit the circle.
  */
 const MIN_HUB_SECTOR = 0.35;
 
@@ -42,8 +42,7 @@ function parts(model: MapModel): Parts {
     else if (n.kind !== "root") items[n.topic]!.push(n.i);
   }
   const total = items.reduce((s, l) => s + l.length, 0);
-  // The 0.28 rad left at twelve o'clock keeps hubs clear of the ring labels there.
-  const usable = TAU - 0.28 - T * GAP;
+  const usable = TAU - T * GAP;
   const min = T > 0 ? Math.min(MIN_SECTOR, usable / T) : 0;
   const spare = usable - T * min;
   const widths = spread(
@@ -52,7 +51,8 @@ function parts(model: MapModel): Parts {
     ),
     T > 0 ? Math.min(MIN_HUB_SECTOR, usable / T) : 0,
   );
-  let a = -TAU / 4 + 0.14;
+  // The first sector starts at twelve o'clock; sectors go clockwise.
+  let a = -TAU / 4 + GAP / 2;
   const sec = widths.map((w) => {
     const s = { a0: a, w, mid: a + w / 2 };
     a += w + GAP;
@@ -84,60 +84,123 @@ function spread(w: number[], floor: number): number[] {
   }
 }
 
-function rings(model: MapModel, p: Parts): P2[] {
-  const out = new Array<P2>(model.nodes.length);
-  out[0] = [CX, CY];
-  const A = p.agents.length;
-  p.agents.forEach((id, t) => {
-    out[id] = polar(300, -TAU / 4 + ((t + 0.5) * TAU) / A);
+export type RingsLayout = {
+  pos: [number, number][];
+  scale: number; // 1, or less when the rings were shrunk into the box
+  hubR: number; // radius of the hub ring, after scaling
+  firstR: number; // radius of the first item arc, after scaling
+  agentR: number; // radius of the agent ring, after scaling
+  labels: {
+    text: string;
+    x: number;
+    y: number;
+    align: "left" | "right" | "centre";
+  }[];
+};
+
+const HUB_R = 120;
+const FIRST_R = 165;
+const ARC_STEP = 15;
+const ALONG = 13.5;
+const AGENT_PAST = 30;
+const AGENT_MIN = 300;
+const AGENT_MAX = 350;
+/** Group names sit on one circle this far past the agent ring (after scaling). */
+const LABEL_PAST = 20;
+const NAME_MAX = 44;
+
+/** Newest first, ties by id, so the order never depends on the payload's. */
+function byFreshness(model: MapModel, list: number[]): number[] {
+  return list.sort((a, b) => {
+    const x = model.nodes[a]!;
+    const y = model.nodes[b]!;
+    const d = y.updatedAt - x.updatedAt;
+    if (d !== 0) return d;
+    const ia = x.id ?? "";
+    const ib = y.id ?? "";
+    return ia < ib ? -1 : ia > ib ? 1 : 0;
   });
-  const place = (list: number[], s: Sector, r0: number) => {
-    let k = 0;
+}
+
+const cut = (name: string) =>
+  name.length > NAME_MAX ? `${name.slice(0, NAME_MAX - 1).trimEnd()}…` : name;
+
+/**
+ * Rings: the index at the centre, one hub per group, each group's items on arcs outward in its
+ * sector (freshest notes first, files after one empty arc), the agents on a ring past the
+ * outermost arc. Everything shrinks by one factor when the agent ring would pass 350.
+ */
+export function ringsLayout(model: MapModel): RingsLayout {
+  const p = parts(model);
+  // Unscaled first: a radius and an angle per node.
+  const r = new Float64Array(model.nodes.length);
+  const an = new Float64Array(model.nodes.length);
+  const lastR: number[] = [];
+  /** Fills arcs from arc `k0` outward; returns the first arc left unused. */
+  const place = (list: number[], s: Sector, k0: number): number => {
+    let k = k0;
     let idx = 0;
     while (idx < list.length) {
-      const r = r0 + 15 * k;
-      const cap = Math.max(1, Math.floor((s.w * r) / 13.5));
+      const rad = FIRST_R + ARC_STEP * k;
+      const cap = Math.max(1, Math.floor((s.w * rad) / ALONG));
       const m = Math.min(cap, list.length - idx);
-      for (let c = 0; c < m; c++)
-        out[list[idx + c]!] = polar(r, s.a0 + ((c + 0.5) * s.w) / cap);
+      for (let c = 0; c < m; c++) {
+        const id = list[idx + c]!;
+        r[id] = rad;
+        an[id] = s.a0 + ((c + 0.5) * s.w) / cap;
+      }
       idx += m;
       k++;
     }
+    return k;
   };
   p.items.forEach((list, i) => {
     const s = p.sec[i]!;
-    out[p.hubs[i]!] = polar(120, s.mid);
-    place(
-      list.filter((id) => model.nodes[id]!.kind === "note"),
-      s,
-      165,
-    );
-    place(
-      list.filter((id) => model.nodes[id]!.kind === "file"),
-      s,
-      245,
-    );
+    r[p.hubs[i]!] = HUB_R;
+    an[p.hubs[i]!] = s.mid;
+    const of = (kind: "note" | "file") =>
+      byFreshness(
+        model,
+        list.filter((id) => model.nodes[id]!.kind === kind),
+      );
+    const kNotes = place(of("note"), s, 0);
+    const kFiles = kNotes > 0 ? kNotes + 1 : 0;
+    const kEnd = place(of("file"), s, kFiles);
+    // The outermost arc that holds an item: with no files, the empty arc kept before them is not.
+    const kLast = kEnd > kFiles ? kEnd - 1 : kNotes - 1;
+    lastR.push(FIRST_R + ARC_STEP * Math.max(0, kLast));
   });
-  return out;
-}
-
-function topics(model: MapModel, p: Parts): P2[] {
-  const out = new Array<P2>(model.nodes.length);
-  out[0] = [CX, CY];
+  const outer = lastR.length ? Math.max(...lastR) : 0;
+  const agentR = Math.max(AGENT_MIN, outer + AGENT_PAST);
+  const scale = Math.min(1, AGENT_MAX / agentR);
   const A = p.agents.length;
   p.agents.forEach((id, t) => {
-    out[id] = polar(64, (t * TAU) / A);
+    r[id] = agentR;
+    an[id] = -TAU / 4 + ((t + 0.5) * TAU) / A;
   });
-  p.items.forEach((list, i) => {
-    const c = polar(240, p.sec[i]!.mid);
-    out[p.hubs[i]!] = c;
-    list.forEach((id, j) => {
-      const rr = 5.6 * Math.sqrt(j + 2);
-      const an = j * 2.39996 + i;
-      out[id] = [c[0] + rr * Math.cos(an), c[1] + rr * Math.sin(an)];
-    });
+
+  const pos = new Array<P2>(model.nodes.length);
+  for (let i = 0; i < model.nodes.length; i++)
+    pos[i] = i === 0 ? [CX, CY] : polar(r[i]! * scale, an[i]!);
+  const labels = model.topics.map((t, i): RingsLayout["labels"][number] => {
+    const s = p.sec[i]!;
+    const [x, y] = polar(agentR * scale + LABEL_PAST, s.mid);
+    const c = Math.cos(s.mid);
+    return {
+      text: `${cut(t.name)} · ${p.items[i]!.length}`,
+      x,
+      y,
+      align: c > 0.25 ? "left" : c < -0.25 ? "right" : "centre",
+    };
   });
-  return out;
+  return {
+    pos: inBox(pos),
+    scale,
+    hubR: HUB_R * scale,
+    firstR: FIRST_R * scale,
+    agentR: agentR * scale,
+    labels,
+  };
 }
 
 const X0 = 250;
@@ -195,90 +258,6 @@ function timeline(model: MapModel, p: Parts, now: number): P2[] {
   return out;
 }
 
-const ITERATIONS = 170;
-const FULL_NODES = 1500;
-
-/**
- * Passes of the force layout for `n` nodes: 170 up to 1,500 nodes, then fewer, so the pair
- * work (n^2 per pass) never exceeds the 1,500-node cost. Never fewer than 12.
- */
-export function forceIterations(n: number): number {
-  if (n <= FULL_NODES) return ITERATIONS;
-  return Math.max(12, Math.floor(ITERATIONS * (FULL_NODES / n) ** 2));
-}
-
-function force(model: MapModel, start: P2[]): P2[] {
-  const N = model.nodes.length;
-  const ITER = forceIterations(N);
-  const px = new Float64Array(N);
-  const py = new Float64Array(N);
-  start.forEach((q, i) => {
-    px[i] = q[0];
-    py[i] = q[1];
-  });
-  const E = model.edges.length;
-  const rest = new Float64Array(E);
-  const stiff = new Float64Array(E);
-  model.edges.forEach(([u, v], e) => {
-    const a = model.nodes[u]!;
-    const b = model.nodes[v]!;
-    const top =
-      a.kind === "root" ||
-      a.kind === "agent" ||
-      b.kind === "root" ||
-      b.kind === "agent";
-    const same = !top && a.topic === b.topic;
-    rest[e] = top ? 170 : same ? 18 : 150;
-    stiff[e] = top ? 0.015 : same ? 0.08 : 0.008;
-  });
-  const fx = new Float64Array(N);
-  const fy = new Float64Array(N);
-  for (let it = 0; it < ITER; it++) {
-    const cool = 1 - it / ITER;
-    fx.fill(0);
-    fy.fill(0);
-    for (let i = 0; i < N; i++) {
-      for (let j = i + 1; j < N; j++) {
-        const dx = px[i]! - px[j]!;
-        const dy = py[i]! - py[j]!;
-        const d2 = Math.max(dx * dx + dy * dy, 16);
-        const d = Math.sqrt(d2);
-        const f = 260 / d2;
-        const ux = (dx / d) * f;
-        const uy = (dy / d) * f;
-        fx[i]! += ux;
-        fy[i]! += uy;
-        fx[j]! -= ux;
-        fy[j]! -= uy;
-      }
-    }
-    for (let e = 0; e < E; e++) {
-      const [u, v] = model.edges[e]!;
-      const dx = px[v]! - px[u]!;
-      const dy = py[v]! - py[u]!;
-      const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-      const f = (d - rest[e]!) * stiff[e]!;
-      fx[u]! += (dx / d) * f;
-      fy[u]! += (dy / d) * f;
-      fx[v]! -= (dx / d) * f;
-      fy[v]! -= (dy / d) * f;
-    }
-    for (let i = 1; i < N; i++) {
-      fx[i]! += (CX - px[i]!) * 0.004;
-      fy[i]! += (CY - py[i]!) * 0.004;
-      px[i] = Math.min(
-        970,
-        Math.max(30, px[i]! + Math.max(-8, Math.min(8, fx[i]!)) * cool),
-      );
-      py[i] = Math.min(
-        735,
-        Math.max(25, py[i]! + Math.max(-8, Math.min(8, fy[i]!)) * cool),
-      );
-    }
-  }
-  return Array.from({ length: N }, (_, i): P2 => [px[i]!, py[i]!]);
-}
-
 const clamp = (v: number, hi: number, fallback: number): number =>
   Number.isFinite(v) ? Math.min(hi, Math.max(0, v)) : fallback;
 
@@ -288,25 +267,17 @@ function inBox(pos: P2[]): P2[] {
   );
 }
 
-/**
- * Flat positions in the 1000 x 760 box, one per model node. `links` is O(n^2) per pass with
- * `forceIterations(n)` passes (bounded at the 1,500-node cost): cache it.
- */
+/** Flat positions in the 1000 x 760 box, one per model node. */
 export function layout(
-  view: Exclude<View, "orbit" | "hive">,
+  view: "rings" | "timeline",
   model: MapModel,
   now: number,
 ): [number, number][] {
-  const p = parts(model);
   switch (view) {
     case "rings":
-      return inBox(rings(model, p));
-    case "topics":
-      return inBox(topics(model, p));
+      return ringsLayout(model).pos;
     case "timeline":
-      return inBox(timeline(model, p, now));
-    case "links":
-      return inBox(force(model, inBox(topics(model, p))));
+      return inBox(timeline(model, parts(model), now));
   }
 }
 

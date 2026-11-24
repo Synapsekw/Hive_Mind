@@ -1,20 +1,11 @@
 // The map's geometry for one model, view and layout, as plain data: edge segments, node groups
-// per topic, the comb, guides and their labels, the core swarm and the timeline ticks. Pure;
-// colours are not decided here (the renderer reads them from tokens), and the renderer builds
-// its batched Path2Ds from this once per scene.
+// per topic, guides and their labels, the core swarm and the timeline ticks. Pure; colours are
+// not decided here (the renderer reads them from tokens), and the renderer builds its batched
+// Path2Ds from this once per scene.
+import { freshLevel } from "./freshness";
 import { DAYS } from "./graph";
-import type { Comb } from "./hive";
+import { ringsLayout, type RingsLayout } from "./layouts";
 import type { Activity, MapModel, View } from "./types";
-
-export type CombCell = {
-  topic: number;
-  x: number;
-  y: number;
-  kind: "hub" | "item" | "root" | "empty";
-  capped: boolean;
-  honey: number;
-  node: number | null;
-};
 
 export type GuideLabel = {
   text: string;
@@ -24,19 +15,22 @@ export type GuideLabel = {
 };
 
 export type Scene = {
-  edges: Float32Array; // x1,y1,x2,y2 per edge
+  edges: Float32Array; // x1,y1,x2,y2 per edge in `rest`
+  /** The edges drawn at rest: index-to-hub spokes in Rings, every model edge elsewhere. */
+  rest: [number, number][];
   byTopic: number[][]; // node indices per topic (notes, files, hubs)
   agents: number[];
   root: number;
-  combCells: CombCell[];
   guides: { rings: number[]; axis: [number, number, number] | null }; // ring radii; timeline axis x0,x1,y
   guideLabels: GuideLabel[];
+  /** Freshness level per model node (freshness.ts): notes and files only, 0 for the rest. */
+  fresh: Uint8Array;
+  /** The factor Rings shrank the drawing by (dots shrink with it); 1 in the other views. */
+  dotScale: number;
+  /** Group names outside the circle in Rings; empty in the other views. */
+  groupLabels: RingsLayout["labels"];
   core: [number, number][]; // swarm points, last-24h writes
   ticks: [number, number][]; // timeline agent-write ticks
-  /** The comb's cell size (box units), 0 outside the Hive view. */
-  combSize: number;
-  /** The entrance arch under the comb (Hive only). */
-  entrance: [number, number] | null;
 };
 
 const CX = 500;
@@ -44,7 +38,6 @@ const CY = 380;
 const X0 = 250;
 const CW = 51;
 const DAY_MS = 86_400_000;
-const RINGS = [143, 228, 272];
 const MONTHS = [
   "Jan",
   "Feb",
@@ -113,22 +106,13 @@ function dayLabel(c: number, now: number): string {
   return c === 0 || day === 1 ? `${day} ${MONTHS[d.getUTCMonth()]}` : `${day}`;
 }
 
-/** Text on the guides: ring names in Rings (on the rings, upper left), axis names and dates in Timeline. */
+/**
+ * Text on the guides: axis names and dates in Timeline. Rings has none (the group names sit
+ * outside the circle and the legend names the agents).
+ */
 export function guideLabels(view: View, now: number): GuideLabel[] {
   const out: GuideLabel[] = [];
-  if (view === "rings") {
-    for (const [text, r] of [
-      ["Notes", 143],
-      ["Files", 228],
-      ["Agents", 272],
-    ] as const)
-      out.push({
-        text,
-        x: CX - r * Math.cos(0.8),
-        y: CY - r * Math.sin(0.8),
-        align: "centre",
-      });
-  } else if (view === "timeline") {
+  if (view === "timeline") {
     out.push({ text: "Agent writes by day", x: 22, y: 30, align: "left" });
     out.push({ text: "Topics", x: 46, y: 330, align: "left" });
     out.push({
@@ -154,10 +138,19 @@ export function buildScene(
   pos: [number, number][],
   act: Activity,
   now: number,
-  comb: Comb | null,
+  rings?: RingsLayout | null, // given in Rings
 ): Scene {
-  const edges = new Float32Array(model.edges.length * 4);
-  model.edges.forEach(([u, v], e) => {
+  // Rings is quiet at rest: only the spokes from the index to the hubs.
+  const rest =
+    view === "rings"
+      ? model.edges.filter(
+          ([u, v]) =>
+            (u === 0 && model.nodes[v]?.kind === "hub") ||
+            (v === 0 && model.nodes[u]?.kind === "hub"),
+        )
+      : model.edges;
+  const edges = new Float32Array(rest.length * 4);
+  rest.forEach(([u, v], e) => {
     const a = pos[u] ?? [CX, CY];
     const b = pos[v] ?? [CX, CY];
     edges[e * 4] = a[0];
@@ -168,39 +161,32 @@ export function buildScene(
 
   const byTopic: number[][] = model.topics.map(() => []);
   const agents: number[] = [];
+  const fresh = new Uint8Array(model.nodes.length);
   for (const n of model.nodes) {
     if (n.kind === "agent") agents.push(n.i);
     else if (n.kind !== "root" && n.topic >= 0) byTopic[n.topic]!.push(n.i);
+    if (n.kind === "note" || n.kind === "file")
+      fresh[n.i] = freshLevel(n.updatedAt, now);
   }
 
-  const hive = view === "hive" && comb !== null;
-  const combCells: CombCell[] = hive
-    ? comb.cells.map((c) => ({
-        topic: c.topic,
-        x: c.x,
-        y: c.y,
-        kind: c.kind,
-        capped: c.capped,
-        honey: c.honey,
-        node: c.node,
-      }))
-    : [];
-
   const isTime = view === "timeline";
+  // Rings without a layout from the caller works it out here.
+  const r = view === "rings" ? (rings ?? ringsLayout(model)) : null;
   return {
     edges,
+    rest,
     byTopic,
     agents,
     root: 0,
-    combCells,
     guides: {
-      rings: view === "rings" ? RINGS : [],
+      rings: r ? [r.hubR, r.firstR, r.agentR] : [],
       axis: isTime ? [X0, 964, 392] : null,
     },
     guideLabels: guideLabels(view, now),
-    core: !isTime && view !== "hive" && act.today > 0 ? swarm(act.today) : [],
+    fresh,
+    dotScale: r ? r.scale : 1,
+    groupLabels: r ? r.labels : [],
+    core: !isTime && act.today > 0 ? swarm(act.today) : [],
     ticks: isTime ? ticks(model, pos, act) : [],
-    combSize: hive ? comb.size : 0,
-    entrance: hive ? comb.entrance : null,
   };
 }

@@ -34,7 +34,7 @@ export type MapNode = {
   note_id: string | null;
 };
 
-export type View = "hive" | "rings" | "topics" | "links" | "timeline" | "orbit";
+export type View = "rings" | "timeline" | "orbit";
 export type NodeKind = "root" | "hub" | "note" | "file" | "agent";
 
 export type ModelNode = {
@@ -67,6 +67,11 @@ export type Filter = {
   member: string | null;
   q: string;
   sel: number | null;
+  /**
+   * Does the search also match an item's group name? Default true. False where a group name is
+   * not a word the user filed by (in Rings, a cluster named after a note, or a month).
+   */
+  groupNames?: boolean;
 };
 
 export type Activity = {

@@ -1,16 +1,21 @@
 // The map's dots as real buttons, for the keyboard and screen readers. The list is visually
 // hidden; the canvas draws what it means (a focused button makes its dot hot and ringed). Each
-// item is memoised, so a filter or selection change touches only the attributes that moved.
+// item is memoised and takes plain values only (never the model or a node object), so a filter,
+// a selection or a new arrangement touches only the attributes that moved, and React never has
+// to compare a 5,000-node model once per item.
 import { memo } from "react";
 import { ariaLabel } from "./nodeShape";
-import type { MapModel, ModelNode } from "./types";
+import type { MapModel, NodeKind } from "./types";
 import s from "./map.module.css";
 
 const f1 = (v: number) => v.toFixed(1);
 
 const Item = memo(function Item({
-  model,
-  n,
+  i,
+  label,
+  kind,
+  topic,
+  locked,
   on,
   sel,
   x,
@@ -18,8 +23,11 @@ const Item = memo(function Item({
   onFocusDot,
   onPick,
 }: {
-  model: MapModel;
-  n: ModelNode;
+  i: number;
+  label: string;
+  kind: NodeKind;
+  topic: number;
+  locked: boolean;
   on: boolean;
   sel: boolean;
   x: string;
@@ -31,18 +39,18 @@ const Item = memo(function Item({
     <li>
       <button
         type="button"
-        aria-label={ariaLabel(model, n)}
+        aria-label={label}
         aria-pressed={sel}
         data-map-dot=""
-        data-kind={n.kind}
-        data-topic={n.topic}
-        data-locked={n.locked ? "" : undefined}
+        data-kind={kind}
+        data-topic={topic}
+        data-locked={locked ? "" : undefined}
         data-lit={on ? "" : undefined}
         data-x={x}
         data-y={y}
-        onFocus={() => onFocusDot(n.i)}
+        onFocus={() => onFocusDot(i)}
         onBlur={() => onFocusDot(null)}
-        onClick={() => onPick(n.i)}
+        onClick={() => onPick(i)}
       />
     </li>
   );
@@ -73,8 +81,11 @@ export const DotList = memo(function DotList({
         return (
           <Item
             key={n.i}
-            model={model}
-            n={n}
+            i={n.i}
+            label={ariaLabel(model, n)}
+            kind={n.kind}
+            topic={n.topic}
+            locked={n.locked}
             on={!!lit[n.i]}
             sel={sel === n.i}
             x={f1(x)}

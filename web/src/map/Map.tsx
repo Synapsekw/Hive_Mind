@@ -4,7 +4,7 @@
 // labels. Everything is computed from the payload in memory; nothing here touches the network.
 // Every view, Orbit included, is drawn on one canvas (MapCanvas); a visually hidden list of
 // real buttons (DotList) carries the keyboard and screen readers. Hover and keyboard focus make a
-// dot hot (the peek card, firing links, the soft dim); the Hive's agent marks move (useMarks).
+// dot hot (the peek card, firing links, the soft dim).
 import {
   startTransition,
   useCallback,
@@ -14,23 +14,36 @@ import {
   useState,
 } from "react";
 import { activity, agentStatus, buildModel } from "./graph";
-import { hiveComb } from "./hive";
-import { layout, orbit } from "./layouts";
+import { layout, orbit, ringsLayout, type RingsLayout } from "./layouts";
+import {
+  GROUP_HEADING,
+  grouping,
+  type Arrange,
+  type Grouping,
+} from "./arrange";
 import { lit, nodeIndex, nodeKey, topicIndexOf } from "./select";
 import { buildScene } from "./scene";
-import type { MapPayload, NodeKind, View } from "./types";
+import type { MapModel, MapPayload, NodeKind, View } from "./types";
 import { TopBar } from "./Controls";
 import { Dock } from "./Dock";
 import { DetailRail } from "./DetailRail";
 import { DotList } from "./DotList";
 import { MapCanvas, type CameraApi, type Preview } from "./MapCanvas";
 import { Peek } from "./Peek";
-import { Presence } from "./Presence";
-import { useMarks } from "./useMarks";
 import { Shell, type AgentRow } from "../shell/Shell";
 import s from "./map.module.css";
 
-type Flat = Exclude<View, "orbit" | "hive">;
+const DAY_MS = 86_400_000;
+
+/** A model and the layouts computed for it; kept so going back to it redoes no layout. */
+type Entry = {
+  model: MapModel;
+  timeline: [number, number][] | null;
+  timelineAt: number;
+  rings: RingsLayout | null;
+  orbit: [number, number, number][] | null;
+  orbitFlat: [number, number][] | null;
+};
 
 const PAN = 60;
 /** How long the pointer rests on a dot before it becomes hot. */
@@ -46,7 +59,8 @@ export function HiveMap({
   /** How much waits in the inbox, for the rail. */
   inbox?: number;
 }) {
-  const [view, setView] = useState<View>("hive");
+  const [view, setView] = useState<View>("rings");
+  const [arrange, setArrange] = useState<Arrange>("folder");
   // The topic filter and the selection are kept by name and by key, not by index, so they
   // follow the same topic and node when a refresh shifts the indices (see `nodeKey`).
   const [topicName, setTopicName] = useState<string | null>(null);
@@ -67,7 +81,45 @@ export function HiveMap({
 
   // A refresh that delivers the same payload keeps the model, so no layout runs again.
   const sig = useMemo(() => JSON.stringify(payload), [payload]);
-  const model = useMemo(() => buildModel(JSON.parse(sig) as MapPayload), [sig]);
+  const parsed = useMemo(() => JSON.parse(sig) as MapPayload, [sig]);
+  // Models for this payload, by arrangement. Rings has its own per arrangement; Timeline and
+  // Orbit draw the folders capped at 8 groups. With 8 folders or fewer that is the same grouping
+  // as Rings by folder, so they share its entry: one model, each view with its own layout. With
+  // more, they share an "other" entry of their own. Time groups depend on the UTC day only, so
+  // they are not rebuilt every minute. Going back to one already seen returns the same object.
+  const entries = useMemo(() => new Map<string, Entry>(), [parsed]);
+  const dayNow = Math.floor(now / DAY_MS) * DAY_MS;
+  const entryOf = (key: string, groups: () => Grouping): Entry => {
+    let e = entries.get(key);
+    if (!e) {
+      e = {
+        model: buildModel(parsed, groups()),
+        timeline: null,
+        timelineAt: 0,
+        rings: null,
+        orbit: null,
+        orbitFlat: null,
+      };
+      entries.set(key, e);
+    }
+    return e;
+  };
+  let entry: Entry;
+  if (view === "rings")
+    entry = entryOf(
+      arrange === "time" ? `rings:time:${dayNow}` : `rings:${arrange}`,
+      () => grouping(parsed, arrange, dayNow),
+    );
+  else {
+    const folder = entryOf("rings:folder", () =>
+      grouping(parsed, "folder", dayNow),
+    );
+    entry =
+      folder.model.topics.length <= 8
+        ? folder
+        : entryOf("other", () => grouping(parsed, "folder", 0, 8));
+  }
+  const model = entry.model;
   const act = useMemo(() => activity(model, now), [model, now]);
 
   const sel = useMemo(() => nodeIndex(model, selKey), [model, selKey]);
@@ -81,63 +133,33 @@ export function HiveMap({
   if (topicName !== null && topic === null) setTopicName(null);
   if (memberId !== null && member === null) setMemberId(null);
 
-  // The comb moves only with the model and the minute (agent marks are live/today/idle).
-  const minuteNow = Math.floor(now / 60_000) * 60_000;
   const lastUsed = useMemo(
     () => new Map(payload.agents.map((a) => [a.id, a.last_used_at] as const)),
     [payload],
   );
-  const comb = useMemo(
-    () => hiveComb(model, minuteNow, lastUsed),
-    [model, minuteNow, lastUsed],
-  );
-  const markStates = useMemo(
-    () => new Map(comb.marks.map((m) => [m.node, { state: m.state }] as const)),
-    [comb],
-  );
-  const agentMarks = useMarks(
-    comb,
-    model,
-    now,
-    view === "hive" && hot === null,
-  );
 
   // Layouts are computed the first time a view is opened, then kept for this model. Only the
   // timeline depends on `now`, so only it is redone when `now` moves.
-  const cache = useMemo(
-    () => ({
-      flat: new Map<Flat, [number, number][]>(),
-      timelineAt: 0,
-      orbit: null as [number, number, number][] | null,
-    }),
-    [model],
-  );
-  const flatView: Flat = view === "orbit" || view === "hive" ? "topics" : view;
-  if (flatView === "timeline" && cache.timelineAt !== now) {
-    cache.flat.delete("timeline");
-    cache.timelineAt = now;
-  }
-  let flatPos = cache.flat.get(flatView);
-  if (!flatPos) {
-    flatPos = layout(flatView, model, now);
-    cache.flat.set(flatView, flatPos);
-  }
-  const basePos = view === "hive" ? comb.pos : flatPos;
+  const cache = entry;
   const isOrbit = view === "orbit";
+  if (view === "rings" || isOrbit) {
+    if (!cache.rings) cache.rings = ringsLayout(model);
+  }
+  let flatPos: [number, number][];
+  if (view === "timeline") {
+    if (!cache.timeline || cache.timelineAt !== now) {
+      cache.timeline = layout("timeline", model, now);
+      cache.timelineAt = now;
+    }
+    flatPos = cache.timeline;
+  } else {
+    flatPos = cache.rings!.pos;
+  }
   if (isOrbit && !cache.orbit) cache.orbit = orbit(model);
-  const pos = basePos;
-  // In the Hive the agents sit where their marks are now. The marks move, the comb does not: the
-  // canvas reads the marks as a small override, so a move never touches the cached dot batches.
-  const markPos = useMemo(
-    () =>
-      new Map(
-        agentMarks.marks.map(
-          (m) => [m.node, m.pos] as [number, [number, number]],
-        ),
-      ),
-    [agentMarks.marks],
-  );
-  const moved = view === "hive" ? markPos : null;
+  // Orbit keeps its own copy of those positions: the canvas and the hidden list tell a view
+  // switch by a new positions array, so going back to Rings must hand them a different one.
+  if (isOrbit && !cache.orbitFlat) cache.orbitFlat = flatPos.slice();
+  const pos = isOrbit ? cache.orbitFlat! : flatPos;
 
   // The hidden list's positions follow the canvas only once a glide has landed, so a view switch
   // never waits on 5,000 buttons' data-x/data-y before its first frame.
@@ -152,22 +174,24 @@ export function HiveMap({
       ),
     [],
   );
-  const listBase = listAt.model === model ? listAt.pos : pos;
+  // The list's own positions and view, so a view switch within one model changes nothing there
+  // until the glide lands. A switch to another model (a new arrangement, or Timeline and Orbit
+  // when there are more than 8 folders) re-renders the list at once: its indices are the new
+  // model's.
+  const listPos = listAt.model === model ? listAt.pos : pos;
   const listView = listAt.model === model ? listAt.view : view;
-  // Keyed on the list's own positions and view, so a view switch changes nothing here until the
-  // glide lands.
-  const listPos = useMemo(() => {
-    if (listView !== "hive") return listBase;
-    const out = listBase.slice();
-    for (const [i, at] of markPos) out[i] = at;
-    return out;
-  }, [listBase, listView, markPos]);
 
-  // The scene is built from the comb's own positions, so a mark's move never rebuilds it.
   const scene = useMemo(
     () =>
-      buildScene(model, view, basePos, act, now, view === "hive" ? comb : null),
-    [model, view, basePos, act, now, comb],
+      buildScene(
+        model,
+        view,
+        pos,
+        act,
+        now,
+        view === "rings" ? cache.rings : null,
+      ),
+    [model, view, pos, act, now, cache],
   );
 
   const agentInfo = useMemo(() => {
@@ -201,22 +225,13 @@ export function HiveMap({
         }),
     [model, agentInfo, lastUsed],
   );
-  // The same names for "At the hive", by node.
-  const agentNames = useMemo(() => {
-    const byId = new Map(agents.map((a) => [a.id, a] as const));
-    const m = new Map<number, { name: string; lastUsedAt: string | null }>();
-    for (const n of model.nodes) {
-      const a =
-        n.kind === "agent" && n.id !== null ? byId.get(n.id) : undefined;
-      if (a) m.set(n.i, { name: a.name, lastUsedAt: a.lastUsedAt ?? null });
-    }
-    return m;
-  }, [agents, model]);
-
   const query = q.trim();
+  // In Rings by Links or Time a group's name is a note's title or a month, not a word the user
+  // filed by, so the search does not light whole groups by it.
+  const groupNames = view !== "rings" || arrange === "folder";
   const on = useMemo(
-    () => lit(model, { topic, kind, member, q, sel }),
-    [model, topic, kind, member, q, sel],
+    () => lit(model, { topic, kind, member, q, sel, groupNames }),
+    [model, topic, kind, member, q, sel, groupNames],
   );
   const hits = query ? on.filter(Boolean).length : 0;
   const selNode = sel !== null ? model.nodes[sel] : undefined;
@@ -231,7 +246,8 @@ export function HiveMap({
         on[n.i]! &&
         n.kind !== "root" &&
         (sel === n.i ||
-          (names && n.kind === "hub" && view !== "timeline") ||
+          // Rings names its groups outside the circle, so its hubs carry no label of their own.
+          (names && n.kind === "hub" && view === "orbit") ||
           (!!selNode && near.has(n.i) && selNode.nb.length <= 14) ||
           (!!query && hits <= 14) ||
           ((view === "timeline" || kind === "agent") && n.kind === "agent"));
@@ -347,6 +363,16 @@ export function HiveMap({
     cameraRef.current?.fitView();
   };
 
+  const changeArrange = (a: Arrange) => {
+    if (a === arrange) return;
+    setArrange(a);
+    // The group filter and the dock preview name groups of the old arrangement.
+    setTopicName(null);
+    setPreview(null);
+    setHot(null);
+    cameraRef.current?.fitView();
+  };
+
   const filter =
     <T,>(set: (v: T) => void) =>
     (v: T) => {
@@ -417,6 +443,8 @@ export function HiveMap({
           stats={stats}
           view={view}
           onView={switchView}
+          arrange={arrange}
+          onArrange={changeArrange}
           names={names}
           onNames={() => setNames((v) => !v)}
           q={q}
@@ -437,13 +465,10 @@ export function HiveMap({
             focusRing={focusDot}
             labelsOn={names}
             labels={labels}
-            marks={markStates}
             onHover={setHot}
             onPick={canvasPick}
             cameraRef={cameraRef}
             fire={fire}
-            flare={agentMarks.flare}
-            moved={moved}
             onLanded={onLanded}
           />
           <DotList
@@ -455,16 +480,9 @@ export function HiveMap({
             onFocusDot={onFocusDot}
             onPick={pick}
           />
-          {view === "hive" && (
-            <Presence
-              marks={agentMarks.marks}
-              names={agentNames}
-              now={now}
-              onHot={setHot}
-            />
-          )}
           <Dock
             model={model}
+            heading={view === "rings" ? GROUP_HEADING[arrange] : "Topics"}
             topic={topic}
             onTopic={filter((t: number | null) =>
               setTopicName(t === null ? null : (model.topics[t]?.name ?? null)),
