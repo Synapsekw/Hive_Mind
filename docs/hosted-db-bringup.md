@@ -21,9 +21,13 @@ sign-ups afterwards, is in [Invitation email](#invitation-email).
 - Migration `20261123105237_invitations` is applied (2026-11-23) and recorded under that version.
   It adds the `invitations` table and `invite_member`, `revoke_invitation` and
   `claim_invitations` for inviting a member from Settings.
-- Migration `emailed_invitations` is **not applied yet**, the Edge Function `invite-email` is not
-  deployed, and "Allow new users to sign up" is still on. [Invitation email](#invitation-email)
-  is the list of what to do, in order. Update this entry when it is done.
+- Migration `20261123174149_emailed_invitations` is applied (2026-11-24) with
+  `supabase db query --linked -f <file>` and recorded under that version. The Edge Function
+  `invite-email` is deployed, with JWT verification off, and its secrets `RESEND_API_KEY`,
+  `HIVE_INVITE_FROM` and `HIVE_SITE_URL` are set. An invitation was sent, opened and joined by
+  hand on 2026-11-24, with and without another account signed in. Still open from
+  [Invitation email](#invitation-email): the project's own mail settings (SMTP through Resend,
+  the code length and its lifetime), and "Allow new users to sign up" is still on.
 - Migration `20261123123845_note_delete_audit` is applied (2026-11-23) and recorded under that
   version. It adds the `notes_deleted_audit` trigger, which writes a deleted note to the audit
   log.
