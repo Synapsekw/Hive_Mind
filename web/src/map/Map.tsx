@@ -90,6 +90,7 @@ export function HiveMap({
       flat: new Map<Flat, [number, number][]>(),
       timelineAt: 0,
       orbit: null as [number, number, number][] | null,
+      orbitFlat: null as [number, number][] | null,
     }),
     [model],
   );
@@ -104,9 +105,12 @@ export function HiveMap({
     flatPos = layout(flatView, model, now);
     cache.flat.set(flatView, flatPos);
   }
-  const pos = flatPos;
   const isOrbit = view === "orbit";
   if (isOrbit && !cache.orbit) cache.orbit = orbit(model);
+  // Orbit keeps its own copy of those positions: the canvas and the hidden list tell a view
+  // switch by a new positions array, so going back to Rings must hand them a different one.
+  if (isOrbit && !cache.orbitFlat) cache.orbitFlat = flatPos.slice();
+  const pos = isOrbit ? cache.orbitFlat! : flatPos;
 
   // The hidden list's positions follow the canvas only once a glide has landed, so a view switch
   // never waits on 5,000 buttons' data-x/data-y before its first frame.
