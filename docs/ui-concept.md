@@ -128,12 +128,13 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
 - **Group by:** a menu in the top bar that appears only in Rings. The button reads "Group by
   Folder" (or Category, Topic, Links, Time) and opens a menu of five radio rows in the order
   Folder, Category, Topic, Links, Time, the current one ticked. Folder
-  groups by topic (the largest first, up to twelve groups, the rest folded into "Other"). Category
+  groups by folder (the largest first, up to twelve groups, the rest folded into "Other"). Category
   draws one ring per kind of topic, in the fixed kind order (customers, partners, projects,
   vendors, products, solutions, people, subjects), and a note sits under the kind of its strongest
   topic; notes with no topic go last in "No topic", and nothing folds. Topic draws one ring per
   topic, the largest first, up to twelve groups, the rest folded into "Other topics" (or "More
-  topics" when a topic already has that name), and a name that two kinds share carries its kind in
+  topics" when a topic already has that name; "No topic" is always the last ring, is never folded
+  and takes one of the twelve places), and a name that two kinds share carries its kind in
   brackets, as "Atlas (Projects)". Links
   groups items that link to each other into clusters, named after their best-linked note, with
   "Hub notes", "Small clusters", "Linked to hubs" (notes whose only links go to hub notes) and
@@ -275,7 +276,7 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   its **Topics** as chips, each with the topic's name and kind. On one's own note each chip has
   **Remove**, which acts at once with no question, and **Add topic** offers the hive's other
   topics, grouped by kind, with **Add**; it appears only while the note has fewer than five
-  topics. If the database refuses an add because the note is already full, the page says "A note
+  topics. If the app's server step refuses an add because the note is already full, the page says "A note
   has at most five topics. Remove one first."; any other refusal says "That didn't work. Try
   again." A note with none shows "No topics yet." A colleague's note shows
   its chips without Remove or Add. Visibility shown inline and changed in place;
