@@ -57,6 +57,8 @@ type Seeds = {
   textMuted: RGB;
   surface: RGB;
   wash: RGB[];
+  /** How strong the coloured glows over the wash are; 1 unless the theme's seed says otherwise. */
+  bloom: number;
 };
 
 const WHITE: RGB = { r: 1, g: 1, b: 1 };
@@ -82,6 +84,7 @@ function seeds(theme: string, mode: Mode): Seeds {
     textMuted: fromHex(s.textMuted),
     surface: fromHex(s.surface),
     wash: s.wash.map(fromHex),
+    bloom: (s as { bloom?: number }).bloom ?? 1,
   };
 }
 
@@ -149,7 +152,7 @@ function blooms(s: Seeds, mode: Mode): Blooms {
   const light = mode === "light";
   // Light-mode tints are mixed 70% with white.
   const tint = (c: RGB) => quantize(light ? mix(c, WHITE, 0.3) : c);
-  const at = (c: RGB, pct: number) => withAlpha(tint(c), pct / 100);
+  const at = (c: RGB, pct: number) => withAlpha(tint(c), (pct / 100) * s.bloom);
   return {
     // Pooled behind the card: brand2 at 46% 58% at 60% 40%, brand at 34% 42% at 34% 78%.
     pooled: [at(s.brand2, light ? 22 : 16), at(s.brand, light ? 18 : 12)],

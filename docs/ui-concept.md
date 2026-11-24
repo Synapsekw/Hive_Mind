@@ -59,7 +59,8 @@ the bottom of the left rail.
   accent; the rest have two. The seed values for every theme in both modes are in
   [`ui/themes.json`](ui/themes.json); the 17 other than Hive were copied from Monolith's `develop` on
   2026-11-18. Hive's light seeds are darkened so white text on the wash keeps its contrast. Hive's
-  dark mode is near-black, so fresh notes read as honey light in the dark. Hive also sets
+  dark mode is near-black (wash, card colour, and the coloured glows over the wash turned down to
+  30% by a `bloom` seed only Hive's dark mode sets), so fresh notes read as honey light in the dark. Hive also sets
   `"rings": "honey"` in its seeds: in Rings its hubs and the legend's group swatches take the brand
   colour, and the glow on fresh notes is 1.9 times as strong (tokens `--rings-hub` and
   `--rings-glow`, unset in every other theme, which keep group hues on hubs). Each theme is tuned on
