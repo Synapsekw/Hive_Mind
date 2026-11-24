@@ -86,6 +86,18 @@ describe("query round-trip", () => {
   });
 });
 
+describe("range validation", () => {
+  it.each([
+    "date=range&from=2026-13-45&to=2026-13-46",
+    "date=range&from=2026-02-31&to=2026-03-01",
+    "date=range&from=2026-11-20&to=2026-11-01",
+  ])("falls back to any for %s", (q) => {
+    const x = fromQuery(new URLSearchParams(q));
+    expect(x).toEqual(DEFAULT_FILTERS);
+    expect(() => toServerFilter(x, NOW, null)).not.toThrow();
+  });
+});
+
 describe("dateBounds", () => {
   it("today is the current UTC day", () => {
     const b = dateBounds(with_({ date: "today" }), NOW)!;

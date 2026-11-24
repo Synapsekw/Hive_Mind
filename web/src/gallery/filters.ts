@@ -53,6 +53,13 @@ const pick = <T extends string>(
 ): T => (v !== null && (all as readonly string[]).includes(v) ? (v as T) : d);
 const id = (v: string | null) => (v && ID.test(v) ? v : null);
 
+/** A real calendar day as YYYY-MM-DD (rejects 2026-13-45 and 2026-02-31). */
+function realDay(v: string): boolean {
+  if (!YMD.test(v) || !Number.isFinite(Date.parse(v))) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(v);
+}
+
 export function fromQuery(p: URLSearchParams): Filters {
   const kinds = (p.get("kinds") ?? "")
     .split(",")
@@ -61,7 +68,12 @@ export function fromQuery(p: URLSearchParams): Filters {
   const from = p.get("from"),
     to = p.get("to");
   const range =
-    date === "range" && from && to && YMD.test(from) && YMD.test(to);
+    date === "range" &&
+    from &&
+    to &&
+    realDay(from) &&
+    realDay(to) &&
+    from <= to;
   if (date === "range" && !range) date = "any";
   return {
     view: pick(p.get("view"), VIEWS, "session"),
