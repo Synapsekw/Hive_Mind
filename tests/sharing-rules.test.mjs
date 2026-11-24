@@ -530,6 +530,7 @@ const addFile = (who, name, file, note = null) =>
 const STUB_KEYS = [
   "agent_id",
   "by_agent",
+  "created_at",
   "id",
   "kind",
   "locked",
@@ -9893,4 +9894,379 @@ test("a hive that is being deleted, and a workspace across two hives, answer as 
   await cancelDeletion(h.owner, h.id);
   await assert.rejects(addSpace(owner, "One too many"), WS_CAP);
   await assert.rejects(addSpace(owner, ""), WS_NO_NAME);
+});
+
+// ------------------------------------------------------------ a note's dates
+// created_at is when a note was written, updated_at when it last changed. Only
+// a person sets them (an import does, for a note written long ago); for an
+// agent or a connected app they are the real moment. notes_before_write
+// decides, so these tests read the stored row.
+
+const ND_WRITTEN = "2024-03-14T12:00:00.000Z";
+const ND_CHANGED = "2024-06-01T09:30:00.000Z";
+const ndRow = async (id) => {
+  const r = (
+    await db.query(
+      `select created_at, updated_at, version, written_by_agent as agent
+         from public.notes where id = $1`,
+      [id],
+    )
+  ).rows[0];
+  return {
+    created: r.created_at.toISOString(),
+    updated: r.updated_at.toISOString(),
+    version: r.version,
+    agent: r.agent,
+  };
+};
+// Within a minute of this moment: the dates in these tests are months off.
+const ndIsNow = (iso) => Math.abs(Date.now() - Date.parse(iso)) < 60_000;
+const ndFromNow = (ms) => new Date(Date.now() + ms).toISOString();
+const ND_DAY = 86_400_000;
+// A note of `name`'s, written by `who` (or by the database's owner: `run`),
+// with the given columns beside the usual ones.
+const ndAdd = (who, name, path, cols = {}, run = as) => {
+  const keys = Object.keys(cols);
+  return run(
+    who,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, body${keys
+      .map((k) => `, ${k}`)
+      .join("")})
+     values ($1, $2, $3, $4, $5, 'body'${keys
+       .map((_, i) => `, $${i + 6}`)
+       .join("")}) returning id`,
+    [
+      hive,
+      members[name],
+      ws[name],
+      `nd/${path}`,
+      `nd ${path}`,
+      ...Object.values(cols),
+    ],
+  ).then((r) => r[0].id);
+};
+// `set` is the text after "set"; its parameters start at $2.
+const ndSet = (who, id, set, params = [], run = as) =>
+  run(who, `update public.notes set ${set} where id = $1 returning id`, [
+    id,
+    ...params,
+  ]);
+const ndVersions = async (id) =>
+  (
+    await db.query(
+      `select count(*)::int as n from public.note_versions where note_id = $1`,
+      [id],
+    )
+  ).rows[0].n;
+
+test("a person gives a note the dates it was written and last changed", async () => {
+  const id = await ndAdd(person("dani"), "dani", "kept.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  const row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.equal(row.updated, ND_CHANGED);
+  assert.equal(row.version, 1);
+
+  // Only the written date: the note last changed now.
+  const half = await ndRow(
+    await ndAdd(person("dani"), "dani", "written-only.md", {
+      created_at: ND_WRITTEN,
+    }),
+  );
+  assert.equal(half.created, ND_WRITTEN);
+  assert.ok(ndIsNow(half.updated));
+
+  // No date at all: both are now, as before.
+  const plain = await ndRow(await ndAdd(person("dani"), "dani", "plain.md"));
+  assert.ok(ndIsNow(plain.created));
+  assert.ok(ndIsNow(plain.updated));
+});
+
+test("a date in the future is cut back to now", async () => {
+  const id = await ndAdd(person("dani"), "dani", "future.md", {
+    created_at: ndFromNow(ND_DAY),
+    updated_at: ndFromNow(2 * ND_DAY),
+  });
+  let row = await ndRow(id);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.ok(ndIsNow(row.updated), row.updated);
+
+  // A past written date with a future change: only the change is cut back.
+  const mixed = await ndRow(
+    await ndAdd(person("dani"), "dani", "future-change.md", {
+      created_at: ND_WRITTEN,
+      updated_at: ndFromNow(ND_DAY),
+    }),
+  );
+  assert.equal(mixed.created, ND_WRITTEN);
+  assert.ok(ndIsNow(mixed.updated), mixed.updated);
+
+  // The same when the dates are changed afterwards.
+  await ndSet(person("dani"), id, "created_at = $2, updated_at = $2", [
+    ND_WRITTEN,
+  ]);
+  await ndSet(person("dani"), id, "created_at = $2, updated_at = $3", [
+    ndFromNow(ND_DAY),
+    ndFromNow(2 * ND_DAY),
+  ]);
+  row = await ndRow(id);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 1);
+});
+
+test("a note never changed before it was written", async () => {
+  const id = await ndAdd(person("dani"), "dani", "order.md", {
+    created_at: ND_CHANGED,
+    updated_at: ND_WRITTEN,
+  });
+  let row = await ndRow(id);
+  assert.equal(row.created, ND_CHANGED);
+  assert.equal(row.updated, ND_CHANGED);
+
+  // By an update of the change alone, and of the written date alone.
+  await ndSet(person("dani"), id, "updated_at = $2", [ND_WRITTEN]);
+  row = await ndRow(id);
+  assert.equal(row.created, ND_CHANGED);
+  assert.equal(row.updated, ND_CHANGED);
+  await ndSet(person("dani"), id, "created_at = $2, updated_at = $2", [
+    ND_WRITTEN,
+  ]);
+  await ndSet(person("dani"), id, "created_at = $2", [ND_CHANGED]);
+  row = await ndRow(id);
+  assert.equal(row.created, ND_CHANGED);
+  assert.equal(row.updated, ND_CHANGED);
+});
+
+test("an agent's and an app's dates are the real moment, whatever they send", async () => {
+  const sent = { created_at: ND_WRITTEN, updated_at: ND_CHANGED };
+  const check = async (id, what) => {
+    const row = await ndRow(id);
+    assert.ok(ndIsNow(row.created), `${what}: created ${row.created}`);
+    assert.ok(ndIsNow(row.updated), `${what}: updated ${row.updated}`);
+  };
+  const agent = await agentFor("dani");
+  await check(await ndAdd(agent, "dani", "by-agent.md", sent), "an agent");
+  const held = await agentFor("dani", "self_hosted");
+  await check(
+    await ndAdd(held, "dani", "by-held-agent.md", sent),
+    "a self-hosted agent",
+  );
+
+  // An app pass writes no note at all (notes_no_app).
+  const pass = passOf(person("dani"));
+  await assert.rejects(
+    ndAdd(pass, "dani", "by-app.md", sent),
+    /row-level security/,
+  );
+  // The rule is the trigger's own and does not lean on that policy: with
+  // row-level security out of the way the dates are still the real moment.
+  // The same for a self-hosted claim that names no agent.
+  await check(
+    await ndAdd(pass, "dani", "by-app-owner.md", sent, asDbOwner),
+    "an app pass",
+  );
+  await check(
+    await ndAdd(
+      { ...person("dani"), aud: "another-audience" },
+      "dani",
+      "by-audience.md",
+      sent,
+      asDbOwner,
+    ),
+    "a token for another audience",
+  );
+  await check(
+    await ndAdd(
+      selfHosted("dani"),
+      "dani",
+      "by-self-hosted.md",
+      sent,
+      asDbOwner,
+    ),
+    "a self-hosted claim",
+  );
+  await asDbOwner(null, `select 1`);
+});
+
+test("a person corrects only the dates: no new version, the same writer", async () => {
+  const agent = await agentFor("dani");
+  const id = await ndAdd(agent, "dani", "corrected.md");
+  const before = await ndRow(id);
+  assert.equal(before.agent, agent.agent_id);
+
+  const done = await ndSet(
+    person("dani"),
+    id,
+    "created_at = $2, updated_at = $3",
+    [ND_WRITTEN, ND_CHANGED],
+  );
+  assert.equal(done.length, 1);
+  assert.deepEqual(await ndRow(id), {
+    created: ND_WRITTEN,
+    updated: ND_CHANGED,
+    version: 1,
+    agent: agent.agent_id,
+  });
+  assert.equal(await ndVersions(id), 1);
+
+  // Nobody else's note: a colleague's update reaches no row.
+  await as(
+    person("dani"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [id],
+  );
+  const other = await ndSet(person("ahmed"), id, "created_at = $2", [
+    "2020-01-01T00:00:00.000Z",
+  ]);
+  assert.equal(other.length, 0);
+  assert.equal((await ndRow(id)).created, ND_WRITTEN);
+});
+
+test("an agent or an app cannot change when a note was written", async () => {
+  const agent = await agentFor("dani");
+  const id = await ndAdd(person("dani"), "dani", "fixed.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  const kept = {
+    created: ND_WRITTEN,
+    updated: ND_CHANGED,
+    version: 1,
+    agent: null,
+  };
+  const other = "2020-01-01T00:00:00.000Z";
+  const pass = passOf(person("dani"));
+
+  // Unchanged content: both dates keep their old values.
+  for (const set of [
+    "created_at = $2",
+    "updated_at = $2",
+    "created_at = $2, updated_at = $2",
+    "created_at = $2, body = body",
+  ]) {
+    assert.equal((await ndSet(agent, id, set, [other])).length, 1, set);
+    assert.deepEqual(await ndRow(id), kept, set);
+    await ndSet(pass, id, set, [other], asDbOwner);
+    assert.deepEqual(await ndRow(id), kept, `an app pass: ${set}`);
+    await ndSet(selfHosted("dani"), id, set, [other], asDbOwner);
+    assert.deepEqual(await ndRow(id), kept, `a self-hosted claim: ${set}`);
+  }
+  // Through the API an app pass reaches no row.
+  assert.equal((await ndSet(pass, id, "created_at = $2", [other])).length, 0);
+  assert.deepEqual(await ndRow(id), kept);
+
+  // With a change of content: the written date still stays, the change is
+  // now, whatever was sent.
+  await ndSet(
+    agent,
+    id,
+    "body = 'by the agent', created_at = $2, updated_at = $2",
+    [other],
+  );
+  const row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 2);
+  assert.equal(row.agent, agent.agent_id);
+  await asDbOwner(null, `select 1`);
+});
+
+test("a change of content is stamped now, whatever date is sent", async () => {
+  const id = await ndAdd(person("dani"), "dani", "edited.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  await ndSet(person("dani"), id, "body = 'edited', updated_at = $2", [
+    "2024-07-01T00:00:00.000Z",
+  ]);
+  let row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 2);
+  assert.equal(await ndVersions(id), 2);
+
+  // A person may send the written date with the new text; a future one is
+  // cut back as ever.
+  await ndSet(person("dani"), id, "body = 'again', created_at = $2", [
+    ND_CHANGED,
+  ]);
+  row = await ndRow(id);
+  assert.equal(row.created, ND_CHANGED);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 3);
+  await ndSet(person("dani"), id, "title = 'a third', created_at = $2", [
+    ndFromNow(ND_DAY),
+  ]);
+  row = await ndRow(id);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.ok(row.updated >= row.created);
+  assert.equal(row.version, 4);
+});
+
+test("an update that sends no date changes no date", async () => {
+  const id = await ndAdd(person("dani"), "dani", "shared-later.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  await ndSet(person("dani"), id, "visibility = 'group'");
+  await ndSet(person("dani"), id, "path = 'nd/moved.md'");
+  assert.deepEqual(await ndRow(id), {
+    created: ND_WRITTEN,
+    updated: ND_CHANGED,
+    version: 1,
+    agent: null,
+  });
+
+  // The server, with no person behind the call (the database's owner, the
+  // service key), is not checked: it writes the dates it sends, as before.
+  const old = "2000-01-01T00:00:00.000Z";
+  const served = await ndAdd(
+    null,
+    "dani",
+    "by-server.md",
+    { updated_at: old },
+    asDbOwner,
+  );
+  let row = await ndRow(served);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.equal(row.updated, old);
+  // A person sharing that note sends no date, so none changes.
+  await ndSet(person("dani"), served, "visibility = 'group'");
+  row = await ndRow(served);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.equal(row.updated, old);
+  await asDbOwner(null, `select 1`);
+});
+
+test("the map gives each note and file the date it was made", async () => {
+  const note = await ndAdd(person("dani"), "dani", "on-the-map.md", {
+    created_at: ND_WRITTEN,
+  });
+  const file = await addFile(person("dani"), "dani", "nd-on-the-map.pdf", note);
+  const fileMade = (
+    await db.query(`select created_at from public.files where id = $1`, [file])
+  ).rows[0].created_at.toISOString();
+  const iso = (v) => new Date(Date.parse(v)).toISOString();
+
+  // The owner, and a colleague for whom both are locked.
+  for (const who of ["dani", "ahmed"]) {
+    const m = await map(person(who));
+    const n = nodeOf(m, note);
+    assert.equal(n.locked, who === "ahmed", who);
+    assert.equal(iso(n.created_at), ND_WRITTEN, who);
+    assert.ok(ndIsNow(n.updated_at), who);
+    const f = nodeOf(m, file);
+    assert.equal(f.locked, who === "ahmed", who);
+    assert.equal(iso(f.created_at), fileMade, who);
+    assert.equal(iso(f.updated_at), fileMade, who);
+  }
+  // Every item carries it, and the order is still by last change.
+  const m = await map(person("dani"));
+  for (const n of m.nodes) assert.ok(n.created_at, n.id);
+  const times = m.nodes.map((n) => Date.parse(n.updated_at));
+  for (let i = 1; i < times.length; i++) assert.ok(times[i - 1] >= times[i]);
 });

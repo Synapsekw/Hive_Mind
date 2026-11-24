@@ -59,6 +59,11 @@ deleted is in [Hive deletion](#hive-deletion).
   recorded under that version: a member has at most 20 workspaces, and a workspace name is 1 to
   60 characters after trimming. Checked first: no member had more than 2 workspaces and no
   name broke the rule.
+- Migration `20261124153504_note_dates` is **not applied yet**. It replaces two functions and
+  rewrites no row: `notes_before_write` (only a person sets a note's `created_at` and
+  `updated_at`; for an agent or a connected app they are the real moment) and `map_graph`
+  (every item carries `created_at`). Apply it in one transaction that also records the version,
+  then change this line.
 - The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
   the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
   still the build from before its signing code moved to `_shared/`; behaviour is the same.
