@@ -6,9 +6,14 @@
 // unexpected failure answers `{ ok: false }` / `null`.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ImportNote } from "../../import/plan";
-import type { BatchResult, WorkspaceMade } from "../../import/types";
+import type {
+  BatchResult,
+  ConnectResult,
+  WorkspaceMade,
+} from "../../import/types";
 import { createServerSupabase } from "../../lib/supabase/server";
 import type { Result, SharePreview } from "../../vault/types";
+import { connectBatchIn } from "./connect";
 import { createImportWorkspaceIn, importBatchIn } from "./import";
 import {
   deleteNoteIn,
@@ -95,5 +100,18 @@ export async function importBatch(
 ): Promise<BatchResult> {
   return withSession<BatchResult>({ ok: false }, (db) =>
     importBatchIn(db, workspaceId, notes),
+  );
+}
+
+/**
+ * One step of turning a workspace's wiki links into links: the 40 notes after the cursor. The
+ * arguments are checked in `connect.ts`; the hive and the member come from the workspace's row.
+ */
+export async function connectWikiLinks(
+  workspaceId: string,
+  after: string | null,
+): Promise<ConnectResult> {
+  return withSession<ConnectResult>({ ok: false }, (db) =>
+    connectBatchIn(db, workspaceId, after),
   );
 }

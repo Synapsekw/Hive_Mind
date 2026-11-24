@@ -163,6 +163,7 @@ export function DevVault({
         }),
       };
     },
+    connect: async () => ({ ok: false }),
   };
   return <Vault data={data} now={now} actions={actions} importer={importer} />;
 }

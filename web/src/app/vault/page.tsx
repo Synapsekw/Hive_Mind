@@ -3,6 +3,7 @@ import { createServerSupabase } from "../../lib/supabase/server";
 import { Vault } from "../../vault/Vault";
 import { loadInboxCount } from "../inbox/load-inbox";
 import {
+  connectWikiLinks,
   createImportWorkspace,
   deleteNote,
   importBatch,
@@ -58,6 +59,7 @@ export default async function VaultPage({
         // Bound to the hive this page shows, as inviting a member is.
         createWorkspace: createImportWorkspace.bind(null, result.data.hive.id),
         importBatch,
+        connect: connectWikiLinks,
       }}
       inbox={inbox}
     />
