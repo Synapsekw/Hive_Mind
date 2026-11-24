@@ -15,7 +15,9 @@ export type GuideLabel = {
 };
 
 export type Scene = {
-  edges: Float32Array; // x1,y1,x2,y2 per edge
+  edges: Float32Array; // x1,y1,x2,y2 per edge in `rest`
+  /** The edges drawn at rest: index-to-hub spokes in Rings, every model edge elsewhere. */
+  rest: [number, number][];
   byTopic: number[][]; // node indices per topic (notes, files, hubs)
   agents: number[];
   root: number;
@@ -105,23 +107,12 @@ function dayLabel(c: number, now: number): string {
 }
 
 /**
- * Text on the guides: "Agents" on the agent ring (radius `agentR`, upper left) in Rings, axis
- * names and dates in Timeline.
+ * Text on the guides: axis names and dates in Timeline. Rings has none (the group names sit
+ * outside the circle and the legend names the agents).
  */
-export function guideLabels(
-  view: View,
-  now: number,
-  agentR = 300,
-): GuideLabel[] {
+export function guideLabels(view: View, now: number): GuideLabel[] {
   const out: GuideLabel[] = [];
-  if (view === "rings") {
-    out.push({
-      text: "Agents",
-      x: CX - agentR * Math.cos(0.8),
-      y: CY - agentR * Math.sin(0.8),
-      align: "centre",
-    });
-  } else if (view === "timeline") {
+  if (view === "timeline") {
     out.push({ text: "Agent writes by day", x: 22, y: 30, align: "left" });
     out.push({ text: "Topics", x: 46, y: 330, align: "left" });
     out.push({
@@ -149,8 +140,17 @@ export function buildScene(
   now: number,
   rings?: RingsLayout | null, // given in Rings
 ): Scene {
-  const edges = new Float32Array(model.edges.length * 4);
-  model.edges.forEach(([u, v], e) => {
+  // Rings is quiet at rest: only the spokes from the index to the hubs.
+  const rest =
+    view === "rings"
+      ? model.edges.filter(
+          ([u, v]) =>
+            (u === 0 && model.nodes[v]?.kind === "hub") ||
+            (v === 0 && model.nodes[u]?.kind === "hub"),
+        )
+      : model.edges;
+  const edges = new Float32Array(rest.length * 4);
+  rest.forEach(([u, v], e) => {
     const a = pos[u] ?? [CX, CY];
     const b = pos[v] ?? [CX, CY];
     edges[e * 4] = a[0];
@@ -174,6 +174,7 @@ export function buildScene(
   const r = view === "rings" ? (rings ?? ringsLayout(model)) : null;
   return {
     edges,
+    rest,
     byTopic,
     agents,
     root: 0,
@@ -181,7 +182,7 @@ export function buildScene(
       rings: r ? [r.hubR, r.firstR, r.agentR] : [],
       axis: isTime ? [X0, 964, 392] : null,
     },
-    guideLabels: guideLabels(view, now, r?.agentR),
+    guideLabels: guideLabels(view, now),
     fresh,
     dotScale: r ? r.scale : 1,
     groupLabels: r ? r.labels : [],

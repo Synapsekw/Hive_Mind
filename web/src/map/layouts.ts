@@ -105,7 +105,8 @@ const ALONG = 13.5;
 const AGENT_PAST = 30;
 const AGENT_MIN = 300;
 const AGENT_MAX = 350;
-const LABEL_PAST = 34;
+/** Group names sit on one circle this far past the agent ring (after scaling). */
+const LABEL_PAST = 20;
 const NAME_MAX = 44;
 
 /** Newest first, ties by id, so the order never depends on the payload's. */
@@ -180,7 +181,7 @@ export function ringsLayout(model: MapModel): RingsLayout {
     pos[i] = i === 0 ? [CX, CY] : polar(r[i]! * scale, an[i]!);
   const labels = model.topics.map((t, i): RingsLayout["labels"][number] => {
     const s = p.sec[i]!;
-    const [x, y] = polar((lastR[i]! + LABEL_PAST) * scale, s.mid);
+    const [x, y] = polar(agentR * scale + LABEL_PAST, s.mid);
     const c = Math.cos(s.mid);
     return {
       text: `${cut(t.name)} · ${p.items[i]!.length}`,

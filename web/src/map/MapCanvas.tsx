@@ -353,7 +353,8 @@ export function MapCanvas(props: Props): JSX.Element {
     } else el.removeAttribute("data-ry");
     orbitProj.current = proj;
 
-    // Pulses: firing ones, and a faint ambient one about every 700 ms in a calm Rings view.
+    // Pulses: firing ones, and a faint ambient one about every 700 ms in a calm Rings view,
+    // along an edge drawn at rest (the spokes).
     // A hot dot stops the ambient pulses at once (its own firing pulses stay).
     pulses.current = pulses.current.filter(
       (q) => time < q.t0 + q.dur && !(q.ambient && p.hot !== null),
@@ -363,14 +364,14 @@ export function MapCanvas(props: Props): JSX.Element {
       PULSE_VIEWS.has(p.view) &&
       p.hot === null &&
       !tw?.glide &&
-      p.model.edges.length > 0;
+      p.scene.rest.length > 0;
     if (
       ambientOk &&
       time - lastAmbient.current >= AMBIENT_EVERY &&
       pulses.current.filter((q) => q.ambient).length < AMBIENT_MAX
     ) {
       const [u, v] =
-        p.model.edges[Math.floor(Math.random() * p.model.edges.length)]!;
+        p.scene.rest[Math.floor(Math.random() * p.scene.rest.length)]!;
       const flip = Math.random() < 0.5;
       pulses.current.push({
         from: flip ? v : u,

@@ -198,6 +198,17 @@ describe.each(RINGS_CASES)("ringsLayout on %s", (_name, model) => {
     });
   });
 
+  it("puts every group name on one circle 20 past the agent ring, in line with its hub", () => {
+    const hubs = model.nodes.filter((n) => n.kind === "hub");
+    r.labels.forEach((l, t) => {
+      expect(radius([l.x, l.y])).toBeCloseTo(r.agentR + 20, 9);
+      const hub = r.pos[hubs.find((n) => n.topic === t)!.i]!;
+      const a = Math.atan2(l.y - 380, l.x - 500);
+      const b = Math.atan2(hub[1] - 380, hub[0] - 500);
+      expect(Math.cos(a - b)).toBeCloseTo(1, 9);
+    });
+  });
+
   it("keeps every position inside the box and the agent ring within 350", () => {
     for (const [x, y] of r.pos) {
       expect(x).toBeGreaterThanOrEqual(0);

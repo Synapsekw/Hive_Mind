@@ -16,9 +16,33 @@ describe("buildScene", () => {
     const grouped = s.byTopic.flat();
     expect(new Set(grouped).size).toBe(grouped.length);
     expect(grouped.length + s.agents.length + 1).toBe(model.nodes.length);
-    expect(s.edges.length).toBe(model.edges.length * 4);
     const r = ringsLayout(model);
     expect(s.guides.rings).toEqual([r.hubR, r.firstR, r.agentR]);
+  });
+  it("draws only the index-to-hub spokes at rest in Rings", () => {
+    const pos = layout("rings", model, NOW);
+    const s = buildScene(model, "rings", pos, act, NOW);
+    const hubs = model.nodes.filter((n) => n.kind === "hub").map((n) => n.i);
+    expect(hubs.length).toBe(model.topics.length);
+    expect(model.edges.length).toBeGreaterThan(hubs.length);
+    expect(s.rest.map(([u, v]) => (u === 0 ? v : u)).sort()).toEqual(
+      [...hubs].sort(),
+    );
+    for (const e of s.rest) expect(e).toContain(0);
+    expect(s.edges.length).toBe(hubs.length * 4);
+    // Each segment joins the index and its hub.
+    s.rest.forEach(([u, v], k) => {
+      expect([...s.edges.slice(k * 4, k * 4 + 4)]).toEqual(
+        [...pos[u]!, ...pos[v]!].map((x) => Math.fround(x)),
+      );
+    });
+  });
+  it("keeps every edge in Timeline and Orbit", () => {
+    for (const view of ["timeline", "orbit"] as const) {
+      const s = buildScene(model, view, layout("rings", model, NOW), act, NOW);
+      expect(s.rest).toEqual(model.edges);
+      expect(s.edges.length).toBe(model.edges.length * 4);
+    }
   });
   it("gives each note and file its freshness level, 0 for the rest", () => {
     const s = buildScene(model, "rings", layout("rings", model, NOW), act, NOW);
@@ -45,17 +69,11 @@ describe("buildScene", () => {
       expect(s.groupLabels).toEqual(r.labels);
     }
   });
-  it("labels only the agent ring in Rings, at its upper left", () => {
+  it("has no guide labels in Rings", () => {
     const r = ringsLayout(model);
     const s = buildScene(model, "rings", r.pos, act, NOW, r);
-    expect(s.guideLabels).toEqual([
-      {
-        text: "Agents",
-        x: 500 - r.agentR * Math.cos(0.8),
-        y: 380 - r.agentR * Math.sin(0.8),
-        align: "centre",
-      },
-    ]);
+    expect(s.guideLabels).toEqual([]);
+    expect(guideLabels("rings", NOW)).toEqual([]);
   });
   it("keeps full-size dots and no group labels outside Rings", () => {
     for (const view of ["timeline", "orbit"] as const) {

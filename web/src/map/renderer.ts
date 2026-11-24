@@ -64,13 +64,10 @@ export type Palette = {
 const TAU = Math.PI * 2;
 const SQ2 = Math.SQRT2;
 const LABEL_MAX = 220;
-/**
- * The opacity of every readable dot's thin brand outline, so an old, faint note is still a
- * visible shape. Meant to be the smallest step with 3:1 contrast against the map card in every
- * theme, mode and reach; even at 1 the light glass card falls short in some themes, so it stays
- * at 1 until that is settled.
- */
-export const OUTLINE_ALPHA = 1;
+/** Opacity of the thin brand outline around a readable dot in Rings (times its dim). */
+export const OUTLINE_ALPHA = 0.45;
+/** A locked dot's stroke in Rings, in screen px (other views keep 1.2). */
+const LOCKED_W = 1.6;
 /** The smallest note or file drawn, in screen px, however far Rings shrank the drawing. */
 const MIN_DOT = 2.5;
 /** Dots smaller than this on screen get no outline (it would swallow the fill). */
@@ -250,8 +247,8 @@ type Frame = {
   /** The scene's dot scale (Rings shrinks dots with the drawing); 1 in Orbit. */
   dotScale: number;
   /**
-   * Freshness per node: notes and files are drawn in the brand colour, brighter when fresher.
-   * Null in Orbit, which keeps the group hues.
+   * Rings only: freshness per node; notes and files are drawn in the brand colour, brighter
+   * when fresher. Null in Timeline and Orbit, which keep the group hues.
    */
   fresh: Uint8Array | null;
 };
@@ -351,7 +348,7 @@ export function drawFrame(
     flipX: 760,
     depth: null,
     dotScale: scene.dotScale,
-    fresh: scene.fresh,
+    fresh: f.view === "rings" ? scene.fresh : null,
   };
 
   drawLayer(F);
@@ -527,7 +524,7 @@ const depthOf = (F: Frame, i: number) => (F.depth ? (F.depth[i] ?? 1) : 1);
 
 /** Draws the resting layer into `g`, whose transform is already set to the box. */
 function drawStatic(F: Frame, g: CanvasRenderingContext2D) {
-  const { scene, c, pal, px, f, model } = F;
+  const { scene, c, pal, px, f } = F;
   g.lineCap = "round";
   g.lineJoin = "round";
   g.globalAlpha = 1;
@@ -557,7 +554,7 @@ function drawStatic(F: Frame, g: CanvasRenderingContext2D) {
       let p = c.litEdges.get(f.lit);
       if (!p) {
         p = new Path2D();
-        for (const [u, v] of model.edges)
+        for (const [u, v] of scene.rest)
           if (f.lit[u] && f.lit[v]) {
             const a = P(F, u);
             const b = P(F, v);
@@ -773,6 +770,9 @@ function drawTicks(F: Frame) {
 
 // ---- Dots ----
 
+/** A locked dot's stroke width in screen px: heavier in Rings, where readable dots are faint. */
+const lockedW = (F: Frame) => (F.fresh ? LOCKED_W : 1.2);
+
 /** Paths for one group of same-kind dots; a hub has three (outer ring, card ring, centre). */
 function groupPaths(
   F: Frame,
@@ -798,7 +798,7 @@ function groupPaths(
       at((i) => Math.max(0.5 * px, rad(i) - 2 * px)),
     ];
   if (kind === "lnote" || kind === "lfile")
-    return [at((i) => rad(i) - 0.6 * px)];
+    return [at((i) => rad(i) - (lockedW(F) / 2) * px)];
   return [at(rad)];
 }
 
@@ -847,7 +847,7 @@ function fillGroup(
     ctx.fill(p);
     ctx.shadowBlur = 0;
     ctx.strokeStyle = colour;
-    ctx.lineWidth = 1.2 * px;
+    ctx.lineWidth = lockedW(F) * px;
     ctx.stroke(p);
   } else {
     ctx.fillStyle = colour;
@@ -897,14 +897,86 @@ type DotCache = {
 };
 const dotCaches = new WeakMap<Scene, DotCache>();
 
+type Group = Omit<Batch, "paths"> & { n: number[] };
+const toBatch = (F: Frame, { n, ...g }: Group): Batch => ({
+  ...g,
+  paths: groupPaths(F, g.kind, n, 1),
+});
+
 /**
- * The dots: notes and files batched per kind, freshness level, alpha and outline, in the brand
- * colour, freshest on top; then the hubs per group in their hue. The batches (keys and paths)
- * are cached per scene, positions, filter, soft set, hot, selection, focus and scale, so a frame
- * that only breathes is a few dozen fills.
+ * Rings: notes and files batched per kind, freshness level, alpha and outline, in the brand
+ * colour, freshest on top; then the hubs per group in their hue.
+ */
+function freshBatches(F: Frame, fresh: Uint8Array): Batch[] {
+  const { scene, model } = F;
+  const dots = new Map<string, Group>();
+  const hubs: Group[] = [];
+  scene.byTopic.forEach((nodes, topic) => {
+    const own = new Map<number, Group>();
+    for (const i of nodes) {
+      if (special(F, i)) continue;
+      const n = model.nodes[i]!;
+      const kind = kindOf(n);
+      const dim = alphaOf(F, i);
+      if (kind === "hub") {
+        const g = own.get(dim);
+        if (g) g.n.push(i);
+        else {
+          const h = { topic, kind, alpha: dim, level: 0, outline: 0, n: [i] };
+          own.set(dim, h);
+          hubs.push(h);
+        }
+        continue;
+      }
+      const locked = kind === "lnote" || kind === "lfile";
+      const level = locked ? 0 : fresh[i]!;
+      const alpha = locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim;
+      const outline = locked ? 0 : outlineOf(diam(F, n), dim);
+      const key = `${kind}|${level}|${alpha}|${outline}`;
+      const g = dots.get(key);
+      if (g) g.n.push(i);
+      else dots.set(key, { topic: -1, kind, alpha, level, outline, n: [i] });
+    }
+  });
+  // Older dots first so fresher ones draw over them, hubs on top.
+  return [...[...dots.values()].sort((x, y) => x.level - y.level), ...hubs].map(
+    (g) => toBatch(F, g),
+  );
+}
+
+/** Timeline: per topic, kind and alpha in the topic's hue; a colleague's item at 0.72. */
+function topicBatches(F: Frame): Batch[] {
+  const { scene, model } = F;
+  const batches: Batch[] = [];
+  scene.byTopic.forEach((nodes, topic) => {
+    const groups = new Map<string, Group>();
+    for (const i of nodes) {
+      if (special(F, i)) continue;
+      const n = model.nodes[i]!;
+      const kind = kindOf(n);
+      const alpha = alphaOf(F, i) * (theirs(n) ? 0.72 : 1);
+      const key = `${kind}|${alpha}`;
+      const g = groups.get(key);
+      if (g) g.n.push(i);
+      else
+        groups.set(key, { topic, kind, alpha, level: 0, outline: 0, n: [i] });
+    }
+    // Plain dots first, hubs on top.
+    for (const g of [...groups.values()].sort(
+      (x, y) => +(x.kind === "hub") - +(y.kind === "hub"),
+    ))
+      batches.push(toBatch(F, g));
+  });
+  return batches;
+}
+
+/**
+ * The dots, in Rings by freshness (freshBatches), elsewhere by topic (topicBatches). The batches
+ * (keys and paths) are cached per scene, positions, filter, soft set, hot, selection, focus and
+ * scale, so a frame that only breathes is a few dozen fills.
  */
 function drawDots(F: Frame) {
-  const { scene, model, f, s } = F;
+  const { scene, f, s } = F;
   let dc = dotCaches.get(scene);
   if (
     !dc ||
@@ -917,41 +989,7 @@ function drawDots(F: Frame) {
     dc.grow !== (f.grow?.nodes ?? null) ||
     dc.s !== s
   ) {
-    type Group = Omit<Batch, "paths"> & { n: number[] };
-    const dots = new Map<string, Group>();
-    const hubs: Group[] = [];
-    scene.byTopic.forEach((nodes, topic) => {
-      const own = new Map<number, Group>();
-      for (const i of nodes) {
-        if (special(F, i)) continue;
-        const n = model.nodes[i]!;
-        const kind = kindOf(n);
-        const dim = alphaOf(F, i);
-        if (kind === "hub") {
-          const g = own.get(dim);
-          if (g) g.n.push(i);
-          else {
-            const h = { topic, kind, alpha: dim, level: 0, outline: 0, n: [i] };
-            own.set(dim, h);
-            hubs.push(h);
-          }
-          continue;
-        }
-        const locked = kind === "lnote" || kind === "lfile";
-        const level = locked ? 0 : scene.fresh[i]!;
-        const alpha = locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim;
-        const outline = locked ? 0 : outlineOf(diam(F, n), dim);
-        const key = `${kind}|${level}|${alpha}|${outline}`;
-        const g = dots.get(key);
-        if (g) g.n.push(i);
-        else dots.set(key, { topic: -1, kind, alpha, level, outline, n: [i] });
-      }
-    });
-    // Older dots first so fresher ones draw over them, hubs on top.
-    const batches: Batch[] = [
-      ...[...dots.values()].sort((x, y) => x.level - y.level),
-      ...hubs,
-    ].map(({ n, ...g }) => ({ ...g, paths: groupPaths(F, g.kind, n, 1) }));
+    const batches = F.fresh ? freshBatches(F, F.fresh) : topicBatches(F);
     dc = {
       pos: f.pos,
       lit: f.lit,
