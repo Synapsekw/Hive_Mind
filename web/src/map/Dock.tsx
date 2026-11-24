@@ -58,6 +58,8 @@ export function Dock({
   useEffect(() => {
     const el = row.current;
     if (!el) return;
+    // A new set of groups (another arrangement) starts from the left.
+    el.scrollLeft = 0;
     const measure = () => setOver(el.scrollWidth > el.clientWidth + 1);
     measure();
     const ro = new ResizeObserver(measure);
@@ -73,7 +75,7 @@ export function Dock({
       ro.disconnect();
       el.removeEventListener("wheel", onWheel);
     };
-  }, [model.topics.length]);
+  }, [model.topics]);
 
   if (model.nodes.length <= 1) return null;
   return (

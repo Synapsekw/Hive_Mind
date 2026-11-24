@@ -101,7 +101,7 @@ export function Peek({
               ["By", owner ?? "Someone"],
               ["Links", String(links(model, n))],
             ]
-          : [["Topics", String(model.topics.length)]];
+          : [["Groups", String(model.topics.length)]];
 
   // In <body>: the map's glass panel (backdrop-filter) would otherwise anchor `fixed` to itself.
   return createPortal(
