@@ -899,8 +899,8 @@ function fillGroup(
     const [outer, mid, inner] = paths as [Path2D, Path2D, Path2D];
     if (!still && !F.fresh) F.ambient = true;
     ctx.fillStyle = colour;
-    if (!F.fresh) {
-      // Timeline and Orbit keep the soft breathing blur.
+    if (!F.fresh || glow) {
+      // Timeline and Orbit keep the soft breathing blur; so does a hub the pointer is on.
       ctx.shadowColor = colour;
       ctx.shadowBlur =
         glow ||
@@ -1318,6 +1318,14 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
     );
     return;
   }
+  if (F.fresh && F.c.glow)
+    stampHalo(
+      F,
+      F.pal.hub,
+      ...P(F, i),
+      (diam(F, n) / 2) * scale * depthOf(F, i) * F.px * HUB_REACH,
+      0.3 * alphaOf(F, i),
+    );
   fillGroup(
     F,
     kind,
