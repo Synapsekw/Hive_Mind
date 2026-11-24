@@ -1544,6 +1544,13 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
   await expect(live(page)).toHaveText(
     "1 topic saved. Now open the vault and press Attach topics.",
   );
+  // Seen as well as announced, and the focus is on Find, not lost with the form.
+  await expect(
+    topics(page).getByText(
+      "1 topic saved. Now open the vault and press Attach topics.",
+    ),
+  ).toBeVisible();
+  await expect(findTopics(page)).toBeFocused();
   await expect(
     topics(page).getByRole("list", { name: "Customers" }),
   ).toContainText("Orbit");
@@ -1580,6 +1587,7 @@ test("Topics: Delete asks first and says the notes stay; a failed read or save s
   await row.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(row).toHaveCount(0);
   await expect(live(page)).toHaveText("Terra Drone deleted.");
+  await expect(topics(page).getByText("Terra Drone deleted.")).toBeVisible();
 
   await open(page, "?fail=1");
   await findTopics(page).click();
@@ -1593,4 +1601,43 @@ test("Topics: a member who is not the owner has no such section", async ({
 }) => {
   await open(page, "?member=1");
   await expect(topics(page)).toHaveCount(0);
+});
+
+test("Topics: Cancel closes the candidates and puts the focus on Find; with nothing new, Find says so where it can be seen", async ({
+  page,
+}) => {
+  await open(page);
+  await findTopics(page).click();
+  const found = topics(page).getByRole("form", {
+    name: "Topics found in your notes",
+  });
+  await found.getByRole("button", { name: "Cancel" }).click();
+  await expect(found).toHaveCount(0);
+  await expect(findTopics(page)).toBeFocused();
+  expect((await calls(page)).filter((c) => c.name === "saveTopics")).toEqual(
+    [],
+  );
+
+  // Tick the subject too and save both: the hive then has everything the notes name.
+  await findTopics(page).click();
+  await found.getByRole("checkbox", { name: "Subjects: flare-stack" }).check();
+  await found.getByRole("button", { name: "Save topics" }).click();
+  await expect(
+    topics(page).getByText(
+      "2 topics saved. Now open the vault and press Attach topics.",
+    ),
+  ).toBeVisible();
+  await expect(findTopics(page)).toBeFocused();
+
+  await findTopics(page).click();
+  const nothing = topics(page).getByText(
+    "Nothing new found. Every topic your notes name is already here.",
+  );
+  await expect(nothing).toBeVisible();
+  await expect(found).toHaveCount(0);
+  await expect(live(page)).toHaveText(
+    "Nothing new found. Every topic your notes name is already here.",
+  );
+  // The earlier message has given way to this one.
+  await expect(topics(page).getByText(/topics saved\./)).toHaveCount(0);
 });

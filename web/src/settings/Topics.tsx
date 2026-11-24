@@ -54,6 +54,8 @@ export function Topics({
 }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [problem, setProblem] = useState<string | null>(null);
+  // The last message that is not a refusal, shown beside the announcement.
+  const [message, setMessage] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
@@ -72,11 +74,18 @@ export function Topics({
   useEffect(() => {
     if (picking) heading.current?.focus();
   }, [picking]);
+  // Leaving the candidates (Save or Cancel) unmounts the focused button: Find takes the focus.
+  const wasPicking = useRef(false);
+  useEffect(() => {
+    if (wasPicking.current && !picking) opener.current?.focus();
+    wasPicking.current = picking;
+  }, [picking]);
 
   const shown = topics.filter((x) => !gone.has(x.id));
 
   function say(text: string, failed = false) {
     setProblem(failed ? text : null);
+    setMessage(!failed && text ? text : null);
     onSay(text);
   }
 
@@ -169,7 +178,6 @@ export function Topics({
     setStage({ kind: "idle" });
     say(`${t.saved(total)} ${t.NEXT}`);
     onChanged();
-    opener.current?.focus();
   }
 
   async function remove(topic: TopicRow) {
@@ -219,6 +227,9 @@ export function Topics({
         <p role="status" className={s.note}>
           {t.FINDING}: {stage.read}
         </p>
+      )}
+      {message && stage.kind !== "picking" && (
+        <p className={s.note}>{message}</p>
       )}
       {problem && stage.kind !== "picking" && (
         <p className={s.refused}>{problem}</p>
@@ -300,6 +311,7 @@ export function Topics({
                 if (stage.saving) return;
                 setStage({ kind: "idle" });
                 setProblem(null);
+                setMessage(null);
               }}
             >
               {t.CANCEL}
