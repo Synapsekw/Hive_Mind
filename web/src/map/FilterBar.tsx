@@ -15,6 +15,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { chipFit } from "./chipFit";
 import type { Preview } from "./MapCanvas";
 import type { MapModel, NodeKind } from "./types";
 import s from "./map.module.css";
@@ -288,20 +289,32 @@ export function FilterBar({
       const plusW = plus?.getBoundingClientRect().width ?? 0;
       setNeed(Math.max(0, Math.ceil(full)));
       setLeast(widths.length ? Math.ceil(plusW) : 0);
-      const room = r.clientWidth;
-      if (full <= room + 0.5) return setFit(Infinity);
-      let used = plusW + gap;
-      let k = 0;
-      while (k < widths.length && used + widths[k]! + (k ? gap : 0) <= room)
-        used += widths[k]! + (k++ ? gap : 0);
-      // Room left for a chip's start: the next one shows, its name cut short.
-      if (k < widths.length && room - used - (k ? gap : 0) >= MIN_CHIP) k++;
-      setFit(k);
+      setFit(
+        chipFit({
+          widths,
+          gap,
+          room: r.clientWidth,
+          plus: plusW,
+          min: MIN_CHIP,
+        }),
+      );
     };
     compute();
     const ro = new ResizeObserver(compute);
     ro.observe(r);
-    return () => ro.disconnect();
+    // A web font that arrives late changes every chip's width.
+    let gone = false;
+    const fonts = typeof document !== "undefined" ? document.fonts : undefined;
+    fonts?.ready?.then(
+      () => {
+        if (!gone) compute();
+      },
+      () => {},
+    );
+    return () => {
+      gone = true;
+      ro.disconnect();
+    };
   }, [chipSig]);
   const shownChips = fit >= chips.length ? chips : chips.slice(0, fit);
   const hidden = chips.length - shownChips.length;
@@ -325,10 +338,14 @@ export function FilterBar({
     setOpen(w);
   };
 
-  // Focus leaving the bar closes the list; a press is left to the outside-press handler.
+  // Focus moving anywhere but the open list and its own button (another list's button, a chip,
+  // out of the bar) closes the list and leaves focus where it went. A null target (a press on a
+  // non-focusable spot) is left to the outside-press handler.
   const onBlur = (e: FocusEvent<HTMLDivElement>) => {
     const to = e.relatedTarget as Node | null;
-    if (open && to && !root.current?.contains(to)) close(false);
+    if (!open || !to) return;
+    const slot = buttons.current[open]?.parentElement;
+    if (!slot?.contains(to)) close(false);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -378,7 +395,7 @@ export function FilterBar({
           type="button"
           className={s.filterButton}
           aria-expanded={open === w}
-          aria-controls={`${id}-${w}`}
+          aria-controls={open === w ? `${id}-${w}` : undefined}
           onClick={() => toggleOpen(w)}
         >
           {labels[w]}
@@ -545,7 +562,7 @@ export function FilterBar({
           type="button"
           className={s.filterButton}
           aria-expanded={open === "legend"}
-          aria-controls={`${id}-legend`}
+          aria-controls={open === "legend" ? `${id}-legend` : undefined}
           onClick={() => toggleOpen("legend")}
         >
           Legend

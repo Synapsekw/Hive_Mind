@@ -243,21 +243,20 @@ export function HiveMap({
   // In Rings by Links or Time a group's name is a note's title or a month, not a word the user
   // filed by, so the search does not light whole groups by it.
   const groupNames = view !== "rings" || arrange === "folder";
-  const on = useMemo(
-    () => lit(model, { topics, kinds, members, q, sel, groupNames }),
-    [model, topics, kinds, members, q, sel, groupNames],
+  // What the filter and the search light, without the selection. The bar's count follows only
+  // this, so selecting a dot runs `lit` once (for `on`) and leaves the count alone.
+  const base = useMemo(
+    () => lit(model, { topics, kinds, members, q, sel: null, groupNames }),
+    [model, topics, kinds, members, q, groupNames],
   );
-  // The bar's count follows the filter and the search, not the selection. A filter change clears
-  // the selection, so it reuses `on` and runs `lit` only once.
-  const counts = useMemo(
+  const counts = useMemo(() => shown(model, base), [model, base]);
+  // With no selection `on` is `base` itself, so the canvas caches keyed on it still hit.
+  const on = useMemo(
     () =>
-      shown(
-        model,
-        sel === null
-          ? on
-          : lit(model, { topics, kinds, members, q, sel: null, groupNames }),
-      ),
-    [model, on, sel, topics, kinds, members, q, groupNames],
+      sel === null
+        ? base
+        : lit(model, { topics, kinds, members, q, sel, groupNames }),
+    [base, model, topics, kinds, members, q, sel, groupNames],
   );
   const hits = query ? on.filter(Boolean).length : 0;
   const selNode = sel !== null ? model.nodes[sel] : undefined;

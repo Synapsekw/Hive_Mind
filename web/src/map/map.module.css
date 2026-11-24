@@ -672,7 +672,13 @@
 }
 
 /* In the row a chip may give up some of its name; the measuring copy keeps every chip whole. */
+/* Chips keep their width; only the last one shown may be cut short when room runs out. */
 .filterChips > .filterChip {
+  flex-shrink: 0;
+}
+
+.filterChips > .filterChip:last-child:not(.filterMore),
+.filterChips > .filterChip:has(+ .filterMore) {
   flex-shrink: 1;
   min-width: 0;
 }
@@ -1052,6 +1058,21 @@
 
 .fill[data-me] {
   background: var(--grad);
+}
+
+/* Played once and the panel folded: unfolding shows them drawn, not drawing again. */
+.today[data-played] .sparkLine,
+.today[data-played] .sparkArea,
+.today[data-played] .fill {
+  animation: none;
+}
+
+.today[data-played] .sparkLine {
+  stroke-dashoffset: 0;
+}
+
+.today[data-played] .sparkArea {
+  opacity: 1;
 }
 
 .count {

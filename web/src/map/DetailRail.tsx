@@ -1,7 +1,7 @@
 // The right rail: today's activity until something is selected, then what it is, who wrote
 // it and what it connects to. Every title is rendered as a text node.
 import Link from "next/link";
-import { useEffect, useId, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { Preview } from "./MapCanvas";
 import type { Activity, MapModel, ModelNode } from "./types";
 import { useFold, useFoldSide } from "../shell/FoldProvider";
@@ -63,6 +63,7 @@ function Today({
   members,
   onMembers,
   onPreview,
+  folded,
 }: {
   model: MapModel;
   act: Activity;
@@ -70,8 +71,17 @@ function Today({
   members: string[];
   onMembers: (ids: string[]) => void;
   onPreview: (p: Preview | null) => void;
+  folded: boolean;
 }) {
   const shown = useCountUp(act.today);
+  // Folding hides this with display: none, and showing it again would replay the sparkline and
+  // bar animations. Once they have been seen and the panel folds, they stay drawn.
+  const seen = useRef(false);
+  const [played, setPlayed] = useState(false);
+  useEffect(() => {
+    if (!folded) seen.current = true;
+    else if (seen.current) setPlayed(true);
+  }, [folded]);
   const grad = useId();
   const series = daySeries(act);
   const total = series.reduce((a, b) => a + b, 0);
@@ -79,7 +89,7 @@ function Today({
   const max = Math.max(1, ...act.perMember.map((m) => m.count));
   const me = new Set(model.members.filter((m) => m.isMe).map((m) => m.id));
   return (
-    <section className={s.today}>
+    <section className={s.today} data-played={played || undefined}>
       <div>
         <p className={s.eyebrow}>Today</p>
         {act.today === 0 ? (
@@ -435,6 +445,7 @@ export function DetailRail({
               members={members}
               onMembers={onMembers}
               onPreview={onPreview}
+              folded={folded}
             />
           )}
         </div>
