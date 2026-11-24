@@ -55,11 +55,13 @@ Timeline to follow when a note was created.
 ## Open threads
 
 - Not run on the real project yet: the re-import of the DRA folder is Danijel's test.
-- The browser tests were not rerun after the review fixes (those touched the database and the
-  import's server code, covered by unit and database tests).
+- After the merge the vault and map browser tests were rerun on `develop`: 163 passed.
+- Defect found after the merge: when the map is zoomed out to fit (seen at a 1,100 px window) the
+  Timeline's quarter labels overprint each other; the text keeps its size while the columns
+  shrink. Likely fix: thin the labels in `web/src/map/renderer.ts` when they would collide.
+  Danijel decided to wait until `task/map-chrome` merges.
 - Accepted limits: a copied vault may carry the copy day as every file's time; the 5,000-item cap
-  still picks by last change; one old note widens the scale for the whole hive; wide labels
-  ("Q4 2026") were not checked at small window sizes.
+  still picks by last change; one old note widens the scale for the whole hive.
 - Still open from before: run "Connect wiki links" on the DRA vault and time `map_graph`; test
   results for delete a hive, folder import and wiki links; then promote `develop` to `main`.
 
