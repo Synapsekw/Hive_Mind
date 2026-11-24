@@ -179,19 +179,29 @@ begin
       new.session_id := public._agent_session();
     else
       perform public._agent_session();
-      new.session_id := old.session_id;
+      new.session_id := case
+        when new.session_id is null and old.session_id is not null
+             and not exists (select 1 from public.sessions s where s.id = old.session_id)
+        then null  -- the foreign key emptying a deleted session's reference
+        else old.session_id
+      end;
     end if;
     return new;
   end if;
   if tg_op = 'UPDATE' then
-    new.session_id := old.session_id;
+    new.session_id := case
+      when new.session_id is null and old.session_id is not null
+           and not exists (select 1 from public.sessions s where s.id = old.session_id)
+      then null  -- the foreign key emptying a deleted session's reference
+      else old.session_id
+    end;
     return new;
   end if;
   -- A person: only their own open upload session.
   if new.session_id is not null and not exists (
        select 1 from public.sessions s
         where s.id = new.session_id and s.agent_id is null and s.ended_at is null
-          and s.member_id = new.member_id
+          and s.member_id = new.member_id and s.workspace_id = new.workspace_id
           and s.member_id in (select public.my_member_ids())) then
     raise exception 'not your upload session';
   end if;
@@ -295,8 +305,12 @@ begin
   if public.jwt_agent_id() is not null or (select auth.uid()) is null then
     raise exception 'only a person uploads in the app';
   end if;
-  if not exists (select 1 from public.notes n where n.id = p_note
-                  and n.member_id in (select public.my_member_ids())) then
+  -- The note is in the session's own workspace: a session is read by whoever
+  -- reads its note, so it must not be pointed at a note of another hive.
+  if not exists (select 1 from public.notes n
+                   join public.sessions x on x.id = p_session
+                  where n.id = p_note and n.workspace_id = x.workspace_id
+                    and n.member_id in (select public.my_member_ids())) then
     raise exception 'not your note';
   end if;
   update public.sessions

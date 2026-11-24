@@ -484,3 +484,87 @@ test("an app pass cannot end a session", async () => {
     /an app pass cannot do this/,
   );
 });
+
+test("deleting a session empties the references of its notes and files", async () => {
+  const agent = await h.agentFor("dani");
+  const n = await h.addNote("dani", "d1", { as: agent, headers: KEY("d1") });
+  const f = await h.saveFile(agent, "dani", "d1.pdf", { headers: KEY("d1") });
+  assert.ok(n.session_id && f.session_id === n.session_id);
+  await h.db.exec("reset role");
+  await h.db.query(`delete from public.sessions where id = $1`, [n.session_id]);
+  const [note] = (
+    await h.db.query(`select session_id from public.notes where id = $1`, [
+      n.id,
+    ])
+  ).rows;
+  const [file] = (
+    await h.db.query(`select session_id from public.files where id = $1`, [
+      f.id,
+    ])
+  ).rows;
+  assert.equal(note.session_id, null);
+  assert.equal(file.session_id, null);
+});
+
+test("a person cannot tag a write with an agent's session or another workspace's upload session", async () => {
+  const agent = await h.agentFor("dani");
+  const a = await h.addNote("dani", "t1", { as: agent, headers: KEY("t1") });
+  const tag = (sid, ws = h.ws.dani) =>
+    h.as(
+      dani(),
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title, session_id)
+       values ($1, $2, $3, $4, 't', $5)`,
+      [h.hive, h.members.dani, ws, `tag-${Math.random()}.md`, sid],
+    );
+  await assert.rejects(tag(a.session_id), /not your upload session/);
+  // A second workspace of dani's, in the same hive.
+  const [{ id: w2 }] = await h.as(
+    dani(),
+    `insert into public.workspaces (hive_id, member_id, name)
+     values ($1, $2, 'Second') returning id`,
+    [h.hive, h.members.dani],
+  );
+  const [{ id: sid }] = await h.as(
+    dani(),
+    `select public.upload_session_open($1) as id`,
+    [w2],
+  );
+  await assert.rejects(tag(sid), /not your upload session/); // in ws.dani
+  await tag(sid, w2); // its own workspace works
+});
+
+test("an upload session ends only on a note of its own workspace, not of another hive", async () => {
+  const [{ id: hive2 }] = await h.as(
+    dani(),
+    `select public.create_hive('Second hive', 'Dani two') as id`,
+  );
+  const [other] = await h.as(
+    dani(),
+    `select m.id as member, w.id as ws from public.members m
+       join public.workspaces w on w.member_id = m.id
+      where m.hive_id = $1 limit 1`,
+    [hive2],
+  );
+  const [foreign] = await h.as(
+    dani(),
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     values ($1, $2, $3, 'f.md', 'f') returning id`,
+    [hive2, other.member, other.ws],
+  );
+  const [{ id: sid }] = await h.as(
+    dani(),
+    `select public.upload_session_open($1) as id`,
+    [h.ws.dani],
+  );
+  await assert.rejects(
+    h.as(dani(), `select public.upload_session_end($1, $2)`, [sid, foreign.id]),
+    /not your note/,
+  );
+  const [s] = await h.as(
+    dani(),
+    `select ended_at, note_id from public.sessions where id = $1`,
+    [sid],
+  );
+  assert.equal(s.ended_at, null);
+  assert.equal(s.note_id, null);
+});
