@@ -84,27 +84,29 @@ size_bytes, created_at`); `files_select` shows a row to its owner and to readers
 
 **`public.sessions`**
 
-| column                       | notes                                                              |
-| ---------------------------- | ------------------------------------------------------------------ |
-| `id uuid pk`                 |                                                                    |
-| `hive_id, member_id`         | from the workspace                                                 |
-| `workspace_id`               |                                                                    |
-| `agent_id uuid null`         | null = a person's upload batch                                     |
-| `client_key text not null`   | stdio process uuid, or remote MCP session id, or upload batch uuid |
-| `title text null`            | set on end; a person may retitle their own                         |
-| `summary text null`          | set on end                                                         |
-| `note_id uuid null`          | the session note; `on delete set null`                             |
-| `started_at, last_active_at` |                                                                    |
-| `ended_at timestamptz null`  | null = open                                                        |
+| column                       | notes                                                                 |
+| ---------------------------- | --------------------------------------------------------------------- |
+| `id uuid pk`                 |                                                                       |
+| `hive_id, member_id`         | from the workspace                                                    |
+| `workspace_id`               |                                                                       |
+| `agent_id uuid null`         | null = a person's upload batch                                        |
+| `client_key text not null`   | `<agent_id>:<x-hive-session>` for agents, `upload:<uuid>` for uploads |
+| `agent_name text not null`   | copied from the agent at open (`Browser upload` for uploads)          |
+| `title text null`            | set on end; a person may retitle their own                            |
+| `summary text null`          | set on end                                                            |
+| `note_id uuid null`          | the session note; `on delete set null`                                |
+| `started_at, last_active_at` |                                                                       |
+| `ended_at timestamptz null`  | null = open                                                           |
 
-`unique (member_id, client_key)`; index `(hive_id, started_at desc)`; partial index on
+Unique `(member_id, client_key)` among open sessions; index `(hive_id, started_at desc)`; partial index on
 `last_active_at where ended_at is null` for the sweep.
 
 - **Read:** the owner, or anyone who can read `note_id`. An open session (no note yet) is
   owner-only.
-- **Write:** only through `security definer` functions — `session_touch(client_key)` and
-  `session_end(client_key, title, summary)` for agents; `upload_session_open()` and
-  `session_retitle(id, title)` for persons. No direct insert/update/delete policy.
+- **Write:** only through `security definer` functions and triggers — the tagging trigger and
+  `session_end(title, summary)` for agents; `upload_session_open(workspace)`,
+  `upload_session_end(session, note)` and `session_retitle(id, title)` for persons;
+  `close_idle_sessions()` for the scheduled sweep. No direct insert/update/delete policy.
 
 **`files` and `notes` gain `session_id uuid null references sessions on delete set null`.**
 An insert trigger fills it from the caller's open session for the client key in the request
@@ -148,10 +150,14 @@ its files with `note_id` null — owner-only.
 
 ### 2. Agent side (MCP) and the session lifecycle
 
-- The MCP server creates a `client_key` once per process (stdio) or uses the MCP session id
-  (remote connector) and sends it as `x-hive-session` on every database request.
-- The first **write** (`hive_write`, `hive_append`, `hive_save_file`) calls `session_touch`, which
-  opens the session or bumps `last_active_at`. Reads never open one.
+- The stdio MCP server makes one random key per process and sends it as `x-hive-session` on
+  every database request. **The remote connector is stateless** (a fresh server per HTTP
+  request, no MCP session id), so it sends no header and its agent gets the key `default`: one
+  rolling session per remote agent, broken by `hive_end_session` or 2 h idle. (Corrected while
+  planning: the first wording said the remote connector would use the MCP session id.)
+- The tagging trigger on `notes` (insert and update) and `files` (insert) opens the session or
+  bumps `last_active_at` on any **write**; an open session idle ≥ 2 h is closed first and a new
+  one opened. Reads never open one. No MCP call is needed for this.
 - **New tool `hive_end_session(title, summary)`** → `session_end`:
   1. writes the session note at `Sessions/<YYYY-MM-DD> <title>.md` (inherits the owner's rule),
      body = summary + generated list of the session's notes and files;
