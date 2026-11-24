@@ -3,7 +3,7 @@
 // The open note: title, path, last change, who wrote it, the sharing control and Delete for the
 // person's own notes (a colleague's note says how it reached you instead), release for a held
 // note, then the rendered text.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { longDate } from "./format";
 import { folderMark, noteMark } from "./marks";
@@ -210,7 +210,11 @@ export function Preview({
       ? (data.folders.find((f) => f.path === n.rule_folder) ?? null)
       : null;
     body = (
-      <article className={s.article}>
+      <article
+        key={n.id}
+        className={`${s.article} rise`}
+        style={{ "--rise-delay": "0s" } as CSSProperties}
+      >
         <header className={s.head}>
           <h2 className={s.noteTitle}>{n.title}</h2>
           <p className={s.path}>{n.path}</p>

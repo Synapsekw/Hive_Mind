@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "../../../lib/supabase/server";
+import { safeNext } from "../../../lib/safe-next";
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,5 +10,10 @@ export async function POST(request: NextRequest) {
   } catch {
     // Not configured or already signed out: nothing to clear.
   }
-  return NextResponse.redirect(new URL("/login", request.url), 303);
+  // Always on to sign-in. A `next` is where sign-in returns afterwards: a path on this site
+  // only (the Join page's "Not you?" sends `/join`), checked again there before it is followed.
+  const next = safeNext(request.nextUrl.searchParams.get("next"));
+  const to =
+    next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`;
+  return NextResponse.redirect(new URL(to, request.url), 303);
 }

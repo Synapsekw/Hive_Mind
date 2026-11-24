@@ -32,7 +32,8 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 | Untrusted self-hosted agent          | Open-source agent with no vendor safety layer                                       | Lower trust tier: reads shared notes only, writes are quarantined until the member releases them                                                                                                                                                                | built    |
 | Prompt injection via note content    | A shared note tells agents to exfiltrate data                                       | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine                                                                                                                                                               | partly   |
 | Departing member                     | Colleague leaves with access                                                        | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision                                                                                                                                                                           | designed |
-| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs; secrets in a vault; MFA on the owner account                                                                                                                                                                          | designed |
+| Joining a hive unasked or uninvited  | A stranger signs up, or an owner adds a person who never agreed                     | Sign-ups off; an account exists only through an emailed invitation; a person becomes a member only by pressing Join, and only for their own confirmed email (section 3)                                                                                         | built    |
+| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs and the invitation mail function; secrets in a vault; MFA on the owner account                                                                                                                                         | designed |
 | Overlap detection as a side channel  | Notifications reveal what a colleague works on                                      | Notification names only the entity; content never moves before double accept; mute per folder                                                                                                                                                                   | designed |
 | The map as a side channel            | Locked dots show that a colleague has notes in a folder                             | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents                                                                                                                                                               | built    |
 
@@ -61,8 +62,9 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   that protects it is that it never leaves the function's secrets.
 - Function secrets are readable by every Edge Function of the project, not only by
   `agent-session`. Any function deployed to this project can therefore read the key, so a new
-  function is reviewed as code that holds it. There are two today: `agent-session` and the
-  connector, `mcp` (section 10). Both sign with it and neither logs it.
+  function is reviewed as code that holds it. There are three today: `agent-session`, the
+  connector `mcp` (section 10) and `invite-email` (below). The first two sign with it and do
+  not log it; `invite-email` does not read it.
 - What the function itself can sign is narrow. It writes `role` and `aud` as fixed values
   (`authenticated`), and copies only validated ids from `agent_login`: the member's user id as
   `sub`, `agent_id`, `workspace_id`, and a trust tier that must be one of the two known ones.
@@ -96,42 +98,167 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   machine runs a build from after 2026-11-23, and the function is using `HIVE_PUBLISHABLE_KEY`
   (set by the setup script), not the legacy anon key. The legacy API keys must not be disabled
   before that either (see [hosted-db-bringup.md](hosted-db-bringup.md#set-up-agent-sign-in)).
-- The owner invites a person by email in Settings ("Invite a member"). A person with a confirmed
-  account is added at once; anyone else gets an invitation that lasts 14 days, can be revoked,
-  and is honoured when they first sign in with that email. The app sends no email and there is
-  no invitation link or code: whoever controls the invited mailbox joins, and nobody else can.
-- Invitations depend on two Supabase project settings (dashboard → Authentication): **"Allow new
-  users to sign up" on**, so the invited person's first "Email me a link" can create their
-  account, and **"Confirm email" on**. The design rests on the second. With it off, Supabase
-  treats a password sign-up as confirmed without proof, so someone who knows an invited address
-  could sign up with it and join in that person's place. The database only lets a confirmed
-  email join, and matches it to the invitation exactly after lower-casing. Nothing in the app
-  can check the setting, so it must stay on.
+  A third condition comes with invitation email: `invite-email` must have `HIVE_SECRET_KEY`
+  set, or it is still using the legacy service-role key and stops sending.
+- **Invitations.** The owner invites a person by email in Settings ("Invite a member"). The
+  server emails that address an invitation, and the person becomes a member only by pressing
+  **Join**. Nobody is added to a hive without that, whether or not they already have an
+  account. In order:
+  - `invite_member` saves an invitation and returns its id. It never creates a member. It
+    refuses an address that already belongs to a member of the hive, an address with an open
+    invitation, and an invitation past either daily cap ("too many invitations today"): 20 per
+    hive in 24 hours, and 20 per inviting person in 24 hours across all their hives. An
+    invitation lasts 14 days and the owner can revoke it. There is no Decline: an
+    invitation that is ignored lapses.
+  - The web app then calls the Edge Function `invite-email` with the owner's own session. The
+    function decides nothing. It asks the database, as the caller, for the address
+    (`invitation_to_email`), and the database answers only for the hive's owner, signed in as a
+    person, and an invitation that is open and not expired. The same call enforces two limits
+    per invitation: one email every 2 minutes ("wait before sending again") and 5 emails in
+    all ("too many emails for this invitation"). The time and the count are stamped in that
+    call, before any mail goes out, so a send that then fails still counts. The call also
+    writes `member.invitation_emailed` to the audit log. **Send again** in Settings goes the
+    same way.
+  - The function answers 401 when there is no bearer and 503 when one of its secrets is
+    missing; it checks its secrets before it calls anything. A refusal by the database is 403,
+    the 2-minute wait is 429 and the 5-email limit is 409. A failure at Supabase Auth or Resend
+    is 502.
+  - With the project's secret key the function asks Supabase Auth for a sign-in link for that
+    address, without Auth sending anything, and sends one email through Resend. The email has a
+    fixed subject and text and one link, to `/join` on the web app. It names no hive and no
+    person: those are words the owner chose, and would let an owner dress up a phishing mail.
+    The person sees them on the Join page, after sign-in.
+  - Before it mails a first-time (`invite`) link, the function sets a fresh random password on
+    the account, which is not yet confirmed, and stores that password nowhere. A password that
+    someone else registered for the invited address beforehand stops working at that moment.
+    The password of a person whose account is confirmed is never touched.
+  - Opening the link shows a **Continue** button and spends nothing, so a mail scanner that
+    opens links ahead of the person cannot use the link up. Continue signs the person in.
+  - If someone is already signed in on that browser, the Continue screen says so before
+    anything happens: who is signed in, that continuing signs this browser out of that account,
+    and that the invited address is signed in instead. The button then reads "Sign out and
+    continue", and a link "Stay signed in as &lt;email&gt;" leaves the invitation link unused.
+    Pressing it reads who is signed in, signs this browser out (this browser only: the
+    person's other devices stay signed in, and that one session is ended at the auth server),
+    and only then verifies the link, over cookies that hold nothing of the old session. A link
+    that turns out to have expired therefore leaves nobody signed in, as the button's label
+    says. The server then asks the auth server who is signed in and requires it to be the
+    person the link belongs to; if it is anyone else, the browser is signed out again and the
+    page says the link has expired. When the account did change, the list that follows says
+    so; when the link was for the account already signed in, it says nothing.
+  - The proxy does not read or refresh the session on requests that change it themselves:
+    Continue's request, `/auth/confirm` and `/auth/signout`. Otherwise two parts of the app
+    write the session cookies on one response, and on the host the proxy's cookies come last:
+    a person signed in as A who pressed Continue on B's link stayed signed in as A (found by
+    hand on the test site, fixed, and pinned by tests).
+  - The page then lists the invitations waiting for their address (`my_invitations`: hive name, who
+    invited them) with **Join** beside each, and shows "Signed in as &lt;email&gt;" with a
+    sign-out link, so a person on a shared computer or with two addresses can see which account
+    is about to join. Join is `accept_invitation`: it creates the member
+    and its `Main` workspace and marks the invitation accepted.
+  - **Optional password, for a new person only.** A person who came in through a first
+    invitation link (`invite`, the kind mailed to an address with no confirmed account) is
+    offered one more page after Join, `/join/password`: "Choose a password", with **Save
+    password** and **Skip for now**. Without it they could only ever sign in by emailed link.
+    - It is offered only right after such a link. Continue leaves a cookie (`hm_new`: one
+      hour, `HttpOnly`, `SameSite=Lax`, `Secure` in production, sent to `/join` paths only),
+      and the page and its action do nothing without it. A sign-in link for an existing
+      account removes it. Saving or skipping removes it. The cookie carries no secret and
+      grants nothing: a signed-in person can change their own password through the auth
+      server in any case.
+    - The page is closed to a visitor with no session, is never cached, and sends no referrer.
+    - Rules, checked in the browser and again on the server: at least 10 characters, at most
+      72 bytes (what the auth server's hash reads), both fields the same. The auth server may
+      still refuse a password (too weak or known from a leak, as the project is configured);
+      the page then says "That password was not accepted. Try a different one." and never
+      shows the auth server's own words.
+    - The password is sent once, to the auth server, with the person's own session (never a
+      secret key). The app never stores it and never logs it, the form or the auth server's
+      answer; a refusal is logged as one fixed phrase with the error's code and status. It is
+      never sent back to the page, and the fields are emptied after a refusal.
+  - The link lasts as long as the project's email link lifetime, set to 24 hours, and works
+    once. After that the page says the link has expired; the person signs in with "Email me a
+    link" using the invited address and is led back to `/join`, or the owner uses Send again.
+    The invitation itself is not spent by an expired link.
+- The database lets a person see and accept only invitations for their own confirmed email,
+  matched exactly after lower-casing. Someone else's invitation is "invitation not found". An
+  account whose address is not confirmed sees none and joins nothing.
 - Only the hive owner can read invitations, including the email addresses in them; an agent
-  never can. Inviting, revoking and joining are refused for any agent identity.
-- The owner learns whether an email has an account: the form answers "added" for one that has
-  and "invited" for one that has not. Only the owner sees it.
-- Accepted gap: sign-ups stay open until invitations are emailed by the server. Until then a
-  stranger can create an account on the project. They are in no hive and see nothing of
-  anyone's, but can start a hive of their own.
-- Accepted gaps that follow from open sign-ups, all closed by emailed invitations with sign-ups
-  off (the next step) and not before:
-  - **Nobody consents to being added.** A stranger who has started a hive of their own can add
-    any confirmed account to it, or leave an invitation for an address that has no account yet.
-    They read nothing by doing so. For a person who already has a hive the app keeps showing
-    that one (it uses the person's oldest membership); a person with no hive yet would land in
-    the stranger's hive at first sign-in. The same call tells the stranger whether an email has
-    an account on the project.
-  - **A password set before the address was confirmed.** Someone who knows an invited address
-    can sign up with it and a password of their choosing. If the invited person then clicks
-    that "Confirm your signup" email instead of asking for a sign-in link, the account is
-    confirmed with the other person's password and joins. Whether a later sign-in link clears
-    such a password depends on the Supabase Auth version and has not been checked on the
-    hosted project. Until sign-ups are closed: invite only addresses you have told nobody
-    else about, tell the person to use "Email me a link" themselves, and treat an unexpected
-    "Confirm your signup" email as a warning.
-  - A person who already has a hive and signs in with a password does not pick up a waiting
-    invitation; it is honoured the next time they use an emailed link.
+  never can. Inviting, sending, revoking, listing and joining are refused for an agent identity,
+  a self-hosted identity and an app's pass.
+- The owner is not told whether an address has an account: Settings answers "Invitation sent"
+  either way, and neither the database's nor the function's answer says which kind of link was
+  made. The owner can still infer it, because the time a send takes differs between the two
+  kinds (an accepted gap, below).
+- `add_member` can no longer be called by a signed-in person: it added any account to a hive
+  without asking. `claim_invitations`, which joined a person silently at sign-in, is gone.
+- What the mail function holds. Its secrets are the Resend key (`RESEND_API_KEY`, a key with
+  sending access only), the sender (`HIVE_INVITE_FROM`), the web app's address
+  (`HIVE_SITE_URL`) and the project's secret key (`HIVE_SECRET_KEY`; without it the function
+  uses the Edge runtime's legacy `SUPABASE_SERVICE_ROLE_KEY`). The secret key bypasses every
+  sharing rule, so it falls under the "server-only" invariant; the function uses it for one
+  call, the sign-in link, and never against the database. They are set in the dashboard, not in
+  a `.env`. Nothing the function logs carries an address, a token or a key: a failure is one
+  fixed phrase. It is deployed without JWT verification, like the other two functions, because
+  the database checks the caller.
+- Two Supabase project settings (dashboard → Authentication) belong to this design:
+  - **"Allow new users to sign up" off.** Only an invitation can then create an account: the
+    function's sign-in link is made with the secret key, which the setting does not stop. A
+    stranger's "Email me a link" or password sign-up creates nothing. It is switched off on the
+    hosted project only after invitation email has been set up and tested by hand
+    ([hosted-db-bringup.md](hosted-db-bringup.md#invitation-email)). Until then a stranger can
+    still create an account there and start a hive, and someone who knows an invited address
+    can sign up with it and a password before its owner confirms it.
+  - **"Confirm email" on.** The database lets only a confirmed email join. With the setting
+    off, Supabase treats an account as confirmed without proof. Nothing in the app can check
+    either setting.
+- What emailed invitations close. The first and the fourth need sign-ups off; the others hold
+  as soon as the migration is applied:
+  - _A stranger could create an account and start a hive._ No account exists without an
+    invitation.
+  - _Nobody consented to being added._ An owner can no longer add an account, and an
+    invitation does nothing until its addressee presses Join.
+  - _The owner learned whether an email had an account._ The answer is now the same for both;
+    what remains is the difference in timing, listed below.
+  - _A password set before the address was confirmed._ Nobody can sign up with a password, so
+    nobody can attach one to an invited address before its owner confirms it. While sign-ups
+    are still on, the random password the function sets before mailing covers an account that
+    was registered before the invitation email went out, not one registered after it.
+  - _A person who signed in with a password did not pick up a waiting invitation._ Joining no
+    longer depends on how the person signed in: `/join` lists what is waiting for anyone
+    signed in.
+- Accepted gaps that remain:
+  - **A link in a mailbox signs its holder in**, as any emailed sign-in link does. Whoever can
+    read the invited mailbox within the link's 24 hours can sign in as that address and join.
+  - **An owner can send mail to addresses of their choosing**: 20 invitations in 24 hours,
+    counted per hive and per inviting person across all their hives, and per recipient at most
+    5 invitation emails to one address in 24 hours from one person, even by revoking and
+    inviting again. The text is fixed, so the mail cannot carry the owner's words, but it
+    arrives unasked. There is no limit by IP address, and none across people.
+  - **The owner can infer whether an address has an account** from how long a send takes: the
+    function does different work for an address with a confirmed account and for one without.
+    Its answers are the same.
+  - **Inviting disturbs the invited account, without giving access to it.** Inviting an address
+    whose account is not yet confirmed replaces that account's password with a random one and
+    withdraws its open links. Inviting a confirmed address replaces that person's pending
+    sign-in link, so a link they had just asked for stops working. Neither lets the inviter
+    sign in or read anything.
+  - **The emailed code.** With every link Supabase Auth also issues an email code that is valid
+    for the same time, so a 24-hour lifetime gives more time to guess one. Guessing is limited
+    by Auth's own per-IP rate limit, and the code length is set to 10, the maximum, which makes
+    it impractical ([hosted-db-bringup.md](hosted-db-bringup.md#4-supabase-mail-for-sign-in-links)).
+  - **Who may start a hive is not restricted.** Anyone with an account, which now means anyone
+    who was invited, can start a hive of their own and invite from it.
+  - **An invitation creates an account record.** Making the link for an address that has none
+    creates an unconfirmed account at Supabase Auth, before the person has done anything. It
+    is in no hive and reads nothing.
+  - **There is no Decline**, and the invited person cannot stop an owner inviting them again
+    after an invitation lapses or is revoked.
+  - **The secret key is in the function's secrets**, readable by every Edge Function of the
+    project, like the signing key above. While `HIVE_SECRET_KEY` is not set the function
+    depends on the legacy service-role key, so the legacy API keys cannot be disabled.
+  - The sign-in emails Supabase Auth sends itself ("Email me a link") keep Supabase's own
+    templates.
 - Revocation takes effect on the next sign-in; the MCP server re-signs in at least hourly. An
   identity issued before the revocation keeps working until it expires, up to one hour later.
 - Trust tiers: `vendor` (Claude, ChatGPT apps) and `self_hosted` (open-source agents).
@@ -213,10 +340,14 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   note id or the folder's path, and the settings before and after; never a note's text, title or
   path. Only the hive owner can read it, and there is no screen for it yet. Writes with no person
   behind them are not recorded.
-- Built: membership changes write one row each, with the action `member.added` (the owner
-  invited a person who had a confirmed account), `member.invited` (an invitation was saved),
-  `member.joined` (the invited person signed in and became a member) or
+- Built: membership changes write one row each, with the action `member.invited` (the owner
+  saved an invitation), `member.joined` (the invited person pressed Join and became a member),
+  `member.invitation_emailed` (an invitation email was requested, first send or Send again) or
   `member.invitation_revoked`. The detail holds the email and the invitation or member id.
+  `member.added` is no longer written, since nobody is added without joining; rows from before
+  stay in the log. `member.invitation_emailed` is written when the database hands the address
+  to the mail function, before the mail goes out, so a row does not prove delivery. The
+  invitation itself keeps the time of the last one and how many were requested.
 - Built: a note deleted by a person writes one row with the action `note.deleted`. It holds the
   note's id, the person, and two counts in the detail: the links removed and the files left
   without a note. Never the note's path, title or body. The row is written in the same
@@ -244,6 +375,8 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - When is the legacy JWT secret revoked? Agent sign-in no longer uses it (section 3); it stays
   valid until every machine has switched and the function uses `HIVE_PUBLISHABLE_KEY`.
 - Does the `agent-session` function need its own rate limit before colleagues' agents use it?
+- Should starting a hive be limited to named people, now that every account comes from an
+  invitation?
 
 ## 10. The remote connector
 
@@ -321,6 +454,10 @@ it in a Hive Mind window. Setup is in
   Why every address: a pass does not say which address it was issued through, so an app that
   registered a trusted address and one of its own could be approved through the first and
   collect the pass through the second.
+- Note, 2026-11-23: migration `20261123174149` also corrects a whitespace-trimming constant
+  that stripped the letter "v" from the ends of invited emails, names, app names and the
+  redirect list used to rate an app. Before the fix an invitation to an address beginning or
+  ending in "v" was stored wrongly. No hand-registered app was affected.
 - `connector_login` works the tier out again each time, so an app whose registration is not
   fully trusted is never `vendor`, however and whenever it was approved. The tier stored on the
   agent is only what Settings shows; it is written at approval and corrected at each call.

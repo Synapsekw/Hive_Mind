@@ -32,8 +32,8 @@ not duplicate content — it points to the canonical home of each topic.
 - **[Master design spec](superpowers/specs/2026-11-16-hive-mind-design.md)** — the engineering
   source of truth: stack, architecture, data model, sharing rules, MCP server, data flows,
   onboarding, phased build plan, guardrails.
-- [Security & trust](security.md) — threat model, identity and tokens, data handling, the remote
-  connector.
+- [Security & trust](security.md) — threat model, identity and tokens, invitations, data
+  handling, the remote connector.
 - [Agent integration](agent-integration.md) — supported agents (the local server, and the remote
   connector at `https://<site>/mcp`), tool surface, guardrail layers, the instruction template,
   the housekeeper.
@@ -56,6 +56,11 @@ not duplicate content — it points to the canonical home of each topic.
   [plan](superpowers/plans/2026-11-23-remote-connector.md). An app connects at
   `https://<site>/mcp` through a Hive Mind sign-in window and gets six tools; `hive_save_file`
   stays in the local server.
+- Emailed invitations:
+  [spec](superpowers/specs/2026-11-23-emailed-invitations-design.md),
+  [plan](superpowers/plans/2026-11-23-emailed-invitations.md). The owner invites an address, the
+  `invite-email` function mails it, and the person joins at `/join` by pressing Join. Sign-ups
+  are then switched off.
 
 ## How we build here
 
@@ -67,6 +72,7 @@ not duplicate content — it points to the canonical home of each topic.
 
 - [`vault/moc/operations.md`](../vault/moc/operations.md) — Supabase, MCP, migrations.
 - [Bringing up a hosted database](hosted-db-bringup.md) — migrations, first hive, first agent
-  token, hosting on Netlify, connecting Claude and ChatGPT.
+  token, hosting on Netlify, connecting Claude and ChatGPT, invitation email and closing
+  sign-ups.
 - [`vault/decisions/`](../vault/decisions/) — decisions and gotchas.
 - [`vault/sessions/`](../vault/sessions/) — working-session notes.

@@ -7,7 +7,7 @@
 // action keeps its row and says so. The decline question is client state only.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Shell } from "../shell/Shell";
 import { shortDate } from "../vault/format";
 import {
@@ -28,6 +28,8 @@ import type {
 import s from "./inbox.module.css";
 
 const FAILED = "That didn't work. Try again.";
+/** How long an answered row takes to collapse before it leaves the list. */
+const LEAVE_MS = 350;
 /** A confirming Decline sooner than this after the question opened is taken as a double click. */
 const CONFIRM_AFTER_MS = 500;
 
@@ -53,6 +55,8 @@ export function Inbox({
   const router = useRouter();
   // Rows answered with `ok`. They stay out even if a refresh is slow to drop them.
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  // Rows answered with `ok` that are collapsing: they leave `gone` after LEAVE_MS.
+  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [failed, setFailed] = useState<ReadonlySet<string>>(new Set());
   // The row showing the decline question.
@@ -60,6 +64,15 @@ export function Inbox({
   const [said, setSaid] = useState("");
   // The same as `busy`, readable at once by a second press that arrives before the render.
   const running = useRef(new Set<string>());
+  // The collapse timers, cleared on unmount so nothing refreshes after the page is left.
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const all = timers.current;
+    return () => {
+      for (const t of all) clearTimeout(t);
+      all.clear();
+    };
+  }, []);
   const heading = useRef<HTMLHeadingElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const target = useRef<Target | null>(null);
@@ -112,10 +125,10 @@ export function Inbox({
     } catch {
       ok = false;
     }
-    running.current.delete(id);
-    setBusy((set) => without(set, id));
     setAsking((open) => (open === id ? null : open));
     if (!ok) {
+      running.current.delete(id);
+      setBusy((set) => without(set, id));
       if (holdsFocus(id)) target.current = { row: id };
       setFailed((set) => withId(set, id));
       setSaid(FAILED);
@@ -136,9 +149,24 @@ export function Inbox({
         ? { row: beside.dataset.row }
         : { heading: true };
     }
-    setGone((set) => withId(set, id));
     setSaid(done);
-    router.refresh();
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // An answered row stays `running` and `busy` until it is gone, so a second press cannot
+    // answer it again while it collapses.
+    const leave = () => {
+      running.current.delete(id);
+      setBusy((set) => without(set, id));
+      setGone((set) => withId(set, id));
+      setLeaving((set) => without(set, id));
+      router.refresh();
+    };
+    if (still) return leave();
+    setLeaving((set) => withId(set, id));
+    const timer = setTimeout(() => {
+      timers.current.delete(timer);
+      leave();
+    }, LEAVE_MS);
+    timers.current.add(timer);
   }
 
   function ask(id: string) {
@@ -159,7 +187,11 @@ export function Inbox({
   return (
     <div className={s.root}>
       <Shell current="inbox" inbox={waiting} />
-      <main aria-label="Inbox" className={s.panel}>
+      <main
+        aria-label="Inbox"
+        className={`${s.panel} rise`}
+        style={{ "--rise-delay": "0.08s" } as CSSProperties}
+      >
         <header className={s.bar}>
           <h1 ref={heading} tabIndex={-1} className={s.title}>
             Inbox
@@ -192,6 +224,7 @@ export function Inbox({
                     item={l}
                     now={now}
                     busy={busy.has(l.id)}
+                    leaving={leaving.has(l.id)}
                     failed={failed.has(l.id)}
                     asking={asking === l.id}
                     onAccept={() =>
@@ -242,6 +275,7 @@ export function Inbox({
                     item={h}
                     now={now}
                     busy={busy.has(h.id)}
+                    leaving={leaving.has(h.id)}
                     failed={failed.has(h.id)}
                     onRelease={() =>
                       act(
@@ -292,6 +326,7 @@ function LinkRow({
   item,
   now,
   busy,
+  leaving,
   failed,
   asking,
   onAccept,
@@ -302,6 +337,7 @@ function LinkRow({
   item: LinkItem;
   now: number;
   busy: boolean;
+  leaving: boolean;
   failed: boolean;
   asking: boolean;
   onAccept: () => void;
@@ -314,85 +350,89 @@ function LinkRow({
   return (
     <li
       data-row={item.id}
-      className={s.item}
+      data-leaving={leaving || undefined}
+      inert={leaving || undefined}
+      className={s.cell}
       aria-busy={off}
       onKeyDown={(e) => {
         if (e.key === "Escape" && asking) onKeep();
       }}
     >
-      <div className={s.text}>
-        <p className={s.what}>
-          Link your note{" "}
-          <Link
-            href={vaultHref(item.mine.workspaceId, item.mine.id)}
-            className={s.own}
-          >
-            {title}
-          </Link>{" "}
-          with {theirNote(item)}
-        </p>
-        <p className={s.meta}>
-          <span>{proposer(item)}</span>
-          <span>{tierReason(item.tier)}</span>
-          <span>{shortDate(item.createdAt, now)}</span>
-        </p>
-        <p className={s.effect}>
-          <span aria-hidden="true" className={s.glyph} />
-          <span>{acceptEffect(item)}</span>
-        </p>
-      </div>
-      <div className={s.side}>
-        <div
-          role="group"
-          aria-label={`Answer for ${title}`}
-          data-actions
-          className={s.actions}
-        >
-          {asking ? (
-            <>
-              <p className={s.ask}>Decline this link?</p>
-              <button
-                type="button"
-                data-pick="decline"
-                className={s.confirm}
-                aria-disabled={off}
-                onClick={onDecline}
-              >
-                Decline
-              </button>
-              <button
-                type="button"
-                data-pick="keep"
-                className={s.secondary}
-                aria-disabled={off}
-                onClick={onKeep}
-              >
-                Keep
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className={s.primary}
-                aria-disabled={off}
-                onClick={onAccept}
-              >
-                Accept
-              </button>
-              <button
-                type="button"
-                data-pick="decline"
-                className={s.secondary}
-                aria-disabled={off}
-                onClick={busy ? undefined : onAsk}
-              >
-                Decline
-              </button>
-            </>
-          )}
+      <div className={s.item}>
+        <div className={s.text}>
+          <p className={s.what}>
+            Link your note{" "}
+            <Link
+              href={vaultHref(item.mine.workspaceId, item.mine.id)}
+              className={s.own}
+            >
+              {title}
+            </Link>{" "}
+            with {theirNote(item)}
+          </p>
+          <p className={s.meta}>
+            <span>{proposer(item)}</span>
+            <span>{tierReason(item.tier)}</span>
+            <span>{shortDate(item.createdAt, now)}</span>
+          </p>
+          <p className={s.effect}>
+            <span aria-hidden="true" className={s.glyph} />
+            <span>{acceptEffect(item)}</span>
+          </p>
         </div>
-        {failed && <p className={s.refused}>{FAILED}</p>}
+        <div className={s.side}>
+          <div
+            role="group"
+            aria-label={`Answer for ${title}`}
+            data-actions
+            className={s.actions}
+          >
+            {asking ? (
+              <>
+                <p className={s.ask}>Decline this link?</p>
+                <button
+                  type="button"
+                  data-pick="decline"
+                  className={s.confirm}
+                  aria-disabled={off}
+                  onClick={onDecline}
+                >
+                  Decline
+                </button>
+                <button
+                  type="button"
+                  data-pick="keep"
+                  className={s.secondary}
+                  aria-disabled={off}
+                  onClick={onKeep}
+                >
+                  Keep
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={s.primary}
+                  aria-disabled={off}
+                  onClick={onAccept}
+                >
+                  Accept
+                </button>
+                <button
+                  type="button"
+                  data-pick="decline"
+                  className={s.secondary}
+                  aria-disabled={off}
+                  onClick={busy ? undefined : onAsk}
+                >
+                  Decline
+                </button>
+              </>
+            )}
+          </div>
+          {failed && <p className={s.refused}>{FAILED}</p>}
+        </div>
       </div>
     </li>
   );
@@ -402,55 +442,65 @@ function HeldRow({
   item,
   now,
   busy,
+  leaving,
   failed,
   onRelease,
 }: {
   item: HeldItem;
   now: number;
   busy: boolean;
+  leaving: boolean;
   failed: boolean;
   onRelease: () => void;
 }) {
   const title = item.title || item.path;
   return (
-    <li data-row={item.id} className={s.item} aria-busy={busy || undefined}>
-      <div className={s.text}>
-        <p className={s.what}>
-          <span className={s.heldTitle}>{title}</span>
-        </p>
-        <p className={s.path}>{item.path}</p>
-        <p className={s.meta}>
-          <span>
-            {item.agentName
-              ? `Written by ${item.agentName}`
-              : "Written by an agent"}
-          </span>
-          <span>{shortDate(item.updatedAt, now)}</span>
-        </p>
-      </div>
-      <div className={s.side}>
-        <div
-          role="group"
-          aria-label={`Answer for ${title}`}
-          data-actions
-          className={s.actions}
-        >
-          <button
-            type="button"
-            className={s.primary}
-            aria-disabled={busy || undefined}
-            onClick={onRelease}
-          >
-            Release
-          </button>
-          <Link
-            href={vaultHref(item.workspaceId, item.id)}
-            className={s.secondary}
-          >
-            Open in vault
-          </Link>
+    <li
+      data-row={item.id}
+      data-leaving={leaving || undefined}
+      inert={leaving || undefined}
+      className={s.cell}
+      aria-busy={busy || undefined}
+    >
+      <div className={s.item}>
+        <div className={s.text}>
+          <p className={s.what}>
+            <span className={s.heldTitle}>{title}</span>
+          </p>
+          <p className={s.path}>{item.path}</p>
+          <p className={s.meta}>
+            <span>
+              {item.agentName
+                ? `Written by ${item.agentName}`
+                : "Written by an agent"}
+            </span>
+            <span>{shortDate(item.updatedAt, now)}</span>
+          </p>
         </div>
-        {failed && <p className={s.refused}>{FAILED}</p>}
+        <div className={s.side}>
+          <div
+            role="group"
+            aria-label={`Answer for ${title}`}
+            data-actions
+            className={s.actions}
+          >
+            <button
+              type="button"
+              className={s.primary}
+              aria-disabled={busy || undefined}
+              onClick={onRelease}
+            >
+              Release
+            </button>
+            <Link
+              href={vaultHref(item.workspaceId, item.id)}
+              className={s.secondary}
+            >
+              Open in vault
+            </Link>
+          </div>
+          {failed && <p className={s.refused}>{FAILED}</p>}
+        </div>
       </div>
     </li>
   );

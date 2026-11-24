@@ -64,7 +64,10 @@ export const HOSTILE_TITLE = (
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
-export function fixturePayload(now: number): MapPayload {
+export function fixturePayload(
+  now: number,
+  opts: { items?: number } = {},
+): MapPayload {
   let seed = 7;
   const rnd = () => {
     seed = (seed * 1664525 + 1013904223) % 4294967296;
@@ -73,50 +76,60 @@ export function fixturePayload(now: number): MapPayload {
   const iso = (t: number) => new Date(t).toISOString();
 
   const nodes: MapNode[] = [];
-  const readableByTopic: string[][] = [];
-  TOPICS.forEach(([topic, count], ti) => {
-    const readable: string[] = [];
-    readableByTopic.push(readable);
-    let lastNote: string | null = null;
-    for (let j = 0; j < count; j++) {
-      const file = j % 4 === 3;
-      const x = rnd();
-      const member = x < 0.5 ? ME : x < 0.8 ? AHMED : SARA;
-      const locked = member !== ME && rnd() < 0.35;
-      const list = file ? FILE_TITLES : NOTE_TITLES;
-      const c = file ? Math.floor(j / 4) : j - Math.floor(j / 4);
-      const title =
-        list[c % list.length]! +
-        (c >= list.length ? ` ${Math.floor(c / list.length) + 1}` : "");
-      const byAgent = rnd() < 0.6;
-      const id = `00000000-0000-4000-9000-${String(ti * 1000 + j).padStart(12, "0")}`;
-      const updated = now - Math.floor(Math.pow(rnd(), 2.2) * 20 * DAY);
-      const path = `${topic}/${slug(title)}${file ? "" : ".md"}`;
-      nodes.push({
-        id,
-        kind: file ? "file" : "note",
-        topic,
-        member_id: member,
-        updated_at: iso(updated),
-        locked,
-        title: locked ? null : title,
-        path: locked ? null : path,
-        workspace_id: locked ? null : `ws-${member.slice(-1)}`,
-        by_agent: locked ? null : byAgent,
-        agent_id:
-          !locked && member === ME && byAgent && !file
-            ? rnd() < 0.6
-              ? AGENT_CLAUDE
-              : AGENT_CHATGPT
-            : null,
-        note_id: !locked && file ? lastNote : null,
-      });
-      if (!locked) {
-        readable.push(id);
-        if (!file) lastNote = id;
+  const readableByTopic: string[][] = TOPICS.map(() => []);
+  // Without `items` one pass over the tables (about 300 items). With it, further passes add the
+  // same tables with suffixed titles ("Overview · 2") until that many items exist.
+  const want = opts.items !== undefined ? Math.max(0, opts.items - 1) : null;
+  for (let round = 0; ; round++) {
+    if (want !== null && nodes.length >= want) break;
+    if (want === null && round > 0) break;
+    const suffix = round > 0 ? ` · ${round + 1}` : "";
+    TOPICS.forEach(([topic, count], ti) => {
+      const readable = readableByTopic[ti]!;
+      let lastNote: string | null = null;
+      for (let j = 0; j < count; j++) {
+        if (want !== null && nodes.length >= want) return;
+        const file = j % 4 === 3;
+        const x = rnd();
+        const member = x < 0.5 ? ME : x < 0.8 ? AHMED : SARA;
+        const locked = member !== ME && rnd() < 0.35;
+        const list = file ? FILE_TITLES : NOTE_TITLES;
+        const c = file ? Math.floor(j / 4) : j - Math.floor(j / 4);
+        const title =
+          list[c % list.length]! +
+          (c >= list.length ? ` ${Math.floor(c / list.length) + 1}` : "") +
+          suffix;
+        const byAgent = rnd() < 0.6;
+        const id = `00000000-0000-4000-9000-${String(round * 100_000 + ti * 1000 + j).padStart(12, "0")}`;
+        const updated = now - Math.floor(Math.pow(rnd(), 2.2) * 20 * DAY);
+        const path = `${topic}/${slug(title)}${file ? "" : ".md"}`;
+        nodes.push({
+          id,
+          kind: file ? "file" : "note",
+          topic,
+          member_id: member,
+          updated_at: iso(updated),
+          locked,
+          title: locked ? null : title,
+          path: locked ? null : path,
+          workspace_id: locked ? null : `ws-${member.slice(-1)}`,
+          by_agent: locked ? null : byAgent,
+          agent_id:
+            !locked && member === ME && byAgent && !file
+              ? rnd() < 0.6
+                ? AGENT_CLAUDE
+                : AGENT_CHATGPT
+              : null,
+          note_id: !locked && file ? lastNote : null,
+        });
+        if (!locked) {
+          readable.push(id);
+          if (!file) lastNote = id;
+        }
       }
-    }
-  });
+    });
+  }
+  const rounds = Math.max(1, Math.ceil(nodes.length / 300));
 
   // Not added to `readableByTopic`, so the links below are the same as without it.
   nodes.push({
@@ -135,7 +148,7 @@ export function fixturePayload(now: number): MapPayload {
   });
 
   const links: MapPayload["links"] = [];
-  for (let k = 0; k < 40; k++) {
+  for (let k = 0; k < 40 * rounds; k++) {
     const a = readableByTopic[Math.floor(rnd() * TOPICS.length)]!;
     const b = readableByTopic[Math.floor(rnd() * TOPICS.length)]!;
     const from = a[Math.floor(rnd() * a.length)];

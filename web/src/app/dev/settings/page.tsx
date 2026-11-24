@@ -8,18 +8,22 @@ import { DevSettings } from "./DevSettings";
 //   ?none=1                 no agents yet
 //   ?fail=1                 every action is refused
 //   ?slow=1                 creating an agent takes over a second
-//   ?outcome=added          inviting answers that the person had an account and is a member now
-//   ?outcome=invited        inviting answers that an invitation was saved (the default)
+//   ?unsent=1               inviting saves the invitation, but its email is not sent
+//   ?wait=1                 Send again answers that an email went out a moment ago
+//   ?limit=1                Send again answers that the invitation has been emailed 5 times
 //   ?reason=already-member  inviting answers that the person is already in
 //   ?reason=already-invited inviting answers that the email already has an open invitation
+//   ?reason=too-many        inviting answers that the hive has made its invitations for the day
 const NOW = Date.UTC(2026, 10, 23, 12, 0, 0);
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 function reasonOf(
   v: string | undefined,
-): "already-member" | "already-invited" | null {
-  return v === "already-member" || v === "already-invited" ? v : null;
+): "already-member" | "already-invited" | "too-many" | null {
+  return v === "already-member" || v === "already-invited" || v === "too-many"
+    ? v
+    : null;
 }
 
 export default async function DevSettingsPage({
@@ -40,7 +44,9 @@ export default async function DevSettingsPage({
       fail={one(q.fail) === "1"}
       slow={one(q.slow) === "1"}
       reason={reasonOf(one(q.reason))}
-      outcome={one(q.outcome) === "added" ? "added" : "invited"}
+      unsent={one(q.unsent) === "1"}
+      wait={one(q.wait) === "1"}
+      limit={one(q.limit) === "1"}
     />
   );
 }

@@ -2,11 +2,13 @@
 
 // The settings over the fixture with stand-in actions. The page keeps its own copy of the data
 // and changes it the way the database would, so the list gains the new agent, a revoked one
-// dims, an added member or a new invitation appears and a revoked invitation goes. Each call is
-// recorded on `window.__settingsCalls` (for the browser tests) with what was asked and never
-// with the token that was answered. With `fail`, every action is refused; with `slow`, creating
-// an agent takes over a second; `reason` is why inviting is refused, and `outcome` is what a
-// successful invite answers.
+// dims, a new invitation appears and a revoked invitation goes. Inviting never adds a member:
+// the person joins by pressing Join. Each call is recorded on `window.__settingsCalls` (for the
+// browser tests) with what was asked and never with the token that was answered. With `fail`,
+// every action is refused; with `slow`, creating an agent takes over a second; `reason` is why
+// inviting is refused; with `unsent`, an invitation is saved but its email is not sent; with
+// `wait`, Send again answers that one was sent a moment ago; with `limit`, that the invitation
+// has been emailed as often as it may be.
 import { useRef, useState } from "react";
 import { Settings } from "../../../settings/Settings";
 import type {
@@ -35,7 +37,7 @@ const wait = (ms = WAIT) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 /** An invitation stays open this long, as in the database. */
 const OPEN_FOR_MS = 14 * 24 * 60 * 60 * 1000;
-const idOf = (kind: "c" | "d" | "f", n: number) =>
+const idOf = (kind: "c" | "d", n: number) =>
   `00000000-0000-4000-8000-00000000${kind}${String(100 + n)}`;
 
 export function DevSettings({
@@ -44,14 +46,18 @@ export function DevSettings({
   fail,
   slow,
   reason,
-  outcome,
+  unsent,
+  wait: tooSoon,
+  limit,
 }: {
   initial: SettingsData;
   now: number;
   fail: boolean;
   slow: boolean;
   reason: Exclude<InviteReason, "failed"> | null;
-  outcome: "added" | "invited";
+  unsent: boolean;
+  wait: boolean;
+  limit: boolean;
 }) {
   const [data, setData] = useState(initial);
   // How many invitations this page has made, so each new one gets its own id.
@@ -97,21 +103,6 @@ export function DevSettings({
       await wait();
       if (fail) return { ok: false, reason: "failed" };
       if (reason) return { ok: false, reason };
-      if (outcome === "added") {
-        setData((d) => ({
-          ...d,
-          members: [
-            ...d.members,
-            {
-              id: idOf("f", d.members.length),
-              name,
-              role: "member",
-              isMe: false,
-            },
-          ],
-        }));
-        return { ok: true, outcome };
-      }
       count.current += 1;
       const id = idOf("c", count.current);
       // Newest first and the email in lower case, as the database stores and returns them.
@@ -128,7 +119,15 @@ export function DevSettings({
           ...d.invitations,
         ],
       }));
-      return { ok: true, outcome };
+      return { ok: true, id, sent: !unsent };
+    },
+    resendInvitation: async (id) => {
+      record("resendInvitation", [id]);
+      await wait();
+      if (fail) return { ok: false, reason: "failed" };
+      if (tooSoon) return { ok: false, reason: "wait" };
+      if (limit) return { ok: false, reason: "limit" };
+      return { ok: true };
     },
     revokeInvitation: async (id) => {
       record("revokeInvitation", [id]);

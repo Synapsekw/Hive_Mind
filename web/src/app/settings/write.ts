@@ -3,6 +3,15 @@
 // `invite_member` and `revoke_invitation` refuse an agent, someone else's workspace or agent,
 // and anyone but the owner.
 //
+// The invitation's email. Inviting saves the invitation (`invite_member` answers its id and
+// never makes anyone a member), then asks the mail function `invite-email` to send it; Send
+// again asks the mail function alone. The function is called from here, the server, with the
+// person's own session token as the bearer, so the database decides there whether this person
+// may send for this invitation. The token is read from the session only after the auth server
+// has confirmed the person. Only the answer's status is looked at: 200 sent, 429 too soon, 409
+// emailed as often as this invitation may be, anything else not sent. The token, the address and whatever the function answered
+// are never passed to `console.*`; a failure is one fixed phrase and, at most, the status.
+//
 // Revoking a connected app. `revoke_agent` is what cuts the app off: from then on the database
 // refuses its pass. After it has succeeded, the app's sign-in at the auth server is ended as
 // well (`revokeGrant`), so the auth server stops renewing the pass and asks the person again
@@ -14,7 +23,7 @@
 // call worked or not: a log line here carries an error's code and message and nothing else,
 // so never an email address or a name either.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Created, Invited, Result } from "../../settings/types";
+import type { Created, Invited, Result, Sent } from "../../settings/types";
 import { ownHive } from "../own-hive";
 import { isUuid } from "../vault/validate";
 import { cleanEmail, cleanName, cleanNewAgent } from "./validate";
@@ -26,6 +35,11 @@ const NO: Result = { ok: false };
 const YES: Result = { ok: true };
 const NOT_CREATED: Created = { ok: false };
 const FAILED: Invited = { ok: false, reason: "failed" };
+const SENT: Sent = { ok: true };
+const NOT_SENT: Sent = { ok: false, reason: "failed" };
+
+/** `fetch`, handed in so the tests can stand in for the mail function. */
+type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /** Only the error's code and message, never the answer beside it. */
 function failed(what: string, res: Res): boolean {
@@ -139,11 +153,74 @@ async function endSignIn(db: Db, agentId: string): Promise<void> {
 const ALREADY_MEMBER = "already a member";
 /** Part of the message it raises for an email with an invitation that is still open. */
 const ALREADY_INVITED = "already invited";
+/** Part of the message it raises once the hive has made its invitations for the day. */
+const TOO_MANY = "too many invitations";
+
+const MAIL_NOT_SENT = "the invitation email could not be sent";
+/** How long the mail function gets to answer: the action itself has ten seconds. */
+const MAIL_TIMEOUT_MS = 8_000;
+
+/**
+ * Asks the mail function to send the invitation's email, as the person. The caller has already
+ * had the auth server confirm the person and checked that `id` is a uuid. Never throws.
+ */
+async function sendIn(db: Db, id: string, fetchFn: Fetch): Promise<Sent> {
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) {
+      console.error(MAIL_NOT_SENT);
+      return NOT_SENT;
+    }
+    const { data } = await db.auth.getSession();
+    const token = data.session?.access_token;
+    if (typeof token !== "string" || token === "") {
+      console.error(MAIL_NOT_SENT);
+      return NOT_SENT;
+    }
+    const res = await fetchFn(
+      `${url.replace(/\/+$/, "")}/functions/v1/invite-email`,
+      {
+        method: "POST",
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ invitation: id }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(MAIL_TIMEOUT_MS),
+      },
+    );
+    // The body is never read: only the status says what happened.
+    if (res.status === 200) return SENT;
+    console.error(MAIL_NOT_SENT, res.status);
+    if (res.status === 429) return { ok: false, reason: "wait" };
+    if (res.status === 409) return { ok: false, reason: "limit" };
+    return NOT_SENT;
+  } catch {
+    // Said without what was thrown: it may name the request.
+    console.error(MAIL_NOT_SENT);
+    return NOT_SENT;
+  }
+}
+
+/** Send again: the email of an invitation that is still open, sent once more. */
+export async function resendIn(
+  db: Db,
+  id: unknown,
+  fetchFn: Fetch,
+): Promise<Sent> {
+  if (!isUuid(id)) return NOT_SENT;
+  if (!(await signedIn(db))) return NOT_SENT;
+  return sendIn(db, id, fetchFn);
+}
 
 export async function inviteIn(
   db: Db,
   email: unknown,
   name: unknown,
+  fetchFn: Fetch,
 ): Promise<Invited> {
   const cleanedEmail = cleanEmail(email);
   const cleanedName = cleanName(name);
@@ -166,12 +243,19 @@ export async function inviteIn(
       return { ok: false, reason: "already-member" };
     if (res.error.message.includes(ALREADY_INVITED))
       return { ok: false, reason: "already-invited" };
+    if (res.error.message.includes(TOO_MANY))
+      return { ok: false, reason: "too-many" };
     return FAILED;
   }
-  if (res.data === "added" || res.data === "invited")
-    return { ok: true, outcome: res.data };
-  console.error("invite_member answer has an unexpected shape");
-  return FAILED;
+  const id = res.data;
+  if (!isUuid(id)) {
+    console.error("invite_member answer has an unexpected shape");
+    return FAILED;
+  }
+  // The invitation stands whether or not its email goes out; Send again is the way forward,
+  // once the two minutes the database stamped before the send have passed.
+  const sent = await sendIn(db, id, fetchFn);
+  return { ok: true, id, sent: sent.ok };
 }
 
 export async function revokeInvitationIn(db: Db, id: unknown): Promise<Result> {

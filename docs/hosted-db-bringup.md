@@ -5,7 +5,8 @@ dev project `tokyttkztrkjvkaksdnh` on 2026-11-22. Design notes:
 [2026-11-22-db-bringup-design.md](superpowers/specs/2026-11-22-db-bringup-design.md).
 
 Putting the web app online and connecting Claude or ChatGPT to it is in
-[Hosting and the connector](#hosting-and-the-connector).
+[Hosting and the connector](#hosting-and-the-connector). Emailing invitations, and closing
+sign-ups afterwards, is in [Invitation email](#invitation-email).
 
 ## Current state of the dev project
 
@@ -20,6 +21,13 @@ Putting the web app online and connecting Claude or ChatGPT to it is in
 - Migration `20261123105237_invitations` is applied (2026-11-23) and recorded under that version.
   It adds the `invitations` table and `invite_member`, `revoke_invitation` and
   `claim_invitations` for inviting a member from Settings.
+- Migration `20261123174149_emailed_invitations` is applied (2026-11-24) with
+  `supabase db query --linked -f <file>` and recorded under that version. The Edge Function
+  `invite-email` is deployed, with JWT verification off, and its secrets `RESEND_API_KEY`,
+  `HIVE_INVITE_FROM` and `HIVE_SITE_URL` are set. An invitation was sent, opened and joined by
+  hand on 2026-11-24, with and without another account signed in. Still open from
+  [Invitation email](#invitation-email): the project's own mail settings (SMTP through Resend,
+  the code length and its lifetime), and "Allow new users to sign up" is still on.
 - Migration `20261123123845_note_delete_audit` is applied (2026-11-23) and recorded under that
   version. It adds the `notes_deleted_audit` trigger, which writes a deleted note to the audit
   log.
@@ -193,13 +201,11 @@ publishable key. Put them in `web/.env.local` (copy `web/.env.example`) and run 
   password never goes through an agent.
 - **Emailed links.** Add `http://localhost:3000/**` to the allowed redirect URLs (Authentication
   → URL Configuration), or the link is refused.
-- **Invitations.** Two settings under Authentication must both be on:
-  - [ ] **Allow new users to sign up**, so an invited person's first "Email me a link" creates
-        their account.
-  - [ ] **Confirm email**, so an account counts as that person only after they have proved the
-        address. With it off, someone who knows an invited address could join in that person's
-        place. Nothing in the app can check this setting; see
-        [security.md](security.md#3-identity-and-tokens).
+- **Invitations.** Inviting in Settings saves the invitation in the database and then asks the
+  Edge Function `invite-email` to email it. That needs the function, its secrets and the
+  project's mail settings: see [Invitation email](#invitation-email). On a project without
+  them the invitation is still saved, and Settings answers "Invitation saved, but the email
+  could not be sent. Use Send again."
 
 ## Hosting and the connector
 
@@ -260,8 +266,9 @@ settings for the local stack.
    moves to the `main` site**, and from then on the connector address people paste is the `main`
    one. A connector added against the test site stops working at that point and is added again
    with the new address.
-4. Leave **Allow new users to sign up** and **Confirm email** as they are (both on). Invitations
-   need them; see [Run the web app](#run-the-web-app).
+4. Leave **Confirm email** on; it stays on for good. Do not touch **Allow new users to sign up**
+   here: it is switched off as the last step of [Invitation email](#invitation-email), and not
+   before.
 
 ### 3. Deploy the connector function
 
@@ -401,6 +408,173 @@ one does not hold, promotion stops and the owner decides.
       itself. Either way the tier must not change: it is read from the registration, which has
       both addresses.
 
+## Invitation email
+
+The owner invites an address in **Settings**. The Edge Function `invite-email` then mails that
+address one link to `<site>/join`, where the person presses **Continue**, signs in and presses
+**Join**. Mail goes out through [Resend](https://resend.com). Once this works, sign-ups are
+switched off, so only an invited address can ever get an account. Why it is built this way is
+in [security.md](security.md#3-identity-and-tokens).
+
+Do the six parts in this order, on the project the site uses. The web app must already be
+hosted ([Hosting and the connector](#hosting-and-the-connector)), because the email links to
+it. **Sign-ups are switched off last**, after the hand tests: switching them off earlier locks
+out everyone who has no account yet.
+
+**Precondition: "Confirm email" is on, and stays on** before, during and after these steps. The
+database lets only a confirmed address see and accept an invitation; with the setting off,
+Supabase counts an address as confirmed without proof. Check it under Authentication before
+you start.
+
+### 1. Resend: a domain and a key
+
+1. In Resend, add the domain the invitations will come from and verify it (Resend lists the DNS
+   records to add). Mail from an address on a domain that is not verified is refused.
+2. Create an API key with **sending access** only, not full access. It is used in two places
+   below. You may create two keys, one for each, so that either can be replaced alone.
+
+A Resend key is a secret. Paste it only into the two dashboard fields named below: not into a
+chat, a shell command, a `.env` or a commit.
+
+### 2. Apply the migration
+
+Apply `emailed_invitations` as in step 2 of [Steps](#steps). It makes `invite_member` return the
+invitation's id and never add a member, adds `invitation_to_email`, `my_invitations` and
+`accept_invitation`, removes `claim_invitations`, and takes `add_member` away from signed-in
+people. Deploy the web app from the same commit: a site built before this migration calls
+functions that no longer answer the same way.
+
+### 3. Deploy the function and set its secrets
+
+```sh
+supabase functions deploy invite-email --use-api --no-verify-jwt --project-ref <project-ref>
+```
+
+It needs the Supabase CLI, signed in; it does not need Docker. JWT verification is off, as for
+the other two functions: the function hands the caller's session to the database, and the
+database decides whether that caller may send for that invitation.
+
+Then set the secrets in the dashboard, under **Edge Functions → Secrets**. They are typed there
+by the project owner so that no key passes through a chat or a shell history. They are not
+`.env` values and nothing on an agent's machine or on Netlify needs them.
+
+| Secret             | Value                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `RESEND_API_KEY`   | The Resend key from part 1 (sending access only)                                                                     |
+| `HIVE_INVITE_FROM` | The sender, for example `Hive Mind <hive@your-domain>`. The domain must be the one verified in Resend                |
+| `HIVE_SITE_URL`    | The web app's address, for example `https://hive-mind-synapse.netlify.app`. No path and no slash at the end          |
+| `HIVE_SECRET_KEY`  | Optional. A secret key of the project (it starts with `sb_secret_`), from Project Settings → API Keys. See the note. |
+
+- The function also uses `HIVE_PUBLISHABLE_KEY`, which
+  [Set up agent sign-in](#set-up-agent-sign-in) already stored.
+- **`HIVE_SECRET_KEY` and the legacy keys.** The function needs a key that may ask Supabase Auth
+  for a sign-in link. Without `HIVE_SECRET_KEY` it uses the Edge runtime's own
+  `SUPABASE_SERVICE_ROLE_KEY`, which is the legacy service-role key. So the legacy API keys must
+  stay enabled, and the legacy JWT secret unrevoked, until `HIVE_SECRET_KEY` is set. Either key
+  bypasses every sharing rule; the function uses it for that one call and never logs it.
+- `HIVE_SITE_URL` decides where the link in the email leads. During hand testing that is the
+  `develop` test site; at promotion to `main` change it to the `main` site, together with the
+  Site URL in part 2 of [Hosting and the connector](#2-supabase-the-dashboard-switches).
+- The name `HIVE_SITE_URL` is also an optional value in the repo's `.env`, where it only tells
+  `pnpm test:live` which site to check. The two are set separately.
+
+To check by hand, with the secrets set:
+
+| Call                                                             | Expected       |
+| ---------------------------------------------------------------- | -------------- |
+| `GET /functions/v1/invite-email`                                 | 405            |
+| `POST /functions/v1/invite-email` with no `Authorization` header | 401, "sign in" |
+
+When a secret is missing the function answers 503, "email is not set up", before it calls
+anything, and Settings shows "Invitation saved, but the email could not be sent. Use Send
+again." The 2-minute wait is 429 and the 5-email limit is 409. A failure at Supabase Auth
+or at Resend is 502, "the email could not be sent"; the function's log names which, in one
+fixed phrase, and never an address, a token or a key.
+
+### 4. Supabase: mail for sign-in links
+
+The invitation itself is sent by the function. The emails Supabase Auth sends itself are a
+separate matter: the built-in mailer reaches only the project's own team, so a colleague who
+chooses **Email me a link** would get nothing. That link is the way back in after an invitation
+link has expired, so it must work.
+
+1. **Authentication → Emails → SMTP settings.** Enable custom SMTP:
+
+   | Field    | Value                                                   |
+   | -------- | ------------------------------------------------------- |
+   | Host     | `smtp.resend.com`                                       |
+   | Port     | `465`                                                   |
+   | Username | `resend`                                                |
+   | Password | A Resend API key (part 1)                               |
+   | Sender   | An address on the domain verified in Resend, and a name |
+
+2. **Authentication → Sign In / Providers → Email.** Two fields, in this order:
+   - [ ] **Email OTP Length**: `10`, the maximum. Do this first. With every emailed link
+         Supabase also issues an email code (6 digits by default) that is valid for the same
+         time, so a longer lifetime gives more time to guess it. Ten digits make that
+         impractical.
+   - [ ] **Email OTP Expiration**: `86400` seconds (24 hours), the maximum. It is the lifetime
+         of every emailed link, the one in an invitation included.
+
+   The dashboard's menu names change; both fields are with the email provider's settings.
+
+3. Leave **Confirm email** on (the precondition above).
+
+### 5. Test by hand
+
+With **Allow new users to sign up** still on. Use the `develop` test site and addresses you can
+read. Note the result in the session note.
+
+- [ ] **A fresh address.** In Settings, invite an address that has no account. Settings answers
+      "Invitation sent". The email arrives from the sender set above, names no hive and no
+      person, and has one button, "Open invitation". It opens `<site>/join` with a **Continue**
+      button. Continue signs the person in, shows "Signed in as" with their address and a
+      sign-out link, and lists the invitation with the hive's name and who invited them.
+      **Join** then offers "Choose a password" (new accounts only). Try a 9-character password
+      ("Use at least 10 characters."), then save a real one: the map opens, and the person is
+      listed under Members. Sign out and sign in with the address and that password. Repeat
+      with another fresh address and choose **Skip for now**: the map opens the same way, and
+      opening `<site>/join/password` afterwards leads straight to the map.
+- [ ] **A link opened while someone else is signed in.** Signed in as the owner, open a fresh
+      address's invitation link in the same browser. The page names the owner's address, says
+      this browser will be signed out of it, and the button reads "Sign out and continue".
+      "Stay signed in as …" leads to the map as the owner, and the link still works
+      afterwards. Continuing lists the invitation under the invited address, with "You are
+      now signed in with a different account."
+- [ ] **An address that has an account.** The same, for an address that already has a confirmed
+      account. Settings answers the same "Invitation sent", the email reads the same, and the
+      person is not a member until they press Join. Join opens the map directly: no password
+      is offered to an account that already exists.
+- [ ] **An expired link.** Open an invitation link more than 24 hours old, or one already used,
+      and press Continue. The page says the link has expired and points to "Email me a link".
+      Signing in that way with the invited address leads back to `/join`, where an invitation
+      that was not yet accepted is still waiting.
+- [ ] **Send again, twice within two minutes.** The first sends a second email. The second
+      answers "Sent a moment ago. Wait two minutes and try again." and sends nothing.
+
+### 6. Switch sign-ups off
+
+Only when all four tests pass:
+
+- [ ] Under Authentication, switch **Allow new users to sign up** off. **Confirm email** stays
+      on.
+- [ ] **An address that was never invited.** On the sign-in page, enter such an address and
+      choose **Email me a link**. No account appears under Authentication → Users, and no
+      working link arrives.
+- [ ] Invite one more fresh address and join with it, to confirm invitations still create
+      accounts with sign-ups off.
+
+From here on, the only way to an account is an invitation, and the owner's account from step 1
+of [Steps](#steps). Dynamic client registration stays off as before; nothing here changes
+[the dashboard switches](#2-supabase-the-dashboard-switches).
+
+The limits, for when a colleague asks why nothing arrived: one email per invitation every 2
+minutes, 5 emails per invitation, 20 invitations in 24 hours per hive and per inviting person
+across all their hives, and an invitation lapses after 14 days. A send that fails still counts
+towards the 5 and starts the 2 minutes. Revoking and inviting again does not get round the 5:
+one person can cause at most 5 invitation emails to one address in 24 hours, so past that, wait
+a day. Each email requested is in the audit log as `member.invitation_emailed`.
+
 ## What is proven, and what is not
 
 - `pnpm test:live` runs its checks against the hosted project: the MCP server signs in with an
@@ -424,3 +598,6 @@ one does not hold, promotion stops and the owner decides.
   and Supabase Auth answers at its discovery address. Without the variable those checks skip.
 - Connecting Claude and ChatGPT through the window is checked by hand. No automated test signs
   an app in.
+- Invitation email is checked by hand ([Invitation email](#5-test-by-hand)). The database rules
+  behind it and the function are tested without a network (`pnpm test`); no automated test
+  sends a real email or opens a real link.

@@ -1,10 +1,14 @@
 // The left rail, shared by the map, the vault, the gallery, the inbox and the settings: the mark,
 // the destinations (Map, Vault, Gallery, Inbox with the number waiting, Settings), the agents when
-// given, the Appearance panel and sign out. It sits straight on the wash, so it is the "chrome"
-// scope (white text in light mode).
+// given (folded into one card) and the account menu (Appearance, Settings, sign out). It sits
+// straight on the wash, so it is the "chrome" scope (white text in light mode).
+"use client";
+
 import Link from "next/link";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { badge } from "../inbox/text";
-import { Appearance } from "./Appearance";
+import { AccountMenu } from "./AccountMenu";
+import { AgentsCard } from "./AgentsCard";
 import s from "./shell.module.css";
 
 export type AgentRow = {
@@ -13,6 +17,8 @@ export type AgentRow = {
   name: string;
   status: string;
   connected: boolean;
+  /** When the agent's token was last used; absent or null reads as "never". */
+  lastUsedAt?: string | null;
 };
 
 const ICON = {
@@ -92,21 +98,51 @@ export function Shell({
   current,
   agents = [],
   inbox,
+  now: nowProp,
 }: {
   current: "map" | "vault" | "gallery" | "inbox" | "settings";
   agents?: AgentRow[];
   /** How many links and held notes wait for the person; shown on the Inbox row. */
   inbox?: number;
+  /** The page's own clock (the map passes its `now`); otherwise read once after mount. */
+  now?: number;
 }) {
   const waiting = inbox ?? 0;
   const count = badge(waiting);
+  const nav = useRef<HTMLElement>(null);
+  const [barY, setBarY] = useState<number | null>(null);
+  // Never read during render (server and client would differ): the page's clock, else one read
+  // after mount.
+  const [mounted, setMounted] = useState<number | null>(null);
+  useEffect(() => setMounted(Date.now()), []);
+  const now = nowProp ?? mounted;
+
+  // One bar slides to the current row: its offset is measured, never guessed.
+  useLayoutEffect(() => {
+    const row = nav.current?.querySelector<HTMLElement>(
+      '[aria-current="page"]',
+    );
+    setBarY(row ? row.offsetTop + (row.offsetHeight - 20) / 2 : null);
+  }, [current]);
+
   return (
-    <aside aria-label="Navigation" data-scope="chrome" className={s.rail}>
+    <aside
+      aria-label="Navigation"
+      data-scope="chrome"
+      className={`${s.rail} rise`}
+    >
       <div className={s.brand}>
         <span aria-hidden="true" className={s.mark} />
         <span className={s.brandName}>Hive</span>
       </div>
-      <nav aria-label="Main" className={s.links}>
+      <nav ref={nav} aria-label="Main" className={s.links}>
+        {barY !== null && (
+          <span
+            aria-hidden="true"
+            className={s.bar}
+            style={{ transform: `translateY(${barY}px)` }}
+          />
+        )}
         {DESTINATIONS.map((d) => (
           <Link
             key={d.key}
@@ -117,7 +153,7 @@ export function Shell({
                 ? `Inbox, ${waiting} waiting`
                 : undefined
             }
-            className={`${s.row} ${s.control}`}
+            className={`${s.row} ${s.link} ${s.control}`}
           >
             <span className={s.slot}>{d.icon}</span>
             <span className={s.rowLabel}>{d.name}</span>
@@ -130,38 +166,10 @@ export function Shell({
         ))}
       </nav>
       <section className={s.foot}>
-        {agents.length > 0 && (
-          <>
-            <h2 className={s.heading}>Agents</h2>
-            <ul className={s.agentList}>
-              {agents.map((a) => (
-                <li key={a.id} className={s.agent}>
-                  <span aria-hidden="true" className={s.slot}>
-                    <span
-                      className={s.agentDot}
-                      data-on={a.connected || undefined}
-                    />
-                  </span>
-                  <span className={s.agentName} title={a.name}>
-                    {a.name}
-                  </span>
-                  <span className={s.agentStatus}>{a.status}</span>
-                </li>
-              ))}
-            </ul>
-          </>
+        {agents.length > 0 && now !== null && (
+          <AgentsCard agents={agents} now={now} />
         )}
-        <Appearance />
-        <form method="post" action="/auth/signout" className={s.signOutForm}>
-          <button type="submit" className={`${s.row} ${s.control}`}>
-            <span aria-hidden="true" className={s.slot}>
-              <svg {...ICON}>
-                <path d="M6.5 2.5h-3v11h3M10 5l3 3-3 3M13 8H6.5" />
-              </svg>
-            </span>
-            <span className={s.rowLabel}>Sign out</span>
-          </button>
-        </form>
+        <AccountMenu />
       </section>
     </aside>
   );

@@ -2,11 +2,11 @@
 // sharing rules as three different people and two kinds of agent.
 // Supabase's auth schema and roles are stubbed in scripts/local-db.mjs;
 // everything else is the SQL that ships. Run with: npm test
-import { test, before } from "node:test";
+import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../scripts/local-db.mjs";
 
-const { db, as, addUser, addClient, addConsent } = await openDb();
+const { db, as, addUser, addMember, addClient, addConsent } = await openDb();
 const users = {};
 const members = {};
 const ws = {};
@@ -32,16 +32,10 @@ before(async () => {
       `select public.create_hive('Test hive', 'Dani') as id`,
     )
   )[0].id;
-  await as(
-    person("dani"),
-    `select public.add_member($1, 'ahmed@example.com', 'Ahmed')`,
-    [hive],
-  );
-  await as(
-    person("dani"),
-    `select public.add_member($1, 'sara@example.com', 'Sara')`,
-    [hive],
-  );
+  // Put there as the database owner: these tests are about what members may
+  // do. How a person becomes one is tested under "Emailed invitations".
+  await addMember(hive, users.ahmed, "Ahmed");
+  await addMember(hive, users.sara, "Sara");
   await as(
     person("outsider"),
     `select public.create_hive('Other hive', 'Outsider')`,
@@ -60,6 +54,18 @@ before(async () => {
     );
     ws[name] = w[0].id;
   }
+});
+
+// A hive makes at most 20 invitations in 24 hours (invite_member), and this
+// file makes more than that in the one hive. Before each test the invitations
+// made so far are moved two days back, so every test starts with the whole
+// allowance; the limit itself has a test of its own.
+beforeEach(async () => {
+  await db.exec("reset role");
+  await db.exec(
+    `update public.invitations set created_at = created_at - interval '2 days'
+      where created_at > now() - interval '1 day'`,
+  );
 });
 
 const addNote = (name, title, extra = {}) =>
@@ -2457,8 +2463,9 @@ test("each inbox list is the newest 100 and the totals count everything", async 
 });
 
 // ---------------------------------------------------------------- settings
-// What the settings screen leans on: `add_member`, `create_agent` and
-// `revoke_agent` refuse on their own, whatever the app sends.
+// What the settings screen leans on: `create_agent` and `revoke_agent` refuse
+// on their own, whatever the app sends. `add_member` is not callable at all:
+// a person joins a hive by accepting an invitation (see "Emailed invitations").
 
 const memberCount = async () =>
   (
@@ -2475,88 +2482,44 @@ const agentsOf = (name) =>
     [members[name]],
   );
 
-test("only the hive owner adds a member", async () => {
+test("nobody adds a member directly: add_member is not callable", async () => {
   const before = await memberCount();
-  await assert.rejects(
-    as(
-      person("ahmed"),
-      `select public.add_member($1, 'outsider@example.com', 'Outsider')`,
-      [hive],
-    ),
-    /only the hive owner/,
-  );
-  // Someone from another hive cannot add themselves either.
-  await assert.rejects(
-    as(
-      person("outsider"),
-      `select public.add_member($1, 'outsider@example.com', 'Outsider')`,
-      [hive],
-    ),
-    /only the hive owner/,
-  );
+  const spare = await addUser("settings-spare@example.com");
+  for (const who of [
+    person("dani"),
+    person("ahmed"),
+    person("outsider"),
+    asUser(spare),
+    await agentFor("dani"),
+    { role: "authenticated" },
+    null,
+  ])
+    await assert.rejects(
+      as(
+        who,
+        `select public.add_member($1, 'settings-spare@example.com', 'Spare')`,
+        [hive],
+      ),
+      /permission denied for function add_member/,
+    );
   assert.equal(await memberCount(), before);
+  assert.deepEqual(await membershipsOf(spare), []);
+  const acl = (
+    await db.query(
+      `select has_function_privilege('anon', p.oid, 'execute') as anon,
+              has_function_privilege('public', p.oid, 'execute') as everyone,
+              has_function_privilege('authenticated', p.oid, 'execute') as signed_in
+         from pg_proc p
+        where p.pronamespace = 'public'::regnamespace and p.proname = 'add_member'`,
+    )
+  ).rows;
+  assert.deepEqual(acl, [{ anon: false, everyone: false, signed_in: false }]);
 });
 
-test("a member cannot be added by an email nobody signed up with", async () => {
-  const before = await memberCount();
-  await assert.rejects(
-    as(
-      person("dani"),
-      `select public.add_member($1, 'nobody@example.com', 'Nobody')`,
-      [hive],
-    ),
-    /no user with that email/,
-  );
-  assert.equal(await memberCount(), before);
-});
-
-test("the same person cannot be added twice", async () => {
-  const before = await memberCount();
-  const spaces = async () =>
-    (
-      await as(
-        person("ahmed"),
-        `select count(*)::int as n from public.workspaces where member_id = $1`,
-        [members.ahmed],
-      )
-    )[0].n;
-  const spacesBefore = await spaces();
-  await assert.rejects(
-    as(
-      person("dani"),
-      `select public.add_member($1, 'ahmed@example.com', 'Ahmed again')`,
-      [hive],
-    ),
-    (e) => e.code === "23505",
-  );
-  // The address is matched whatever its case.
-  await assert.rejects(
-    as(
-      person("dani"),
-      `select public.add_member($1, 'AHMED@Example.com', 'Ahmed again')`,
-      [hive],
-    ),
-    (e) => e.code === "23505",
-  );
-  assert.equal(await memberCount(), before);
-  assert.equal(await spaces(), spacesBefore);
-});
-
-test("an agent cannot add a member, create an agent or revoke one", async () => {
+test("an agent cannot create an agent or revoke one", async () => {
   // The owner's own agent: refused for being an agent, not for whose it is.
   const agent = await agentFor("dani");
-  const before = await memberCount();
   const agentsBefore = await agentsOf("dani");
-
-  await assert.rejects(
-    as(
-      agent,
-      `select public.add_member($1, 'outsider@example.com', 'Outsider')`,
-      [hive],
-    ),
-    /only the hive owner/,
-  );
-  assert.equal(await memberCount(), before);
 
   await assert.rejects(
     as(agent, `select * from public.create_agent($1, 'Spawned', 'other')`, [
@@ -2600,15 +2563,28 @@ test("a person cannot revoke a colleague's agent or connect one to a colleague's
 });
 
 // ------------------------------------------------------------- invitations
-// The owner invites by email. A person with a confirmed account is added at
-// once; anyone else joins when they first sign in with that address, and only
-// once the address is confirmed. Fresh `invite-…` users in every test.
+// The owner invites by email. Nobody is added by being invited: the person
+// joins by accepting the invitation, signed in with the invited address, and
+// only once that address is confirmed. Fresh `invite-…` users in every test.
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// Answers the invitation's id.
 const invite = (who, email, name, h = hive) =>
-  as(who, `select public.invite_member($1, $2, $3) as r`, [h, email, name]);
-const claim = (who) => as(who, `select public.claim_invitations() as n`);
+  as(who, `select public.invite_member($1, $2, $3) as r`, [
+    h,
+    email,
+    name,
+  ]).then((r) => r[0].r);
 const revokeInvitation = (who, id) =>
   as(who, `select public.revoke_invitation($1)`, [id]);
+const toEmail = (who, id) =>
+  as(who, `select public.invitation_to_email($1) as email`, [id]);
+const myInvitations = (who) => as(who, `select * from public.my_invitations()`);
+// Answers the hive joined.
+const accept = (who, id) =>
+  as(who, `select public.accept_invitation($1) as hive`, [id]).then(
+    (r) => r[0].hive,
+  );
 const asUser = (id) => ({ sub: id, role: "authenticated" });
 // Read as the database owner: what is really there, whoever may see it.
 const invitationsFor = async (email) =>
@@ -2649,74 +2625,111 @@ const otherHive = async () =>
       [users.outsider],
     )
   ).rows[0].hive_id;
+// A hive of its own, with a fresh owner.
+const freshHive = async (tag) => {
+  const owner = asUser(await addUser(`invite-${tag}-owner@example.com`));
+  const id = (
+    await as(owner, `select public.create_hive($1, 'Owner') as id`, [
+      `Hive ${tag}`,
+    ])
+  )[0].id;
+  return { owner, id };
+};
+const expire = (id) =>
+  db.query(
+    `update public.invitations set expires_at = now() - interval '1 second'
+      where id = $1`,
+    [id],
+  );
 const selfHosted = (name) => ({ ...person(name), trust_tier: "self_hosted" });
+const NO_CLIENT = "00000000-0000-0000-0000-000000000000";
+// An app pass: the person's own identity plus a client_id (see "connected apps").
+const passOf = (who) => ({ ...who, client_id: NO_CLIENT });
+const PASS_REFUSED = /an app pass cannot do this/;
 
 test("the owner invites an email nobody signed up with", async () => {
   const before = await inviteState();
-  const r = await invite(
+  const mark = await lastAudit();
+  const id = await invite(
     person("dani"),
     "  Invite-Unknown@Example.com ",
     " Una ",
   );
-  assert.equal(r[0].r, "invited");
+  assert.match(id, UUID);
 
   assert.deepEqual(await invitationsFor("Invite-Unknown@Example.com"), []);
   const rows = await invitationsFor("invite-unknown@example.com");
   assert.equal(rows.length, 1);
   const [row] = rows;
+  assert.equal(row.id, id);
   assert.equal(row.hive_id, hive);
   assert.equal(row.display_name, "Una");
   assert.equal(row.invited_by, members.dani);
   assert.equal(row.accepted_at, null);
   assert.equal(row.accepted_member, null);
   assert.equal(row.revoked_at, null);
+  // Not emailed yet: that is counted by invitation_to_email.
+  assert.equal(row.last_emailed_at, null);
+  assert.equal(row.email_count, 0);
   const days = (row.expires_at - row.created_at) / 86_400_000;
   assert.ok(Math.abs(days - 14) < 0.01, `expires in ${days} days`);
 
   const after = await inviteState();
   assert.equal(after.members, before.members);
   assert.equal(after.workspaces, before.workspaces);
-});
-
-test("the owner invites a confirmed account and it is added at once", async () => {
-  const id = await addUser("Invite-Known@example.com");
-  const r = await invite(person("dani"), "invite-known@EXAMPLE.com", "Known");
-  assert.equal(r[0].r, "added");
-
-  const ms = await membershipsOf(id);
-  assert.equal(ms.length, 1);
-  assert.equal(ms[0].hive_id, hive);
-  assert.equal(ms[0].display_name, "Known");
-  assert.equal(ms[0].role, "member");
-  assert.deepEqual(ms[0].workspaces, ["Main"]);
-  assert.deepEqual(await invitationsFor("invite-known@example.com"), []);
-  // They are in: they read the member list, and have nothing left to claim.
-  assert.ok(
-    (
-      await as(asUser(id), `select id from public.members where hive_id = $1`, [
+  const audits = await auditSince(mark);
+  assert.deepEqual(
+    audits.map((r) => [r.action, r.hive_id, r.member_id, r.detail]),
+    [
+      [
+        "member.invited",
         hive,
-      ])
-    ).length > 1,
+        members.dani,
+        { invitation: id, email: "invite-unknown@example.com" },
+      ],
+    ],
   );
-  assert.equal((await claim(asUser(id)))[0].n, 0);
-  assert.equal((await membershipsOf(id)).length, 1);
 });
 
-test("an unconfirmed account is invited, not added", async () => {
-  const id = await addUser("invite-unconfirmed@example.com", {
+test("inviting adds nobody, whether or not the address has an account", async () => {
+  const known = await addUser("Invite-Known@example.com");
+  const unconfirmed = await addUser("invite-unconfirmed@example.com", {
     confirmed: false,
   });
-  const r = await invite(
-    person("dani"),
-    "invite-unconfirmed@example.com",
-    "Unconfirmed",
+  const before = await inviteState();
+  const mark = await lastAudit();
+
+  // The owner gets the same kind of answer for all three: an invitation's id.
+  for (const [email, name] of [
+    ["invite-known@EXAMPLE.com", "Known"],
+    ["invite-unconfirmed@example.com", "Unconfirmed"],
+    ["invite-nobody@example.com", "Nobody"],
+  ]) {
+    const id = await invite(person("dani"), email, name);
+    assert.match(id, UUID);
+    const rows = await invitationsFor(email.toLowerCase());
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, id);
+    assert.equal(rows[0].accepted_at, null);
+    assert.equal(rows[0].accepted_member, null);
+  }
+
+  const after = await inviteState();
+  assert.equal(after.members, before.members);
+  assert.equal(after.workspaces, before.workspaces);
+  assert.deepEqual(await membershipsOf(known), []);
+  assert.deepEqual(await membershipsOf(unconfirmed), []);
+  assert.deepEqual(
+    (await auditSince(mark)).map((r) => r.action),
+    ["member.invited", "member.invited", "member.invited"],
   );
-  assert.equal(r[0].r, "invited");
-  assert.deepEqual(await membershipsOf(id), []);
-  assert.equal(
-    (await invitationsFor("invite-unconfirmed@example.com")).length,
-    1,
-  );
+  // Invited is not in: the person with the account reads nothing of the hive.
+  for (const table of ["members", "hives", "workspaces", "notes"])
+    assert.deepEqual(
+      await as(asUser(known), `select 1 from public.${table}`),
+      [],
+      table,
+    );
 });
 
 test("only the hive owner invites, and never twice", async () => {
@@ -2741,6 +2754,11 @@ test("only the hive owner invites, and never twice", async () => {
         /only the hive owner can invite members/,
       );
   }
+  // An app the owner approved is not the owner.
+  await assert.rejects(
+    invite(passOf(person("dani")), "invite-refused-new@example.com", "R"),
+    PASS_REFUSED,
+  );
   // An owner invites into their own hive only; a member's agent is no owner.
   await assert.rejects(
     invite(person("dani"), "invite-refused@example.com", "Refused", other),
@@ -2787,9 +2805,9 @@ test("only the hive owner invites, and never twice", async () => {
   await unchanged(before);
 
   // The same email twice.
-  assert.equal(
-    (await invite(person("dani"), "invite-twice@example.com", "Twice"))[0].r,
-    "invited",
+  assert.match(
+    await invite(person("dani"), "invite-twice@example.com", "Twice"),
+    UUID,
   );
   const once = await inviteState();
   for (const email of ["INVITE-TWICE@EXAMPLE.COM", "invite-twice@example.com "])
@@ -2804,7 +2822,7 @@ test("only the hive owner invites, and never twice", async () => {
 });
 
 test("an invitation needs a real email address and a name", async () => {
-  // One of these has an account, so the "added" path is checked as well.
+  // One of these addresses has an account: it makes no difference.
   const known = await addUser("invite-shape@example.com");
   const before = await inviteState();
   const bad = [
@@ -2812,6 +2830,7 @@ test("an invitation needs a real email address and a name", async () => {
     ["invite-shape@example.com", "   "],
     ["invite-shape@example.com", null],
     ["invite-shape@example.com", "x".repeat(61)],
+    ["invite-shape@example.com", "Sha\npe"],
     ["invite-shape-new@example.com", ""],
     ["invite-shape-new@example.com", " \t "],
     ["invite-shape-new@example.com", "x".repeat(61)],
@@ -2836,148 +2855,86 @@ test("an invitation needs a real email address and a name", async () => {
   }
   assert.deepEqual(await membershipsOf(known), []);
   // The limits themselves are allowed.
-  assert.equal(
-    (
-      await invite(
-        person("dani"),
-        "invite-shape-new@example.com",
-        "x".repeat(60),
-      )
-    )[0].r,
-    "invited",
+  assert.match(
+    await invite(
+      person("dani"),
+      "invite-shape-new@example.com",
+      "x".repeat(60),
+    ),
+    UUID,
   );
 });
 
-test("the invited person joins at sign-in, once", async () => {
-  await invite(person("dani"), "invite-join@example.com", "Joiner");
-  // The account appears later, as it does at a first sign-in.
-  const id = await addUser("Invite-Join@Example.com");
-  assert.deepEqual(await membershipsOf(id), []);
-
-  assert.equal((await claim(asUser(id)))[0].n, 1);
-  const ms = await membershipsOf(id);
-  assert.equal(ms.length, 1);
-  assert.equal(ms[0].hive_id, hive);
-  assert.equal(ms[0].display_name, "Joiner");
-  assert.equal(ms[0].role, "member");
-  assert.deepEqual(ms[0].workspaces, ["Main"]);
-  const [inv] = await invitationsFor("invite-join@example.com");
-  assert.ok(inv.accepted_at);
-  assert.equal(inv.accepted_member, ms[0].id);
-  assert.equal(inv.revoked_at, null);
-
-  const after = await inviteState();
-  assert.equal((await claim(asUser(id)))[0].n, 0);
-  await unchanged(after);
-  assert.deepEqual(await membershipsOf(id), ms);
-  // Joined: the owner can no longer invite or revoke that invitation.
-  await assert.rejects(
-    invite(person("dani"), "invite-join@example.com", "Joiner"),
-    /that person is already a member/,
-  );
-  await assert.rejects(
-    revokeInvitation(person("dani"), inv.id),
-    /invitation not found/,
-  );
-  await unchanged(after);
-});
-
-test("nobody joins without the invited, confirmed email address", async () => {
-  // An account with the invited address that never proved it.
-  await invite(person("dani"), "invite-proof@example.com", "Proof");
-  const unproved = await addUser("invite-proof@example.com", {
-    confirmed: false,
-  });
-  // Other, confirmed people, with addresses close to the invited one.
-  const others = [];
-  for (const email of [
-    "invite-other@example.com",
-    "xinvite-proof@example.com",
-    "invite-proof@example.com.evil.test",
-    "invite-proof@example.co",
-    "invite-proo_@example.com",
-    "invite-%@example.com",
-    " invite-proof@example.com",
-  ])
-    others.push(await addUser(email));
-  // A revoked and an expired invitation, each for a confirmed person.
-  await invite(person("dani"), "invite-gone@example.com", "Gone");
-  const gone = await addUser("invite-gone@example.com");
-  const [goneInv] = await invitationsFor("invite-gone@example.com");
-  await revokeInvitation(person("dani"), goneInv.id);
-  await invite(person("dani"), "invite-late@example.com", "Late");
-  const late = await addUser("invite-late@example.com");
-  await db.query(
-    `update public.invitations set expires_at = now() - interval '1 second'
-      where email = 'invite-late@example.com'`,
-  );
-
-  const before = await inviteState();
-  for (const id of [unproved, ...others, gone, late, users.ahmed]) {
-    assert.equal((await claim(asUser(id)))[0].n, 0);
-    await unchanged(before);
-  }
-  for (const id of [unproved, ...others, gone, late])
-    assert.deepEqual(await membershipsOf(id), []);
-
-  // Once the address is proved, the same person does join.
-  await db.query(
-    `update auth.users set email_confirmed_at = now() where id = $1`,
-    [unproved],
-  );
-  assert.equal((await claim(asUser(unproved)))[0].n, 1);
-  assert.equal((await membershipsOf(unproved))[0].display_name, "Proof");
-});
-
-test("an agent or an anonymous caller cannot claim", async () => {
-  // The agent of a person who does have an invitation waiting (stored by
-  // hand: inviting a confirmed account adds it at once).
-  const other = await otherHive();
-  await db.query(
-    `insert into public.invitations (hive_id, email, display_name)
-     values ($1, 'ahmed@example.com', 'Ahmed there')`,
-    [other],
-  );
-  const before = await inviteState();
-  for (const who of [
-    await agentFor("ahmed"),
-    await agentFor("ahmed", "self_hosted"),
-    selfHosted("ahmed"),
-    { role: "authenticated" },
-    { role: "authenticated", sub: "" },
+test("only white space is trimmed from an invitation's email and name", async () => {
+  // An earlier version trimmed the letter "v" as if it were a vertical tab,
+  // so alice@company.dev was stored, and would have been emailed, as
+  // alice@company.de.
+  const dani = person("dani");
+  for (const [email, name, storedEmail, storedName] of [
+    ["vera@company.dev", "vlad v", "vera@company.dev", "vlad v"],
+    [" Viv@Example.DEV ", " Viv ", "viv@example.dev", "Viv"],
+    ["v@invite-v.tv", "v", "v@invite-v.tv", "v"],
+    ["vv@invite-vv.dev\n", "\tvv\r\n", "vv@invite-vv.dev", "vv"],
+    [
+      "\u000B\finvite-vt@example.dev\u000B",
+      "\u000B Valve V \f",
+      "invite-vt@example.dev",
+      "Valve V",
+    ],
   ]) {
-    await assert.rejects(claim(who), /sign in as a person/);
-    await unchanged(before);
+    const id = await invite(dani, email, name);
+    const [row] = (
+      await db.query(
+        `select email, display_name from public.invitations where id = $1`,
+        [id],
+      )
+    ).rows;
+    assert.deepEqual(row, { email: storedEmail, display_name: storedName });
+    assert.deepEqual(await toEmail(dani, id), [{ email: storedEmail }]);
+    // The same address again is the same address.
+    await assert.rejects(
+      invite(dani, storedEmail, "Again"),
+      /that email is already invited/,
+    );
   }
-  await assert.rejects(claim(null), /permission denied/);
-  await unchanged(before);
-  assert.equal((await membershipsOf(users.ahmed)).length, 1);
-  // Left pending for nobody: the outsider takes it back.
-  const [inv] = (await invitationsFor("ahmed@example.com")).filter(
-    (i) => i.hive_id === other,
+  // A name or an address of nothing but white space is still refused.
+  await assert.rejects(
+    invite(dani, "invite-v-empty@example.dev", "\u000B \f"),
+    /enter a name of 1 to 60 characters/,
   );
-  await revokeInvitation(person("outsider"), inv.id);
+  await assert.rejects(
+    invite(dani, "\u000B", "Name"),
+    /enter a valid email address/,
+  );
 });
 
 test("an expired invitation can be made again", async () => {
-  await invite(person("dani"), "invite-again@example.com", "First");
-  await db.query(
-    `update public.invitations set expires_at = now() - interval '1 second'
-      where email = 'invite-again@example.com'`,
+  const first = await invite(
+    person("dani"),
+    "invite-again@example.com",
+    "First",
   );
-  const r = await invite(person("dani"), "invite-again@example.com", "Second");
-  assert.equal(r[0].r, "invited");
+  await expire(first);
+  const second = await invite(
+    person("dani"),
+    "invite-again@example.com",
+    "Second",
+  );
+  assert.match(second, UUID);
+  assert.notEqual(second, first);
 
   const rows = await invitationsFor("invite-again@example.com");
   assert.equal(rows.length, 2);
   const pending = rows.filter((i) => !i.accepted_at && !i.revoked_at);
   assert.equal(pending.length, 1);
+  assert.equal(pending[0].id, second);
   assert.equal(pending[0].display_name, "Second");
   assert.ok(pending[0].expires_at > new Date());
   // The new one is the one honoured.
-  const id = await addUser("invite-again@example.com");
-  assert.equal((await claim(asUser(id)))[0].n, 1);
-  assert.equal((await membershipsOf(id))[0].display_name, "Second");
+  const me = asUser(await addUser("invite-again@example.com"));
+  await assert.rejects(accept(me, first), /invitation not found/);
+  assert.equal(await accept(me, second), hive);
+  assert.equal((await membershipsOf(me.sub))[0].display_name, "Second");
 });
 
 test("there is never a second pending invitation for one email in a hive", async () => {
@@ -2999,25 +2956,23 @@ test("there is never a second pending invitation for one email in a hive", async
   );
   // Another hive may invite the same address.
   const other = await otherHive();
-  assert.equal(
-    (
-      await invite(
-        person("outsider"),
-        "invite-single@example.com",
-        "Single there",
-        other,
-      )
-    )[0].r,
-    "invited",
+  assert.match(
+    await invite(
+      person("outsider"),
+      "invite-single@example.com",
+      "Single there",
+      other,
+    ),
+    UUID,
   );
   // A revoked one does not block a new one.
   const [mine] = (await invitationsFor("invite-single@example.com")).filter(
     (i) => i.hive_id === hive,
   );
   await revokeInvitation(person("dani"), mine.id);
-  assert.equal(
-    (await invite(person("dani"), "invite-single@example.com", "Single"))[0].r,
-    "invited",
+  assert.match(
+    await invite(person("dani"), "invite-single@example.com", "Single"),
+    UUID,
   );
   const pending = (await invitationsFor("invite-single@example.com")).filter(
     (i) => !i.accepted_at && !i.revoked_at,
@@ -3025,65 +2980,15 @@ test("there is never a second pending invitation for one email in a hive", async
   assert.deepEqual(pending.map((i) => i.hive_id).sort(), [hive, other].sort());
 });
 
-test("claiming changes nothing for someone who is already a member", async () => {
-  // Invited, then added another way before signing in.
-  await invite(person("dani"), "invite-already@example.com", "Invited name");
-  const id = await addUser("invite-already@example.com");
-  await as(
-    person("dani"),
-    `select public.add_member($1, 'invite-already@example.com', 'Added name')`,
-    [hive],
-  );
-  const ms = await membershipsOf(id);
-  const audits = (await inviteState()).audits;
-
-  assert.equal((await claim(asUser(id)))[0].n, 0);
-  assert.deepEqual(await membershipsOf(id), ms);
-  assert.equal(ms.length, 1);
-  assert.equal(ms[0].display_name, "Added name");
-  assert.deepEqual(ms[0].workspaces, ["Main"]);
-  assert.equal((await inviteState()).audits, audits);
-  const [inv] = await invitationsFor("invite-already@example.com");
-  assert.ok(inv.accepted_at);
-  assert.equal(inv.accepted_member, ms[0].id);
-
-  // An owner invited to their own hive stays the owner, under their own name.
-  const mark = await inviteState();
-  await db.query(
-    `insert into public.invitations (hive_id, email, display_name) values ($1, 'dani@example.com', 'Demoted')`,
-    [hive],
-  );
-  assert.equal((await claim(person("dani")))[0].n, 0);
-  const dani = (await membershipsOf(users.dani)).filter(
-    (m) => m.hive_id === hive,
-  );
-  assert.equal(dani.length, 1);
-  assert.equal(dani[0].role, "owner");
-  assert.equal(dani[0].display_name, "Dani");
-  assert.equal((await inviteState()).members, mark.members);
-
-  // A waiting invitation is closed when the owner invites the same person
-  // again after they got an account.
-  await invite(person("dani"), "invite-later@example.com", "Later");
-  const later = await addUser("invite-later@example.com");
-  assert.equal(
-    (await invite(person("dani"), "invite-later@example.com", "Later now"))[0]
-      .r,
-    "added",
-  );
-  const [closed] = await invitationsFor("invite-later@example.com");
-  assert.ok(closed.accepted_at);
-  assert.equal((await claim(asUser(later)))[0].n, 0);
-  const lm = await membershipsOf(later);
-  assert.equal(lm.length, 1);
-  assert.equal(lm[0].display_name, "Later now");
-  assert.equal(closed.accepted_member, lm[0].id);
-});
-
 test("only the hive owner revokes an invitation", async () => {
-  await invite(person("dani"), "invite-revoke@example.com", "Revoke");
+  const id = await invite(
+    person("dani"),
+    "invite-revoke@example.com",
+    "Revoke",
+  );
   const invited = await addUser("invite-revoke@example.com");
   const [inv] = await invitationsFor("invite-revoke@example.com");
+  assert.equal(inv.id, id);
   const before = await inviteState();
 
   for (const who of [
@@ -3116,7 +3021,7 @@ test("only the hive owner revokes an invitation", async () => {
     /invitation not found/,
   );
   await assert.rejects(
-    revokeInvitation(person("dani"), "00000000-0000-0000-0000-000000000000"),
+    revokeInvitation(person("dani"), NO_CLIENT),
     /invitation not found/,
   );
   await unchanged(before);
@@ -3131,8 +3036,11 @@ test("only the hive owner revokes an invitation", async () => {
     /invitation not found/,
   );
   await unchanged(after);
-  // A revoked invitation lets nobody in.
-  assert.equal((await claim(asUser(invited)))[0].n, 0);
+  // A revoked invitation lets nobody in, and is no longer shown or emailed.
+  assert.deepEqual(await myInvitations(asUser(invited)), []);
+  await assert.rejects(accept(asUser(invited), inv.id), /invitation not found/);
+  await assert.rejects(toEmail(person("dani"), inv.id), /invitation not found/);
+  await unchanged(after);
   assert.deepEqual(await membershipsOf(invited), []);
 });
 
@@ -3145,12 +3053,13 @@ test("only the hive owner reads invitations, and nobody writes them by hand", as
   const mine = await as(
     person("dani"),
     `select id, hive_id, email, display_name, created_at, expires_at,
-            accepted_at, revoked_at
+            accepted_at, revoked_at, last_emailed_at, email_count
        from public.invitations where id = $1`,
     [inv.id],
   );
   assert.equal(mine.length, 1);
   assert.equal(mine[0].email, "invite-read@example.com");
+  assert.equal(mine[0].email_count, 0);
   // The owner sees their own hive's only.
   const other = await otherHive();
   await invite(person("outsider"), "invite-read-there@example.com", "T", other);
@@ -3161,6 +3070,8 @@ test("only the hive owner reads invitations, and nobody writes them by hand", as
   assert.deepEqual(seen, [{ hive_id: hive }]);
   assert.ok(!(await read(person("outsider"))).some((r) => r.id === inv.id));
 
+  // The invited person does not read the table either: my_invitations is
+  // what shows them their own.
   for (const who of [
     person("ahmed"),
     person("sara"),
@@ -3205,6 +3116,14 @@ test("only the hive owner reads invitations, and nobody writes them by hand", as
       ),
       /permission denied/,
     );
+    // The email limits cannot be wound back.
+    await assert.rejects(
+      as(
+        who,
+        `update public.invitations set email_count = 0, last_emailed_at = null`,
+      ),
+      /permission denied/,
+    );
     await assert.rejects(
       as(who, `delete from public.invitations where id = $1`, [inv.id]),
       /permission denied/,
@@ -3217,9 +3136,16 @@ test("inviting, joining and revoking are in the audit log for the owner only", a
   const mark = await lastAudit();
   await addUser("invite-audit-known@example.com");
   await invite(person("dani"), "invite-audit-known@example.com", "Known");
-  await invite(person("dani"), "invite-audit-join@example.com", "Join");
+  const joinId = await invite(
+    person("dani"),
+    "invite-audit-join@example.com",
+    "Join",
+  );
   const joiner = await addUser("invite-audit-join@example.com");
-  await claim(asUser(joiner));
+  // Emailing is in the log; looking writes nothing.
+  await toEmail(person("dani"), joinId);
+  await myInvitations(asUser(joiner));
+  await accept(asUser(joiner), joinId);
   await invite(person("dani"), "invite-audit-gone@example.com", "Gone");
   const [gone] = await invitationsFor("invite-audit-gone@example.com");
   await revokeInvitation(person("dani"), gone.id);
@@ -3234,8 +3160,9 @@ test("inviting, joining and revoking are in the audit log for the owner only", a
   assert.deepEqual(
     rows.map((r) => r.action),
     [
-      "member.added",
       "member.invited",
+      "member.invited",
+      "member.invitation_emailed",
       "member.joined",
       "member.invited",
       "member.invitation_revoked",
@@ -3245,10 +3172,14 @@ test("inviting, joining and revoking are in the audit log for the owner only", a
     assert.equal(r.hive_id, hive);
     assert.equal(r.agent_id, null);
   }
-  const [added, invited, join, , revoked] = rows;
-  assert.equal(added.member_id, members.dani);
-  assert.equal(added.detail.email, "invite-audit-known@example.com");
-  assert.ok(added.detail.member);
+  const [known, invited, emailed, join, , revoked] = rows;
+  assert.equal(emailed.member_id, members.dani);
+  assert.deepEqual(emailed.detail, {
+    invitation: joined.id,
+    email: "invite-audit-join@example.com",
+  });
+  assert.equal(known.member_id, members.dani);
+  assert.equal(known.detail.email, "invite-audit-known@example.com");
   assert.equal(invited.member_id, members.dani);
   assert.deepEqual(invited.detail, {
     invitation: joined.id,
@@ -3287,73 +3218,718 @@ test("inviting, joining and revoking are in the audit log for the owner only", a
   );
 });
 
-test("a person invited to two hives joins both with one claim", async () => {
+// ------------------------------------------------------ emailed invitations
+// The server emails the invitation and the person presses Join. The mail
+// function asks the database one thing, invitation_to_email, with the owner's
+// own session; the Join page asks my_invitations and accept_invitation with
+// the invited person's.
+
+test("a hive makes at most 20 invitations in 24 hours", async () => {
+  const a = await freshHive("cap-a");
+  const b = await freshHive("cap-b");
+  const ids = [];
+  for (let i = 1; i <= 20; i++)
+    ids.push(
+      await invite(a.owner, `invite-cap-${i}@example.com`, `Cap ${i}`, a.id),
+    );
+  const full = await inviteState();
+  const more = (email = "invite-cap-21@example.com") =>
+    invite(a.owner, email, "Cap more", a.id);
+
+  await assert.rejects(more(), /too many invitations today/);
+  await unchanged(full);
+  // Revoking one makes no room, not even for the address it was for.
+  await revokeInvitation(a.owner, ids[0]);
+  const revoked = await inviteState();
+  await assert.rejects(more(), /too many invitations today/);
+  await assert.rejects(
+    more("invite-cap-1@example.com"),
+    /too many invitations today/,
+  );
+  // An address that is still invited is told so, as on any other day.
+  await assert.rejects(
+    more("invite-cap-2@example.com"),
+    /that email is already invited/,
+  );
+  await unchanged(revoked);
+  // The limit is each hive's own.
+  assert.match(
+    await invite(b.owner, "invite-cap-21@example.com", "Cap", b.id),
+    UUID,
+  );
+  await assert.rejects(more(), /too many invitations today/);
+
+  // Once one of the twenty is more than a day old there is room for one.
+  await db.query(
+    `update public.invitations
+        set created_at = now() - interval '24 hours 1 second' where id = $1`,
+    [ids[1]],
+  );
+  assert.match(await more(), UUID);
+  await assert.rejects(
+    more("invite-cap-22@example.com"),
+    /too many invitations today/,
+  );
+});
+
+test("a person makes at most 20 invitations in 24 hours, over all their hives", async () => {
+  const a = await freshHive("person-a");
+  const me = a.owner;
+  const hiveOf = async (name) =>
+    (await as(me, `select public.create_hive($1, 'Owner') as id`, [name]))[0]
+      .id;
+  const second = await hiveOf("Hive person second");
+  const ids = [];
+  for (let i = 1; i <= 12; i++)
+    ids.push(await invite(me, `invite-person-${i}@example.com`, "P", a.id));
+  for (let i = 13; i <= 20; i++)
+    ids.push(await invite(me, `invite-person-${i}@example.com`, "P", second));
+  const third = await hiveOf("Hive person third");
+  const full = await inviteState();
+
+  // No hive is at its own limit; the person is at theirs.
+  for (const h of [a.id, second, third]) {
+    await assert.rejects(
+      invite(me, "invite-person-21@example.com", "P", h),
+      /too many invitations today/,
+    );
+    await unchanged(full);
+  }
+  // Revoking makes no room.
+  await revokeInvitation(me, ids[0]);
+  await assert.rejects(
+    invite(me, "invite-person-21@example.com", "P", third),
+    /too many invitations today/,
+  );
+  // Someone else is not held back by it.
+  const b = await freshHive("person-b");
+  assert.match(
+    await invite(b.owner, "invite-person-21@example.com", "P", b.id),
+    UUID,
+  );
+
+  // Once one of the twenty is more than a day old there is room for one.
+  await db.query(
+    `update public.invitations
+        set created_at = now() - interval '24 hours 1 second' where id = $1`,
+    [ids[19]],
+  );
+  assert.match(
+    await invite(me, "invite-person-21@example.com", "P", third),
+    UUID,
+  );
+  await assert.rejects(
+    invite(me, "invite-person-22@example.com", "P", a.id),
+    /too many invitations today/,
+  );
+});
+
+test("the owner gets an invitation's address to email, within limits", async () => {
+  const dani = person("dani");
+  const id = await invite(dani, " Invite-Mail@Example.com", "Mail");
+  const sent = async () =>
+    (
+      await db.query(
+        `select email_count as count, last_emailed_at as at,
+                extract(epoch from now() - last_emailed_at)::float8 as ago
+           from public.invitations where id = $1`,
+        [id],
+      )
+    ).rows[0];
+  const lastSent = (ago) =>
+    db.query(
+      `update public.invitations set last_emailed_at = now() - $2::interval
+        where id = $1`,
+      [id, ago],
+    );
+  assert.deepEqual(await sent(), { count: 0, at: null, ago: null });
+  const mark = await lastAudit();
+
+  assert.deepEqual(await toEmail(dani, id), [
+    { email: "invite-mail@example.com" },
+  ]);
+  let s = await sent();
+  assert.equal(s.count, 1);
+  assert.ok(s.ago >= 0 && s.ago < 5, `stamped ${s.ago} s ago`);
+
+  // At once again, and just short of two minutes later.
+  const once = await inviteState();
+  await assert.rejects(toEmail(dani, id), /wait before sending again/);
+  await unchanged(once);
+  await lastSent("1 minute 55 seconds");
+  const almost = await inviteState();
+  await assert.rejects(toEmail(dani, id), /wait before sending again/);
+  await unchanged(almost);
+
+  // Two minutes on it is sent again, up to five times in all.
+  for (const count of [2, 3, 4, 5]) {
+    await lastSent("2 minutes 1 second");
+    assert.deepEqual(await toEmail(dani, id), [
+      { email: "invite-mail@example.com" },
+    ]);
+    s = await sent();
+    assert.equal(s.count, count);
+    assert.ok(s.ago >= 0 && s.ago < 5, `stamped ${s.ago} s ago`);
+  }
+  for (const ago of ["0 seconds", "3 minutes", "3 days"]) {
+    await lastSent(ago);
+    const five = await inviteState();
+    await assert.rejects(
+      toEmail(dani, id),
+      /too many emails for this invitation/,
+    );
+    await unchanged(five);
+  }
+  // The limits are each invitation's own.
+  const other = await invite(dani, "invite-mail-other@example.com", "Other");
+  assert.deepEqual(await toEmail(dani, other), [
+    { email: "invite-mail-other@example.com" },
+  ]);
+  // Each email that went out is in the audit log, under the owner's name;
+  // the refusals above left nothing.
+  const mail = { invitation: id, email: "invite-mail@example.com" };
+  assert.deepEqual(
+    (await auditSince(mark))
+      .filter((r) => r.action !== "member.invited")
+      .map((r) => [r.action, r.hive_id, r.member_id, r.agent_id, r.detail]),
+    [
+      ...[1, 2, 3, 4, 5].map(() => [
+        "member.invitation_emailed",
+        hive,
+        members.dani,
+        null,
+        mail,
+      ]),
+      [
+        "member.invitation_emailed",
+        hive,
+        members.dani,
+        null,
+        { invitation: other, email: "invite-mail-other@example.com" },
+      ],
+    ],
+  );
+});
+
+test("a person emails one address at most 5 times in 24 hours, however often it is invited", async () => {
+  const a = await freshHive("rcpt-a");
+  const me = a.owner;
+  const second = (
+    await as(me, `select public.create_hive('Hive rcpt second', 'Owner') as id`)
+  )[0].id;
+  const address = "invite-rcpt@example.com";
+  // The two-minute wait is not what is tested here.
+  const rested = () =>
+    db.query(
+      `update public.invitations set last_emailed_at = now() - interval '3 minutes'
+        where email = $1`,
+      [address],
+    );
+  const send = async (id) => {
+    await rested();
+    return toEmail(me, id);
+  };
+
+  // Two emails, revoked, invited again, two more, then one from another
+  // hive of the same person: five in all.
+  let id = await invite(me, address, "Rcpt", a.id);
+  await send(id);
+  await send(id);
+  await revokeInvitation(me, id);
+  id = await invite(me, address, "Rcpt", a.id);
+  await send(id);
+  await send(id);
+  const there = await invite(me, address, "Rcpt", second);
+  await send(there);
+
+  // The sixth is refused whichever invitation it is asked for, and a fresh
+  // invitation does not help.
+  const five = await inviteState();
+  for (const inv of [id, there]) {
+    await rested();
+    const before = await inviteState();
+    await assert.rejects(
+      toEmail(me, inv),
+      /too many emails for this invitation/,
+    );
+    await unchanged(before);
+  }
+  assert.equal((await inviteState()).audits, five.audits);
+  await revokeInvitation(me, id);
+  id = await invite(me, address, "Rcpt", a.id);
+  await assert.rejects(toEmail(me, id), /too many emails for this invitation/);
+  assert.equal(
+    (
+      await db.query(
+        `select email_count from public.invitations where id = $1`,
+        [id],
+      )
+    ).rows[0].email_count,
+    0,
+  );
+
+  // Another address is not held back, nor is another person inviting this one.
+  const other = await invite(me, "invite-rcpt-other@example.com", "O", a.id);
+  assert.deepEqual(await toEmail(me, other), [
+    { email: "invite-rcpt-other@example.com" },
+  ]);
+  const b = await freshHive("rcpt-b");
+  const theirs = await invite(b.owner, address, "Rcpt", b.id);
+  assert.deepEqual(await toEmail(b.owner, theirs), [{ email: address }]);
+
+  // A day after the first of the five there is room for one more.
+  await db.query(
+    `update public.audit_log set at = now() - interval '24 hours 1 second'
+      where id = (select min(id) from public.audit_log
+                   where action = 'member.invitation_emailed'
+                     and detail ->> 'email' = $1)`,
+    [address],
+  );
+  assert.deepEqual(await toEmail(me, id), [{ email: address }]);
+  await rested();
+  await assert.rejects(toEmail(me, id), /too many emails for this invitation/);
+});
+
+test("nobody but the hive's owner gets an invitation's address", async () => {
+  const dani = person("dani");
+  const id = await invite(dani, "invite-mail-refused@example.com", "Refused");
+  const invited = await addUser("invite-mail-refused@example.com");
+  const revoked = await invite(dani, "invite-mail-revoked@example.com", "R");
+  await revokeInvitation(dani, revoked);
+  const late = await invite(dani, "invite-mail-late@example.com", "L");
+  await expire(late);
+  const joined = await invite(dani, "invite-mail-joined@example.com", "J");
+  await accept(asUser(await addUser("invite-mail-joined@example.com")), joined);
+  const before = await inviteState();
+
+  for (const who of [
+    person("ahmed"),
+    person("sara"),
+    person("outsider"),
+    asUser(invited),
+    { role: "authenticated" },
+    { role: "authenticated", sub: "" },
+  ]) {
+    await assert.rejects(toEmail(who, id), /invitation not found/);
+    await unchanged(before);
+  }
+  for (const who of [
+    await agentFor("dani"),
+    await agentFor("dani", "self_hosted"),
+    selfHosted("dani"),
+    await agentFor("ahmed"),
+  ]) {
+    await assert.rejects(
+      toEmail(who, id),
+      /only the hive owner can invite members/,
+    );
+    await unchanged(before);
+  }
+  for (const who of [passOf(dani), { ...dani, aud: "some-client" }]) {
+    await assert.rejects(toEmail(who, id), PASS_REFUSED);
+    await unchanged(before);
+  }
+  await assert.rejects(toEmail(null, id), /permission denied/);
+  // Not there, or no longer open.
+  for (const gone of [null, NO_CLIENT, revoked, late, joined]) {
+    await assert.rejects(toEmail(dani, gone), /invitation not found/);
+    await unchanged(before);
+  }
+  // Another hive's owner gets their own invitation's address, not this one.
+  const there = await invite(
+    person("outsider"),
+    "invite-mail-there@example.com",
+    "There",
+    await otherHive(),
+  );
+  await assert.rejects(toEmail(dani, there), /invitation not found/);
+  assert.deepEqual(await toEmail(person("outsider"), there), [
+    { email: "invite-mail-there@example.com" },
+  ]);
+  // The open one is the owner's to send: none of the refusals was about it.
+  assert.deepEqual(await toEmail(dani, id), [
+    { email: "invite-mail-refused@example.com" },
+  ]);
+});
+
+test("a person sees the invitations waiting for their own confirmed address", async () => {
   const other = await otherHive();
-  await invite(person("dani"), "invite-two@example.com", "Two here");
-  await invite(
+  const here = await invite(person("dani"), "invite-mine@example.com", "Mine");
+  const there = await invite(
+    person("outsider"),
+    "INVITE-MINE@example.com",
+    "Mine there",
+    other,
+  );
+  await invite(person("dani"), "invite-mine-not@example.com", "Not mine");
+  // Two more hives: one took its invitation back, the other's ran out.
+  const c = await freshHive("mine-c");
+  const d = await freshHive("mine-d");
+  await revokeInvitation(
+    c.owner,
+    await invite(c.owner, "invite-mine@example.com", "Mine", c.id),
+  );
+  await expire(await invite(d.owner, "invite-mine@example.com", "Mine", d.id));
+  const me = asUser(await addUser("Invite-Mine@Example.com"));
+  const before = await inviteState();
+
+  const rows = await myInvitations(me);
+  assert.deepEqual(
+    rows.map((r) => Object.keys(r)),
+    [
+      ["id", "hive_name", "invited_by", "expires_at"],
+      ["id", "hive_name", "invited_by", "expires_at"],
+    ],
+  );
+  assert.deepEqual(
+    rows.map(({ id, hive_name, invited_by }) => ({
+      id,
+      hive_name,
+      invited_by,
+    })),
+    [
+      { id: here, hive_name: "Test hive", invited_by: "Dani" },
+      { id: there, hive_name: "Other hive", invited_by: "Outsider" },
+    ],
+  );
+  const [stored] = (await invitationsFor("invite-mine@example.com")).filter(
+    (i) => i.id === here,
+  );
+  assert.deepEqual(rows[0].expires_at, stored.expires_at);
+  // Looking changes nothing, and lets nobody in.
+  await unchanged(before);
+  assert.deepEqual(await membershipsOf(me.sub), []);
+
+  // Nobody else is shown them: not the owners, not a member, not a person
+  // whose address is close to it.
+  for (const who of [
+    person("dani"),
+    person("ahmed"),
+    person("outsider"),
+    c.owner,
+    asUser(await addUser("xinvite-mine@example.com")),
+    asUser(await addUser("invite-mine@example.com.evil.test")),
+    asUser(await addUser("invite-min_@example.com")),
+    asUser(await addUser("invite-%@example.com")),
+  ])
+    assert.deepEqual(await myInvitations(who), []);
+
+  // An account that never proved the address sees none until it has.
+  await invite(person("dani"), "invite-mine-unproved@example.com", "Unproved");
+  const unproved = await addUser("invite-mine-unproved@example.com", {
+    confirmed: false,
+  });
+  assert.deepEqual(await myInvitations(asUser(unproved)), []);
+  await db.query(
+    `update auth.users set email_confirmed_at = now() where id = $1`,
+    [unproved],
+  );
+  assert.equal((await myInvitations(asUser(unproved))).length, 1);
+
+  // An invitation whose inviter has left the hive is still shown, unnamed.
+  await db.query(
+    `insert into public.invitations (hive_id, email, display_name)
+     values ($1, 'invite-mine-orphan@example.com', 'Orphan')`,
+    [hive],
+  );
+  const orphan = await myInvitations(
+    asUser(await addUser("invite-mine-orphan@example.com")),
+  );
+  assert.deepEqual(
+    orphan.map(({ hive_name, invited_by }) => [hive_name, invited_by]),
+    [["Test hive", ""]],
+  );
+});
+
+test("the invited person joins by accepting, once", async () => {
+  const id = await invite(person("dani"), "invite-join@example.com", "Joiner");
+  // The account appears later, as it does when the emailed link is opened.
+  const me = asUser(await addUser("Invite-Join@Example.com"));
+  // Signing in is not joining.
+  assert.deepEqual(await membershipsOf(me.sub), []);
+  assert.deepEqual(
+    await as(me, `select 1 from public.members where hive_id = $1`, [hive]),
+    [],
+  );
+  const mark = await lastAudit();
+
+  assert.equal(await accept(me, id), hive);
+  const ms = await membershipsOf(me.sub);
+  assert.equal(ms.length, 1);
+  assert.equal(ms[0].hive_id, hive);
+  assert.equal(ms[0].display_name, "Joiner");
+  assert.equal(ms[0].role, "member");
+  assert.deepEqual(ms[0].workspaces, ["Main"]);
+  const [inv] = await invitationsFor("invite-join@example.com");
+  assert.ok(inv.accepted_at);
+  assert.equal(inv.accepted_member, ms[0].id);
+  assert.equal(inv.revoked_at, null);
+  assert.deepEqual(
+    (await auditSince(mark)).map((r) => [r.action, r.member_id, r.detail]),
+    [
+      [
+        "member.joined",
+        ms[0].id,
+        { invitation: id, email: "invite-join@example.com" },
+      ],
+    ],
+  );
+  // They are in: they read the member list, and nothing is left waiting.
+  assert.ok(
+    (await as(me, `select id from public.members where hive_id = $1`, [hive]))
+      .length > 1,
+  );
+  assert.deepEqual(await myInvitations(me), []);
+
+  const after = await inviteState();
+  await assert.rejects(accept(me, id), /invitation not found/);
+  await unchanged(after);
+  assert.deepEqual(await membershipsOf(me.sub), ms);
+  // Joined: the owner can no longer invite, email or revoke that invitation.
+  await assert.rejects(
+    invite(person("dani"), "invite-join@example.com", "Joiner"),
+    /that person is already a member/,
+  );
+  await assert.rejects(toEmail(person("dani"), id), /invitation not found/);
+  await assert.rejects(
+    revokeInvitation(person("dani"), id),
+    /invitation not found/,
+  );
+  await unchanged(after);
+});
+
+test("a person invited to two hives joins each one by itself", async () => {
+  const other = await otherHive();
+  const here = await invite(
+    person("dani"),
+    "invite-two@example.com",
+    "Two here",
+  );
+  const there = await invite(
     person("outsider"),
     "INVITE-TWO@example.com",
     "Two there",
     other,
   );
   // A third hive that did not invite them.
-  const third = (
-    await as(
-      asUser(await addUser("invite-third-owner@example.com")),
-      `select public.create_hive('Third hive', 'Third') as id`,
-    )
-  )[0].id;
-  const id = await addUser("invite-two@example.com");
+  const third = await freshHive("third");
+  const me = asUser(await addUser("invite-two@example.com"));
 
-  assert.equal((await claim(asUser(id)))[0].n, 2);
-  const ms = await membershipsOf(id);
+  assert.equal(await accept(me, there), other);
+  let ms = await membershipsOf(me.sub);
+  assert.deepEqual(
+    ms.map((m) => [m.hive_id, m.display_name, m.role, m.workspaces]),
+    [[other, "Two there", "member", ["Main"]]],
+  );
+  // The other invitation is still waiting, and still theirs to take.
+  assert.deepEqual(
+    (await myInvitations(me)).map((r) => r.id),
+    [here],
+  );
+  assert.equal(await accept(me, here), hive);
+  ms = await membershipsOf(me.sub);
   assert.deepEqual(
     Object.fromEntries(ms.map((m) => [m.hive_id, m.display_name])),
     { [hive]: "Two here", [other]: "Two there" },
   );
-  for (const m of ms) {
-    assert.equal(m.role, "member");
-    assert.deepEqual(m.workspaces, ["Main"]);
-  }
-  assert.ok(!ms.some((m) => m.hive_id === third));
-  assert.equal((await claim(asUser(id)))[0].n, 0);
-  assert.equal((await membershipsOf(id)).length, 2);
+  assert.ok(!ms.some((m) => m.hive_id === third.id));
+  assert.deepEqual(await myInvitations(me), []);
 });
 
-test("an account with no email address joins nothing", async () => {
-  await invite(person("dani"), "invite-noemail@example.com", "No Email");
+test("nobody joins without the invited, confirmed email address", async () => {
+  const dani = person("dani");
+  const proof = await invite(dani, "invite-proof@example.com", "Proof");
+  // An account with the invited address that never proved it.
+  const unproved = await addUser("invite-proof@example.com", {
+    confirmed: false,
+  });
+  // Other, confirmed people, with addresses close to the invited one.
+  const others = [];
+  for (const email of [
+    "invite-other@example.com",
+    "xinvite-proof@example.com",
+    "invite-proof@example.com.evil.test",
+    "invite-proof@example.co",
+    "invite-proo_@example.com",
+    "invite-%@example.com",
+    " invite-proof@example.com",
+  ])
+    others.push(await addUser(email));
+  // A revoked and an expired invitation, each for a confirmed person.
+  const gone = await invite(dani, "invite-gone@example.com", "Gone");
+  const goneUser = await addUser("invite-gone@example.com");
+  await revokeInvitation(dani, gone);
+  const late = await invite(dani, "invite-late@example.com", "Late");
+  const lateUser = await addUser("invite-late@example.com");
+  await expire(late);
+
+  const before = await inviteState();
+  const everyone = [
+    unproved,
+    ...others,
+    goneUser,
+    lateUser,
+    users.ahmed,
+    users.dani,
+    users.outsider,
+  ];
+  for (const id of everyone) {
+    for (const inv of [proof, gone, late, null, NO_CLIENT])
+      await assert.rejects(
+        accept(asUser(id), inv),
+        /invitation not found/,
+        `${id} accepted ${inv}`,
+      );
+    assert.deepEqual(await myInvitations(asUser(id)), []);
+    await unchanged(before);
+  }
+  for (const id of [unproved, ...others, goneUser, lateUser])
+    assert.deepEqual(await membershipsOf(id), []);
+
+  // Once the address is proved, the same person does join.
+  await db.query(
+    `update auth.users set email_confirmed_at = now() where id = $1`,
+    [unproved],
+  );
+  assert.equal(await accept(asUser(unproved), proof), hive);
+  assert.equal((await membershipsOf(unproved))[0].display_name, "Proof");
+});
+
+test("an account with no email address is shown nothing and joins nothing", async () => {
+  const id = await invite(person("dani"), "invite-noemail@example.com", "No");
   const before = await inviteState();
   for (const email of [null, ""]) {
-    const id = (
+    const user = (
       await db.query(
         `insert into auth.users (email, email_confirmed_at)
          values ($1, now()) returning id`,
         [email],
       )
     ).rows[0].id;
-    assert.equal((await claim(asUser(id)))[0].n, 0);
-    assert.deepEqual(await membershipsOf(id), []);
+    assert.deepEqual(await myInvitations(asUser(user)), []);
+    await assert.rejects(accept(asUser(user), id), /invitation not found/);
+    assert.deepEqual(await membershipsOf(user), []);
   }
   await unchanged(before);
 });
 
-test("adding a person closes the invitation that was waiting for them", async () => {
-  await invite(person("dani"), "invite-lapsed@example.com", "Late");
-  await db.query(
-    `update public.invitations set expires_at = now() - interval '1 second'
-      where email = 'invite-lapsed@example.com'`,
-  );
-  const id = await addUser("invite-lapsed@example.com");
-  const r = await invite(person("dani"), "invite-lapsed@example.com", "Late");
-  assert.equal(r[0].r, "added");
+test("an agent, an app or an anonymous caller neither sees nor accepts an invitation", async () => {
+  const id = await invite(person("dani"), "invite-agent@example.com", "Agent");
+  // The invited person's own agent, were they to have one: the claims an
+  // agent identity carries, on the invited person's account.
+  const me = asUser(await addUser("invite-agent@example.com"));
+  const agent = (tier) => ({
+    ...me,
+    agent_id: "11111111-1111-4111-8111-111111111111",
+    workspace_id: ws.dani,
+    trust_tier: tier,
+  });
+  const before = await inviteState();
 
-  const rows = await invitationsFor("invite-lapsed@example.com");
-  assert.equal(rows.length, 1);
-  assert.equal(rows.filter((i) => !i.accepted_at && !i.revoked_at).length, 0);
-  // One membership, and a later claim finds nothing left to join.
-  assert.equal((await membershipsOf(id)).length, 1);
-  assert.equal((await claim(asUser(id)))[0].n, 0);
-  assert.equal((await membershipsOf(id)).length, 1);
+  for (const who of [
+    agent("vendor"),
+    agent("self_hosted"),
+    { ...me, trust_tier: "self_hosted" },
+    { role: "authenticated" },
+    { role: "authenticated", sub: "" },
+  ]) {
+    await assert.rejects(accept(who, id), /sign in as a person/);
+    await assert.rejects(myInvitations(who), /sign in as a person/);
+    await unchanged(before);
+  }
+  // A member's real agent is refused the same way.
+  for (const who of [await agentFor("ahmed"), await agentFor("dani")]) {
+    await assert.rejects(accept(who, id), /sign in as a person/);
+    await assert.rejects(myInvitations(who), /sign in as a person/);
+  }
+  for (const who of [
+    passOf(me),
+    { ...me, aud: "some-client" },
+    passOf(agent("vendor")),
+  ]) {
+    await assert.rejects(accept(who, id), PASS_REFUSED);
+    await assert.rejects(myInvitations(who), PASS_REFUSED);
+    await unchanged(before);
+  }
+  await assert.rejects(accept(null, id), /permission denied/);
+  await assert.rejects(myInvitations(null), /permission denied/);
+  await unchanged(before);
+  assert.deepEqual(await membershipsOf(me.sub), []);
+
+  // The person themself, signed in: it was theirs all along.
+  assert.deepEqual(
+    (await myInvitations(me)).map((r) => r.id),
+    [id],
+  );
+  assert.equal(await accept(me, id), hive);
+});
+
+test("accepting changes nothing for someone who is already a member", async () => {
+  // Invited, then put into the hive another way before accepting.
+  const id = await invite(
+    person("dani"),
+    "invite-already@example.com",
+    "Invited name",
+  );
+  const user = await addUser("invite-already@example.com");
+  await addMember(hive, user, "Added name");
+  const ms = await membershipsOf(user);
+  const audits = (await inviteState()).audits;
+
+  assert.equal(await accept(asUser(user), id), hive);
+  assert.deepEqual(await membershipsOf(user), ms);
+  assert.equal(ms.length, 1);
+  assert.equal(ms[0].display_name, "Added name");
+  assert.deepEqual(ms[0].workspaces, ["Main"]);
+  assert.equal((await inviteState()).audits, audits);
+  const [inv] = await invitationsFor("invite-already@example.com");
+  assert.ok(inv.accepted_at);
+  assert.equal(inv.accepted_member, ms[0].id);
+
+  // An owner invited to their own hive stays the owner, under their own name.
+  const own = await freshHive("own");
+  const mark = await inviteState();
+  const mine = (
+    await db.query(
+      `insert into public.invitations (hive_id, email, display_name)
+       values ($1, 'invite-own-owner@example.com', 'Demoted') returning id`,
+      [own.id],
+    )
+  ).rows[0].id;
+  assert.equal(await accept(own.owner, mine), own.id);
+  const owner = await membershipsOf(own.owner.sub);
+  assert.equal(owner.length, 1);
+  assert.equal(owner[0].role, "owner");
+  assert.equal(owner[0].display_name, "Owner");
+  assert.deepEqual(owner[0].workspaces, ["Main"]);
+  const after = await inviteState();
+  assert.equal(after.members, mark.members);
+  assert.equal(after.workspaces, mark.workspaces);
+  assert.equal(after.audits, mark.audits);
+});
+
+test("nothing joins a hive silently: claim_invitations is gone", async () => {
+  const left = (
+    await db.query(
+      `select p.proname from pg_proc p
+        where p.pronamespace = 'public'::regnamespace
+          and p.proname = 'claim_invitations'`,
+    )
+  ).rows;
+  assert.deepEqual(left, []);
+  const id = await invite(person("dani"), "invite-silent@example.com", "S");
+  const me = asUser(await addUser("invite-silent@example.com"));
+  await assert.rejects(
+    as(me, `select public.claim_invitations()`),
+    /does not exist/,
+  );
+  // Signed in, looked at the hive, looked at the invitation: still not in.
+  await as(me, `select * from public.hives`);
+  await myInvitations(me);
+  assert.deepEqual(await membershipsOf(me.sub), []);
+  const [inv] = await invitationsFor("invite-silent@example.com");
+  assert.equal(inv.id, id);
+  assert.equal(inv.accepted_at, null);
 });
 
 // ---------------------------------------------------------- deleting a note
@@ -3671,11 +4247,7 @@ test("deleting a workspace, a member, an account or a hive still works", async (
   const leaver = async (tag) => {
     const email = `dn-${tag}@example.com`;
     const user = await addUser(email);
-    await as(person("dani"), `select public.add_member($1, $2, $3)`, [
-      hive,
-      email,
-      `Leaver ${tag}`,
-    ]);
+    await addMember(hive, user, `Leaver ${tag}`);
     const m = (
       await db.query(
         `select m.id as member, w.id as space from public.members m
@@ -3897,11 +4469,7 @@ const caSetup = () =>
         `select public.create_hive('CA hive', 'Kai') as id`,
       )
     )[0].id;
-    await as(
-      person("kai"),
-      `select public.add_member($1, 'lena@ca.example.com', 'Lena')`,
-      [ca.hive],
-    );
+    await addMember(ca.hive, users.lena, "Lena");
     ca.omarHive = (
       await as(
         person("omar"),
@@ -3971,6 +4539,15 @@ const caSetup = () =>
         ca.hive,
       ])
     ).rows[0].id;
+    // One waiting for kai, so that as a person kai has something to see and
+    // to accept.
+    ca.kaiInvitation = (
+      await as(
+        person("omar"),
+        `select public.invite_member($1, 'kai@ca.example.com', 'Kai') as id`,
+        [ca.omarHive],
+      )
+    )[0].id;
     // No person writes these four tables yet; the rows are put there directly.
     await db.exec("reset role");
     const entity = (
@@ -4207,11 +4784,6 @@ test("every function refuses an app pass except connector_login", async () => {
       true,
     ],
     create_hive: [`select public.create_hive('By a pass', 'Kai')`, [], true],
-    add_member: [
-      `select public.add_member($1, $2, 'Spare')`,
-      [ca.hive, ca.spareEmail],
-      true,
-    ],
     invite_member: [
       `select public.invite_member($1, 'new@ca.example.com', 'New')`,
       [ca.hive],
@@ -4222,7 +4794,17 @@ test("every function refuses an app pass except connector_login", async () => {
       [ca.invitation],
       true,
     ],
-    claim_invitations: [`select public.claim_invitations()`, [], true],
+    invitation_to_email: [
+      `select public.invitation_to_email($1)`,
+      [ca.invitation],
+      true,
+    ],
+    my_invitations: [`select id from public.my_invitations()`, [], true],
+    accept_invitation: [
+      `select public.accept_invitation($1)`,
+      [ca.kaiInvitation],
+      true,
+    ],
     create_agent: [
       `select * from public.create_agent($1, 'By a pass', 'other')`,
       [ws.kai],
@@ -4256,6 +4838,17 @@ test("every function refuses an app pass except connector_login", async () => {
   for (const name of ["connect_app", "connector_login", "jwt_oauth_client"])
     assert.ok(names.includes(name), name);
   assert.ok(!names.includes("oauth_client_tier"));
+  // The functions of the emailed-invitations migration, and the two it took
+  // away from people.
+  for (const name of [
+    "invite_member",
+    "invitation_to_email",
+    "my_invitations",
+    "accept_invitation",
+  ])
+    assert.ok(names.includes(name), name);
+  for (const name of ["add_member", "claim_invitations"])
+    assert.ok(!names.includes(name), name);
   for (const f of listed.filter((x) => pure.includes(x.name))) {
     assert.equal(f.definer, false, `${f.name} is security definer`);
     // With an empty search_path every table must be named with its schema.
@@ -4473,6 +5066,8 @@ test("an app is a vendor only when every address it registered is a known one", 
     '["https://claude.ai/cb"]',
     '["https://claude.ai/cb","https://chatgpt.com/cb"]',
     ' [ "https://a.b.openai.com/cb?x=1" ,\n "https://claude.com/cb" ] ',
+    // White space around the list, a vertical tab included, is not part of it.
+    "\u000B\f https://claude.ai/cb \t\u000B",
   ];
   const selfHosted = [
     // One address that is not known, among known ones.
@@ -4481,6 +5076,14 @@ test("an app is a vendor only when every address it registered is a known one", 
     "https://claude.ai/cb https://evil.example/cb",
     '["https://claude.ai/cb","https://evil.example/cb"]',
     "https://claude.ai/cb,http://localhost:6274/oauth/callback",
+    // A letter before the scheme is not white space: an earlier version
+    // trimmed "v" as if it were a vertical tab and read these as https.
+    "vhttps://claude.ai/x",
+    "vvhttps://claude.ai/x",
+    "Vhttps://claude.ai/x",
+    "vhttps://claude.ai/xv",
+    "https://claude.ai/cb,vhttps://chatgpt.com/cb",
+    'v["https://claude.ai/cb"]',
     // Not https.
     "http://claude.ai/cb",
     "evilapp://claude.ai/cb",
@@ -4642,6 +5245,11 @@ test("an app's name is the one it registered, cleaned", async () => {
   assert.equal(await nameFor("‮edualc‬ ⁦x⁩‏‎؜"), "edualc x");
   assert.equal(await nameFor("Cla​u‍de﻿­⁠"), "Claude");
   assert.equal(await nameFor("Claude\u{E0041}\u{E007F}"), "Claude");
+  // Only white space is trimmed: a name keeps a "v" at either end.
+  for (const name of ["vivid dev", "Viv", "v", "vv", "v v", "Vera's MCP v"])
+    assert.equal(await nameFor(name), name);
+  assert.equal(await nameFor("\u000B valve \u000B"), "valve");
+  assert.equal(await nameFor(`${"v".repeat(130)}`), "v".repeat(120));
   // Cut to 120 characters; never empty.
   assert.equal(await nameFor("x".repeat(500)), "x".repeat(120));
   assert.equal(await nameFor(`${"x".repeat(119)} y`), "x".repeat(119));
@@ -5000,7 +5608,10 @@ test("a token made for another audience is refused like an app pass", async () =
       [`select public.respond_to_link($1, true)`, [ca.link]],
       [`select public.connect_app($1, $2)`, [apps.a, ws.kai]],
       [`select public.note_visibility(${asRow})`, [row]],
-      [`select public.claim_invitations()`, []],
+      [`select public.invite_member($1, 'aud@ca.example.com', 'A')`, [ca.hive]],
+      [`select public.invitation_to_email($1)`, [ca.invitation]],
+      [`select public.my_invitations()`, []],
+      [`select public.accept_invitation($1)`, [ca.kaiInvitation]],
     ])
       await assert.rejects(as(who, sql, params), APP_REFUSED, `${what} ${sql}`);
     const written = await trial(

@@ -1,6 +1,12 @@
 // The sentences and labels of the settings screen, and the order of its agents. Plain functions,
 // so the screen and the tests read the same words.
-import type { Agent, AgentStatus, InviteReason, TrustTier } from "./types";
+import type {
+  Agent,
+  AgentStatus,
+  InviteReason,
+  Sent,
+  TrustTier,
+} from "./types";
 
 const TIERS: Record<TrustTier, string> = {
   vendor: "Vendor-hosted",
@@ -23,6 +29,14 @@ const STATUSES: Record<AgentStatus, string | null> = {
 const INVITE_FAILURES: Record<InviteReason, string> = {
   "already-member": "That person is already a member.",
   "already-invited": "That email is already invited.",
+  "too-many": "Too many invitations today. Try again tomorrow.",
+  failed: "That didn't work. Try again.",
+};
+
+const SEND_FAILURES: Record<(Sent & { ok: false })["reason"], string> = {
+  wait: "Sent a moment ago. Wait two minutes and try again.",
+  limit:
+    "This address has had as many invitation emails as allowed. Try again tomorrow.",
   failed: "That didn't work. Try again.",
 };
 
@@ -45,18 +59,30 @@ export function inviteFailure(r: InviteReason): string {
   return INVITE_FAILURES[r];
 }
 
-/** What the owner passes on after an invitation is saved; `address` is where the person signs in. */
-export function inviteNotice(
-  name: string,
-  email: string,
-  address: string,
-): string {
-  return `Invitation saved. Ask ${name} to open ${address}, enter ${email} and choose Email me a link.`;
+/** Why sending an invitation's email again did not happen. */
+export function sendFailure(r: (Sent & { ok: false })["reason"]): string {
+  return SEND_FAILURES[r];
+}
+
+/** What the owner reads after an invitation is saved: whether its email went out. */
+export function inviteNotice(email: string, sent: boolean): string {
+  return sent
+    ? `Invitation sent to ${email}.`
+    : "Invitation saved, but the email could not be sent. Wait two minutes, then use Send again.";
+}
+
+/** What is announced when an invitation's email went out again. */
+export function sentAgain(name: string): string {
+  return `Invitation for ${name} sent again.`;
 }
 
 /** The line under the invite form. */
 export const INVITE_HELP: string =
-  "If they have an account they are added now. Otherwise they join when they first sign in with this email.";
+  "They get an email with a link to the invitation and become a member when they press Join.";
+
+/** The line under the heading of the open invitations. */
+export const INVITATIONS_NOTE: string =
+  "Not members yet. Each has an email with a link and joins by pressing Join.";
 
 /** Active agents first, then the rest; the newest first inside each group. A new array. */
 export function sortAgents(agents: Agent[]): Agent[] {

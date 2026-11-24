@@ -4,8 +4,10 @@
 // file is open, all client state, so tabs, filtering and selecting a card make no request.
 // Opening, downloading, deleting and loading more go through `actions`; the database decides
 // what they may do. A deleted file leaves the list in place and nothing is re-read.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Shell } from "../shell/Shell";
+import { useSlidingPill } from "../shell/useSlidingPill";
+import pillCss from "../shell/SlidingPill.module.css";
 import { Details } from "./Details";
 import { FileCard } from "./FileCard";
 import { defaultTab, tabCounts, viewable, visibleFiles } from "./select";
@@ -49,6 +51,8 @@ export function Gallery({
   const scroller = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const target = useRef<Target | null>(null);
+  const group = useRef<HTMLDivElement>(null);
+  const pill = useSlidingPill(group, '[aria-pressed="true"]', tab);
 
   const counts = tabCounts(files);
   const shown = visibleFiles(files, tab, filter);
@@ -127,9 +131,14 @@ export function Gallery({
     <div className={s.root}>
       <div className={s.page} inert={viewing || undefined}>
         <Shell current="gallery" inbox={inbox} />
-        <main aria-label="Gallery" className={s.panel}>
+        <main
+          aria-label="Gallery"
+          className={`${s.panel} rise`}
+          style={{ "--rise-delay": "0.08s" } as CSSProperties}
+        >
           <div className={s.bar}>
-            <div role="group" aria-label="Show" className={s.tabs}>
+            <div ref={group} role="group" aria-label="Show" className={s.tabs}>
+              <span aria-hidden="true" className={pillCss.pill} style={pill} />
               {TABS.map((t) => (
                 <button
                   key={t.key}

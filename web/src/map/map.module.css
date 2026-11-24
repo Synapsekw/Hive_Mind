@@ -69,6 +69,7 @@
 
 /* The view switch: one segmented control, a 10 px hairline track with 7 px segments. */
 .switch {
+  position: relative;
   display: flex;
   padding: 3px;
   border: 1px solid var(--line);
@@ -76,6 +77,8 @@
 }
 
 .tab {
+  position: relative;
+  z-index: 1;
   height: 30px;
   padding: 0 14px;
   border: 0;
@@ -93,8 +96,8 @@
   color: var(--fg);
 }
 
+/* The highlight is the sliding pill under the group (shell/SlidingPill.module.css). */
 .tab[aria-pressed="true"] {
-  background: var(--fill-on);
   color: var(--fg);
   font-weight: 500;
 }
@@ -154,13 +157,19 @@
   color: var(--muted);
 }
 
-/* ---- The stage: a 1000 x 760 box ---- */
+/* ---- The stage: one canvas, fitted to the room the card has ---- */
 
-.stage {
+/* The camera owns every gesture on the stage (touch-action: none). Stacked (narrow) layouts give
+   it the box's aspect ratio; the fit-the-screen layout below lets it take the remaining height. */
+.stageFit {
   position: relative;
-  width: 100%;
+  flex: 1;
+  min-height: 0;
   aspect-ratio: 1000 / 760;
-  container-type: inline-size;
+  overflow: hidden;
+  touch-action: none;
+  container-type: size;
+  border-radius: 12px;
   background: radial-gradient(
     ellipse 36% 44% at 50% 50%,
     color-mix(in srgb, var(--brand) 8%, transparent),
@@ -168,127 +177,97 @@
   );
 }
 
-.svg {
+.canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  cursor: grab;
 }
 
-.guides {
-  stroke: var(--line);
-}
-
-.edgeBase {
-  stroke: var(--edge);
-}
-
-.edgeHi {
-  stroke: var(--fg);
-}
-
-.ticks {
-  stroke: var(--quiet);
-}
-
-.edges {
-  animation: edges-in 1.1s ease both;
-}
-
-@keyframes edges-in {
-  0%,
-  55% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-.core {
-  stroke: var(--brand);
-  animation: breathe 4s ease-in-out infinite;
-}
-
-@keyframes breathe {
-  0%,
-  100% {
-    opacity: 0.75;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-/* Ring and axis names: a few small frosted tags, the only blur inside the card. */
-.guideLabel {
+/* The hidden list of dot buttons: there for the keyboard and screen readers, drawn by the
+   canvas. Every item sits on one 1 px spot, so the list never adds height or scroll. */
+.srList {
   position: absolute;
-  z-index: 1;
-  padding: 0 8px;
-  border-radius: 6px;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
-  background: color-mix(in srgb, var(--bg) 50%, transparent);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-  font-size: 12px;
-  color: var(--muted);
-  pointer-events: none;
-  transform: translate(-50%, -50%);
 }
 
-.guideLabel[data-left] {
-  transform: translate(0, -50%);
-}
-
-.flat {
+.srList li,
+.srList button {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
 }
 
-.flat[hidden] {
-  display: none;
-}
-
-/* ---- Dots ---- */
-
-.dot {
+/* The zoom control: a small glass bar in the stage's bottom-right corner. */
+.zoom {
   position: absolute;
+  right: 12px;
+  bottom: 12px;
   z-index: 2;
   display: flex;
+  align-items: center;
+  gap: 2px;
   padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  color: var(--fg2);
+  font-size: 12px;
+}
+
+.zoomButton,
+.zoomFit {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
   border: 0;
+  border-radius: 8px;
   background: none;
+  color: var(--fg2);
+  font-size: 14px;
   cursor: pointer;
-  transform: translate(-50%, -50%);
   transition:
-    left 0.9s var(--ease),
-    top 0.9s var(--ease),
-    opacity 0.25s ease;
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
-.dot[data-lit] {
-  z-index: 3;
+.zoomFit {
+  font-size: 12px;
 }
 
-/* Dimmed: everything outside the filter, search or selection. */
-.dot:not([data-lit]) {
-  opacity: 0.1;
+.zoomButton:hover,
+.zoomFit:hover {
+  background: var(--fill);
+  color: var(--fg);
 }
 
-/* A dimmed dot reached by keyboard shows itself and its focus ring at full strength. */
-.dot:focus-visible {
-  z-index: 6;
-  opacity: 1;
+.zoomValue {
+  min-width: 42px;
+  text-align: center;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
 }
 
-.dot[data-kind="hub"],
-.dot[data-kind="root"] {
-  z-index: 4;
-}
-
-.dot[aria-pressed="true"] {
-  z-index: 5;
-}
+/* ---- The detail rail's marks (the map itself draws on the canvas) ---- */
 
 /* The selected ring: a gap in the card's colour, then a fine ring in the text colour. */
 .shape {
@@ -345,143 +324,366 @@
     var(--ring);
 }
 
-.label {
-  position: absolute;
-  top: 50%;
-  left: calc(50% + var(--d) / 2 + 6px);
-  max-width: 240px;
-  padding: 1px 6px;
-  border-radius: 6px;
+/* ---- The peek card: glass next to the pointer, never in the way of it ---- */
+
+.peek {
+  position: fixed;
+  z-index: 50;
+  width: 250px;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  box-shadow: var(--lift);
+  color: var(--fg);
+  pointer-events: none;
+  animation: peek 0.16s var(--ease) both;
+}
+
+@keyframes peek {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.peekKind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.peekSwatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+}
+
+.peekSwatch[data-kind="file"] {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.85);
+}
+
+.peekTitle {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.peekFacts {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.peekFacts div {
+  display: flex;
+  gap: 8px;
+}
+
+.peekFacts dt {
+  flex: none;
+  width: 58px;
+  color: var(--quiet);
+}
+
+.peekFacts dd {
+  min-width: 0;
+  margin: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  background: color-mix(in srgb, var(--bg) 84%, transparent);
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: 400;
-  pointer-events: none;
-  transform: translateY(-50%);
+  color: var(--fg2);
 }
 
-.label[data-flip] {
-  left: auto;
-  right: calc(50% + var(--d) / 2 + 6px);
-}
+/* ---- "At the hive": who is at the hive, top right of the stage ---- */
 
-.label[data-strong] {
-  font-weight: 500;
-}
-
-/* ---- Orbit: the same dots on a turning sphere ---- */
-
-.orbit {
+.presence {
   position: absolute;
-  inset: 0;
-  perspective: 150cqw;
-}
-
-.orbitTilt {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform-style: preserve-3d;
-  transform: rotateX(-16deg);
-}
-
-.spin {
-  transform-style: preserve-3d;
-  animation: spin 80s linear infinite;
-}
-
-.equator {
-  position: absolute;
-  left: -34cqw;
-  top: -34cqw;
-  width: 68cqw;
-  height: 68cqw;
-  border-radius: 50%;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  min-width: 168px;
+  max-width: 240px;
+  padding: 9px 12px 10px;
   border: 1px solid var(--line);
-  transform: rotateX(90deg);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  font-size: 12px;
 }
 
-.at {
-  position: absolute;
-  left: 0;
-  top: 0;
-  transform-style: preserve-3d;
+.presenceHead {
+  margin: 0 0 6px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
-.billboard {
-  left: 0;
-  top: 0;
-  transform: rotateX(16deg) translate(-50%, -50%);
-  transition: opacity 0.25s ease;
-  animation: unspin 80s linear infinite;
+.presenceList {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
 }
 
-@keyframes spin {
-  from {
-    transform: rotateY(0deg);
-  }
-  to {
-    transform: rotateY(360deg);
-  }
-}
-
-@keyframes unspin {
-  from {
-    transform: rotateY(0deg) rotateX(16deg) translate(-50%, -50%);
-  }
-  to {
-    transform: rotateY(-360deg) rotateX(16deg) translate(-50%, -50%);
-  }
-}
-
-.orbit:hover .spin,
-.orbit:hover .billboard,
-.orbit:focus-within .spin,
-.orbit:focus-within .billboard {
-  animation-play-state: paused;
-}
-
-/* ---- Chips ---- */
-
-.chips {
+.presenceList li {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
   align-items: center;
-  gap: 2px 4px;
+  gap: 7px;
+  margin: 0 -6px;
+  padding: 3px 6px;
+  border-radius: 7px;
+  transition: background var(--dur-fast) var(--ease);
 }
 
-.chip {
+.presenceList li:hover,
+.presenceList li:focus-visible {
+  background: var(--fill);
+}
+
+.presenceMark {
+  flex: none;
+}
+
+.presenceMark polygon {
+  fill: var(--bg);
+  stroke: var(--brand);
+  stroke-width: 1.4;
+}
+
+.presenceMark circle {
+  fill: var(--fg2);
+}
+
+.presenceMark[data-state="live"] circle {
+  fill: var(--brand);
+}
+
+.presenceName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+.presenceLive {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.presenceAgo {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--quiet);
+}
+
+.presenceIdle {
+  margin: 0;
+  color: var(--quiet);
+}
+
+/* ---- The legend dock ---- */
+
+.dock {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2;
+  max-width: calc(100% - 230px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  animation: dock-in 0.8s 0.5s var(--ease) both;
+}
+
+@keyframes dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+.dockGroup {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dockGroup:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dockLabel {
+  flex: none;
+  margin-right: 6px;
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--quiet);
+}
+
+.dockRule {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+}
+
+.dockTopics {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dockTopics::-webkit-scrollbar {
+  display: none;
+}
+
+.dockTopics[data-over] {
+  -webkit-mask-image: linear-gradient(90deg, var(--fg) 85%, transparent);
+  mask-image: linear-gradient(90deg, var(--fg) 85%, transparent);
+}
+
+.dockItem {
+  position: relative;
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 12px;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
   border: 0;
   border-radius: 8px;
   background: none;
   color: var(--fg2);
-  font-size: 13px;
+  font-size: 12.5px;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background 0.18s var(--ease),
     color 0.18s var(--ease);
 }
 
-.chip:hover {
+.dockItem:hover,
+.dockItem:focus-visible {
+  color: var(--fg);
+  background: var(--fill);
+}
+
+.dockItem[aria-pressed="true"] {
+  background: var(--fill-on);
   color: var(--fg);
 }
 
-.chip[data-quiet] {
+.dockItem[data-quiet] {
   color: var(--quiet);
 }
 
-.chip[aria-pressed="true"] {
-  background: var(--fill);
+.dockSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+  transition: box-shadow 0.25s var(--ease);
+}
+
+.dockItem:hover .dockSwatch,
+.dockItem:focus-visible .dockSwatch,
+.dockItem[aria-pressed="true"] .dockSwatch {
+  box-shadow: 0 0 8px 1px var(--c);
+}
+
+.dockCount {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--quiet);
+}
+
+.dockIcon {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+
+.dockLegend {
+  cursor: default;
+}
+
+.dockLegend:hover {
+  background: none;
+}
+
+.dockAvatar {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--fill-on);
   color: var(--fg);
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+.dockItem[data-quiet] .dockAvatar {
+  opacity: 0.45;
+}
+
+/* A small fixed label above an icon entry, shown on hover and keyboard focus. */
+.dockTip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%) translateY(3px);
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 11.5px;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.15s var(--ease),
+    transform 0.15s var(--ease);
+}
+
+.dockItem:hover .dockTip,
+.dockItem:focus-visible .dockTip {
+  opacity: 1;
+  transform: translateX(-50%);
 }
 
 .chipDot {
@@ -493,7 +695,7 @@
   background: var(--c, var(--fg2));
 }
 
-.chip[data-quiet] .chipDot {
+.dockItem[data-quiet] .chipDot {
   opacity: 0.35;
 }
 
@@ -510,23 +712,6 @@
 .chipDot[data-kind="agent"] {
   border: 1.5px solid var(--fg2);
   background: radial-gradient(circle, var(--fg2) 0 1.5px, var(--bg) 2px);
-}
-
-.sep {
-  width: 1px;
-  height: 16px;
-  margin: 0 10px;
-  background: var(--line);
-}
-
-.legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 10px;
-  font-size: 13px;
-  color: var(--muted);
 }
 
 .legendDot {
@@ -562,6 +747,21 @@
   gap: 18px;
 }
 
+.eyebrow {
+  margin: 0 0 10px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--quiet);
+}
+
+.bigRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+
 .big {
   font-size: 44px;
   font-weight: 600;
@@ -570,8 +770,52 @@
 }
 
 .bigNote {
-  margin: 8px 0 0;
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.3;
   color: var(--muted);
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 54px;
+  overflow: visible;
+}
+
+.sparkLine {
+  stroke: var(--brand);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-dasharray: 600;
+  stroke-dashoffset: 600;
+  animation: draw 1.6s 0.4s var(--ease) forwards;
+}
+
+.sparkArea {
+  opacity: 0;
+  animation: fade-in 1s 1s var(--ease) forwards;
+}
+
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fade-in {
+  to {
+    opacity: 1;
+  }
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  color: var(--quiet);
 }
 
 .quiet {
@@ -580,10 +824,24 @@
 }
 
 .bars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.barRow {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px 14px;
+  grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) auto;
+  gap: 14px;
   align-items: center;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border-radius: 8px;
+  transition: background 0.18s var(--ease);
+}
+
+.barRow:hover {
+  background: var(--fill);
 }
 
 .track {
@@ -592,11 +850,25 @@
   background: var(--fill);
 }
 
+.track {
+  overflow: hidden;
+}
+
 .fill {
   display: block;
+  width: 100%;
   height: 3px;
   border-radius: 2px;
   background: var(--edge);
+  transform-origin: left center;
+  transform: scaleX(var(--w, 1));
+  animation: grow 1.2s calc(var(--i, 0) * 0.12s) var(--ease) both;
+}
+
+@keyframes grow {
+  from {
+    transform: scaleX(0);
+  }
 }
 
 .fill[data-me] {
@@ -605,6 +877,44 @@
 
 .count {
   color: var(--muted);
+}
+
+.needs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--fg);
+  text-decoration: none;
+  transition:
+    transform 0.2s var(--ease),
+    border-color 0.2s var(--ease);
+}
+
+.needs:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-hi);
+}
+
+.back {
+  align-self: flex-start;
+  height: 28px;
+  padding: 0 8px;
+  margin-left: -8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.18s var(--ease);
+}
+
+.back:hover {
+  color: var(--fg);
 }
 
 .sel {
@@ -763,8 +1073,10 @@
     background: var(--panel-solid);
   }
 
-  .guideLabel {
-    background: color-mix(in srgb, var(--bg) 84%, transparent);
+  .zoom,
+  .presence,
+  .peek {
+    background: var(--surface);
   }
 }
 
@@ -796,33 +1108,37 @@
   .stageFit {
     flex: 1 1 0;
     min-height: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    container-type: size;
-  }
-
-  .stageFit > .stage {
-    flex: none;
-    width: min(100cqw, calc(100cqh * 1000 / 760));
+    aspect-ratio: auto;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dot,
-  .billboard,
+  .dock,
+  .sparkLine,
+  .sparkArea,
+  .fill {
+    animation: none;
+  }
+
+  .sparkLine {
+    stroke-dashoffset: 0;
+  }
+
+  .sparkArea {
+    opacity: 1;
+  }
+
   .tab,
   .toggle,
   .search,
-  .chip,
+  .dockItem,
+  .zoomButton,
+  .zoomFit,
   .clear,
   .primaryLink {
     transition: none;
   }
-  .edges,
-  .core,
-  .spin,
-  .billboard {
+  .peek {
     animation: none;
   }
 }
