@@ -1,11 +1,13 @@
 "use client";
 
 // The import panel: pick a folder, see what is in it, choose where it goes, then send the notes
-// a batch at a time. Files are read and parsed in the browser, only for the batch on its way.
+// a batch at a time. Files are read and parsed in the browser, only for the batch on its way;
+// each note travels with the date it was written and the date its file last changed.
 // The server writes as the person and the database decides; nothing here sets sharing.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
+import { noteDates } from "../import/dates";
 import { parseNote } from "../import/parse";
 import {
   BATCH_BYTES,
@@ -187,6 +189,8 @@ export function Import({
       workspace = made.current?.name === wanted ? made.current : null;
     }
     const paths = picked.plan.notes;
+    // One "now" for the whole import: a date after it is not a note's date.
+    const startedAt = Date.now();
     stop.current = false;
     onBusy(true);
     setStage({
@@ -231,13 +235,22 @@ export function Import({
       const unread: string[] = [];
       for (const path of chunk) {
         try {
-          const parsed = parseNote(await picked.files.get(path)!.text(), path);
+          const file = picked.files.get(path)!;
+          const parsed = parseNote(await file.text(), path);
           if (parsed.warning) warned += 1;
+          const dates = noteDates(
+            parsed.frontmatter,
+            path,
+            file.lastModified,
+            startedAt,
+          );
           notes.push({
             path,
             title: parsed.title,
             body: parsed.body,
             frontmatter: parsed.frontmatter,
+            ...(dates.written_at ? { written_at: dates.written_at } : {}),
+            ...(dates.modified_at ? { modified_at: dates.modified_at } : {}),
           });
         } catch {
           unread.push(path);

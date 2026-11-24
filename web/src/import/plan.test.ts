@@ -202,6 +202,31 @@ describe("noteBytes", () => {
       noteBytes({ ...note("a.md", "abc"), frontmatter: { tags: ["a"] } }),
     ).toBe(plain + textBytes('"tags":["a"]'));
   });
+
+  it("counts the two dates when the note carries them", () => {
+    const plain = noteBytes(note("a.md", "abc"));
+    const when = "2025-03-14T12:00:00.000Z";
+    expect(noteBytes({ ...note("a.md", "abc"), written_at: when })).toBe(
+      plain + textBytes(`,"written_at":"${when}"`),
+    );
+    expect(
+      noteBytes({
+        ...note("a.md", "abc"),
+        written_at: when,
+        modified_at: when,
+      }),
+    ).toBe(
+      plain + textBytes(`,"written_at":"${when}","modified_at":"${when}"`),
+    );
+    // A date that is not there weighs nothing.
+    expect(
+      noteBytes({
+        ...note("a.md", "abc"),
+        written_at: undefined,
+        modified_at: undefined,
+      }),
+    ).toBe(plain);
+  });
 });
 
 describe("batches", () => {

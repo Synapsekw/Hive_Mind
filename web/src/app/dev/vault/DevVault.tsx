@@ -6,8 +6,8 @@
 // colleague's note that was read only through that link goes with it. With `fail`, every write
 // is refused and the folder count is unavailable; with `slow`, deleting and unlinking take over
 // a second.
-// The import's stand-ins keep what was imported in memory, per workspace, so a second import
-// answers "unchanged". `failbatch` refuses a batch by its number ("2"), or every batch ("all");
+// The import's stand-ins keep what was imported in memory, per workspace, with each note's two
+// dates, so a second import answers "unchanged", and "updated" when only a date is another. `failbatch` refuses a batch by its number ("2"), or every batch ("all");
 // `taken` and `limit` refuse a new workspace with that reason; with `slow` a batch takes most
 // of a second.
 // Connecting wiki links answers from memory too: 90 notes, 40 a step, each step 7 links made, 2
@@ -160,7 +160,14 @@ export function DevVault({
         ok: true,
         outcomes: notes.map((n) => {
           const key = `${workspaceId}\n${n.path}`;
-          const sent = JSON.stringify([n.title, n.body, n.frontmatter]);
+          // The dates count: the same note with another date answers "updated".
+          const sent = JSON.stringify([
+            n.title,
+            n.body,
+            n.frontmatter,
+            n.written_at ?? null,
+            n.modified_at ?? null,
+          ]);
           const before = imported.current.get(key);
           imported.current.set(key, sent);
           const outcome: Outcome =
