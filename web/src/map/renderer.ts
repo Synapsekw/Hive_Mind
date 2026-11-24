@@ -1352,12 +1352,18 @@ const NEAR_MAX = 400;
 /** The neighbours' glow, in screen px. */
 const NEAR_GLOW = 10;
 
-/** A batch of the hot dot's neighbours. `tone`: a group (>= 0), the brand (-1) or fg2 (-2). */
+/**
+ * A batch of the hot dot's neighbours. `tone`: a group (>= 0), a Rings note or file (-1: its
+ * colour is the ramp step `step`, or the accent if locked) or fg2 (-2).
+ */
 type NearBatch = {
   tone: number;
   kind: Kind;
   alpha: number;
   outline: number;
+  step: number; // Rings: the ramp step of a note or file; else 0
+  level: number; // Rings: its freshness, for the halo; else 0
+  halo: number[]; // Rings: the nodes that get a halo (hubs, notes at level 6 or 7), else []
   paths: Path2D[];
 };
 type NearCache = Omit<DotCache, "batches" | "grow"> & {
@@ -1390,21 +1396,28 @@ function nearBatches(F: Frame): Pick<NearCache, "batches" | "loose"> {
     let tone: number;
     let alpha: number;
     let outline = 0;
+    let step = 0;
+    let level = 0;
     if (F.fresh && kind !== "hub") {
       const dim = alphaOf(F, i);
       const locked = kind === "lnote" || kind === "lfile";
-      const level = locked ? 0 : (F.fresh[i] ?? 0);
+      level = locked ? 0 : (F.fresh[i] ?? 0);
+      step = strong(F, i) ? 7 : level;
       tone = -1;
-      alpha = locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim;
+      alpha = dim;
       outline = locked ? 0 : outlineOf(diam(F, n), dim);
     } else {
       tone = kind === "hub" || n.topic >= 0 ? n.topic : -2;
       alpha = alphaOf(F, i) * (theirs(n) ? 0.72 : 1);
     }
-    const key = `${kind}|${tone}|${alpha}|${outline}`;
-    const g = groups.get(key);
-    if (g) g.n.push(i);
-    else groups.set(key, { tone, kind, alpha, outline, n: [i] });
+    const key = `${kind}|${tone}|${alpha}|${outline}|${step}|${level}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { tone, kind, alpha, outline, step, level, halo: [], n: [] };
+      groups.set(key, g);
+    }
+    g.n.push(i);
+    if (F.fresh && (kind === "hub" || level >= 6)) g.halo.push(i);
   }
   // Plain dots first, hubs on top.
   const batches = [...groups.values()]
@@ -1441,12 +1454,35 @@ function drawNear(F: Frame) {
     };
     nearCaches.set(scene, nc);
   }
+  if (F.fresh) {
+    // Rings: every halo first, so none covers a neighbour's dot (as in drawDots).
+    for (const b of nc.batches) {
+      const hub = b.kind === "hub";
+      if (!b.halo.length || (!hub && !F.c.glow)) continue;
+      const peak = hub ? 0.3 : haloAlpha(b.level, f.time, F.still);
+      if (!hub && b.level === 7 && !F.still) F.ambient = true;
+      for (const i of b.halo) {
+        const [x, y] = P(F, i);
+        const r = (diam(F, F.model.nodes[i]!) / 2) * depthOf(F, i) * F.px;
+        stampHalo(
+          F,
+          hub ? pal.hub : pal.glow,
+          x,
+          y,
+          r * (hub ? HUB_REACH : HALO_REACH),
+          peak * b.alpha,
+        );
+      }
+    }
+  }
   for (const b of nc.batches) {
     const colour =
       b.kind === "hub"
         ? hubColour(F, b.tone)
         : b.tone === -1
-          ? pal.brand
+          ? b.kind === "lnote" || b.kind === "lfile"
+            ? pal.accent
+            : pal.fresh[b.step]!
           : b.tone === -2
             ? pal.fg2
             : hueOf(F, b.tone);
