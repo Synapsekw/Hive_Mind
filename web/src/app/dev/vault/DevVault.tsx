@@ -4,7 +4,7 @@
 // `window.__vaultCalls` (for the browser tests) and answers as the database would. A deleted
 // note or an ended link leaves this page's sample data until the page is loaded again; a
 // colleague's note that was read only through that link goes with it. With `fail`, every write
-// is refused and the folder count is unavailable; with `slow`, deleting and unlinking take over
+// is refused and the folder count is unavailable; with `slow`, deleting, unlinking and changing a note's topics take over
 // a second.
 // The import's stand-ins keep what was imported in memory, per workspace, with each note's two
 // dates, so a second import answers "unchanged", and "updated" when only a date is another. `failbatch` refuses a batch by its number ("2"), or every batch ("all");
@@ -162,21 +162,33 @@ export function DevVault({
     },
     detachTopic: async (noteId, topicId) => {
       record("detachTopic", [noteId, topicId]);
-      if (!fail)
-        setChanged((c) => ({
-          ...c,
-          [noteId]: topicsNow(noteId).filter((t) => t !== topicId),
-        }));
-      return answer();
+      if (slow) await wait(SLOW_WAIT);
+      // As the server: only a pair that is still attached is taken off.
+      const carried = topicsNow(noteId);
+      if (fail || !carried.includes(topicId)) return { ok: false };
+      setChanged((c) => ({
+        ...c,
+        [noteId]: carried.filter((t) => t !== topicId),
+      }));
+      return { ok: true };
     },
     addTopic: async (noteId, topicId): Promise<TopicChange> => {
       record("addTopic", [noteId, topicId]);
+      if (slow) await wait(SLOW_WAIT);
       if (fail) return { ok: false, reason: "failed" };
-      const now = topicsNow(noteId);
-      if (now.includes(topicId)) return { ok: true };
-      if (now.length >= MAX_TOPICS_PER_NOTE)
+      // As the database: a note that is not the person's own is refused.
+      const open =
+        sample.open && "note" in sample.open ? sample.open.note : null;
+      const found =
+        sample.notes.find((n) => n.id === noteId) ??
+        (open?.id === noteId ? open : null);
+      if (!found || found.member_id !== sample.me || found.access !== "own")
+        return { ok: false, reason: "failed" };
+      const carried = topicsNow(noteId);
+      if (carried.includes(topicId)) return { ok: true };
+      if (carried.length >= MAX_TOPICS_PER_NOTE)
         return { ok: false, reason: "full" };
-      setChanged((c) => ({ ...c, [noteId]: [...now, topicId] }));
+      setChanged((c) => ({ ...c, [noteId]: [...carried, topicId] }));
       return { ok: true };
     },
     preview: async (workspaceId, path) => {
