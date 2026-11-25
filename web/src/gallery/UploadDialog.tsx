@@ -28,6 +28,9 @@ type Row = {
   status: Status;
   /** The stored name and signed link, once the batch has started. */
   slot: { name: string; url: string } | null;
+  /** The bytes are in storage: a retry only records the file again. A second PUT to the same
+   * link would be refused (x-upsert: false). */
+  stored: boolean;
 };
 
 const STATUS: Record<Status, string> = {
@@ -43,6 +46,7 @@ const rowsOf = (files: File[]): Row[] =>
     file,
     status: file.size > UPLOAD_MAX ? "refused" : "pending",
     slot: null,
+    stored: false,
   }));
 
 export function UploadDialog({
@@ -77,6 +81,8 @@ export function UploadDialog({
   const [folderId, setFolderId] = useState<string>("");
   const [said, setSaid] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  // startUpload is on its way: nothing may close the dialog or call the batch finished.
+  const [starting, setStarting] = useState(false);
   // The batch once it has started: its id and the home note the server resolved.
   const batch = useRef<{ id: string; noteId: string; ended: boolean } | null>(
     null,
@@ -87,7 +93,7 @@ export function UploadDialog({
     box.current?.querySelector<HTMLElement>("input, button")?.focus();
   }, []);
 
-  const busy = rows.some((r) => r.status === "uploading");
+  const busy = starting || rows.some((r) => r.status === "uploading");
   const waiting = rows.filter((r) => r.status === "pending");
   const tooMany = rows.filter((r) => r.status !== "refused").length > FILES_MAX;
   const canStart = !started && waiting.length > 0 && !tooMany;
@@ -119,12 +125,17 @@ export function UploadDialog({
     }
     setStatus(i, "uploading");
     try {
-      const put = await fetch(slot.url, {
-        method: "PUT",
-        body: row.file,
-        headers: { "content-type": mimeFor(slot.name), "x-upsert": "false" },
-      });
-      if (!put.ok) throw new Error(String(put.status));
+      if (!row.stored) {
+        const put = await fetch(slot.url, {
+          method: "PUT",
+          body: row.file,
+          headers: { "content-type": mimeFor(slot.name), "x-upsert": "false" },
+        });
+        if (!put.ok) throw new Error(String(put.status));
+        setRows((list) =>
+          list.map((r, j) => (j === i ? { ...r, stored: true } : r)),
+        );
+      }
       const landed = await actions.finishUpload(
         b.id,
         slot.name,
@@ -152,6 +163,7 @@ export function UploadDialog({
   async function start() {
     if (!canStart) return;
     setStarted(true);
+    setStarting(true);
     setSaid(null);
     const sending = live.current
       .map((r, i) => ({ r, i }))
@@ -170,6 +182,7 @@ export function UploadDialog({
       answer = null;
     }
     if (!answer) {
+      setStarting(false);
       setStarted(false);
       setSaid("Couldn't start the upload.");
       return;
@@ -182,7 +195,10 @@ export function UploadDialog({
         return at === -1 ? r : { ...r, slot: slots[at] ?? null };
       }),
     );
-    await Promise.all(sending.map(({ i }, at) => send(i, slots[at] ?? null)));
+    // Each send marks its row uploading before its first wait, so `busy` never lapses.
+    const sends = sending.map(({ i }, at) => send(i, slots[at] ?? null));
+    setStarting(false);
+    await Promise.all(sends);
     await settle();
   }
 
@@ -208,6 +224,7 @@ export function UploadDialog({
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
+            // While a start or a file is on its way, Escape does nothing.
             void close();
           }
         }}

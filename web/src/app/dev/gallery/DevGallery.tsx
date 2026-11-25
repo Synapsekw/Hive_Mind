@@ -7,6 +7,9 @@
 //   fail      every action answers nothing: no link, no page, { ok: false }
 //   mislabel  a PDF's link answers with a web page, as a file whose declared type lies would
 //   everyFile every file opens in the viewer (the viewer's tests)
+//   slowStart startUpload answers after 1.5 s
+//   failFinish the first finishUpload answers null, as a refused record after a stored PUT
+import { useRef } from "react";
 import { applyFilters, DEFAULT_FILTERS } from "../../../gallery/filters";
 import { fixtureGallery, fixtureMore } from "../../../gallery/fixture";
 import { Gallery } from "../../../gallery/Gallery";
@@ -79,12 +82,16 @@ export function DevGallery({
   fail,
   mislabel,
   everyFile,
+  slowStart,
+  failFinish,
 }: {
   data: GalleryData;
   now: number;
   fail: boolean;
   mislabel: boolean;
   everyFile: boolean;
+  slowStart: boolean;
+  failFinish: boolean;
 }) {
   const everything = (): GalleryFile[] => [
     ...fixtureGallery(now).files,
@@ -102,7 +109,8 @@ export function DevGallery({
     return [...seen].map(([id, title]) => ({ id, title, path: `${title}.md` }));
   };
   const ok = () => (fail ? { ok: false as const } : { ok: true as const });
-  const uploads = new Map<string, string | null>(); // batch -> folder
+  const uploads = useRef(new Map<string, string | null>()).current; // batch -> folder
+  const finishRefused = useRef(false);
 
   const actions: GalleryActions = {
     openFile: async (id) => {
@@ -190,6 +198,7 @@ export function DevGallery({
     },
     startUpload: async (req) => {
       record("startUpload", [req]);
+      if (slowStart) await new Promise((go) => setTimeout(go, 1500));
       if (fail) return null;
       const batch = newId("5");
       uploads.set(batch, req.folderId);
@@ -210,6 +219,10 @@ export function DevGallery({
     finishUpload: async (batch, name, noteId, folderId) => {
       record("finishUpload", [batch, name, noteId, folderId]);
       if (fail || !uploads.has(batch)) return null;
+      if (failFinish && !finishRefused.current) {
+        finishRefused.current = true;
+        return null;
+      }
       const note = myNotes().find((n) => n.id === noteId);
       const kind = fileKind(name, mimeFor(name));
       return {

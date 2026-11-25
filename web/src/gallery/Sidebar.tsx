@@ -56,7 +56,7 @@ function NameField({
       aria-label="Folder name"
       className={s.nameField}
       defaultValue={initial}
-      maxLength={80}
+      maxLength={60}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();

@@ -113,9 +113,14 @@ export function Gallery({
     () => new Map(data.sessions.map((x) => [x.id, x])),
   );
   const [folders, setFolders] = useState<GalleryFolder[]>(data.folders);
-  const [memberships, setMemberships] = useState<Memberships>(() =>
-    withFolders(new Map(), data.files),
-  );
+  // Every membership the loader handed over (files not loaded yet included), and the loaded
+  // files' own.
+  const [memberships, setMemberships] = useState<Memberships>(() => {
+    const m: Memberships = new Map();
+    for (const { folder_id, file_id } of data.memberships ?? [])
+      m.set(folder_id, (m.get(folder_id) ?? new Set()).add(file_id));
+    return withFolders(m, data.files);
+  });
   const [filters, setFilters] = useGalleryUrl();
   const [next, setNext] = useState(data.next);
   const [selected, setSelected] = useState<string | null>(null);

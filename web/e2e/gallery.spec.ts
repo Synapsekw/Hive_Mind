@@ -717,11 +717,17 @@ test("uploading two files shows their progress and adds them under an upload gro
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   const dialog = uploader(page);
   await expect(dialog).toBeVisible();
+  // The browser's own type is not what is sent: the PUT declares mimeFor(stored name). Two
+  // files of one name are stored under distinct names, and those are what finishUpload gets.
   await dialog.getByLabel("Choose files").setInputFiles([
-    { name: "sketch.png", mimeType: "image/png", buffer: Buffer.alloc(2048) },
     {
-      name: "brief.md",
-      mimeType: "text/markdown",
+      name: "report.pdf",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.alloc(2048),
+    },
+    {
+      name: "report.pdf",
+      mimeType: "text/plain",
       buffer: Buffer.from("# Hi"),
     },
   ]);
@@ -729,12 +735,13 @@ test("uploading two files shows their progress and adds them under an upload gro
     .getByRole("list", { name: "Files to upload" })
     .getByRole("listitem");
   await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText("sketch.png");
+  await expect(rows.nth(0)).toContainText("report.pdf");
   await expect(rows.nth(0)).toContainText("2 KB");
   await expect(dialog).toContainText("Uploads (private)");
   await dialog.getByRole("button", { name: "Upload 2 files" }).click();
   await expect(rows.nth(0)).toContainText("Uploaded");
   await expect(rows.nth(1)).toContainText("Uploaded");
+  await expect(rows.nth(1)).toContainText("report (2).pdf");
   await expect
     .poll(async () => (await calls(page, "endUpload")).length)
     .toBe(1);
@@ -746,8 +753,8 @@ test("uploading two files shows their progress and adds them under an upload gro
       args: [
         {
           files: [
-            { name: "sketch.png", size: 2048 },
-            { name: "brief.md", size: 4 },
+            { name: "report.pdf", size: 2048 },
+            { name: "report.pdf", size: 4 },
           ],
           noteId: null,
           folderId: null,
@@ -755,11 +762,16 @@ test("uploading two files shows their progress and adds them under an upload gro
       ],
     },
   ]);
-  expect(puts.map((p) => p.type).sort()).toEqual([
-    "image/png",
-    "text/markdown",
+  expect(puts.map((p) => p.type)).toEqual([
+    "application/pdf",
+    "application/pdf",
   ]);
-  expect(await calls(page, "finishUpload")).toHaveLength(2);
+  expect(
+    puts.map((p) => new URL(p.url).searchParams.get("name")).sort(),
+  ).toEqual(["report (2).pdf", "report.pdf"]);
+  expect(
+    (await calls(page, "finishUpload")).map((c) => c.args[1]).sort(),
+  ).toEqual(["report (2).pdf", "report.pdf"]);
 
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(uploader(page)).toHaveCount(0);
@@ -841,6 +853,90 @@ test("a failed upload can be retried", async ({ page }) => {
   await expect
     .poll(async () => (await calls(page, "endUpload")).length)
     .toBe(1);
+});
+
+test("while the upload is starting, the dialog can be neither finished nor closed", async ({
+  page,
+}) => {
+  await open(page, "?slowstart=1");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog
+    .getByLabel("Choose files")
+    .setInputFiles([
+      { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("a") },
+    ]);
+  await dialog.getByRole("button", { name: "Upload 1 file" }).click();
+  await expect
+    .poll(async () => (await calls(page, "startUpload")).length)
+    .toBe(1);
+  // The start takes 1.5 s: no Done meanwhile, and Escape and Cancel do not close.
+  await expect(dialog.getByRole("button", { name: "Done" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "Cancel" }).click({ force: true });
+  await page.waitForTimeout(300);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Done" })).toHaveCount(0);
+  await expect(dialog.getByRole("listitem")).toContainText("Uploaded");
+  await expect
+    .poll(async () => (await calls(page, "endUpload")).length)
+    .toBe(1);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(uploader(page)).toHaveCount(0);
+  expect(await calls(page, "finishUpload")).toHaveLength(1);
+});
+
+test("a file stored but not recorded is recorded again on Retry, without a second PUT", async ({
+  page,
+}) => {
+  await open(page, "?failfinish=1");
+  let puts = 0;
+  page.on("request", (r) => {
+    if (r.method() === "PUT" && r.url().includes("/dev/upload-sink")) puts++;
+  });
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog
+    .getByLabel("Choose files")
+    .setInputFiles([
+      { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("a") },
+    ]);
+  await dialog.getByRole("button", { name: "Upload 1 file" }).click();
+  const row = dialog.getByRole("listitem");
+  await expect(row).toContainText("Failed");
+  expect(puts).toBe(1);
+  expect(await calls(page, "endUpload")).toEqual([]);
+  await row.getByRole("button", { name: "Retry" }).click();
+  await expect(row).toContainText("Uploaded");
+  await expect
+    .poll(async () => (await calls(page, "endUpload")).length)
+    .toBe(1);
+  expect(puts).toBe(1);
+  expect(await calls(page, "finishUpload")).toHaveLength(2);
+});
+
+test("with older files on the server, a folder asks for all of its files by id", async ({
+  page,
+}) => {
+  await open(page, "?more=1");
+  const older = MORE.files.find((f) => f.name === "Quarterly report Q3.pdf")!;
+  expect(older.folders).toEqual([HARBOUR.id]);
+  await folder(page, "Harbour").click();
+  await expect(
+    main(page).getByRole("button", { name: /^Quarterly report Q3\.pdf/ }),
+  ).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(await calls(page, "loadPage")).toEqual([
+    {
+      name: "loadPage",
+      args: [
+        toServerFilter({ ...DEFAULT_FILTERS, folder: HARBOUR.id }, NOW, [
+          older.id,
+        ]),
+        null,
+      ],
+    },
+  ]);
 });
 
 test("files dropped from the computer open the upload dialog with them", async ({

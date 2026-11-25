@@ -78,6 +78,9 @@ export type GalleryPage = {
 export type GalleryData = GalleryPage & {
   folders: GalleryFolder[];
   members: { id: string; name: string }[];
+  /** Every folder membership of the caller (up to 5000), including files not loaded yet, so a
+   * folder's server filter can name all of its files. */
+  memberships: { folder_id: string; file_id: string }[];
 };
 export type Result = { ok: true } | { ok: false };
 export type NoteChoice = { id: string; title: string; path: string };

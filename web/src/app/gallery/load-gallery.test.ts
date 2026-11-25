@@ -290,6 +290,7 @@ describe("loadGallery: states", () => {
           { id: ME, name: "Danijel" },
           { id: AHMED, name: "Ahmed" },
         ],
+        memberships: [],
         next: null,
       },
     });
@@ -692,11 +693,31 @@ describe("loadGallery: sessions, references and folders", () => {
     expect(data.files[0]!.session_id).toBe(S1);
     expect(data.sessions.map((s) => s.id)).toEqual([S1]);
     expect(data.folders).toEqual([{ id: F1, name: "Acme", parent_id: null }]);
+    expect(data.memberships).toEqual([{ folder_id: F1, file_id: fid(1) }]);
     expect(t.waves()).toEqual([
       ["own"],
       ["files", "gallery_folder_files", "gallery_folders", "members"],
       ["file_references", "sessions", "storage"],
       ["notes"],
+    ]);
+  });
+
+  it("hands over memberships of files beyond the first page too", async () => {
+    const t = stub(
+      world({
+        files: [file(1)],
+        folders: [{ id: F1, name: "Acme", parent_id: null }],
+        memberships: [
+          { folder_id: F1, file_id: fid(1) },
+          { folder_id: F1, file_id: fid(9) },
+        ],
+      }),
+    );
+    const data = await loaded(t);
+    expect(data.files.map((f) => f.id)).toEqual([fid(1)]);
+    expect(data.memberships).toEqual([
+      { folder_id: F1, file_id: fid(1) },
+      { folder_id: F1, file_id: fid(9) },
     ]);
   });
 

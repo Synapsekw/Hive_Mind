@@ -247,6 +247,7 @@ const MORE: Row[] = [
     size: 2.3 * MB,
     hoursAgo: 720,
     owner: "me",
+    folders: [1], // in Harbour, but not on the first page
   },
   {
     name: "site-photo-entrance.png",
@@ -380,6 +381,10 @@ export function fixtureGallery(now: number): GalleryData {
       { id: MEMBER_ID.ahmed, name: OWNERS.ahmed },
       { id: MEMBER_ID.sara, name: OWNERS.sara },
     ],
+    // Every membership, the older files' included, as the loader hands them over.
+    memberships: [...files, ...build(MORE, now, FIRST.length)].flatMap((f) =>
+      f.folders.map((folder_id) => ({ folder_id, file_id: f.id })),
+    ),
     next: { created_at: last.created_at, id: last.id },
   };
 }

@@ -393,10 +393,12 @@ async function page(
   );
 
   const inFolders = new Map<string, string[]>();
+  const pairs: { folder_id: string; file_id: string }[] = [];
   for (const m of rows(memberships)) {
     const fileId = text(m.file_id);
     const folderId = text(m.folder_id);
     if (!fileId || !folderId) continue;
+    pairs.push({ folder_id: folderId, file_id: fileId });
     (inFolders.get(fileId) ?? inFolders.set(fileId, []).get(fileId)!).push(
       folderId,
     );
@@ -447,6 +449,7 @@ async function page(
         id: text(m.id),
         name: text(m.display_name),
       })),
+      memberships: first ? pairs : [],
       next:
         all.length > PAGE && last
           ? { created_at: text(last.created_at), id: text(last.id) }
