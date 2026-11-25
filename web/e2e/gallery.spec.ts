@@ -423,6 +423,23 @@ test("a card shows its thumbnail or tile, name, size and sharing word", async ({
   await expect(card(page, DECK)).toContainText("PPTX");
 });
 
+test("a card with a picture shows a small type badge and no sheet; one without keeps the sheet", async ({
+  page,
+}) => {
+  await open(page);
+  const withPicture = card(page, PHOTO);
+  await expect(withPicture.locator("img")).toHaveCount(1);
+  await expect(withPicture.locator('span[class*="badge"]')).toHaveCount(1);
+  await expect(
+    withPicture.locator('span[class*="sheet"]:not([class*="sheetLabel"])'),
+  ).toHaveCount(0);
+  const without = card(page, DECK);
+  await expect(
+    without.locator('span[class*="sheet"]:not([class*="sheetLabel"])'),
+  ).toHaveCount(1);
+  await expect(without.locator('span[class*="badge"]')).toHaveCount(0);
+});
+
 test("selecting a card opens the panel with what is known about the file", async ({
   page,
 }) => {

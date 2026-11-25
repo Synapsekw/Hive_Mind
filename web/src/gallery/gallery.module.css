@@ -740,6 +740,23 @@
   background: var(--line-hi);
 }
 
+/* The type on a tile that has a picture: small and quiet, bottom-left. */
+.badge {
+  align-self: end;
+  justify-self: start;
+  margin: 0 0 6px 6px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--fg);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
 .sheetLabel,
 .label {
   font-family: var(--font-mono), monospace;

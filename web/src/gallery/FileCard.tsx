@@ -34,13 +34,26 @@ export function Preview({
   // can be dead by the time its card scrolls into view: show the type tile instead.
   const [broken, setBroken] = useState<string | null>(null);
   const thumb = file.thumb && file.thumb !== broken ? file.thumb : null;
+  // A picture on the tile replaces the big sheet; the type then sits in a small corner badge.
+  const [drawn, setDrawn] = useState(false);
+  const isPdf = file.kind === "pdf" && !!file.thumb;
+  const picture = isPdf ? drawn : !!thumb;
+  const badge = (
+    <span aria-hidden="true" className={s.badge}>
+      {kindLabel(file.kind, file.name)}
+    </span>
+  );
   return (
     <span className={s.tile} data-large={large || undefined}>
-      {file.kind === "pdf" && file.thumb ? (
+      {isPdf ? (
         // A PDF's thumbnail link is the PDF itself: page 1 is drawn over the type tile.
         <>
-          <Sheet file={file} />
-          <PdfThumb fileId={file.id} url={file.thumb} />
+          {!drawn && <Sheet file={file} />}
+          <PdfThumb
+            fileId={file.id}
+            url={file.thumb!}
+            onDrawn={() => setDrawn(true)}
+          />
         </>
       ) : thumb ? (
         // A short-lived signed link: a plain <img>, never the image optimiser.
@@ -62,6 +75,7 @@ export function Preview({
       ) : (
         <Sheet file={file} />
       )}
+      {picture && badge}
     </span>
   );
 }

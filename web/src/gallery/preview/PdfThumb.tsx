@@ -42,11 +42,25 @@ async function render(url: string): Promise<string | null> {
   }
 }
 
-export function PdfThumb({ fileId, url }: { fileId: string; url: string }) {
+export function PdfThumb({
+  fileId,
+  url,
+  onDrawn,
+}: {
+  fileId: string;
+  url: string;
+  /** Called once the page image is in, so the card can drop its type tile. */
+  onDrawn?: () => void;
+}) {
   const [src, setSrc] = useState<string | null>(
     () => cache.get(fileId) ?? null,
   );
   const box = useRef<HTMLSpanElement>(null);
+  const told = useRef(onDrawn);
+  told.current = onDrawn;
+  useEffect(() => {
+    if (src) told.current?.();
+  }, [src]);
 
   useEffect(() => {
     if (cache.has(fileId)) return setSrc(cache.get(fileId) ?? null);
