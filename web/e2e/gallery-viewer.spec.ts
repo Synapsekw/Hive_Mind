@@ -169,3 +169,39 @@ test("a deck shows its tile with Download and no canvas", async ({ page }) => {
     )
     .toEqual([{ name: "downloadFile", args: [DECK.id] }]);
 });
+
+test.describe("on a 2x screen", () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test("zoomed to 300%, no page canvas holds more than 16 Mpx", async ({
+    page,
+  }) => {
+    await open(page);
+    await card(page, PROPOSAL).click();
+    const dialog = viewer(page, PROPOSAL);
+    const zoomIn = dialog.getByRole("button", { name: "Zoom in" });
+    await expect(dialog.getByTestId("pdf-pages")).toHaveText("2");
+    while ((await zoomIn.getAttribute("aria-disabled")) !== "true")
+      await zoomIn.click();
+    await expect(
+      dialog.getByRole("button", { name: /^Zoom 300%/ }),
+    ).toBeVisible();
+    const first = dialog
+      .getByRole("document", { name: PROPOSAL.name })
+      .locator('[data-page="1"] canvas');
+    // Drawn at 300%: CSS width is 3 x 1.25 x 595 pt, the backing store capped below 2x that.
+    await expect
+      .poll(() => first.evaluate((c: HTMLCanvasElement) => c.style.width))
+      .toBe(`${Math.floor(595 * 1.25 * 3)}px`);
+    const sizes = await dialog
+      .locator("canvas")
+      .evaluateAll((all) =>
+        all.map(
+          (c) =>
+            (c as HTMLCanvasElement).width * (c as HTMLCanvasElement).height,
+        ),
+      );
+    expect(Math.max(...sizes)).toBeGreaterThan(10_000_000);
+    for (const px of sizes) expect(px).toBeLessThanOrEqual(16_000_000);
+  });
+});

@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   drawPage,
   openPdf,
+  releaseCanvas,
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from "./pdf";
@@ -20,7 +21,9 @@ const BASE = 1.25;
 const STRIP_SCALE = 0.16;
 const STRIP_MAX = 50;
 
-/** One page; drawn once it comes near the visible part of the column. */
+/** One page; drawn while it is near the visible part of the column (within two heights of
+ * it), and its canvas given back once it is further away, so a long or zoomed document holds
+ * only a handful of drawn pages. */
 function Page({
   doc,
   number,
@@ -57,9 +60,9 @@ function Page({
     if (!el || !root) return;
     const io = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) if (e.isIntersecting) setNear(true);
+        for (const e of entries) setNear(e.isIntersecting);
       },
-      { root, rootMargin: "600px 0px" },
+      { root, rootMargin: "200% 0px" },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -79,9 +82,13 @@ function Page({
     return () => io.disconnect();
   }, [root, onSeen, number]);
 
+  // A page that leaves, or a new zoom, cancels the drawing under way; a page that has left
+  // gives its pixels back and is drawn again when it returns.
   useEffect(() => {
-    if (!page || !near || !canvas.current) return;
-    const draw = drawPage(page, canvas.current, scale);
+    const el = canvas.current;
+    if (!el) return;
+    if (!page || !near) return releaseCanvas(el);
+    const draw = drawPage(page, el, scale);
     draw.done.catch(() => {});
     return () => draw.cancel();
   }, [page, near, scale]);
