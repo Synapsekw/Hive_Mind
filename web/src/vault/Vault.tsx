@@ -159,6 +159,10 @@ export function Vault({
   const main = useRef<HTMLElement>(null);
   const narrow = useNarrow(main);
   const [picking, setPicking] = useState(false);
+  // The popover belongs to the narrow card: wide again, it is closed for good.
+  useEffect(() => {
+    if (!narrow) setPicking(false);
+  }, [narrow]);
   // Where the focus goes once a deleted note has left the page.
   const target = useRef<{ row: HTMLElement | null } | null>(null);
 
@@ -518,7 +522,11 @@ export function Vault({
       <div className={s.listTitleRow}>
         {narrow && !shared ? (
           <h2 className={s.listTitlePick}>
-            <ScopePicker title={title} open={picking} onOpenChange={setPicking}>
+            <ScopePicker
+              title={title}
+              open={picking && narrow}
+              onOpenChange={setPicking}
+            >
               {scopeList}
             </ScopePicker>
           </h2>

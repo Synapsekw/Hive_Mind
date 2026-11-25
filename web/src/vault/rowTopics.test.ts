@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rowTopics } from "./rowTopics";
+import { rowTopics, topicsById } from "./rowTopics";
 import type { VaultTopic } from "./types";
 
 const T = (id: string): VaultTopic => ({
@@ -24,6 +24,11 @@ describe("rowTopics", () => {
       shown: [T("a"), T("b")],
       more: 3,
     });
+  });
+  it("takes a prebuilt map as well as the list", () => {
+    expect(rowTopics(["x", "a", "b", "c"], topicsById(hive))).toEqual(
+      rowTopics(["x", "a", "b", "c"], hive),
+    );
   });
   it("skips ids the hive does not have, and does not count them", () => {
     expect(rowTopics(["x", "a", "y", "b", "c"], hive)).toEqual({

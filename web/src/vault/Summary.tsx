@@ -45,7 +45,7 @@ function Links({
   if (notes.length === 0) return null;
   return (
     <>
-      <p className={s.overviewLabel}>{label}</p>
+      <h3 className={s.overviewLabel}>{label}</h3>
       <ul className={s.rows}>
         {notes.map((n) => (
           <li key={n.id}>
@@ -92,8 +92,8 @@ export function Summary(props: Props) {
       <dl className={s.stats}>
         {stats.map((x) => (
           <div key={x.key} className={s.stat}>
-            <dt className={s.statNumber}>{x.n}</dt>
-            <dd className={s.statWord}>{x.word}</dd>
+            <dt className={s.statWord}>{x.word}</dt>
+            <dd className={s.statNumber}>{x.n}</dd>
           </div>
         ))}
       </dl>

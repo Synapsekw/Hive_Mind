@@ -4,7 +4,7 @@
 // opens a popover holding the Folders / Topics switch and the list (its children). Client state
 // only; the parent owns `open` so a choice made inside can close it. It closes like every popover
 // (useDismiss).
-import { useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useDismiss } from "../map/useDismiss";
 import s from "./vault.module.css";
 
@@ -32,6 +32,17 @@ export function ScopePicker({
       if (refocus) button.current?.focus();
     },
   });
+
+  // A choice made inside the popover unmounts the button that held the focus: when the popover
+  // closes and the focus has nowhere to be, it goes back to the picker button.
+  const was = useRef(open);
+  useEffect(() => {
+    if (was.current && !open) {
+      const at = document.activeElement;
+      if (!at || at === document.body) button.current?.focus();
+    }
+    was.current = open;
+  }, [open]);
 
   return (
     <div ref={root} className={s.scopePicker}>

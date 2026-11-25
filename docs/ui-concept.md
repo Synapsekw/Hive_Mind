@@ -308,21 +308,22 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   one small line with the path, when it changed and who wrote it ("written by you", "written by
   your agent", "shared by" a name, or "opened by a link"), then one row of actions: the sharing
   control, the note's **Topics** as chips with the topic's name and kind, **+ Topic** and a
-  **⋯** menu. On one's own note each chip has **Remove**, which acts at once with no
+  **⋯** menu. On one's own note each chip ends in a **×** button, named
+  "Remove <topic>" for assistive tech, which acts at once with no
   question. **+ Topic** opens a picker with a field, "Find a topic", and the hive's other
   topics grouped by kind; choosing one adds it at once. It appears only while the note has
   fewer than five topics and the hive has a topic left to add. If the app's server step refuses
   an add because the note is already full, the page says "A note
   has at most five topics. Remove one first."; any other refusal says "That didn't work. Try
   again." When nothing matches the field, the picker says "No topic matches." A note with no
-  topics shows no chips. A colleague's note shows its chips without Remove or **+ Topic**.
+  topics shows no chips. A colleague's note shows its chips without the × or **+ Topic**.
   The **⋯** menu holds **Copy link**, which says "Link copied.", and, on one's own note,
   **Delete note…**. Visibility shown inline and changed in place;
   quarantine is a folder with a release action. **Delete note…** asks in place of the action
   row: "Delete this note? It is gone for good, with its history and its links. Files attached
   to it stay in the gallery." with **Delete** and **Keep**; the second Delete counts only half
-  a second after the question appears, as with the inbox's Decline. Afterwards the note's tab
-  closes and a status line says "Note deleted." A colleague's note has no Delete. A note with
+  a second after the question appears, as with the inbox's Decline. Afterwards the note closes (the
+  address loses it, the tab stays) and a status line says "Note deleted." A colleague's note has no Delete. A note with
   accepted links shows **Linked with** under the action row: for each link the other note's
   title (which opens it in the vault), its owner, and **Unlink**. A note with no accepted
   links shows no such heading. When the card is under 1,000 px wide, the folder column is not

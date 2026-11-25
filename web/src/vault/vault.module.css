@@ -532,11 +532,12 @@
 
 .stat {
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   gap: 2px;
 }
 
 .statNumber {
+  margin: 0;
   font-size: 28px;
   font-weight: 600;
   line-height: 1.1;
@@ -550,6 +551,7 @@
 
 .overviewLabel {
   margin: 0;
+  font-weight: 400;
   font-family: var(--font-mono), monospace;
   font-size: 12px;
   letter-spacing: 0.12em;

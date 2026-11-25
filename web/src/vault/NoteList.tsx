@@ -1,11 +1,11 @@
 // The note column: one link per note with its last change, an agent or held tag, and its
 // sharing mark. On the shared tab the notes are grouped by owner. Every title is a text node.
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { shortDate } from "./format";
 import { noteMark } from "./marks";
 import { Glyph, markText, markTitle } from "./MarkTag";
-import { rowTopics } from "./rowTopics";
+import { rowTopics, topicsById } from "./rowTopics";
 import type { VaultData, VaultNote, VaultTopic } from "./types";
 import s from "./vault.module.css";
 
@@ -16,7 +16,7 @@ type RowProps = {
   now: number;
   members: VaultData["members"];
   showMark: boolean;
-  topics: VaultTopic[];
+  topics: Map<string, VaultTopic>;
 };
 
 function Row({
@@ -93,6 +93,7 @@ export function NoteList({
   empty: string | null;
   more: string | null;
 }) {
+  const byId = useMemo(() => topicsById(topics), [topics]);
   const row = (n: VaultNote, showMark: boolean) => (
     <Row
       key={n.id}
@@ -102,7 +103,7 @@ export function NoteList({
       now={now}
       members={members}
       showMark={showMark}
-      topics={topics}
+      topics={byId}
     />
   );
   return (

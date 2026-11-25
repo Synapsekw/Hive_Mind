@@ -122,11 +122,31 @@ test("in a narrow card the folders fold into the list title", async ({
   await expect(
     page.getByRole("group", { name: "Folders and topics" }),
   ).toHaveCount(0);
+  await expect(picker).toBeFocused();
   await expect(picker).toHaveAccessibleName(/decisions/);
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(
     folders(page).getByRole("button", { name: /^decisions\b/ }),
   ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("in a narrow card a folder chosen by keyboard leaves the focus on the picker", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await open(page);
+  const picker = page.getByRole("button", { name: /^Choose folder or topic/ });
+  await picker.focus();
+  await page.keyboard.press("Enter");
+  const pop = page.getByRole("group", { name: "Folders and topics" });
+  await pop.getByRole("button", { name: /^decisions\b/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(pop).toHaveCount(0);
+  await expect(picker).toBeFocused();
+  await expect(picker).toHaveAccessibleName(/decisions/);
+  await expect(
+    page.getByRole("navigation", { name: "Notes" }).getByRole("link").first(),
+  ).toBeVisible();
 });
 
 test("the vault is a solid card with no blur", async ({ page }) => {

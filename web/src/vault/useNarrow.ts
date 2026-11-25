@@ -7,9 +7,12 @@ export function useNarrow(ref: RefObject<HTMLElement | null>, below = 1000) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) =>
-      setNarrow(e.contentRect.width < below),
-    );
+    // The border box: the card's whole width, padding included.
+    const ro = new ResizeObserver(([e]) => {
+      const box = e.borderBoxSize?.[0];
+      const width = box ? box.inlineSize : el.getBoundingClientRect().width;
+      setNarrow(width < below);
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, [ref, below]);

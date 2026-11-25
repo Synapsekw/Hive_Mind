@@ -12,7 +12,7 @@ const FOCUSABLE =
 /** What Tab stops on inside `box`, in order. */
 const stops = (box: HTMLElement) =>
   [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-    (el) => el.tabIndex >= 0,
+    (el) => el.tabIndex >= 0 && el.getClientRects().length > 0,
   );
 
 export function PanelDialog({
