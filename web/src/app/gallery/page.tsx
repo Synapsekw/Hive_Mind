@@ -2,7 +2,22 @@ import { Gallery } from "../../gallery/Gallery";
 import { createServerSupabase } from "../../lib/supabase/server";
 import { Notice } from "../../shell/Notice";
 import { loadInboxCount } from "../inbox/load-inbox";
-import { deleteFile, downloadFile, loadMore, openFile } from "./actions";
+import {
+  addToFolder,
+  createFolder,
+  deleteFile,
+  deleteFolder,
+  downloadFile,
+  endUpload,
+  findMyNotes,
+  finishUpload,
+  loadPage,
+  openFile,
+  removeFromFolder,
+  renameFolder,
+  setHome,
+  startUpload,
+} from "./actions";
 import { loadGallery } from "./load-gallery";
 
 // Reads the session cookie, so never prerendered.
@@ -33,7 +48,22 @@ export default async function GalleryPage() {
     <Gallery
       data={result.data}
       now={Date.now()}
-      actions={{ openFile, downloadFile, deleteFile, loadMore }}
+      actions={{
+        openFile,
+        downloadFile,
+        deleteFile,
+        loadPage,
+        setHome,
+        findMyNotes,
+        createFolder,
+        renameFolder,
+        deleteFolder,
+        addToFolder,
+        removeFromFolder,
+        startUpload,
+        finishUpload,
+        endUpload,
+      }}
       inbox={inbox}
     />
   );

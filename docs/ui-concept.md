@@ -364,10 +364,12 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   counts: attached, already attached, notes with no topic. A folder import runs it by itself as
   its last stage. In a hive with no topics it says where topics come from.
 
-- **Gallery** — previews of generated documents; mine, shared with me, whole hive; a full-screen
-  viewer for PDF, PPTX, XLSX and images. Built so far: a card grid with image thumbnails, the
-  viewer for images and PDFs, download for every file and delete for your own; PPTX and XLSX
-  download only.
+- **Gallery** — the files you may read, grouped by agent session (default) or as a flat grid;
+  folders of your own on the left, a panel with the file's facts on the right, and filter chips
+  for type, date, session, agent and owner. A full-window viewer opens images, PDFs (pdf.js, in
+  the browser), text, Markdown and CSV; PPTX and XLSX download only. Files are uploaded from the
+  browser, moved between folders by drag, and re-homed to another note from the panel. Sharing
+  always follows the home note.
 - **Chat** — conversations on the left, the thread in the centre panel with source chips under
   each answer, agent activity and artifacts on the right. The line under the composer always says
   which workspace is written to and whose subscription is paying.

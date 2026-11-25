@@ -1,14 +1,17 @@
-// One file in the grid: a single button with the thumbnail or a type tile, the name, a quiet
-// line of type, size and date, the owner on a colleague's file, and who can read it. The popover
-// for a file the viewer cannot show is passed in and sits right after the button, so Tab walks
-// from the card into it.
-import { useState, type ReactNode } from "react";
+// One file in a grid: a single button with the thumbnail or a type tile, the name, and a quiet
+// line of size and who can read it. Pressing it selects the file (the panel shows it); Enter on
+// the selected card, or a double-click, opens the viewer when the file has one. The card can be
+// dragged onto a folder in the sidebar.
+import { useState } from "react";
+import { SharingMark } from "./icons";
 import { kindLabel } from "./kind";
-import { SharingMark } from "./Details";
-import { viewable } from "./select";
-import { metaLine, sharingText } from "./text";
+import { PdfThumb } from "./preview/PdfThumb";
+import { sharingText, sizeText } from "./text";
 import type { GalleryFile } from "./types";
 import s from "./gallery.module.css";
+
+/** What a dragged card carries: the file's id, nothing else. */
+export const DRAG_TYPE = "application/x-hive-file";
 
 /** A sheet of paper with a folded corner, carrying the type as a mono label ("PDF", "PPTX"). */
 export function Sheet({ file }: { file: GalleryFile }) {
@@ -19,68 +22,109 @@ export function Sheet({ file }: { file: GalleryFile }) {
   );
 }
 
-export function FileCard({
+/** The thumbnail, a PDF's first page, or the type tile; for the card and, larger, the panel. */
+export function Preview({
   file,
-  now,
-  expanded,
-  onSelect,
-  children,
+  large = false,
 }: {
   file: GalleryFile;
-  now: number;
-  /** Whether this card's popover is open. */
-  expanded: boolean;
-  onSelect: () => void;
-  children?: ReactNode;
+  large?: boolean;
 }) {
-  const shows = viewable(file);
-  const sharing = sharingText(file);
   // A thumbnail link lives ten minutes and images load lazily, so on a page left open a link
   // can be dead by the time its card scrolls into view: show the type tile instead.
   const [broken, setBroken] = useState<string | null>(null);
   const thumb = file.thumb && file.thumb !== broken ? file.thumb : null;
+  // A picture on the tile replaces the big sheet; the type then sits in a small corner badge.
+  const [drawn, setDrawn] = useState(false);
+  const isPdf = file.kind === "pdf" && !!file.thumb;
+  const picture = isPdf ? drawn : !!thumb;
+  const badge = (
+    <span aria-hidden="true" className={s.badge}>
+      {kindLabel(file.kind, file.name)}
+    </span>
+  );
   return (
-    <li className={s.cell} data-open={expanded || undefined}>
+    <span className={s.tile} data-large={large || undefined}>
+      {isPdf ? (
+        // A PDF's thumbnail link is the PDF itself: page 1 is drawn over the type tile.
+        <>
+          {!drawn && <Sheet file={file} />}
+          <PdfThumb
+            fileId={file.id}
+            url={file.thumb!}
+            onDrawn={() => setDrawn(true)}
+          />
+        </>
+      ) : thumb ? (
+        // A short-lived signed link: a plain <img>, never the image optimiser.
+        <img
+          src={thumb}
+          onError={() => setBroken(thumb)}
+          // An image that failed before the page became interactive fired its error with
+          // nobody listening: it is complete and has no width.
+          ref={(img) => {
+            if (img?.complete && img.naturalWidth === 0) setBroken(thumb);
+          }}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          className={s.thumb}
+        />
+      ) : (
+        <Sheet file={file} />
+      )}
+      {picture && badge}
+    </span>
+  );
+}
+
+export function FileCard({
+  file,
+  selected,
+  onSelect,
+  onOpen,
+}: {
+  file: GalleryFile;
+  selected: boolean;
+  onSelect: () => void;
+  /** Opens the viewer; absent when the file has none. */
+  onOpen?: () => void;
+}) {
+  const size = sizeText(file.size);
+  return (
+    <li className={s.cell}>
       <button
         type="button"
         className={s.card}
         data-file={file.id}
-        aria-haspopup={shows ? "dialog" : undefined}
-        aria-expanded={shows ? undefined : expanded}
+        aria-pressed={selected}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(DRAG_TYPE, file.id);
+          e.dataTransfer.effectAllowed = "copy";
+        }}
         onClick={onSelect}
+        onDoubleClick={() => onOpen?.()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && selected && onOpen) {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
       >
-        <span className={s.tile}>
-          {thumb ? (
-            // A short-lived signed link: a plain <img>, never the image optimiser.
-            <img
-              src={thumb}
-              onError={() => setBroken(thumb)}
-              // An image that failed before the page became interactive fired its error with
-              // nobody listening: it is complete and has no width.
-              ref={(img) => {
-                if (img?.complete && img.naturalWidth === 0) setBroken(thumb);
-              }}
-              alt=""
-              loading="lazy"
-              decoding="async"
-              referrerPolicy="no-referrer"
-              className={s.thumb}
-            />
-          ) : (
-            <Sheet file={file} />
-          )}
-        </span>
+        <Preview file={file} />
         <span className={s.name} title={file.name}>
           {file.name}
         </span>
-        <span className={s.meta}>{metaLine(file, now)}</span>
-        {!file.mine && <span className={s.owner}>{file.owner}</span>}
         <span className={s.sharing}>
           <SharingMark file={file} />
-          <span className={s.sharingText}>{sharing}</span>
+          <span className={s.sharingText}>
+            {[size, sharingText(file)].filter(Boolean).join(" · ")}
+          </span>
         </span>
       </button>
-      {children}
     </li>
   );
 }

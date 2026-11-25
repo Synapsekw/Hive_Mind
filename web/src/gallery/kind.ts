@@ -1,55 +1,59 @@
-// What a file is, for the purpose of showing it. The declared type is whatever the saving agent
-// said, so it is never trusted alone: a file is an image or a PDF only when its name's extension
-// and its declared type agree. SVG and HTML are not in the table, so they are always `other` and
-// are never shown inline.
+// What a file is, for showing it. Mirrors public.file_kind in the file_links migration; both are
+// tested against tests/fixtures/kind-cases.json. The loader reads the stored column; this is for
+// the fixture and the upload dialog's preview of what a file will be.
 import type { Kind } from "./types";
 
-/** Images larger than this get no thumbnail. */
 export const THUMB_MAX = 2 * 1024 * 1024;
-/** PDFs larger than this are offered for download, not shown in the viewer. */
+export const PDF_THUMB_MAX = 5 * 1024 * 1024;
 export const PDF_VIEW_MAX = 25 * 1024 * 1024;
+export const TEXT_VIEW_MAX = 512 * 1024;
 
-/** Kinds the viewer can show: the extension and the one declared type it must come with. */
-const SHOWN = new Map<string, ["image" | "pdf", string]>([
-  ["png", ["image", "image/png"]],
-  ["jpg", ["image", "image/jpeg"]],
-  ["jpeg", ["image", "image/jpeg"]],
-  ["gif", ["image", "image/gif"]],
-  ["webp", ["image", "image/webp"]],
-  ["avif", ["image", "image/avif"]],
-  ["pdf", ["pdf", "application/pdf"]],
+export const KIND_LABEL: Record<Kind, string> = {
+  pdf: "PDF",
+  image: "Images",
+  slides: "Slides",
+  sheet: "Sheets",
+  doc: "Documents",
+  text: "Text",
+  csv: "CSV",
+  other: "Other",
+};
+
+/** Kinds whose declared type must agree with the extension. */
+const CHECKED = new Map<string, [Kind, string[]]>([
+  ["png", ["image", ["image/png"]]],
+  ["jpg", ["image", ["image/jpeg"]]],
+  ["jpeg", ["image", ["image/jpeg"]]],
+  ["gif", ["image", ["image/gif"]]],
+  ["webp", ["image", ["image/webp"]]],
+  ["avif", ["image", ["image/avif"]]],
+  ["pdf", ["pdf", ["application/pdf"]]],
+  ["md", ["text", ["text/markdown", "text/plain"]]],
+  ["txt", ["text", ["text/markdown", "text/plain"]]],
+  ["csv", ["csv", ["text/csv", "text/plain"]]],
 ]);
-
-/** Kinds that are only ever downloaded, so the extension alone decides. */
+/** Kinds only ever downloaded: the extension alone decides. */
 const BY_NAME = new Map<string, Kind>([
   ["pptx", "slides"],
   ["xlsx", "sheet"],
-  ["csv", "sheet"],
   ["docx", "doc"],
-  ["md", "doc"],
-  ["txt", "doc"],
 ]);
 
-/** The text after the last dot, lower-cased; "" when the name has no dot. */
 function extension(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
+  const m = /\.([^./]+)$/.exec(name);
+  return m ? m[1]!.toLowerCase() : "";
 }
 
 export function fileKind(name: string, mime: string | null): Kind {
   const ext = extension(name);
-  const shown = SHOWN.get(ext);
-  if (shown) {
+  const checked = CHECKED.get(ext);
+  if (checked) {
     const declared = (mime ?? "").split(";")[0]!.trim().toLowerCase();
-    return declared === shown[1] ? shown[0] : "other";
+    return checked[1].includes(declared) ? checked[0] : "other";
   }
   return BY_NAME.get(ext) ?? "other";
 }
 
-/**
- * The short label on a file's tile: its extension in capitals ("PDF", "PNG", "PPTX"), or "FILE"
- * when the name has none that is 1 to 5 letters and digits.
- */
 export function kindLabel(kind: Kind, name: string): string {
   if (kind === "pdf") return "PDF";
   const ext = extension(name);

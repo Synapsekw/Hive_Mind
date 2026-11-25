@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deleteIn, downloadIn, openIn } from "./write";
+import { deleteIn, downloadIn, findNotesIn, openIn, setHomeIn } from "./write";
 
 const HIVE = "00000000-0000-4000-8000-000000000a01";
 const ME = "00000000-0000-4000-8000-000000000001";
@@ -7,6 +7,7 @@ const AHMED = "00000000-0000-4000-8000-000000000002";
 const W1 = "00000000-0000-4000-8000-000000000b01";
 const FILE = "00000000-0000-4000-8000-000000030001";
 const PATH = `${ME}/${W1}/outputs/proposal/acme/Proposal v2.pdf`;
+const NOTE = "00000000-0000-4000-8000-000000010001";
 
 type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
@@ -21,6 +22,7 @@ function row(over: Record<string, unknown> = {}) {
     storage_path: PATH,
     name: "Proposal v2.pdf",
     mime: "application/pdf",
+    kind: "pdf",
     ...over,
   };
 }
@@ -38,6 +40,10 @@ function stub(
     sign?: unknown;
     remove?: unknown;
     user?: { id: string } | null;
+    /** The answer to any rpc call. */
+    rpc?: Res;
+    /** The answer to the note search. */
+    notes?: Res;
   } = {},
 ) {
   const calls: Call[] = [];
@@ -49,13 +55,14 @@ function stub(
         opts.own ?? ok([{ id: ME, hive_id: HIVE, hive: { name: "Synapse" } }])
       );
     if (isDelete(c)) return opts.gone ?? ok([{ id: FILE }]);
+    if (c.table === "notes") return opts.notes ?? ok([]);
     return opts.file ?? ok([row()]);
   };
   const from = vi.fn((table: string) => {
     const call: Call = { table, ops: [] };
     calls.push(call);
     const chain: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "order", "limit", "delete"])
+    for (const m of ["select", "eq", "order", "limit", "delete", "in", "ilike"])
       chain[m] = (...args: unknown[]) => {
         call.ops.push([m, args]);
         return chain;
@@ -70,6 +77,10 @@ function stub(
   const auth = {
     getUser: vi.fn(async () => ({ data: { user }, error: null })),
   };
+  const rpc = vi.fn(async (..._args: unknown[]) => {
+    log.push("rpc");
+    return opts.rpc ?? ok(null);
+  });
   const buckets: string[] = [];
   const createSignedUrl = vi.fn(async (..._args: unknown[]) => {
     log.push("sign");
@@ -88,7 +99,8 @@ function stub(
     }),
   };
   return {
-    db: { from, auth, storage } as never,
+    db: { from, auth, storage, rpc } as never,
+    rpc,
     calls,
     getUser: auth.getUser,
     log,
@@ -152,10 +164,11 @@ describe("openIn", () => {
   it("signs no inline link for a file the viewer cannot show", async () => {
     // A PDF by name that declares HTML, a page, a drawing, a deck: download only.
     for (const over of [
-      { mime: "text/html" },
-      { name: "page.html", mime: "text/html" },
-      { name: "drawing.svg", mime: "image/svg+xml" },
-      { name: "deck.pptx", mime: "application/pdf" },
+      { mime: "text/html", kind: "other" },
+      { name: "page.html", mime: "text/html", kind: "other" },
+      { name: "drawing.svg", mime: "image/svg+xml", kind: "other" },
+      { name: "deck.pptx", mime: "application/pdf", kind: "slides" },
+      { name: "x.pdf", kind: "not-a-kind" },
     ]) {
       const t = stub({ file: ok([row(over)]) });
       expect(await openIn(t.db, FILE)).toBeNull();
@@ -165,7 +178,7 @@ describe("openIn", () => {
 
   it("opens an image as an image", async () => {
     const t = stub({
-      file: ok([row({ name: "site.png", mime: "image/png" })]),
+      file: ok([row({ name: "site.png", mime: "image/png", kind: "image" })]),
     });
     expect(await openIn(t.db, FILE)).toEqual({
       url: "https://signed/one",
@@ -351,5 +364,108 @@ describe("deleteIn", () => {
   it("answers not ok when the database deleted no row", async () => {
     const t = stub({ gone: ok([]) });
     expect(await deleteIn(t.db, FILE)).toEqual({ ok: false });
+  });
+});
+
+describe("openIn: kinds", () => {
+  it("reads the stored kind, not the name", async () => {
+    const t = stub();
+    await openIn(t.db, FILE);
+    const [q] = table(t, "files");
+    expect(op(q!, "select")[0]![1]).toEqual([
+      "id,member_id,storage_path,name,kind",
+    ]);
+  });
+
+  it("openFile answers a link for text and csv kinds, still never for slides or other", async () => {
+    for (const [over, kind] of [
+      [{ name: "notes.md", mime: "text/markdown", kind: "text" }, "text"],
+      [{ name: "rows.csv", mime: "text/csv", kind: "csv" }, "csv"],
+    ] as const) {
+      const t = stub({ file: ok([row(over)]) });
+      expect(await openIn(t.db, FILE)).toEqual({
+        url: "https://signed/one",
+        kind,
+      });
+    }
+    for (const kind of ["slides", "sheet", "doc", "other"]) {
+      const t = stub({ file: ok([row({ kind })]) });
+      expect(await openIn(t.db, FILE)).toBeNull();
+      expect(t.createSignedUrl).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe("setHomeIn", () => {
+  it("setHome calls file_set_home and answers ok; a refusal answers { ok: false }", async () => {
+    const t = stub();
+    expect(await setHomeIn(t.db, FILE, NOTE)).toEqual({ ok: true });
+    expect(t.rpc).toHaveBeenCalledWith("file_set_home", {
+      p_file: FILE,
+      p_note: NOTE,
+    });
+    const none = stub();
+    expect(await setHomeIn(none.db, FILE, null)).toEqual({ ok: true });
+    expect(none.rpc).toHaveBeenCalledWith("file_set_home", {
+      p_file: FILE,
+      p_note: null,
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const refused = stub({ rpc: boom });
+    expect(await setHomeIn(refused.db, FILE, NOTE)).toEqual({ ok: false });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("Secret name");
+    expect(JSON.stringify(log.mock.calls)).toContain("XX000");
+  });
+
+  it("refuses ids that are not uuids before any call", async () => {
+    const t = stub();
+    expect(await setHomeIn(t.db, "nope", NOTE)).toEqual({ ok: false });
+    expect(await setHomeIn(t.db, FILE, "nope")).toEqual({ ok: false });
+    expect(await setHomeIn(t.db, FILE, undefined)).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.from).not.toHaveBeenCalled();
+  });
+});
+
+describe("findNotesIn", () => {
+  it("findMyNotes searches the caller's own notes by title, at most 20", async () => {
+    const t = stub({
+      notes: ok([
+        { id: NOTE, title: "Acme", path: "clients/acme.md", body: "x" },
+      ]),
+    });
+    expect(await findNotesIn(t.db, " acme ")).toEqual([
+      { id: NOTE, title: "Acme", path: "clients/acme.md" },
+    ]);
+    const [q] = table(t, "notes");
+    expect(op(q!, "select")[0]![1]).toEqual(["id,title,path"]);
+    expect(op(q!, "ilike")[0]![1]).toEqual(["title", "%acme%"]);
+    expect(op(q!, "in")[0]![1]).toEqual(["member_id", [ME]]);
+    expect(op(q!, "limit")[0]![1]).toEqual([20]);
+  });
+
+  it("escapes the pattern's own characters in the query", async () => {
+    const t = stub();
+    await findNotesIn(t.db, "50%_off\\*");
+    const [q] = table(t, "notes");
+    expect(op(q!, "ilike")[0]![1]).toEqual(["title", "%50\\%\\_off\\\\%"]);
+  });
+
+  it("lists the newest of the caller's notes for an empty query, without a title filter", async () => {
+    const t = stub();
+    await findNotesIn(t.db, "");
+    const [q] = table(t, "notes");
+    expect(op(q!, "ilike")).toHaveLength(0);
+    expect(op(q!, "limit")[0]![1]).toEqual([20]);
+  });
+
+  it("answers [] for a bad query before any call, and when the search fails", async () => {
+    const t = stub();
+    for (const bad of [7, null, "x".repeat(101)])
+      expect(await findNotesIn(t.db, bad)).toEqual([]);
+    expect(t.from).not.toHaveBeenCalled();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await findNotesIn(stub({ notes: boom }).db, "acme")).toEqual([]);
+    expect(await findNotesIn(stub({ own: ok([]) }).db, "acme")).toEqual([]);
   });
 });

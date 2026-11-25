@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { metaLine, sharingText, sizeText } from "./text";
-import type { GalleryFile } from "./types";
+import {
+  folderPath,
+  metaLine,
+  sharingText,
+  sizeText,
+  spanText,
+  uploadTitle,
+  whoCanRead,
+} from "./text";
+import type { GalleryFile, GallerySession } from "./types";
 
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 
@@ -12,10 +20,14 @@ function file(over: Partial<GalleryFile> = {}): GalleryFile {
     size: 1258291,
     created_at: "2026-11-03T09:00:00.000Z",
     owner: "Danijel",
+    owner_id: "m-me",
     mine: true,
     note: null,
     sharing: "private",
     thumb: null,
+    session_id: null,
+    refs: [],
+    folders: [],
     ...over,
   };
 }
@@ -101,5 +113,89 @@ describe("metaLine", () => {
     expect(
       metaLine(file({ kind: "other", name: "LICENSE", size: 512 }), NOW),
     ).toBe("FILE · 512 B · 3 Nov");
+  });
+});
+
+describe("whoCanRead", () => {
+  const note = { id: "n1", title: "Harbour proposal" };
+  it("names the owner for a file shared with the caller", () => {
+    expect(whoCanRead(file({ mine: false, owner: "Ahmed" }))).toBe(
+      "Shared with you by Ahmed.",
+    );
+  });
+  it("says only you when there is no home note", () => {
+    expect(whoCanRead(file({ note: null }))).toBe(
+      "Only you. It has no home note.",
+    );
+  });
+  it("follows a shared note", () => {
+    expect(whoCanRead(file({ note, sharing: "through-note" }))).toBe(
+      "Whoever can read “Harbour proposal”.",
+    );
+  });
+  it("follows a private note", () => {
+    expect(whoCanRead(file({ note, sharing: "private" }))).toBe(
+      "Only you, for now: it follows “Harbour proposal”, which is private.",
+    );
+  });
+});
+
+describe("spanText", () => {
+  const session = (over: Partial<GallerySession>): GallerySession => ({
+    id: "s",
+    title: "t",
+    agent: "a",
+    started_at: "2026-11-22T09:00:00.000Z",
+    ended_at: "2026-11-22T10:20:00.000Z",
+    note: null,
+    mine: true,
+    ...over,
+  });
+  it("gives one day and two times for a session within a day", () => {
+    expect(spanText(session({}), NOW)).toBe("22 Nov, 09:00–10:20");
+  });
+  it("gives both days for a session that runs past midnight", () => {
+    expect(
+      spanText(session({ ended_at: "2026-11-23T01:05:00.000Z" }), NOW),
+    ).toBe("22 Nov 09:00 – 23 Nov 01:05");
+  });
+  it("says from when an open session runs", () => {
+    expect(spanText(session({ ended_at: null }), NOW)).toBe(
+      "22 Nov, from 09:00",
+    );
+  });
+  it("carries the year of an older session", () => {
+    expect(
+      spanText(
+        session({
+          started_at: "2025-03-01T08:00:00.000Z",
+          ended_at: "2025-03-01T08:30:00.000Z",
+        }),
+        NOW,
+      ),
+    ).toBe("1 Mar 2025, 08:00–08:30");
+  });
+  it("is empty for a date that is not one", () => {
+    expect(spanText(session({ started_at: "nope" }), NOW)).toBe("");
+  });
+});
+
+describe("uploadTitle", () => {
+  it("names an upload batch by its UTC day", () => {
+    expect(uploadTitle("2026-11-22T23:30:00.000Z")).toBe("Upload · 2026-11-22");
+  });
+});
+
+describe("folderPath", () => {
+  const folders = [
+    { id: "a", name: "Harbour", parent_id: null },
+    { id: "b", name: "Proposals", parent_id: "a" },
+  ];
+  it("names a sub-folder with its parent", () => {
+    expect(folderPath("b", folders)).toBe("Harbour / Proposals");
+    expect(folderPath("a", folders)).toBe("Harbour");
+  });
+  it("is empty for a folder that is gone", () => {
+    expect(folderPath("z", folders)).toBe("");
   });
 });
