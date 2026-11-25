@@ -104,6 +104,29 @@
   gap: 0;
 }
 
+.split[data-narrow] {
+  grid-template-columns: 1fr;
+}
+
+.split[data-narrow] .list {
+  border-right: none;
+}
+
+.back {
+  margin: 0 0 12px -10px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.back:hover {
+  border-color: var(--line);
+}
+
 .list,
 .detail {
   min-width: 0;

@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Shell } from "../shell/Shell";
+import { useNarrow } from "../vault/useNarrow";
 import { FAILED, InboxDetail, type Current } from "./InboxDetail";
 import { InboxList } from "./InboxList";
 import {
@@ -77,6 +78,12 @@ export function Inbox({
     };
   }, []);
   const detailHeading = useRef<HTMLHeadingElement>(null);
+  // Under 1,000 px the card folds: the list alone, or the detail alone once an item is opened.
+  const card = useRef<HTMLElement>(null);
+  const narrow = useNarrow(card);
+  const [showing, setShowing] = useState(false);
+  // Set by the way back: the selected row takes the focus after the list is on screen again.
+  const refocusRow = useRef(false);
   const target = useRef<Target | null>(null);
   // When the decline question was last opened.
   const askedAt = useRef(0);
@@ -113,6 +120,15 @@ export function Inbox({
 
   // Runs after every render, once the row that left is out of the page.
   useEffect(() => {
+    if (refocusRow.current) {
+      const row = card.current?.querySelector<HTMLElement>(
+        '[data-row][aria-selected="true"]',
+      );
+      if (row) {
+        refocusRow.current = false;
+        row.focus();
+      }
+    }
     const want = target.current;
     if (!want) return;
     target.current = null;
@@ -207,11 +223,21 @@ export function Inbox({
     setAsking(null);
   }
 
-  function select(id: string) {
+  function select(id: string, open: boolean) {
+    if (open) {
+      setShowing(true);
+      // The detail takes the focus, so Escape there goes back.
+      if (narrow) target.current = { heading: true };
+    }
     if (id === currentId) return;
     setSelected(id);
     // A question left open on one item is not carried to another.
     setAsking(null);
+  }
+
+  function back() {
+    refocusRow.current = true;
+    setShowing(false);
   }
 
   // Nothing loaded and nothing counted: one block instead of the columns.
@@ -223,6 +249,7 @@ export function Inbox({
     <div className={s.root}>
       <Shell current="inbox" inbox={waiting} />
       <main
+        ref={card}
         aria-label="Inbox"
         className={`${s.panel} rise`}
         style={{ "--rise-delay": "0.08s" } as CSSProperties}
@@ -248,49 +275,58 @@ export function Inbox({
             </Link>
           </div>
         ) : (
-          <div className={s.split}>
-            <InboxList
-              links={links}
-              held={held}
-              linksLeft={linksLeft}
-              heldLeft={heldLeft}
-              linksTotal={data.linksTotal}
-              heldTotal={data.heldTotal}
-              loadedLinks={data.links.length}
-              loadedHeld={data.held.length}
-              now={now}
-              selectedId={currentId}
-              leaving={leaving}
-              onSelect={(to) => select(to)}
-            />
-            <InboxDetail
-              current={current}
-              opening={opening}
-              now={now}
-              busy={busy.has(id)}
-              failed={failed.has(id)}
-              asking={asking === id}
-              waiting={waiting}
-              headingRef={detailHeading}
-              onAccept={() =>
-                act(id, () => actions.respondToLink(id, true), "Link accepted.")
-              }
-              onAsk={() => ask(id)}
-              onKeep={() => keep(id)}
-              onDecline={() => {
-                // The second press of a double click lands where the question has just put
-                // this button: too soon to be an answer to it.
-                if (Date.now() - askedAt.current < CONFIRM_AFTER_MS) return;
-                void act(
-                  id,
-                  () => actions.respondToLink(id, false),
-                  "Link declined.",
-                );
-              }}
-              onRelease={() =>
-                act(id, () => actions.releaseNote(id), "Note released.")
-              }
-            />
+          <div className={s.split} data-narrow={narrow || undefined}>
+            {(!narrow || !showing) && (
+              <InboxList
+                links={links}
+                held={held}
+                linksLeft={linksLeft}
+                heldLeft={heldLeft}
+                linksTotal={data.linksTotal}
+                heldTotal={data.heldTotal}
+                loadedLinks={data.links.length}
+                loadedHeld={data.held.length}
+                now={now}
+                selectedId={currentId}
+                leaving={leaving}
+                onSelect={select}
+              />
+            )}
+            {(!narrow || showing) && (
+              <InboxDetail
+                onBack={narrow ? back : undefined}
+                current={current}
+                opening={opening}
+                now={now}
+                busy={busy.has(id)}
+                failed={failed.has(id)}
+                asking={asking === id}
+                waiting={waiting}
+                headingRef={detailHeading}
+                onAccept={() =>
+                  act(
+                    id,
+                    () => actions.respondToLink(id, true),
+                    "Link accepted.",
+                  )
+                }
+                onAsk={() => ask(id)}
+                onKeep={() => keep(id)}
+                onDecline={() => {
+                  // The second press of a double click lands where the question has just put
+                  // this button: too soon to be an answer to it.
+                  if (Date.now() - askedAt.current < CONFIRM_AFTER_MS) return;
+                  void act(
+                    id,
+                    () => actions.respondToLink(id, false),
+                    "Link declined.",
+                  );
+                }}
+                onRelease={() =>
+                  act(id, () => actions.releaseNote(id), "Note released.")
+                }
+              />
+            )}
           </div>
         )}
         <p aria-live="polite" className={s.srOnly}>

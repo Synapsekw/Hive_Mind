@@ -10,6 +10,7 @@ import { shortDate } from "../vault/format";
 import {
   ACCEPT_LINK,
   ALL_DONE,
+  BACK,
   FINAL_NOTE,
   HELD_NOTE,
   NOT_SHARED,
@@ -64,7 +65,23 @@ function Lines({ opening }: { opening: Opening | null }) {
 export function InboxDetail(props: Props) {
   const { current, headingRef } = props;
   return (
-    <section aria-labelledby="inbox-detail-title" className={s.detail}>
+    <section
+      aria-labelledby="inbox-detail-title"
+      className={s.detail}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && props.onBack && !props.asking) props.onBack();
+      }}
+    >
+      {props.onBack && (
+        <button
+          type="button"
+          className={s.back}
+          aria-label="Back to the inbox"
+          onClick={props.onBack}
+        >
+          ← {BACK}
+        </button>
+      )}
       {current === null ? (
         <div className={s.done}>
           <h2

@@ -438,10 +438,10 @@ test("empty shows Nothing needs you. with Open the vault; above the cap says how
   await expect(railInbox(page)).toHaveAccessibleName("Inbox, 260 waiting");
 });
 
-test("at 1100 x 560 the page does not scroll and each column scrolls on its own", async ({
+test("at 1300 x 560 the page does not scroll and each column scrolls on its own", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1100, height: 560 });
+  await page.setViewportSize({ width: 1300, height: 560 });
   await open(page);
   const fit = await page.evaluate(() => {
     const root = document.scrollingElement!;
@@ -481,7 +481,7 @@ test("at 1100 x 560 the page does not scroll and each column scrolls on its own"
   });
   expect(fit.pageScrolls).toBe(false);
   expect(fit.panelBottom).toBeLessThanOrEqual(560);
-  expect(fit.panelRight).toBeLessThanOrEqual(1100);
+  expect(fit.panelRight).toBeLessThanOrEqual(1300);
   expect(fit.apart).toBe(true);
   expect(fit.listInside).toBe(true);
   expect(fit.detailInside).toBe(true);
@@ -566,6 +566,44 @@ for (const width of [390, 700, 1600]) {
     await page.mouse.click(x, y);
     await page.waitForTimeout(300);
     expect(await calls(page)).toEqual([]);
+    // Folded narrow, the list is behind the back button.
+    const back = detail(page).getByRole("button", {
+      name: "Back to the inbox",
+    });
+    if (await back.isVisible()) await back.click();
     await expect(options(page)).toHaveCount(5);
   });
 }
+
+test("under 1,000 px the list shows alone; Enter opens the item full width; ← Inbox and Escape return to its row", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await open(page);
+  await expect(list(page)).toBeVisible();
+  await expect(button(page, "Accept link")).toHaveCount(0);
+
+  await options(page).first().focus();
+  await page.keyboard.press("Enter");
+  await expect(button(page, "Accept link")).toBeVisible();
+  await expect(
+    detail(page).getByRole("button", { name: "Back to the inbox" }),
+  ).toBeVisible();
+  await expect(list(page)).toBeHidden();
+
+  await page.keyboard.press("Escape");
+  await expect(list(page)).toBeVisible();
+  await expect(options(page).first()).toBeFocused();
+
+  await options(page).nth(1).click();
+  await detail(page).getByRole("button", { name: "Back to the inbox" }).click();
+  await expect(options(page).nth(1)).toBeFocused();
+
+  // Wide again: both columns, no back button.
+  await page.setViewportSize({ width: 1400, height: 700 });
+  await expect(list(page)).toBeVisible();
+  await expect(detail(page)).toBeVisible();
+  await expect(
+    detail(page).getByRole("button", { name: "Back to the inbox" }),
+  ).toHaveCount(0);
+});
