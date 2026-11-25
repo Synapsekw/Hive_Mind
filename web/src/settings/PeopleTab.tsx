@@ -1,16 +1,23 @@
 "use client";
 
-// The People tab: the hive's members and, for the owner, Invite a member, its form, the notice
-// that says whether the email went out, and the invitations still open. Markup only: the state
-// and what each press does live in `Settings`.
+// The People tab: one list of the hive's members and, for the owner, the invitations still
+// open, each with its ⋯ menu (Send again, Revoke invitation); Invite someone and its dialog;
+// and the notice that says whether the email went out. Markup only: the state and what each
+// press does live in `Settings`.
 import { useId, useRef, useState } from "react";
-import { shortDate } from "../vault/format";
+import { PanelDialog } from "../vault/PanelDialog";
+import { RowMenu } from "./RowMenu";
 import type { Notice, Open } from "./Settings";
 import {
   FAILED,
   INVITATIONS_NOTE,
+  INVITED,
   INVITE_HELP,
+  INVITE_TITLE,
   NAME_MAX,
+  REVOKE_INVITATION,
+  SEND_AGAIN,
+  invitationLine,
   inviteNotice,
 } from "./text";
 import type { Invitation, SettingsData } from "./types";
@@ -61,88 +68,88 @@ export function PeopleTab({
   onRevokeInvitation: (invitation: Invitation) => void;
   onSay: (text: string) => void;
 }) {
+  const inviting = data.isOwner && open?.kind === "invite";
   return (
-    <>
-      <section aria-labelledby="settings-members" className={s.section}>
-        <div className={s.sectionHead}>
-          <div className={s.headText}>
-            <h2 className={s.label}>
-              <span id="settings-members">Members</span>
-              <span className={s.count}>{data.members.length}</span>
-            </h2>
-            <p className={s.note}>
-              Everyone in {data.hiveName}. Each keeps their own notes until they
-              share them.
-            </p>
-          </div>
-          {data.isOwner && open?.kind !== "invite" && (
-            <button
-              type="button"
-              data-open="invite"
-              className={s.secondary}
-              onClick={onShow}
-            >
-              Invite a member
-            </button>
-          )}
+    <section aria-labelledby="settings-people" className={s.section}>
+      {/* While the invite dialog is open, what is behind its dim takes no focus and no press. */}
+      <div className={s.sectionHead} inert={inviting || undefined}>
+        <div className={s.headText}>
+          <h2 className={s.label}>
+            <span id="settings-people">People</span>
+            <span className={s.count}>
+              {data.members.length + invitations.length}
+            </span>
+          </h2>
+          <p className={s.note}>
+            Everyone in {data.hiveName}. Each keeps their own notes until they
+            share them.
+          </p>
         </div>
-        {data.isOwner && open?.kind === "invite" && (
+        {data.isOwner && (
+          // Kept in its place behind the dialog, but not drawn: one yellow button at a time.
+          <button
+            type="button"
+            data-open="invite"
+            className={s.primary}
+            data-behind={inviting || undefined}
+            onClick={() => {
+              if (!inviting) onShow();
+            }}
+          >
+            {INVITE_TITLE}
+          </button>
+        )}
+      </div>
+      {inviting && (
+        <PanelDialog
+          label={INVITE_TITLE}
+          busy={busy === "invite"}
+          onClose={onCancel}
+        >
           <InviteForm
             busy={busy === "invite"}
             onInvite={onInvite}
             onCancel={onCancel}
             onSay={onSay}
           />
-        )}
+        </PanelDialog>
+      )}
+      <div inert={inviting || undefined}>
         {data.isOwner && <InviteNotice notice={notice} onDismiss={onDismiss} />}
-        <ul role="list" aria-label="Members" className={s.rows}>
+        <ul role="list" aria-label="People" className={s.rows}>
           {data.members.map((m) => (
             <li key={m.id} className={s.member}>
               <span className={s.memberName}>
                 <span className={s.memberText}>{m.name}</span>
-                {m.isMe && <span className={s.mark}>you</span>}
+                {m.isMe && <span className={s.mark}>You</span>}
               </span>
               <span className={s.role}>
                 {m.role === "owner" ? "Owner" : "Member"}
               </span>
             </li>
           ))}
+          {invitations.map((i) => (
+            <InvitationRow
+              key={i.id}
+              invitation={i}
+              now={now}
+              busy={busy === i.id}
+              failed={failed.has(i.id)}
+              unsent={unsent.get(i.id) ?? null}
+              onResend={() => onResend(i)}
+              onRevoke={() => onRevokeInvitation(i)}
+            />
+          ))}
         </ul>
-      </section>
-      {invitations.length > 0 && (
-        <section aria-labelledby="settings-invitations" className={s.section}>
-          <div className={s.sectionHead}>
-            <div className={s.headText}>
-              <h2 className={s.label}>
-                <span id="settings-invitations">Invitations</span>
-                <span className={s.count}>{invitations.length}</span>
-              </h2>
-              <p className={s.note}>{INVITATIONS_NOTE}</p>
-            </div>
-          </div>
-          <ul role="list" aria-label="Invitations" className={s.rows}>
-            {invitations.map((i) => (
-              <InvitationRow
-                key={i.id}
-                invitation={i}
-                now={now}
-                busy={busy === i.id}
-                failed={failed.has(i.id)}
-                unsent={unsent.get(i.id) ?? null}
-                onResend={() => onResend(i)}
-                onRevoke={() => onRevokeInvitation(i)}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
-    </>
+      </div>
+    </section>
   );
 }
 
 /**
- * An open invitation: who, where it was sent, until when, and Send again and Revoke, each in
- * one step. `unsent` is why the last Send again did not happen.
+ * An open invitation: who, the Invited mark, one grey line (where it was sent, when, until
+ * when), and a ⋯ menu with Send again and Revoke invitation, each one step. `unsent` is why
+ * the last Send again did not happen.
  */
 function InvitationRow({
   invitation,
@@ -162,40 +169,38 @@ function InvitationRow({
   onRevoke: () => void;
 }) {
   return (
-    <li className={s.item} aria-busy={busy || undefined}>
+    <li
+      data-invitation={invitation.id}
+      className={s.item}
+      aria-busy={busy || undefined}
+    >
       <div className={s.text}>
         <p className={s.what}>
           <span className={s.name}>{invitation.name}</span>
+          <span className={s.mark} title={INVITATIONS_NOTE}>
+            {INVITED}
+          </span>
         </p>
-        <p className={s.meta}>
-          <span className={s.address}>{invitation.email}</span>
-        </p>
-        <p className={s.meta}>
-          <span>Invited {shortDate(invitation.createdAt, now)}</span>
-          <span>Expires {shortDate(invitation.expiresAt, now)}</span>
+        <p className={`${s.meta} ${s.address}`}>
+          {invitationLine(invitation, now).map((part, i) => (
+            <span key={i}>{part}</span>
+          ))}
         </p>
       </div>
       <div className={s.side}>
-        <div className={s.actions}>
-          <button
-            type="button"
-            className={s.secondary}
-            aria-label={`Send again to ${invitation.name}`}
-            aria-disabled={busy || undefined}
-            onClick={onResend}
-          >
-            Send again
-          </button>
-          <button
-            type="button"
-            className={s.secondary}
-            aria-label={`Revoke invitation for ${invitation.name}`}
-            aria-disabled={busy || undefined}
-            onClick={onRevoke}
-          >
-            Revoke
-          </button>
-        </div>
+        <RowMenu
+          label={`Actions for ${invitation.name}`}
+          disabled={busy}
+          items={[
+            { key: "resend", text: SEND_AGAIN, onPick: onResend },
+            {
+              key: "revoke",
+              text: REVOKE_INVITATION,
+              danger: true,
+              onPick: onRevoke,
+            },
+          ]}
+        />
         {unsent && <p className={s.refused}>{unsent}</p>}
         {failed && <p className={s.refused}>{FAILED}</p>}
       </div>
@@ -273,9 +278,9 @@ function InviteForm({
 
   return (
     <form
-      aria-label="Invite a member"
+      aria-label={INVITE_TITLE}
       data-form="invite"
-      className={s.form}
+      className={`${s.form} ${s.dialogForm}`}
       noValidate
       aria-busy={busy || undefined}
       onSubmit={(e) => {
@@ -289,6 +294,7 @@ function InviteForm({
         }
       }}
     >
+      <h2 className={s.dialogTitle}>{INVITE_TITLE}</h2>
       <div className={s.fields}>
         <div className={s.field}>
           <label htmlFor={`${id}-email`} className={s.fieldLabel}>
@@ -325,14 +331,8 @@ function InviteForm({
         </div>
       </div>
       <p className={s.hint}>{INVITE_HELP}</p>
-      <div className={s.formFoot}>
-        <button
-          type="submit"
-          className={s.primary}
-          aria-disabled={busy || undefined}
-        >
-          Invite
-        </button>
+      <div className={`${s.formFoot} ${s.dialogFoot}`}>
+        {problem && <p className={s.refused}>{problem}</p>}
         <button
           type="button"
           className={s.secondary}
@@ -341,7 +341,13 @@ function InviteForm({
         >
           Cancel
         </button>
-        {problem && <p className={s.refused}>{problem}</p>}
+        <button
+          type="submit"
+          className={s.primary}
+          aria-disabled={busy || undefined}
+        >
+          Invite
+        </button>
       </div>
     </form>
   );

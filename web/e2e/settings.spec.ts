@@ -3,10 +3,18 @@ import { fixtureSettings } from "../src/settings/fixture";
 import {
   CONNECT_TITLE,
   DELETE_WORKSPACE_ITEM,
+  DELETE_HELP,
+  DELETE_HIVE_ITEM,
+  DELETE_TITLE,
   INVITATIONS_NOTE,
+  INVITED,
   INVITE_HELP,
+  INVITE_TITLE,
+  KEEP_HIVE,
   MCP_COMMAND,
+  REVOKE_INVITATION,
   REVOKE_ITEM,
+  SEND_AGAIN,
   envLine,
   foldedAgents,
   inviteNotice,
@@ -68,8 +76,14 @@ const rows = (page: Page, name: string) =>
   main(page).getByRole("list", { name }).getByRole("listitem");
 const agentRow = (page: Page, name: string) =>
   rows(page, "Agents").filter({ hasText: name });
+/** The People list: the members, then (for the owner) the open invitations. */
+const people = (page: Page) => rows(page, "People");
+const invitations = (page: Page) =>
+  people(page).filter({ has: page.getByText(INVITED, { exact: true }) });
+const members = (page: Page) =>
+  people(page).filter({ hasNot: page.getByText(INVITED, { exact: true }) });
 const memberRow = (page: Page, name: string) =>
-  rows(page, "Members").filter({ hasText: name });
+  members(page).filter({ hasText: name });
 const connect = (page: Page) =>
   main(page).getByRole("button", { name: "Connect an agent" });
 const connectForm = (page: Page) =>
@@ -90,16 +104,19 @@ async function askRevoke(row: Locator) {
   await row.getByRole("button", { name: REVOKE_ITEM }).click();
 }
 const inviteButton = (page: Page) =>
-  main(page).getByRole("button", { name: "Invite a member" });
+  main(page).getByRole("button", { name: INVITE_TITLE });
+const inviteDialog = (page: Page) =>
+  page.getByRole("dialog", { name: INVITE_TITLE });
 const inviteForm = (page: Page) =>
-  main(page).getByRole("form", { name: "Invite a member" });
+  inviteDialog(page).getByRole("form", { name: INVITE_TITLE });
 const invitationRow = (page: Page, name: string) =>
-  rows(page, "Invitations").filter({ hasText: name });
+  invitations(page).filter({ hasText: name });
 const notice = (page: Page) => main(page).getByRole("status");
 
-/** Opens the invite form, fills it and presses Invite. */
+/** Opens the invite dialog, fills it and presses Invite. */
 async function invite(page: Page, email = "mira@example.com", name = "Mira") {
   await inviteButton(page).click();
+  await expect(inviteDialog(page)).toBeVisible();
   const form = inviteForm(page);
   await form.getByLabel("Email").fill(email);
   await form.getByLabel("Display name").fill(name);
@@ -111,10 +128,13 @@ const dialog = (page: Page) =>
     .getByRole("dialog")
     .filter({ hasNot: page.getByRole("form", { name: CONNECT_TITLE }) });
 const live = (page: Page) => main(page).locator('[aria-live="polite"]');
-const revokeButton = (row: Locator) =>
-  row.getByRole("button", { name: /^Revoke/ });
-const sendAgain = (row: Locator) =>
-  row.getByRole("button", { name: /^Send again/ });
+/** Opens a row's ⋯ menu and picks one of its items. */
+async function pick(row: Locator, item: string) {
+  await moreButton(row).click();
+  await row.getByRole("button", { name: item, exact: true }).click();
+}
+const sendAgain = (row: Locator) => pick(row, SEND_AGAIN);
+const revokeInvite = (row: Locator) => pick(row, REVOKE_INVITATION);
 const WAIT = "Sent a moment ago. Wait two minutes and try again.";
 const LIMIT =
   "This address has had as many invitation emails as allowed. Try again tomorrow.";
@@ -179,7 +199,7 @@ test("the rail marks Settings; the tabs show with counts; Agents is open; revoke
     "An agent writes into one workspace as you. It can never change sharing, accept links or delete notes.",
   );
   // The other tabs' sections are in the page, hidden.
-  await expect(section(page, "Members")).toHaveCount(0);
+  await expect(section(page, "People")).toHaveCount(0);
 
   // The heading counts the active agents, as the tab does.
   await expect(section(page, "Agents").getByRole("heading")).toHaveText(
@@ -228,12 +248,12 @@ test("the rail marks Settings; the tabs show with counts; Agents is open; revoke
   await expect(old.getByRole("button")).toHaveCount(0);
 
   await openTab(page, "People");
-  await expect(section(page, "Members")).toBeVisible();
+  await expect(section(page, "People")).toBeVisible();
   await expect(section(page, "Agents")).toHaveCount(0);
-  await expect(rows(page, "Members")).toHaveCount(3);
+  await expect(members(page)).toHaveCount(3);
   await expect(memberRow(page, "Danijel")).toContainText("Owner");
   await expect(
-    memberRow(page, "Danijel").getByText("you", { exact: true }),
+    memberRow(page, "Danijel").getByText("You", { exact: true }),
   ).toBeVisible();
   await expect(memberRow(page, "Sara")).toContainText("Member");
 
@@ -563,18 +583,21 @@ test("a failed create says so in the form and shows no dialog; a failed revoke k
   await expect(rows(page, "Agents").nth(0)).toContainText(LOCAL.name);
 });
 
-test("Invite a member: the form says what will happen; a bad email or an empty name is refused with no call", async ({
+test("Invite someone opens a dialog that says what will happen; a bad email or an empty name is refused with no call", async ({
   page,
 }) => {
   await open(page);
   await openTab(page, "People");
   await inviteButton(page).click();
+  await expect(inviteDialog(page)).toBeVisible();
   const form = inviteForm(page);
+  await expect(form.getByRole("heading", { name: INVITE_TITLE })).toBeVisible();
   await expect(form).toContainText(INVITE_HELP);
   const email = form.getByLabel("Email");
   const name = form.getByLabel("Display name");
   const send = form.getByRole("button", { name: "Invite", exact: true });
   await expect(email).toBeFocused();
+  await expect(form.getByRole("button")).toHaveText(["Cancel", "Invite"]);
 
   for (const bad of ["", "mira", "mira@@example.com", "mi ra@example.com"]) {
     await email.fill(bad);
@@ -605,10 +628,70 @@ test("Invite a member: the form says what will happen; a bad email or an empty n
   await inviteButton(page).click();
   await expect(connectForm(page)).toHaveCount(0);
   await expect(email).toHaveValue("");
-  // Escape puts the form away.
+  // Escape puts the dialog away, with the focus back on Invite someone.
   await page.keyboard.press("Escape");
-  await expect(form).toHaveCount(0);
+  await expect(inviteDialog(page)).toHaveCount(0);
   await expect(inviteButton(page)).toBeFocused();
+  // So does Cancel.
+  await inviteButton(page).click();
+  await inviteForm(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(inviteDialog(page)).toHaveCount(0);
+  await expect(inviteButton(page)).toBeFocused();
+  expect(await calls(page)).toEqual([]);
+});
+
+test("People: with the invite dialog open, one yellow button shows and nothing behind the dialog takes the focus", async ({
+  page,
+}) => {
+  await open(page, "?tab=people");
+  const primaries = () =>
+    page.evaluate(() => {
+      const panel = document.getElementById("panel-people")!;
+      const yellow = getComputedStyle(
+        document.querySelector('[data-open="invite"]')!,
+      ).backgroundColor;
+      return [...panel.querySelectorAll("button")].filter(
+        (b) =>
+          b.getClientRects().length > 0 &&
+          getComputedStyle(b).visibility !== "hidden" &&
+          getComputedStyle(b).backgroundColor === yellow,
+      ).length;
+    });
+  expect(await primaries()).toBe(1);
+  await inviteButton(page).click();
+  await expect(inviteDialog(page)).toBeVisible();
+  // The dialog's Invite is the one; Invite someone keeps its place but is not drawn.
+  expect(await primaries()).toBe(1);
+  await expect(inviteButton(page)).toBeHidden();
+
+  // From the People tab, Tab goes into the dialog; the ⋯ menus behind it are passed over.
+  await tabOf(page, "People").focus();
+  await page.keyboard.press("Tab");
+  expect(
+    await page.evaluate(() =>
+      Boolean(document.activeElement?.closest('[role="dialog"]')),
+    ),
+  ).toBe(true);
+  for (const who of [LENA, MARKO]) {
+    const behind = moreButton(invitationRow(page, who.name));
+    await behind.evaluate((el) => (el as HTMLElement).focus());
+    await expect(behind).not.toBeFocused();
+  }
+  // A press that reaches Invite someone anyway opens nothing new: the dialog keeps what was typed.
+  await inviteForm(page).getByLabel("Email").fill("mira@example.com");
+  await page
+    .locator('[data-open="invite"]')
+    .evaluate((el) => (el as HTMLElement).click());
+  await expect(inviteForm(page).getByLabel("Email")).toHaveValue(
+    "mira@example.com",
+  );
+
+  // Closed, everything behind is back in reach.
+  await page.keyboard.press("Escape");
+  await expect(inviteDialog(page)).toHaveCount(0);
+  const lena = moreButton(invitationRow(page, LENA.name));
+  await lena.focus();
+  await expect(lena).toBeFocused();
   expect(await calls(page)).toEqual([]);
 });
 
@@ -621,11 +704,11 @@ test("inviting never adds a member; when the email could not be sent the notice 
   expect(await calls(page)).toEqual([
     { name: "inviteMember", args: ["mira@example.com", "Mira"] },
   ]);
-  await expect(inviteForm(page)).toHaveCount(0);
+  await expect(inviteDialog(page)).toHaveCount(0);
   await expect(inviteButton(page)).toBeFocused();
   // Nobody joined: the invitation is saved and waits for the person to press Join.
-  await expect(rows(page, "Members")).toHaveCount(3);
-  await expect(rows(page, "Invitations")).toHaveCount(3);
+  await expect(members(page)).toHaveCount(3);
+  await expect(invitations(page)).toHaveCount(3);
   await expect(notice(page)).toHaveText(
     "Invitation saved, but the email could not be sent. Wait two minutes, then use Send again.",
   );
@@ -633,29 +716,39 @@ test("inviting never adds a member; when the email could not be sent the notice 
 
   // Send again on that invitation sends it, and the notice that it was not sent goes.
   const mira = invitationRow(page, "Mira");
-  await sendAgain(mira).click();
+  await sendAgain(mira);
   await expect(live(page)).toHaveText("Invitation for Mira sent again.");
   await expect(notice(page)).toBeEmpty();
-  await expect(rows(page, "Invitations")).toHaveCount(3);
+  await expect(invitations(page)).toHaveCount(3);
   // The next form starts empty.
   await inviteButton(page).click();
   await expect(inviteForm(page).getByLabel("Email")).toHaveValue("");
   await expect(inviteForm(page).getByLabel("Display name")).toHaveValue("");
 });
 
-test("inviting someone: the invitation is listed with its dates; the notice says where it was sent and stays until Dismiss", async ({
+test("inviting someone: the invitation is listed with the members, marked Invited, with its dates; the notice says where it was sent and stays until Dismiss", async ({
   page,
 }) => {
   await open(page);
   await openTab(page, "People");
-  // The two that were already open, the newest first.
-  await expect(rows(page, "Invitations")).toHaveCount(2);
-  await expect(section(page, "Invitations")).toContainText(INVITATIONS_NOTE);
-  await expect(rows(page, "Invitations").nth(0)).toContainText(LENA.name);
+  // One list: the members, then the two that were already open, the newest first.
+  await expect(people(page)).toHaveCount(5);
+  await expect(invitations(page)).toHaveCount(2);
+  await expect(people(page).nth(3)).toContainText(LENA.name);
+  await expect(people(page).nth(4)).toContainText(MARKO.name);
+  await expect(section(page, "Invitations")).toHaveCount(0);
   const lena = invitationRow(page, LENA.name);
-  await expect(lena).toContainText(LENA.email);
-  await expect(lena).toContainText("Invited 22 Nov");
-  await expect(lena).toContainText("Expires 6 Dec");
+  // The mark says what an invitation is when pointed at.
+  await expect(lena.getByText(INVITED, { exact: true })).toHaveAttribute(
+    "title",
+    INVITATIONS_NOTE,
+  );
+  // One grey line: the email, when it was sent and when it expires.
+  await expect(lena.locator("p").nth(1).locator("span")).toHaveText([
+    LENA.email,
+    "Invited 22 Nov",
+    "Expires 6 Dec",
+  ]);
   await expect(invitationRow(page, MARKO.name)).toContainText("Expires 4 Dec");
   await expect(notice(page)).toBeEmpty();
 
@@ -663,9 +756,9 @@ test("inviting someone: the invitation is listed with its dates; the notice says
   expect(await calls(page)).toEqual([
     { name: "inviteMember", args: ["mira@example.com", "Mira"] },
   ]);
-  await expect(inviteForm(page)).toHaveCount(0);
-  await expect(rows(page, "Members")).toHaveCount(3);
-  await expect(rows(page, "Invitations")).toHaveCount(3);
+  await expect(inviteDialog(page)).toHaveCount(0);
+  await expect(members(page)).toHaveCount(3);
+  await expect(invitations(page)).toHaveCount(3);
   const mira = invitationRow(page, "Mira");
   await expect(mira).toContainText("mira@example.com");
   await expect(mira).toContainText("Invited 23 Nov");
@@ -686,7 +779,7 @@ test("inviting someone: the invitation is listed with its dates; the notice says
   await connectForm(page).getByRole("button", { name: "Cancel" }).click();
   await openTab(page, "People");
   await expect(notice(page)).toHaveText(said);
-  await sendAgain(mira).click();
+  await sendAgain(mira);
   await expect(live(page)).toHaveText("Invitation for Mira sent again.");
   await expect(notice(page)).toHaveText(said);
 
@@ -698,10 +791,10 @@ test("inviting someone: the invitation is listed with its dates; the notice says
   await expect(main(page)).not.toContainText("Invitation sent to");
   await expect(inviteButton(page)).toBeFocused();
   // The invitation itself is still open.
-  await expect(rows(page, "Invitations")).toHaveCount(3);
+  await expect(invitations(page)).toHaveCount(3);
 });
 
-test("a refused invitation says why and keeps the form open with what was typed", async ({
+test("a refused invitation says why and keeps the dialog open with what was typed", async ({
   page,
 }) => {
   for (const [query, said] of [
@@ -718,8 +811,9 @@ test("a refused invitation says why and keeps the form open with what was typed"
     await expect(live(page)).toHaveText(said);
     await expect(form.getByLabel("Email")).toHaveValue("mira@example.com");
     await expect(form.getByLabel("Display name")).toHaveValue("Mira");
-    await expect(rows(page, "Members")).toHaveCount(3);
-    await expect(rows(page, "Invitations")).toHaveCount(2);
+    await expect(inviteDialog(page)).toBeVisible();
+    await expect(members(page)).toHaveCount(3);
+    await expect(invitations(page)).toHaveCount(2);
     await expect(notice(page)).toBeEmpty();
     expect(await calls(page)).toEqual([
       { name: "inviteMember", args: ["mira@example.com", "Mira"] },
@@ -727,23 +821,34 @@ test("a refused invitation says why and keeps the form open with what was typed"
   }
 });
 
-test("Revoke on an invitation removes it in one step; a refused revoke keeps the row and says so", async ({
+test("Revoke invitation, from ⋯, removes it in one step; a refused revoke keeps the row and says so", async ({
   page,
 }) => {
   await open(page);
   await openTab(page, "People");
   const lena = invitationRow(page, LENA.name);
-  // Each Revoke says whose invitation it is.
+  // Each ⋯ says whose invitation it is, and holds Send again, then Revoke invitation.
+  await expect(moreButton(lena)).toHaveAccessibleName(
+    `Actions for ${LENA.name}`,
+  );
   await expect(
-    lena.getByRole("button", { name: `Revoke invitation for ${LENA.name}` }),
-  ).toBeVisible();
+    moreButton(invitationRow(page, MARKO.name)),
+  ).toHaveAccessibleName(`Actions for ${MARKO.name}`);
+  await moreButton(lena).click();
+  const menu = lena.getByRole("group", { name: `Actions for ${LENA.name}` });
+  await expect(menu.getByRole("button")).toHaveText([
+    SEND_AGAIN,
+    REVOKE_INVITATION,
+  ]);
+  // Revoke invitation is drawn as what cannot be undone; Send again is not.
   await expect(
-    invitationRow(page, MARKO.name).getByRole("button", {
-      name: `Revoke invitation for ${MARKO.name}`,
-    }),
-  ).toBeVisible();
-  await revokeButton(lena).click();
-  await expect(rows(page, "Invitations")).toHaveCount(1);
+    menu.getByRole("button", { name: REVOKE_INVITATION }),
+  ).toHaveAttribute("data-danger", "true");
+  await expect(
+    menu.getByRole("button", { name: SEND_AGAIN }),
+  ).not.toHaveAttribute("data-danger");
+  await menu.getByRole("button", { name: REVOKE_INVITATION }).click();
+  await expect(invitations(page)).toHaveCount(1);
   await expect(lena).toHaveCount(0);
   await expect(invitationRow(page, MARKO.name)).toBeVisible();
   expect(await calls(page)).toEqual([
@@ -752,97 +857,74 @@ test("Revoke on an invitation removes it in one step; a refused revoke keeps the
   await expect(live(page)).toHaveText(`Invitation for ${LENA.name} revoked.`);
   await expect(dialog(page)).toHaveCount(0);
 
-  // The last one gone, the section goes with it.
-  await revokeButton(invitationRow(page, MARKO.name)).click();
-  await expect(section(page, "Invitations")).toHaveCount(0);
+  // The last one gone, the list holds the members only.
+  await revokeInvite(invitationRow(page, MARKO.name));
+  await expect(invitations(page)).toHaveCount(0);
+  await expect(people(page)).toHaveCount(3);
   await expect(inviteButton(page)).toBeFocused();
 
   await open(page, "?fail=1");
   await openTab(page, "People");
   const kept = invitationRow(page, LENA.name);
-  await revokeButton(kept).click();
+  await revokeInvite(kept);
   await expect(kept).toContainText(FAILED);
   await expect(live(page)).toHaveText(FAILED);
-  await expect(rows(page, "Invitations")).toHaveCount(2);
-  await expect(revokeButton(kept)).toBeFocused();
+  await expect(invitations(page)).toHaveCount(2);
+  await expect(moreButton(kept)).toBeFocused();
   expect(await calls(page)).toEqual([
     { name: "revokeInvitation", args: [LENA.id] },
   ]);
 });
 
-test("Send again on an invitation sends its email once more in one step; too soon or refused says so in the row", async ({
+test("Send again, from ⋯, sends an invitation's email once more in one step; too soon or refused says so in the row", async ({
   page,
 }) => {
   await open(page);
   await openTab(page, "People");
   const lena = invitationRow(page, LENA.name);
-  // Each Send again says whose invitation it is, and comes before Revoke.
-  await expect(
-    lena.getByRole("button", { name: `Send again to ${LENA.name}` }),
-  ).toHaveText("Send again");
-  await expect(
-    invitationRow(page, MARKO.name).getByRole("button", {
-      name: `Send again to ${MARKO.name}`,
-    }),
-  ).toBeVisible();
-  await expect(lena.getByRole("button")).toHaveText(["Send again", "Revoke"]);
-  // It looks like the Revoke beside it: the same quiet button.
-  expect(await sendAgain(lena).getAttribute("class")).toBe(
-    await revokeButton(lena).getAttribute("class"),
-  );
-
-  await sendAgain(lena).click();
+  await sendAgain(lena);
   await expect(live(page)).toHaveText(
     `Invitation for ${LENA.name} sent again.`,
   );
   expect(await calls(page)).toEqual([
     { name: "resendInvitation", args: [LENA.id] },
   ]);
-  // Nothing moves: the row stays, the focus stays on the button, no notice, no dialog.
-  await expect(rows(page, "Invitations")).toHaveCount(2);
-  await expect(sendAgain(lena)).toBeFocused();
+  // Nothing moves: the row stays, the menu closes and the focus is on its ⋯, no notice, no
+  // dialog.
+  await expect(invitations(page)).toHaveCount(2);
+  await expect(lena.getByRole("group")).toHaveCount(0);
+  await expect(moreButton(lena)).toBeFocused();
   await expect(lena).not.toContainText(FAILED);
   await expect(notice(page)).toBeEmpty();
   await expect(dialog(page)).toHaveCount(0);
 
-  // A second press while the first is still under way asks once.
-  await open(page, "?tab=people");
-  const twice = sendAgain(invitationRow(page, LENA.name));
-  await twice.dblclick();
-  await expect(live(page)).toHaveText(
-    `Invitation for ${LENA.name} sent again.`,
-  );
-  expect(await calls(page)).toEqual([
-    { name: "resendInvitation", args: [LENA.id] },
-  ]);
-
   await open(page, "?limit=1&tab=people");
   const spent = invitationRow(page, LENA.name);
-  await sendAgain(spent).click();
+  await sendAgain(spent);
   await expect(spent).toContainText(LIMIT);
   await expect(live(page)).toHaveText(LIMIT);
-  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await expect(invitations(page)).toHaveCount(2);
 
   await open(page, "?wait=1&tab=people");
   const soon = invitationRow(page, LENA.name);
-  await sendAgain(soon).click();
+  await sendAgain(soon);
   await expect(soon).toContainText(WAIT);
   await expect(live(page)).toHaveText(WAIT);
   await expect(invitationRow(page, MARKO.name)).not.toContainText(WAIT);
-  await expect(sendAgain(soon)).toBeFocused();
-  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await expect(moreButton(soon)).toBeFocused();
+  await expect(invitations(page)).toHaveCount(2);
 
   await open(page, "?fail=1&tab=people");
   const kept2 = invitationRow(page, LENA.name);
-  await sendAgain(kept2).click();
+  await sendAgain(kept2);
   await expect(kept2).toContainText(FAILED);
   await expect(live(page)).toHaveText(FAILED);
-  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await expect(invitations(page)).toHaveCount(2);
   expect(await calls(page)).toEqual([
     { name: "resendInvitation", args: [LENA.id] },
   ]);
   // Revoking next says its own refusal once, not both.
-  await revokeButton(kept2).click();
+  await revokeInvite(kept2);
   await expect(live(page)).toHaveText(FAILED);
   await expect(kept2.getByText(FAILED)).toHaveCount(1);
 });
@@ -854,8 +936,8 @@ test("revoking the invitation a notice is about takes the notice away too", asyn
   await openTab(page, "People");
   await invite(page);
   await expect(notice(page)).toContainText("Invitation sent to");
-  await revokeButton(invitationRow(page, "Mira")).click();
-  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await revokeInvite(invitationRow(page, "Mira"));
+  await expect(invitations(page)).toHaveCount(2);
   await expect(notice(page)).toBeEmpty();
 });
 
@@ -864,19 +946,19 @@ test("a member who is not the owner sees the members on the People tab, no invit
 }) => {
   await open(page, "?member=1");
   await openTab(page, "People");
-  await expect(rows(page, "Members")).toHaveCount(3);
+  await expect(people(page)).toHaveCount(3);
   await expect(inviteButton(page)).toHaveCount(0);
-  await expect(inviteForm(page)).toHaveCount(0);
-  await expect(section(page, "Invitations")).toHaveCount(0);
-  await expect(rows(page, "Invitations")).toHaveCount(0);
+  await expect(inviteDialog(page)).toHaveCount(0);
+  await expect(invitations(page)).toHaveCount(0);
   await expect(main(page)).not.toContainText("Invitations");
+  await expect(main(page)).not.toContainText(INVITED);
   await expect(main(page)).not.toContainText(LENA.email);
   await expect(notice(page)).toHaveCount(0);
   await expect(
-    memberRow(page, "Ahmed").getByText("you", { exact: true }),
+    memberRow(page, "Ahmed").getByText("You", { exact: true }),
   ).toBeVisible();
   await expect(
-    memberRow(page, "Danijel").getByText("you", { exact: true }),
+    memberRow(page, "Danijel").getByText("You", { exact: true }),
   ).toHaveCount(0);
   await expect(memberRow(page, "Danijel")).toContainText("Owner");
   // Their own agents are still theirs to manage.
@@ -884,7 +966,7 @@ test("a member who is not the owner sees the members on the People tab, no invit
   await expect(connect(page)).toBeVisible();
 });
 
-test("at 1100 x 560 with the invite form open, the notice and the invitations, the page does not scroll", async ({
+test("at 1100 x 560 with the invite dialog open, the notice and the invitations, the page does not scroll", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1100, height: 560 });
@@ -909,27 +991,35 @@ test("at 1100 x 560 with the invite form open, the notice and the invitations, t
     });
   const fine = { pageScrolls: false, inside: true, sideways: false };
   await openTab(page, "People");
-  await expect(rows(page, "Invitations")).toHaveCount(2);
+  await expect(invitations(page)).toHaveCount(2);
   expect(await measure()).toEqual(fine);
 
   await inviteButton(page).click();
   const form = inviteForm(page);
-  // The form opens low in the card and is brought whole into view.
+  // The whole dialog is inside the window, its foot included.
   await expect(form.getByLabel("Email")).toBeInViewport();
   await expect(form.getByRole("button", { name: "Cancel" })).toBeInViewport();
+  await expect(
+    form.getByRole("button", { name: "Invite", exact: true }),
+  ).toBeInViewport();
   expect(await measure()).toEqual(fine);
 
   await form.getByLabel("Email").fill("mira@example.com");
   await form.getByLabel("Display name").fill("Mira");
   await form.getByRole("button", { name: "Invite", exact: true }).click();
   await expect(notice(page)).toContainText("Invitation sent to");
-  await inviteButton(page).click();
-  await expect(rows(page, "Invitations")).toHaveCount(3);
+  await expect(invitations(page)).toHaveCount(3);
   expect(await measure()).toEqual(fine);
-  // Every invitation's Revoke can be reached inside the card.
-  const last = revokeButton(invitationRow(page, MARKO.name));
+  // Every invitation's ⋯ can be reached inside the card.
+  const last = moreButton(invitationRow(page, MARKO.name));
   await last.scrollIntoViewIfNeeded();
   await expect(last).toBeInViewport();
+  expect(await measure()).toEqual(fine);
+  // And with the notice there, the dialog opened again still fits.
+  await inviteButton(page).click();
+  await expect(
+    inviteForm(page).getByRole("button", { name: "Invite", exact: true }),
+  ).toBeInViewport();
   expect(await measure()).toEqual(fine);
 });
 
@@ -975,7 +1065,7 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
 
   // From the heading, Tab reaches the open tab, then walks its panel: Connect and each ⋯.
   // Each other tab, once chosen, is followed by its own panel: each workspace's ⋯, the
-  // topics' controls, Invite a member, then each invitation's Send again and Revoke.
+  // topics' controls, Invite someone, then each invitation's ⋯.
   await main(page).getByRole("heading", { level: 1 }).focus();
   await page.keyboard.press("Tab");
   await expect(tabOf(page, "Agents")).toBeFocused();
@@ -1035,13 +1125,7 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   for (const who of [LENA, MARKO]) {
     await page.keyboard.press("Tab");
     await expect(
-      main(page).getByRole("button", { name: `Send again to ${who.name}` }),
-    ).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(
-      main(page).getByRole("button", {
-        name: `Revoke invitation for ${who.name}`,
-      }),
+      main(page).getByRole("button", { name: `Actions for ${who.name}` }),
     ).toBeFocused();
   }
 
@@ -1321,12 +1405,22 @@ test("a slow create that is refused gives the page back, with the focus in the f
 const DELETE_AFTER = "2026-11-30T12:00:00.000Z";
 const NOT_THE_NAME = "That is not this hive's name.";
 const deleteSection = (page: Page) => section(page, "Delete this hive");
+/** The danger box's button, which opens the delete dialog. */
+const deleteOpener = (page: Page) =>
+  deleteSection(page).getByRole("button", { name: DELETE_HIVE_ITEM });
+const deleteDialog = (page: Page) =>
+  page.getByRole("dialog", { name: DELETE_TITLE });
 const deleteForm = (page: Page) =>
-  main(page).getByRole("form", { name: "Delete this hive" });
+  deleteDialog(page).getByRole("form", { name: DELETE_TITLE });
 const deleteField = (page: Page) =>
   deleteForm(page).getByLabel("Type the hive's name to confirm");
 const deleteButton = (page: Page) =>
-  deleteForm(page).getByRole("button", { name: "Delete hive" });
+  deleteForm(page).getByRole("button", { name: "Delete hive", exact: true });
+/** Opens the delete dialog from the Hive tab's danger box. */
+async function openDelete(page: Page) {
+  await deleteOpener(page).click();
+  await expect(deleteDialog(page)).toBeVisible();
+}
 const banner = (page: Page) => page.locator("[data-closing]");
 const deletionCalls = (page: Page) =>
   page.evaluate(
@@ -1356,7 +1450,33 @@ test("the owner's last section says what deleting erases, on the Hive tab; a mem
   await expect(part).toContainText(
     "Deleting this hive erases 128 notes and 14 files of 3 members.",
   );
-  await expect(part).toContainText("For 7 days the hive can only be read");
+  // Then the danger box, with Delete hive… and nothing yellow: the tab has no primary.
+  await expect(deleteOpener(page)).toBeVisible();
+  await expect(deleteForm(page)).toHaveCount(0);
+  // The same yellow as Agents' Connect an agent shows nowhere on this tab.
+  expect(
+    await page.evaluate(() =>
+      [...document.querySelectorAll("#panel-hive button")].some((b) =>
+        /primary/.test(b.className),
+      ),
+    ),
+  ).toBe(false);
+  // What happens next is said in the dialog, before anything is pressed.
+  await openDelete(page);
+  await expect(deleteDialog(page)).toContainText(DELETE_HELP);
+  await expect(deleteForm(page).getByRole("button")).toHaveText([
+    KEEP_HIVE,
+    "Delete hive",
+  ]);
+  // Keep the hive closes it and puts the focus back on Delete hive….
+  await deleteForm(page).getByRole("button", { name: KEEP_HIVE }).click();
+  await expect(deleteDialog(page)).toHaveCount(0);
+  await expect(deleteOpener(page)).toBeFocused();
+  // So does Escape.
+  await openDelete(page);
+  await page.keyboard.press("Escape");
+  await expect(deleteDialog(page)).toHaveCount(0);
+  await expect(deleteOpener(page)).toBeFocused();
   // The last section of the card.
   expect(
     await main(page).locator("section").last().getAttribute("aria-labelledby"),
@@ -1376,6 +1496,7 @@ test("Delete hive does nothing until the hive's name is typed exactly, and says 
   page,
 }) => {
   await open(page, "?tab=hive");
+  await openDelete(page);
   const button = deleteButton(page);
   const field = deleteField(page);
   await expect(button).toBeDisabled();
@@ -1395,16 +1516,27 @@ test("Delete hive does nothing until the hive's name is typed exactly, and says 
   await field.fill("Synapse");
   await expect(button).toBeEnabled();
   await expect(button).not.toHaveAttribute("aria-describedby", /.+/);
-  // The button stays in the keyboard's path while it does nothing.
+  // The button stays in the keyboard's path while it does nothing, after Keep the hive.
   await field.fill("x");
   await field.press("Tab");
+  await expect(
+    deleteForm(page).getByRole("button", { name: KEEP_HIVE }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(button).toBeFocused();
+  // Behind the dialog nothing takes the focus, and a press on Delete hive… there opens nothing.
+  await deleteOpener(page).evaluate((el) => (el as HTMLElement).focus());
+  await expect(deleteOpener(page)).not.toBeFocused();
+  await deleteOpener(page).evaluate((el) => (el as HTMLElement).click());
+  await expect(field).toHaveValue("x");
+  expect(await deletionCalls(page)).toEqual([]);
 });
 
 test("a refused deletion says why, keeps what was typed and puts the focus back in the field", async ({
   page,
 }) => {
   await open(page, "?notname=1&tab=hive");
+  await openDelete(page);
   await deleteField(page).fill("Synapse");
   await deleteButton(page).click();
   await expect(deleteForm(page).getByText(NOT_THE_NAME)).toBeVisible();
@@ -1419,6 +1551,7 @@ test("a refused deletion says why, keeps what was typed and puts the focus back 
   await expect(deleteForm(page).getByText(NOT_THE_NAME)).toHaveCount(0);
 
   await open(page, "?fail=1&tab=hive", false);
+  await openDelete(page);
   await deleteField(page).fill("Synapse");
   await deleteField(page).press("Enter");
   await expect(deleteForm(page).getByText(FAILED)).toBeVisible();
@@ -1435,6 +1568,7 @@ test("Delete hive asks once and loads the page afresh: the banner and Cancel del
   await page.evaluate(() => {
     (window as unknown as { __before?: boolean }).__before = true;
   });
+  await openDelete(page);
   await deleteField(page).fill("Synapse");
   await deleteButton(page).dblclick();
   const part = deleteSection(page);
@@ -1449,10 +1583,12 @@ test("Delete hive asks once and loads the page afresh: the banner and Cancel del
     { name: "requestHiveDeletion", args: ["Synapse"] },
   ]);
   await expect(deleteForm(page)).toHaveCount(0);
+  await expect(deleteOpener(page)).toHaveCount(0);
   await expect(banner(page)).toBeVisible();
 
   await part.getByRole("button", { name: "Cancel deletion" }).click();
-  await expect(deleteField(page)).toBeVisible();
+  await expect(deleteOpener(page)).toBeVisible();
+  await openDelete(page);
   await expect(deleteField(page)).toHaveValue("");
   await expect(banner(page)).toHaveCount(0);
   expect(await deletionCalls(page)).toEqual([
@@ -1474,6 +1610,7 @@ test("while the hive is being deleted the section says when it goes, in the pers
   await expect(part).toContainText("Until then it can only be read.");
   await expect(part).not.toContainText("128 notes");
   await expect(deleteForm(page)).toHaveCount(0);
+  await expect(deleteOpener(page)).toHaveCount(0);
   await expect(
     part.getByRole("button", { name: "Cancel deletion" }),
   ).toBeVisible();
@@ -1578,6 +1715,27 @@ test("with the banner, at 1100 x 560 the page still does not scroll and the card
   ).toBe(false);
 });
 
+test("at 1100 x 560 the delete dialog is inside the window, Delete hive included, and the page does not scroll", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 560 });
+  await open(page, "?tab=hive");
+  await openDelete(page);
+  for (const part of [
+    deleteField(page),
+    deleteForm(page).getByRole("button", { name: KEEP_HIVE }),
+    deleteButton(page),
+  ])
+    await expect(part).toBeInViewport({ ratio: 1 });
+  expect(
+    await page.evaluate(
+      () =>
+        document.scrollingElement!.scrollHeight > window.innerHeight ||
+        document.scrollingElement!.scrollWidth > window.innerWidth,
+    ),
+  ).toBe(false);
+});
+
 test("at 390 px the banner and the delete section stay inside the window and cover nothing", async ({
   page,
 }) => {
@@ -1602,6 +1760,7 @@ test("at 390 px the banner and the delete section stay inside the window and cov
   ).toBe(true);
 
   await open(page, "?tab=hive", false);
+  await openDelete(page);
   await deleteField(page).scrollIntoViewIfNeeded();
   for (const part of [deleteField(page), deleteButton(page)]) {
     const box = (await part.boundingBox())!;
@@ -2153,7 +2312,7 @@ test("?tab=topics opens Topics; choosing a tab writes ?tab= without a request", 
   // A reload opens the tab in the address.
   await page.reload({ waitUntil: "networkidle" });
   await expect(tabOf(page, "People")).toHaveAttribute("aria-selected", "true");
-  await expect(section(page, "Members")).toBeVisible();
+  await expect(section(page, "People")).toBeVisible();
 });
 
 test("arrow keys, Home and End move between tabs", async ({ page }) => {

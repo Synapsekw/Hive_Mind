@@ -5,6 +5,7 @@ import type {
   Agent,
   AgentStatus,
   Deletion,
+  Invitation,
   InviteReason,
   Requested,
   Sent,
@@ -91,6 +92,25 @@ export const INVITE_HELP: string =
 /** The line under the heading of the open invitations. */
 export const INVITATIONS_NOTE: string =
   "Not members yet. Each has an email with a link and joins by pressing Join.";
+
+// ---- People ----
+
+/** The invite dialog's heading and name, and the button that opens it. */
+export const INVITE_TITLE: string = "Invite someone";
+/** The mark beside an invitation's name in the People list. */
+export const INVITED: string = "Invited";
+/** The items of an invitation's ⋯ menu. */
+export const SEND_AGAIN: string = "Send again";
+export const REVOKE_INVITATION: string = "Revoke invitation";
+
+/** An invitation's one grey line, in parts: the email, when it was sent, when it expires. */
+export function invitationLine(i: Invitation, now: number): string[] {
+  return [
+    i.email,
+    `Invited ${shortDate(i.createdAt, now)}`,
+    `Expires ${shortDate(i.expiresAt, now)}`,
+  ];
+}
 
 /** Active agents first, then the rest; the newest first inside each group. A new array. */
 export function sortAgents(agents: Agent[]): Agent[] {
@@ -200,6 +220,10 @@ export const DELETED_ON: string = "This hive will be deleted on";
 export const CLOSING_HELP: string =
   "Until then it can only be read. Cancelling brings it back as it was.";
 export const CANCEL_DELETION: string = "Cancel deletion";
+/** The button in the Hive tab's danger box that opens the delete dialog. */
+export const DELETE_HIVE_ITEM: string = "Delete hive…";
+/** The delete dialog's way out. */
+export const KEEP_HIVE: string = "Keep the hive";
 
 function many(n: number, one: string): string {
   return `${n} ${n === 1 ? one : `${one}s`}`;

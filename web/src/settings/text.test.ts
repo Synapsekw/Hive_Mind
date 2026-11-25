@@ -5,7 +5,14 @@ import {
   CONNECT_TITLE,
   MCP_COMMAND,
   REVOKE_ITEM,
+  DELETE_HIVE_ITEM,
+  INVITED,
+  INVITE_TITLE,
+  KEEP_HIVE,
+  REVOKE_INVITATION,
+  SEND_AGAIN,
   agentLine,
+  invitationLine,
   envLine,
   foldedAgents,
   inviteFailure,
@@ -17,7 +24,7 @@ import {
   tierHelp,
   tierText,
 } from "./text";
-import type { Agent } from "./types";
+import type { Agent, Invitation } from "./types";
 
 function agent(over: Partial<Agent> = {}): Agent {
   return {
@@ -326,5 +333,34 @@ describe("the Agents tab", () => {
     const now = Date.UTC(2026, 10, 23, 12);
     const a = agent({ lastUsedAt: "2026-11-22T08:00:00Z" });
     expect(agentLine(a, null, now).at(-1)).toBe("Last used 22 Nov");
+  });
+});
+
+describe("invitationLine", () => {
+  const invitation: Invitation = {
+    id: "00000000-0000-4000-8000-0000000000b1",
+    email: "lena@example.com",
+    name: "Lena",
+    createdAt: "2026-11-22T09:00:00.000Z",
+    expiresAt: "2026-12-06T09:00:00.000Z",
+  };
+  it("is the email, when it was sent and when it expires", () => {
+    const now = Date.UTC(2026, 10, 23, 12);
+    expect(invitationLine(invitation, now)).toEqual([
+      "lena@example.com",
+      "Invited 22 Nov",
+      "Expires 6 Dec",
+    ]);
+  });
+});
+
+describe("the People and Hive words", () => {
+  it("are the ones the spec names", () => {
+    expect(INVITE_TITLE).toBe("Invite someone");
+    expect(INVITED).toBe("Invited");
+    expect(SEND_AGAIN).toBe("Send again");
+    expect(REVOKE_INVITATION).toBe("Revoke invitation");
+    expect(DELETE_HIVE_ITEM).toBe("Delete hive\u2026");
+    expect(KEEP_HIVE).toBe("Keep the hive");
   });
 });

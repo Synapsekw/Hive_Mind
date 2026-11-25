@@ -571,6 +571,32 @@
   overflow-wrap: anywhere;
 }
 
+/* Invite someone, while its dialog is open: kept in its place, not drawn, so the tab shows one
+   yellow button, the dialog's Invite. */
+.primary[data-behind] {
+  visibility: hidden;
+}
+
+/* ---- The Hive tab's danger box: Delete hive…, or, while the hive is being deleted, when it
+   goes and Cancel deletion. A full-strength edge says it cannot be undone, as on Revoke. */
+
+.danger {
+  padding: 14px 16px;
+  border: 1px solid var(--fg);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.dangerText {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 13px;
+  color: var(--fg);
+}
+
 /* ---- The invitation notice: the sentence to pass on, kept until dismissed ----
    Where the form was, in the form's box, with a stronger edge: it is an answer, not a field. */
 
