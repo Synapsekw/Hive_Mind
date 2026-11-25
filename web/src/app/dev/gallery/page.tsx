@@ -7,6 +7,7 @@ import { DevGallery } from "./DevGallery";
 //   ?fail=1      every action is refused
 //   ?mislabel=1  a PDF's link answers with a web page instead
 //   ?empty=1     a hive with no files
+//   ?every=1     every file opens in the viewer (the v2 viewer's tests)
 //   ?stale=1     every thumbnail link is dead, as on a page left open past ten minutes
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 
@@ -36,6 +37,7 @@ export default async function DevGalleryPage({
       now={NOW}
       fail={one(q.fail) === "1"}
       mislabel={one(q.mislabel) === "1"}
+      everyFile={one(q.every) === "1"}
     />
   );
 }

@@ -1,58 +1,81 @@
 "use client";
 
-// The full-window viewer for images and PDFs. Opening a file asks the server for a fresh link
-// every time. What the link holds is never run as a page of ours:
+// The full-window viewer. It shows one file of the current view and moves through that view
+// with the arrows. Opening a file asks the server for a fresh link every time, and an answer
+// for a file that is no longer on screen is dropped. What the link holds is never run as a page
+// of ours:
 //   - an image is only ever the source of an <img>, which draws pixels and runs nothing;
-//   - a PDF is fetched, its response must say application/pdf and start like a PDF, and it is
-//     shown from an object URL of a Blob typed application/pdf, so the browser can only hand it
-//     to its PDF reader. The file's own link is never the source of the frame.
-// Anything else, and anything that fails those checks, is offered for download instead.
+//   - a PDF, text or CSV file is fetched through `fetchChecked`, which refuses bytes that are not
+//     what they claim; a PDF is drawn by pdf.js into canvases (no scripts, no annotation layer)
+//     and text and CSV cells are text nodes, never HTML.
+// Anything else, and anything that fails those checks, shows its type tile and Download.
 import { useEffect, useRef, useState } from "react";
-import { Actions, Chevron, Cross, SharingMark, useDownload } from "./Details";
+import { Chevron, Cross, useDownload } from "./Details";
 import { Sheet } from "./FileCard";
-import { PDF_VIEW_MAX } from "./kind";
-import { metaLine, sharingText } from "./text";
-import type { GalleryFile, LegacyActions } from "./types";
+import { kindLabel, PDF_VIEW_MAX, TEXT_VIEW_MAX } from "./kind";
+import { CsvView } from "./preview/CsvView";
+import { fetchChecked } from "./preview/fetchChecked";
+import { PdfView } from "./preview/PdfView";
+import { TextView } from "./preview/TextView";
+import { sizeText } from "./text";
+import type { GalleryFile, ViewerProps } from "./types";
 import s from "./gallery.module.css";
+import p from "./preview/preview.module.css";
 
-const PDF = "application/pdf";
+const CSV_VIEW_MAX = 2 * 1024 * 1024;
 
-/** A PDF starts with "%PDF-"; readers allow it anywhere in the first 1024 bytes. */
-function startsLikePdf(buf: ArrayBuffer): boolean {
-  const head = new Uint8Array(buf, 0, Math.min(buf.byteLength, 1024));
-  const magic = [0x25, 0x50, 0x44, 0x46, 0x2d];
-  for (let i = 0; i + magic.length <= head.length; i++)
-    if (magic.every((byte, j) => head[i + j] === byte)) return true;
-  return false;
-}
-
-/** The link's bytes as a PDF Blob, or null when they are not a PDF the viewer may show. */
-async function pdfBlob(url: string, signal: AbortSignal): Promise<Blob | null> {
-  try {
-    const res = await fetch(url, {
-      signal,
-      credentials: "omit",
-      referrerPolicy: "no-referrer",
-    });
-    if (!res.ok) return null;
-    const type = (res.headers.get("content-type") ?? "").trim().toLowerCase();
-    if (!type.startsWith(PDF)) return null;
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength > PDF_VIEW_MAX || !startsLikePdf(buf)) return null;
-    return new Blob([buf], { type: PDF });
-  } catch {
-    return null;
-  }
-}
-
-type View =
+type Shown =
   | { phase: "opening" }
   | { phase: "image"; url: string }
-  | { phase: "pdf"; src: string }
+  | { phase: "pdf"; blob: Blob }
+  | { phase: "text"; blob: Blob }
+  | { phase: "csv"; blob: Blob }
   /** The server gave no link. */
   | { phase: "refused" }
-  /** There is a link, but not to something that may be drawn here. */
-  | { phase: "download-only" };
+  /** No preview for this kind, or the bytes failed the checks. */
+  | { phase: "tile" };
+
+/** Whether the viewer draws this file at all; anything else goes straight to its tile. */
+function previewable(f: GalleryFile): boolean {
+  return (
+    f.kind === "image" ||
+    f.kind === "text" ||
+    f.kind === "csv" ||
+    (f.kind === "pdf" && f.size <= PDF_VIEW_MAX)
+  );
+}
+
+function Tile({
+  file,
+  text,
+  download,
+}: {
+  file: GalleryFile;
+  text: string;
+  download: () => Promise<boolean>;
+}) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className={s.instead}>
+      <Sheet file={file} />
+      <p role="status" className={s.insteadText}>
+        {text}
+      </p>
+      <button
+        type="button"
+        className={s.secondary}
+        onClick={async () => setFailed(!(await download()))}
+      >
+        Download
+      </button>
+      {failed && (
+        <p role="alert" className={s.refused}>
+          Couldn&apos;t download the file.
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** One file on the stage. Keyed by the file, so each file starts from "opening". */
 function Stage({
@@ -60,10 +83,12 @@ function Stage({
   actions,
 }: {
   file: GalleryFile;
-  actions: LegacyActions;
+  actions: ViewerProps["actions"];
 }) {
-  const [view, setView] = useState<View>({ phase: "opening" });
-  const [failed, setFailed] = useState(false);
+  const shows = previewable(file);
+  const [shown, setShown] = useState<Shown>(
+    shows ? { phase: "opening" } : { phase: "tile" },
+  );
   const openFile = useRef(actions.openFile);
   useEffect(() => {
     openFile.current = actions.openFile;
@@ -71,35 +96,42 @@ function Stage({
   const download = useDownload(actions.downloadFile, file.id);
 
   useEffect(() => {
+    if (!shows) return;
     let live = true;
-    let made: string | null = null;
     const abort = new AbortController();
     (async () => {
-      let link: Awaited<ReturnType<LegacyActions["openFile"]>> = null;
+      let link: Awaited<ReturnType<ViewerProps["actions"]["openFile"]>> = null;
       try {
         link = await openFile.current(file.id);
       } catch {
         link = null;
       }
       if (!live) return;
-      if (!link) return setView({ phase: "refused" });
+      if (!link) return setShown({ phase: "refused" });
+      // The link must be for the kind the file is listed as; anything else is not drawn.
+      if (link.kind !== file.kind) return setShown({ phase: "tile" });
       if (link.kind === "image")
-        return setView({ phase: "image", url: link.url });
-      if (link.kind !== "pdf") return setView({ phase: "download-only" });
-      const blob = await pdfBlob(link.url, abort.signal);
+        return setShown({ phase: "image", url: link.url });
+      const max =
+        link.kind === "pdf"
+          ? PDF_VIEW_MAX
+          : link.kind === "csv"
+            ? CSV_VIEW_MAX
+            : TEXT_VIEW_MAX;
+      if (link.kind !== "pdf" && link.kind !== "text" && link.kind !== "csv")
+        return setShown({ phase: "tile" });
+      const got = await fetchChecked(link.url, link.kind, max, abort.signal);
       if (!live) return;
-      if (!blob) return setView({ phase: "download-only" });
-      made = URL.createObjectURL(blob);
-      setView({ phase: "pdf", src: made });
+      if (!got.ok) return setShown({ phase: "tile" });
+      setShown({ phase: link.kind, blob: got.blob });
     })();
     return () => {
       live = false;
       abort.abort();
-      if (made) URL.revokeObjectURL(made);
     };
-  }, [file.id]);
+  }, [file.id, file.kind, shows]);
 
-  switch (view.phase) {
+  switch (shown.phase) {
     case "opening":
       return (
         <p role="status" className={s.stageNote}>
@@ -108,70 +140,69 @@ function Stage({
       );
     case "refused":
       return (
-        <p role="alert" className={s.stageNote}>
-          Couldn&apos;t open the file.
-        </p>
+        <Tile file={file} text="Couldn't open the file." download={download} />
+      );
+    case "tile":
+      return (
+        <Tile
+          file={file}
+          text="No preview yet for this kind of file. Download to open it."
+          download={download}
+        />
       );
     case "image":
       return (
         <img
-          src={view.url}
+          src={shown.url}
           alt={file.name}
           referrerPolicy="no-referrer"
           className={s.shot}
-          onError={() => setView({ phase: "download-only" })}
+          onError={() => setShown({ phase: "tile" })}
         />
       );
     case "pdf":
-      return <iframe src={view.src} title={file.name} className={s.frame} />;
-    case "download-only":
+      return <PdfView blob={shown.blob} name={file.name} />;
+    case "text":
       return (
-        <div className={s.instead}>
-          <Sheet file={file} />
-          <p role="status" className={s.insteadText}>
-            This file can&apos;t be shown here.
-          </p>
-          <button
-            type="button"
-            className={s.secondary}
-            onClick={async () => setFailed(!(await download()))}
-          >
-            Download
-          </button>
-          {failed && (
-            <p role="alert" className={s.refused}>
-              Couldn&apos;t download the file.
-            </p>
-          )}
-        </div>
+        <TextView
+          blob={shown.blob}
+          name={file.name}
+          truncated={file.size > TEXT_VIEW_MAX}
+        />
       );
+    case "csv":
+      return <CsvView blob={shown.blob} name={file.name} />;
   }
 }
 
+/** Where a key press should be left alone: typing in a field of the info strip or toolbar. */
+function typing(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return (
+    !!el &&
+    (el.isContentEditable ||
+      el.tagName === "INPUT" ||
+      el.tagName === "TEXTAREA" ||
+      el.tagName === "SELECT")
+  );
+}
+
 export function Viewer({
-  file,
-  position,
-  total,
-  now,
+  files,
+  index,
   actions,
   onMove,
   onClose,
-  onDeleted,
-}: {
-  file: GalleryFile;
-  /** Where the file stands among the files the viewer can show, from 1. */
-  position: number;
-  total: number;
-  now: number;
-  actions: LegacyActions;
-  onMove: (by: -1 | 1) => void;
-  onClose: () => void;
-  onDeleted: (id: string) => void;
-}) {
+  aside,
+  toolbar,
+}: ViewerProps) {
   const dialog = useRef<HTMLDivElement>(null);
   const close = useRef<HTMLButtonElement>(null);
-  const first = position <= 1;
-  const last = position >= total;
+  const file = files[index];
+  const first = index <= 0;
+  const last = index >= files.length - 1;
+  const download = useDownload(actions.downloadFile, file?.id ?? "");
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     close.current?.focus();
@@ -179,6 +210,12 @@ export function Viewer({
 
   // Keys are heard on the document, so they work wherever the focus is; the rest of the page is
   // inert while the viewer is open, and Tab turns round at either end of the dialog.
+  const move = useRef<(to: number) => void>(() => {});
+  useEffect(() => {
+    move.current = (to: number) => {
+      if (to >= 0 && to < files.length && to !== index) onMove(to);
+    };
+  });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const box = dialog.current;
@@ -186,13 +223,18 @@ export function Viewer({
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
-      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      } else if (
+        (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+        !typing(e.target)
+      ) {
         e.preventDefault();
-        onMove(e.key === "ArrowLeft" ? -1 : 1);
+        move.current(index + (e.key === "ArrowLeft" ? -1 : 1));
       } else if (e.key === "Tab") {
         const stops = [
-          ...box.querySelectorAll<HTMLElement>("button, a[href], iframe"),
-        ];
+          ...box.querySelectorAll<HTMLElement>(
+            'button, a[href], input, select, textarea, [tabindex="0"]',
+          ),
+        ].filter((el) => el.offsetParent !== null || el === close.current);
         if (stops.length === 0) return;
         const at = stops.indexOf(document.activeElement as HTMLElement);
         const edge = e.shiftKey ? 0 : stops.length - 1;
@@ -204,7 +246,14 @@ export function Viewer({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, onMove]);
+  }, [onClose, index]);
+
+  if (!file) return null;
+  const meta = [
+    kindLabel(file.kind, file.name),
+    sizeText(file.size),
+    `${index + 1} of ${files.length} in view`,
+  ].filter((part) => part !== "");
 
   return (
     <div
@@ -220,11 +269,7 @@ export function Viewer({
             {file.name}
           </h2>
           <p className={s.viewerMeta}>
-            <span>{metaLine(file, now)}</span>
-            <span className={s.sharing}>
-              <SharingMark file={file} />
-              <span className={s.sharingText}>{sharingText(file)}</span>
-            </span>
+            <span>{meta.join(" · ")}</span>
           </p>
         </div>
         <div className={s.pager}>
@@ -234,34 +279,31 @@ export function Viewer({
             className={s.icon}
             aria-label="Previous file"
             aria-disabled={first}
-            onClick={() => onMove(-1)}
+            onClick={() => move.current(index - 1)}
           >
             <Chevron back />
           </button>
-          <span className={s.pagerCount}>
-            <span aria-hidden="true">
-              {position} / {total}
-            </span>
-            <span className={s.srOnly}>
-              File {position} of {total}
-            </span>
+          <span className={s.pagerCount} aria-hidden="true">
+            {index + 1} / {files.length}
           </span>
           <button
             type="button"
             className={s.icon}
             aria-label="Next file"
             aria-disabled={last}
-            onClick={() => onMove(1)}
+            onClick={() => move.current(index + 1)}
           >
             <Chevron />
           </button>
         </div>
-        <Actions
-          key={file.id}
-          file={file}
-          actions={actions}
-          onDeleted={onDeleted}
-        />
+        {toolbar}
+        <button
+          type="button"
+          className={s.secondary}
+          onClick={async () => setFailed((await download()) ? null : file.id)}
+        >
+          Download
+        </button>
         <button
           ref={close}
           type="button"
@@ -272,8 +314,16 @@ export function Viewer({
           <Cross />
         </button>
       </header>
-      <div className={s.stage}>
-        <Stage key={file.id} file={file} actions={actions} />
+      {failed === file.id && (
+        <p role="alert" className={`${s.refused} ${p.barAlert}`}>
+          Couldn&apos;t download the file.
+        </p>
+      )}
+      <div className={p.body} data-aside={aside ? "" : undefined}>
+        <div className={s.stage}>
+          <Stage key={file.id} file={file} actions={actions} />
+        </div>
+        {aside && <aside className={p.aside}>{aside}</aside>}
       </div>
     </div>
   );

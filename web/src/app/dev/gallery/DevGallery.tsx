@@ -2,11 +2,13 @@
 
 // The gallery over the fixture with stand-in actions: each records its call on
 // `window.__galleryCalls` (for the browser tests) and answers from the fixture, with links that
-// need neither storage nor the network. With `fail`, opening and downloading answer nothing and
-// a delete is refused. With `mislabel`, a PDF's link answers with a web page, as a file whose
-// declared type lies would.
+// need no storage: images are data links and PDFs, CSV and text files open the samples under
+// /dev/ (web/public/dev). With `fail`, opening and downloading answer nothing and a delete is
+// refused. With `mislabel`, a PDF's link answers with a web page, as a file whose declared type
+// lies would. With `everyFile`, every file opens in the viewer, as the v2 screen will do.
 import { fixtureMore } from "../../../gallery/fixture";
 import { Gallery } from "../../../gallery/Gallery";
+import { SAMPLES } from "./samples";
 import type {
   GalleryData,
   GalleryFile,
@@ -49,32 +51,9 @@ function photo(thumb: string, tall: boolean): Promise<string> {
   });
 }
 
-/** A minimal one-page PDF with a line of text, as a data link. */
-function pdf(title: string): string {
-  const text = title.replace(/[^\w .-]/g, "");
-  const stream = `BT /F1 20 Tf 56 760 Td (${text}) Tj ET`;
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-  ];
-  let out = "%PDF-1.4\n";
-  const offsets: number[] = [];
-  objects.forEach((body, i) => {
-    offsets.push(out.length);
-    out += `${i + 1} 0 obj\n${body}\nendobj\n`;
-  });
-  const xref = out.length;
-  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  for (const at of offsets) out += `${String(at).padStart(10, "0")} 00000 n \n`;
-  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-  return `data:application/pdf;base64,${btoa(out)}`;
-}
-
-/** What a mislabelled "PDF" really holds: a page with a script. It must never be drawn. */
-const PAGE = `data:text/html,${encodeURIComponent(
+/** What a mislabelled "PDF" really holds: a page with a script, declared as a PDF. It must
+ * never be drawn. */
+const PAGE = `data:application/pdf,${encodeURIComponent(
   "<title>pwned</title><h1>mislabelled page</h1><script>try{top.document.title='pwned'}catch(e){}</script>",
 )}`;
 
@@ -83,11 +62,13 @@ export function DevGallery({
   now,
   fail,
   mislabel,
+  everyFile,
 }: {
   data: GalleryData;
   now: number;
   fail: boolean;
   mislabel: boolean;
+  everyFile: boolean;
 }) {
   const find = (id: string): GalleryFile | undefined =>
     [...data.files, ...fixtureMore(now).files].find((f) => f.id === id);
@@ -99,13 +80,15 @@ export function DevGallery({
       const file = find(id);
       if (fail || !file) return null;
       if (file.kind === "pdf")
-        return { url: mislabel ? PAGE : pdf(file.name), kind: "pdf" };
+        return { url: mislabel ? PAGE : SAMPLES.pdf, kind: "pdf" };
+      if (file.kind === "csv") return { url: SAMPLES.csv, kind: "csv" };
+      if (file.kind === "text") return { url: SAMPLES.text, kind: "text" };
       if (file.kind === "image")
         return {
           url: await photo(file.thumb ?? PIXEL, file.name.includes("plan")),
           kind: "image",
         };
-      return { url: "data:text/plain,not%20shown", kind: file.kind };
+      return null;
     },
     downloadFile: async (id) => {
       record("downloadFile", [id]);
@@ -122,5 +105,12 @@ export function DevGallery({
       return fail ? null : fixtureMore(now);
     },
   };
-  return <Gallery data={data} now={now} actions={actions} />;
+  return (
+    <Gallery
+      data={data}
+      now={now}
+      actions={actions}
+      viewable={everyFile ? () => true : undefined}
+    />
+  );
 }

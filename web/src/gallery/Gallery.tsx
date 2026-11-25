@@ -8,16 +8,16 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Shell } from "../shell/Shell";
 import { useSlidingPill } from "../shell/useSlidingPill";
 import pillCss from "../shell/SlidingPill.module.css";
-import { Details } from "./Details";
+import { Actions, Details } from "./Details";
 import { FileCard } from "./FileCard";
 import {
   defaultTab,
   tabCounts,
-  viewableV1 as viewable,
+  viewableV1,
   visibleFiles,
   type Tab,
 } from "./filters";
-import type { GalleryData, LegacyActions } from "./types";
+import type { GalleryData, GalleryFile, LegacyActions } from "./types";
 import { Viewer } from "./Viewer";
 import s from "./gallery.module.css";
 
@@ -35,12 +35,16 @@ export function Gallery({
   now,
   actions,
   inbox,
+  viewable = viewableV1,
 }: {
   data: GalleryData;
   now: number;
   actions: LegacyActions;
   /** How much waits in the inbox, for the rail. */
   inbox?: number;
+  /** Which files open in the viewer; the rest open their details. */
+  // Gallery v2: replaced in Task 8 (the dev page opens every file in the v2 viewer)
+  viewable?: (f: GalleryFile) => boolean;
 }) {
   const [files, setFiles] = useState(data.files);
   const [next, setNext] = useState(data.next);
@@ -88,9 +92,9 @@ export function Gallery({
     setOpen(null);
   }
 
-  function move(by: -1 | 1) {
-    const to = slides[slide + by];
-    if (slide !== -1 && to) setOpen(to.id);
+  function move(to: number) {
+    const file = slides[to];
+    if (slide !== -1 && file) setOpen(file.id);
   }
 
   function removed(id: string) {
@@ -194,6 +198,7 @@ export function Gallery({
                       file={f}
                       now={now}
                       expanded={expanded}
+                      opens={viewable(f)}
                       onSelect={() => setOpen(expanded ? null : f.id)}
                     >
                       {expanded && (
@@ -232,15 +237,22 @@ export function Gallery({
         </main>
       </div>
       {viewing && (
+        // Gallery v2: replaced in Task 8 (the v1 screen passes its action row as the toolbar)
         <Viewer
-          file={opened}
-          position={slide + 1}
-          total={slides.length}
-          now={now}
+          files={slides}
+          index={slide}
           actions={actions}
           onMove={move}
           onClose={close}
-          onDeleted={removed}
+          aside={null}
+          toolbar={
+            <Actions
+              key={opened.id}
+              file={opened}
+              actions={actions}
+              onDeleted={removed}
+            />
+          }
         />
       )}
     </div>

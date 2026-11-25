@@ -243,14 +243,15 @@ test("the arrows move through the files the viewer can show", async ({
   await expect(card(page, shown[2]!)).toBeFocused();
 });
 
-test("a PDF is shown from an object URL in a frame", async ({ page }) => {
+// Gallery v2: the viewer draws PDFs with pdf.js (e2e/gallery-viewer.spec.ts covers it).
+test("a PDF is drawn into canvases, never a frame", async ({ page }) => {
   await open(page);
   await card(page, PROPOSAL).click();
   const dialog = page.getByRole("dialog", { name: PROPOSAL.name });
-  const frame = dialog.locator("iframe");
-  await expect(frame).toHaveCount(1);
-  await expect(frame).toHaveAttribute("title", PROPOSAL.name);
-  await expect(frame).toHaveAttribute("src", /^blob:/);
+  await expect(
+    dialog.getByRole("document", { name: PROPOSAL.name }).locator("canvas"),
+  ).not.toHaveCount(0);
+  await expect(dialog.locator("iframe, embed, object")).toHaveCount(0);
   await expect(dialog.locator("img")).toHaveCount(0);
 });
 
@@ -260,7 +261,9 @@ test("a file that claims to be a PDF but is a page is not rendered", async ({
   await open(page, "?mislabel=1");
   await card(page, PROPOSAL).click();
   const dialog = page.getByRole("dialog", { name: PROPOSAL.name });
-  await expect(dialog).toContainText("This file can't be shown here.");
+  await expect(dialog).toContainText(
+    "No preview yet for this kind of file. Download to open it.",
+  );
   await expect(dialog.locator("iframe")).toHaveCount(0);
   await expect(dialog.locator("img")).toHaveCount(0);
   await expect(
@@ -353,8 +356,9 @@ test("Delete is not offered on a colleague's file", async ({ page }) => {
 
   await card(page, BAY).click();
   await expect(page.getByRole("dialog", { name: BAY.name })).toBeVisible();
+  // Gallery v2: the viewer has a Download of its own beside the v1 action row.
   await expect(
-    viewer(page).getByRole("button", { name: "Download" }),
+    actionsIn(page, viewer(page)).getByRole("button", { name: "Download" }),
   ).toBeVisible();
   await expect(
     viewer(page).getByRole("button", { name: "Delete" }),

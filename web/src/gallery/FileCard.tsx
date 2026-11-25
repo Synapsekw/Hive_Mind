@@ -5,7 +5,8 @@
 import { useState, type ReactNode } from "react";
 import { kindLabel } from "./kind";
 import { SharingMark } from "./Details";
-import { viewableV1 as viewable } from "./filters";
+import { viewableV1 } from "./filters";
+import { PdfThumb } from "./preview/PdfThumb";
 import { metaLine, sharingText } from "./text";
 import type { GalleryFile } from "./types";
 import s from "./gallery.module.css";
@@ -23,6 +24,7 @@ export function FileCard({
   file,
   now,
   expanded,
+  opens,
   onSelect,
   children,
 }: {
@@ -30,10 +32,12 @@ export function FileCard({
   now: number;
   /** Whether this card's popover is open. */
   expanded: boolean;
+  /** Whether selecting the card opens the viewer (otherwise its details). */
+  opens?: boolean;
   onSelect: () => void;
   children?: ReactNode;
 }) {
-  const shows = viewable(file);
+  const shows = opens ?? viewableV1(file);
   const sharing = sharingText(file);
   // A thumbnail link lives ten minutes and images load lazily, so on a page left open a link
   // can be dead by the time its card scrolls into view: show the type tile instead.
@@ -50,7 +54,13 @@ export function FileCard({
         onClick={onSelect}
       >
         <span className={s.tile}>
-          {thumb ? (
+          {file.kind === "pdf" && file.thumb ? (
+            // A PDF's thumbnail link is the PDF itself: page 1 is drawn over the type tile.
+            <>
+              <Sheet file={file} />
+              <PdfThumb fileId={file.id} url={file.thumb} />
+            </>
+          ) : thumb ? (
             // A short-lived signed link: a plain <img>, never the image optimiser.
             <img
               src={thumb}

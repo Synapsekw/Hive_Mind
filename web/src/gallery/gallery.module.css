@@ -226,6 +226,11 @@
   overflow: hidden;
 }
 
+/* A PDF's drawn page sits over its type tile, in the same cell. */
+.tile > * {
+  grid-area: 1 / 1;
+}
+
 .thumb {
   display: block;
   width: 100%;
