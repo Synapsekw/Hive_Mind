@@ -170,8 +170,8 @@ its files with `note_id` null — owner-only.
   land in a note whose sharing is inherited); summary "Closed automatically."
 - **`hive_save_file`** gains `references: string[]` (note paths in the agent's workspace) and
   returns the session id and title.
-- **`hive_read` / `hive_search`** list a note's files (id, name, kind, size, session title)
-  wrapped as data; never a link or `storage_path`.
+- **`hive_read`** lists a note's files (id, name, kind, size, session title) and the files it
+  references, wrapped as data; never a link or `storage_path`. `hive_search` does not list files.
 - Self-hosted agents still cannot save files; their notes are tagged with sessions.
 
 ### 3. The screen (`/gallery`)
@@ -225,7 +225,8 @@ fileIds[])`, `removeFromFolder`.
 
 ## Performance and data-fetching budget
 
-- **First paint:** 3 waves as v1; files capped at 200 via `files (hive_id, created_at desc, id)`;
+- **First paint:** up to 4 waves (v1's 3, plus the titles of the sessions' notes not already
+  read, when there are any); files capped at 200 via `files (hive_id, created_at desc, id)`;
   plus the sessions of those files (by id), readable notes (by id), my folders and their
   memberships (owner-only, small), one batched thumbnail signing call.
 - **Tabs, chips, folder selection, view switch, panel:** 0 requests while the result is within

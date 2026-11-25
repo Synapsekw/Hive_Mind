@@ -106,8 +106,19 @@ deleted is in [Hive deletion](#hive-deletion).
 
    After the migrations, run `scripts/setup-session-sweep.sh`. It enables `pg_cron` if needed
    and schedules the job `close-idle-sessions` every 15 minutes, which closes agent sessions
-   idle for two hours. It needs the Supabase CLI signed in, uses no secret and is safe to run
-   again.
+   idle for two hours (an idle session is also closed by its agent's next write, sweep or no
+   sweep). It runs through the Supabase CLI login (`supabase login`), stores no project secret
+   anywhere, and is safe to run again.
+
+   **Gallery v2 on the dev project.** The dev project is already past
+   `20261124185153_topics_view`, and the three gallery migrations carry earlier stamps
+   (`20261124181505_sessions`, `20261124184944_file_links`, `20261124190145_gallery_folders`).
+   A plain `supabase db push` refuses migrations older than the last one applied, so push them
+   with `supabase db push --include-all` (list first with `supabase migration list` and check
+   that exactly these three are pending). Never re-stamp them to a later version to get round
+   this: the files keep the versions they were minted with. Then run
+   `scripts/setup-session-sweep.sh` and record the result under
+   [Current state](#current-state-of-the-dev-project).
 
 3. **Create the hive as the owner.** `create_hive` refuses a caller with no identity. In SQL, set
    the owner's identity for the transaction first:
