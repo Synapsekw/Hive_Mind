@@ -4,11 +4,14 @@ import {
   badge,
   declineQuestion,
   inboxCount,
+  linkLine,
+  openingOf,
   proposer,
   theirNote,
   tierReason,
   vaultHref,
 } from "./text";
+import { fixtureInbox } from "./fixture";
 import type { InboxData, LinkItem } from "./types";
 
 function link(over: Partial<LinkItem> = {}): LinkItem {
@@ -139,5 +142,51 @@ describe("vaultHref", () => {
     expect(vaultHref("a b&c", "n/1?x=y")).toBe(
       "/vault?ws=a%20b%26c&note=n%2F1%3Fx%3Dy",
     );
+  });
+});
+
+describe("linkLine", () => {
+  const base = fixtureInbox().links;
+  it("names their note's title when the person may read it", () => {
+    const item = base.find((l) => l.theirs.title !== null)!;
+    expect(linkLine(item)).toEqual({
+      mine: "Northwind renewal, draft terms",
+      rest: "with Sara's \u201cPricing 2026\u201d",
+    });
+  });
+  it("says the note can't be seen yet when the title is unknown", () => {
+    expect(linkLine(base[0]!)).toEqual({
+      mine: "Harbour Logistics proposal",
+      rest: "with a note of Ahmed's you can't see yet",
+    });
+  });
+  it("falls back to the path when the person's own note has no title", () => {
+    const item = { ...base[0]!, mine: { ...base[0]!.mine, title: "" } };
+    expect(linkLine(item).mine).toBe("clients/harbour-logistics/proposal.md");
+  });
+});
+
+describe("openingOf", () => {
+  it("drops front matter and headings and joins the first lines", () => {
+    const body =
+      "---\ntags: [a]\n---\n# Title\n\nFirst line.\nSecond line.\n\n## Part\nThird.";
+    expect(openingOf(body)).toBe("First line. Second line. Third.");
+  });
+  it("cuts at 280 characters on a word boundary and adds an ellipsis", () => {
+    const body = Array.from({ length: 80 }, () => "word").join(" "); // 399 characters
+    const out = openingOf(body);
+    expect(out.endsWith("\u2026")).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(281);
+    expect(out.slice(0, -1).endsWith("word")).toBe(true);
+  });
+  it("keeps a short body whole", () => {
+    expect(openingOf("Just this.")).toBe("Just this.");
+  });
+  it("answers an empty string for an empty or heading-only body", () => {
+    expect(openingOf("")).toBe("");
+    expect(openingOf("# Only a heading\n")).toBe("");
+  });
+  it("reads Windows line ends", () => {
+    expect(openingOf("# T\r\nOne.\r\nTwo.")).toBe("One. Two.");
   });
 });

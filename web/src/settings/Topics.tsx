@@ -1,11 +1,14 @@
 "use client";
 
-// The owner's Topics section. "Find topics in my notes" reads the heads of the owner's own
-// notes a page at a time, works out the candidates in the browser, and shows the ones the hive
-// does not have yet, ticked by kind; Save sends the ticked ones. Below, the hive's topics by
-// kind, each with Delete, asked once. The database decides whether the person may; this only
-// asks. Nothing here reads a note's text.
-import { Fragment, useEffect, useRef, useState } from "react";
+// The owner's Topics tab. "Find topics in my notes" reads the heads of the owner's own notes a
+// page at a time, works out the candidates in the browser, and shows the ones the hive does not
+// have yet in a dialog, ticked by kind; Save sends the ticked ones. Below, a search and a chip
+// per kind (client state only) over a grid of the hive's topics, each with a ⋯ menu whose
+// Delete topic… asks once. The database decides whether the person may; this only asks.
+// Nothing here reads a note's text.
+import { useEffect, useRef, useState } from "react";
+import { PanelDialog } from "../vault/PanelDialog";
+import { RowMenu } from "./RowMenu";
 import { candidates } from "../topics/candidates";
 import { normal } from "../topics/normal";
 import {
@@ -46,6 +49,8 @@ export function Topics({
   closing,
   onSay,
   onChanged,
+  onModal,
+  visible = true,
 }: {
   topics: TopicRow[];
   /** The owner's own workspaces: where their notes are read from. */
@@ -56,6 +61,11 @@ export function Topics({
   onSay: (text: string) => void;
   /** Topics were saved or deleted: the page is read again. */
   onChanged: () => void;
+  /** Whether the candidates' dialog is open, so the screen can hold its tabs meanwhile. */
+  onModal?: (open: boolean) => void;
+  /** Whether this tab is the one shown. Candidates that arrive while it is hidden take the
+   * focus once it is shown again. */
+  visible?: boolean;
 }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [problem, setProblem] = useState<string | null>(null);
@@ -64,6 +74,9 @@ export function Topics({
   const [asking, setAsking] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  // The search and the chosen kind chip: client state, no request.
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState<string | null>(null);
   // Which kinds the person folded or unfolded by hand; the rest follow their size.
   const [folds, setFolds] = useState<Readonly<Record<string, boolean>>>({});
   const isOpen = (id: string, size: number) => folds[id] ?? size <= OPEN_UP_TO;
@@ -73,18 +86,41 @@ export function Topics({
   const alive = useRef(true);
   const opener = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const grid = useRef<HTMLUListElement>(null);
+  const search = useRef<HTMLInputElement>(null);
+  // Where the focus goes after the next render: a topic's Keep, its ⋯ button, or, when that
+  // topic is not in the grid (the last one went), the search.
+  const target = useRef<{ id: string; pick: "keep" | "menu" } | null>(null);
+  useEffect(() => {
+    const want = target.current;
+    if (!want) return;
+    target.current = null;
+    const cell = [
+      ...(grid.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []),
+    ].find((el) => el.dataset.row === want.id);
+    const to =
+      want.pick === "keep"
+        ? cell?.querySelector<HTMLElement>('[data-pick="keep"]')
+        : cell?.querySelector<HTMLElement>("[data-menu]");
+    (to ?? cell ?? search.current)?.focus();
+  });
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
     };
   }, []);
-  // The candidates replace the button: the focus goes to their heading.
+  // The candidates open in a dialog: the focus goes to their heading, at once or, when they
+  // arrived while the tab was hidden, as soon as the tab is shown again.
   const picking = stage.kind === "picking";
   useEffect(() => {
-    if (picking) heading.current?.focus();
-  }, [picking]);
-  // Leaving the candidates (Save or Cancel) unmounts the focused button: Find takes the focus.
+    if (picking && visible) heading.current?.focus();
+  }, [picking, visible]);
+  useEffect(() => {
+    onModal?.(picking);
+    return () => onModal?.(false);
+  }, [picking, onModal]);
+  // Leaving the candidates (Save or Cancel) closes the dialog: Find takes the focus.
   const wasPicking = useRef(false);
   useEffect(() => {
     if (wasPicking.current && !picking) opener.current?.focus();
@@ -92,6 +128,29 @@ export function Topics({
   }, [picking]);
 
   const shown = topics.filter((x) => !gone.has(x.id));
+  const counts = t.kindCounts(shown);
+  // A chosen kind whose last topic went is no longer offered: every kind shows again.
+  const chosen = kind !== null && counts[kind] ? kind : null;
+  const listed = t.filterTopics(shown, chosen, q);
+
+  function ask(id: string) {
+    if (running.current) return;
+    target.current = { id, pick: "keep" };
+    setAsking(id);
+  }
+
+  function keep(id: string) {
+    if (running.current) return;
+    target.current = { id, pick: "menu" };
+    setAsking(null);
+  }
+
+  function cancel() {
+    if (stage.kind !== "picking" || stage.saving) return;
+    setStage({ kind: "idle" });
+    setProblem(null);
+    setMessage(null);
+  }
 
   function say(text: string, failed = false) {
     setProblem(failed ? text : null);
@@ -100,7 +159,8 @@ export function Topics({
   }
 
   async function find() {
-    if (running.current) return;
+    // Only from rest: a press while the candidates are open would throw them away.
+    if (running.current || stage.kind !== "idle") return;
     running.current = true;
     say("");
     setStage({ kind: "finding", read: 0 });
@@ -215,7 +275,14 @@ export function Topics({
     running.current = false;
     setBusy(null);
     setAsking(null);
-    if (!ok) return say(t.FAILED, true);
+    if (!ok) {
+      target.current = { id: topic.id, pick: "menu" };
+      return say(t.FAILED, true);
+    }
+    // The focus goes to the next topic's ⋯, else the one before, else the search.
+    const at = listed.findIndex((x) => x.id === topic.id);
+    const next = listed[at + 1] ?? listed[at - 1];
+    target.current = { id: next?.id ?? "", pick: "menu" };
     setGone((set) => new Set(set).add(topic.id));
     say(t.deleted(topic.name));
     onChanged();
@@ -223,7 +290,8 @@ export function Topics({
 
   return (
     <section aria-labelledby="settings-topics" className={s.section}>
-      <div className={s.sectionHead}>
+      {/* While the candidates are open, what is behind their dim takes no focus and no press. */}
+      <div className={s.sectionHead} inert={picking || undefined}>
         <div className={s.headText}>
           <h2 className={s.label}>
             <span id="settings-topics">{t.TITLE}</span>
@@ -231,17 +299,28 @@ export function Topics({
           </h2>
           <p className={s.note}>{t.NOTE}</p>
         </div>
-        {stage.kind !== "picking" && !closing && (
-          <button
-            ref={opener}
-            type="button"
-            className={s.primary}
-            aria-disabled={stage.kind === "finding" || undefined}
-            onClick={() => void find()}
-          >
-            {t.FIND}
-          </button>
-        )}
+        <div className={s.topicTools}>
+          <input
+            ref={search}
+            type="search"
+            aria-label={t.SEARCH}
+            placeholder={t.SEARCH}
+            className={`${s.input} ${s.search}`}
+            value={q}
+            onChange={(e) => setQ(e.currentTarget.value)}
+          />
+          {!closing && (
+            <button
+              ref={opener}
+              type="button"
+              className={s.secondary}
+              aria-disabled={stage.kind !== "idle" || undefined}
+              onClick={() => void find()}
+            >
+              {t.FIND_LONG}
+            </button>
+          )}
+        </div>
       </div>
 
       {stage.kind === "finding" && (
@@ -257,257 +336,280 @@ export function Topics({
       )}
 
       {stage.kind === "picking" && (
-        <form
-          aria-labelledby="settings-topics-found"
-          className={s.form}
-          aria-busy={stage.saving || undefined}
-          onSubmit={(e) => {
-            e.preventDefault();
-            void save();
-          }}
-        >
-          <h3
-            ref={heading}
-            id="settings-topics-found"
-            tabIndex={-1}
-            className={s.fieldLabel}
+        <PanelDialog label={t.FOUND} busy={stage.saving} onClose={cancel}>
+          <form
+            aria-labelledby="settings-topics-found"
+            className={`${s.form} ${s.dialogForm}`}
+            aria-busy={stage.saving || undefined}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
           >
-            {t.FOUND}
-          </h3>
-          <p className={s.hint}>{t.FOUND_NOTE}</p>
-          {KINDS.map((kind) => {
-            const of = stage.found
-              .map((c, i) => ({ c, i }))
-              .filter(({ c }) => c.kind === kind);
-            if (of.length === 0) return null;
-            const fold = `found-${kind}`;
-            const open = isOpen(fold, of.length);
-            const on = of.filter(({ i }) => stage.ticked.has(i)).length;
-            const setAll = (to: boolean) => {
-              if (stage.saving) return;
-              const ticked = new Set(stage.ticked);
-              for (const { i } of of) {
-                if (to) ticked.add(i);
-                else ticked.delete(i);
-              }
-              setStage({ ...stage, ticked });
-            };
-            return (
-              <div
-                key={kind}
-                role="group"
-                aria-labelledby={`${fold}-title`}
-                className={s.fold}
+            <div className={s.foundHead}>
+              <h3
+                ref={heading}
+                id="settings-topics-found"
+                tabIndex={-1}
+                className={s.dialogTitle}
               >
-                <div className={s.foldHead}>
-                  <h4 id={`${fold}-title`} className={s.foldTitle}>
+                {t.FOUND}
+              </h3>
+              <span className={s.count}>
+                {t.ticked(stage.ticked.size, stage.found.length)}
+              </span>
+            </div>
+            <p className={s.hint}>{t.FOUND_NOTE}</p>
+            {KINDS.map((kind) => {
+              const of = stage.found
+                .map((c, i) => ({ c, i }))
+                .filter(({ c }) => c.kind === kind);
+              if (of.length === 0) return null;
+              const fold = `found-${kind}`;
+              const open = isOpen(fold, of.length);
+              const on = of.filter(({ i }) => stage.ticked.has(i)).length;
+              const setAll = (to: boolean) => {
+                if (stage.saving) return;
+                const ticked = new Set(stage.ticked);
+                for (const { i } of of) {
+                  if (to) ticked.add(i);
+                  else ticked.delete(i);
+                }
+                setStage({ ...stage, ticked });
+              };
+              return (
+                <div
+                  key={kind}
+                  role="group"
+                  aria-labelledby={`${fold}-title`}
+                  className={s.fold}
+                >
+                  <div className={s.foldHead}>
+                    <h4 id={`${fold}-title`} className={s.foldTitle}>
+                      <button
+                        type="button"
+                        className={s.foldToggle}
+                        aria-expanded={open}
+                        aria-controls={`${fold}-list`}
+                        onClick={() => toggle(fold, of.length)}
+                      >
+                        {t.KIND_NAMES[kind]}{" "}
+                        <span className={s.count}>{of.length}</span>
+                      </button>
+                    </h4>
+                    <span className={s.count}>{t.ticked(on, of.length)}</span>
                     <button
                       type="button"
-                      className={s.foldToggle}
-                      aria-expanded={open}
-                      aria-controls={`${fold}-list`}
-                      onClick={() => toggle(fold, of.length)}
+                      className={s.small}
+                      aria-label={t.tickAll(t.KIND_NAMES[kind])}
+                      aria-disabled={
+                        stage.saving || on === of.length || undefined
+                      }
+                      onClick={() => setAll(true)}
                     >
-                      {t.KIND_NAMES[kind]}{" "}
-                      <span className={s.count}>{of.length}</span>
+                      {t.ALL}
                     </button>
-                  </h4>
-                  <span className={s.count}>{t.ticked(on, of.length)}</span>
-                  <button
-                    type="button"
-                    className={s.small}
-                    aria-label={t.tickAll(t.KIND_NAMES[kind])}
-                    aria-disabled={
-                      stage.saving || on === of.length || undefined
-                    }
-                    onClick={() => setAll(true)}
-                  >
-                    {t.ALL}
-                  </button>
-                  <button
-                    type="button"
-                    className={s.small}
-                    aria-label={t.tickNone(t.KIND_NAMES[kind])}
-                    aria-disabled={stage.saving || on === 0 || undefined}
-                    onClick={() => setAll(false)}
-                  >
-                    {t.NONE}
-                  </button>
+                    <button
+                      type="button"
+                      className={s.small}
+                      aria-label={t.tickNone(t.KIND_NAMES[kind])}
+                      aria-disabled={stage.saving || on === 0 || undefined}
+                      onClick={() => setAll(false)}
+                    >
+                      {t.NONE}
+                    </button>
+                  </div>
+                  {open && (
+                    <ul id={`${fold}-list`} role="list" className={s.picks}>
+                      {of.map(({ c, i }) => {
+                        const extra = t.candidateNotes(c.kind, c.notes);
+                        const also = t.alsoKnown(c.aliases);
+                        const elsewhere = stage.under.get(i) ?? null;
+                        return (
+                          <li key={i}>
+                            <label className={s.pick}>
+                              <input
+                                type="checkbox"
+                                checked={stage.ticked.has(i)}
+                                disabled={stage.saving}
+                                aria-label={t.pickLabel(
+                                  t.KIND_NAMES[kind],
+                                  c.name,
+                                  c.aliases,
+                                  elsewhere,
+                                )}
+                                onChange={(e) => {
+                                  const ticked = new Set(stage.ticked);
+                                  if (e.currentTarget.checked) ticked.add(i);
+                                  else ticked.delete(i);
+                                  setStage({ ...stage, ticked });
+                                }}
+                              />
+                              <span className={s.pickText}>
+                                <span className={s.pickName}>{c.name}</span>
+                                {extra && (
+                                  <span className={s.pickMore}>{extra}</span>
+                                )}
+                                {also && (
+                                  <span className={s.pickMore}>{also}</span>
+                                )}
+                                {elsewhere && (
+                                  <span className={s.pickMore}>
+                                    {elsewhere}
+                                  </span>
+                                )}
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
-                {open && (
-                  <ul id={`${fold}-list`} role="list" className={s.picks}>
-                    {of.map(({ c, i }) => {
-                      const extra = t.candidateNotes(c.kind, c.notes);
-                      const also = t.alsoKnown(c.aliases);
-                      const elsewhere = stage.under.get(i) ?? null;
-                      return (
-                        <li key={i}>
-                          <label className={s.pick}>
-                            <input
-                              type="checkbox"
-                              checked={stage.ticked.has(i)}
-                              disabled={stage.saving}
-                              aria-label={t.pickLabel(
-                                t.KIND_NAMES[kind],
-                                c.name,
-                                c.aliases,
-                                elsewhere,
-                              )}
-                              onChange={(e) => {
-                                const ticked = new Set(stage.ticked);
-                                if (e.currentTarget.checked) ticked.add(i);
-                                else ticked.delete(i);
-                                setStage({ ...stage, ticked });
-                              }}
-                            />
-                            <span className={s.pickText}>
-                              <span className={s.pickName}>{c.name}</span>
-                              {extra && (
-                                <span className={s.pickMore}>{extra}</span>
-                              )}
-                              {also && (
-                                <span className={s.pickMore}>{also}</span>
-                              )}
-                              {elsewhere && (
-                                <span className={s.pickMore}>{elsewhere}</span>
-                              )}
-                            </span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            );
-          })}
-          <div className={`${s.formFoot} ${s.saveBar}`}>
-            <span className={s.count}>
-              {t.ticked(stage.ticked.size, stage.found.length)}
-            </span>
-            <button
-              type="submit"
-              className={s.primary}
-              aria-disabled={
-                stage.saving || stage.ticked.size === 0 || undefined
-              }
-            >
-              {t.SAVE}
-            </button>
-            <button
-              type="button"
-              className={s.secondary}
-              aria-disabled={stage.saving || undefined}
-              onClick={() => {
-                if (stage.saving) return;
-                setStage({ kind: "idle" });
-                setProblem(null);
-                setMessage(null);
-              }}
-            >
-              {t.CANCEL}
-            </button>
-            {problem && <p className={s.refused}>{problem}</p>}
-          </div>
-        </form>
+              );
+            })}
+            <div className={`${s.formFoot} ${s.dialogFoot} ${s.saveBar}`}>
+              {problem && <p className={s.refused}>{problem}</p>}
+              <button
+                type="submit"
+                className={s.primary}
+                aria-disabled={
+                  stage.saving || stage.ticked.size === 0 || undefined
+                }
+              >
+                {t.saveN(stage.ticked.size)}
+              </button>
+              <button
+                type="button"
+                className={s.secondary}
+                aria-disabled={stage.saving || undefined}
+                onClick={cancel}
+              >
+                {t.CANCEL}
+              </button>
+            </div>
+          </form>
+        </PanelDialog>
       )}
 
-      {shown.length === 0 && stage.kind === "idle" ? (
-        <div className={s.empty}>
-          <p className={s.emptyTitle}>{t.EMPTY_TITLE}</p>
-          <p className={s.emptyText}>{t.EMPTY_TEXT}</p>
-        </div>
+      {shown.length === 0 ? (
+        stage.kind === "idle" && (
+          <div className={s.empty}>
+            <p className={s.emptyTitle}>{t.EMPTY_TITLE}</p>
+            <p className={s.emptyText}>{t.EMPTY_TEXT}</p>
+          </div>
+        )
       ) : (
-        KINDS.map((kind) => {
-          const of = shown.filter((x) => x.kind === kind);
-          if (of.length === 0) return null;
-          const fold = `saved-${kind}`;
-          const open = isOpen(fold, of.length);
-          return (
-            <Fragment key={kind}>
-              <h3 className={s.foldTitle}>
-                <button
-                  type="button"
-                  className={s.foldToggle}
-                  aria-expanded={open}
-                  aria-controls={`${fold}-list`}
-                  onClick={() => toggle(fold, of.length)}
-                >
-                  {t.KIND_NAMES[kind]}{" "}
-                  <span className={s.count}>{of.length}</span>
-                </button>
-              </h3>
-              {open && (
-                <ul
-                  id={`${fold}-list`}
-                  role="list"
-                  aria-label={t.KIND_NAMES[kind]}
-                  className={s.topics}
-                >
-                  {of.map((topic) => {
-                    const notes = t.topicNotes(topic.notes);
-                    const isAsking = asking === topic.id;
-                    const off = busy === topic.id || undefined;
-                    return (
-                      <li
-                        key={topic.id}
-                        className={s.topic}
-                        data-asking={isAsking || undefined}
-                        aria-busy={off}
-                      >
+        <div inert={picking || undefined}>
+          <div role="group" aria-label="Kinds" className={s.chips}>
+            <button
+              type="button"
+              className={s.chip}
+              aria-pressed={chosen === null}
+              onClick={() => setKind(null)}
+            >
+              {t.ALL} <span className={s.count}>{shown.length}</span>
+            </button>
+            {KINDS.filter((k) => counts[k]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={s.chip}
+                aria-pressed={chosen === k}
+                onClick={() => setKind(k)}
+              >
+                {t.KIND_NAMES[k]} <span className={s.count}>{counts[k]}</span>
+              </button>
+            ))}
+          </div>
+          {listed.length === 0 ? (
+            <p className={s.note}>{t.NO_MATCH}</p>
+          ) : (
+            <ul
+              ref={grid}
+              role="list"
+              aria-label="Topics"
+              className={s.topicGrid}
+            >
+              {listed.map((topic) => {
+                const notes = t.topicNotes(topic.notes);
+                const isAsking = asking === topic.id && !closing;
+                const off = busy === topic.id || undefined;
+                return (
+                  <li
+                    key={topic.id}
+                    data-row={topic.id}
+                    tabIndex={-1}
+                    className={s.topicCell}
+                    data-asking={isAsking || undefined}
+                    aria-busy={off}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape" && isAsking) keep(topic.id);
+                    }}
+                  >
+                    <div className={s.text}>
+                      <p className={s.what}>
                         <span className={s.topicName}>{topic.name}</span>
-                        {notes && <span className={s.pickMore}>{notes}</span>}
-                        {!closing && (
-                          <div
-                            role="group"
-                            aria-label={`${t.DELETE} ${topic.name}`}
-                            className={s.actions}
+                        {chosen === null && (
+                          <span className={s.mark}>
+                            {t.KIND_NAMES[topic.kind]}
+                          </span>
+                        )}
+                      </p>
+                      {notes && <p className={s.meta}>{notes}</p>}
+                    </div>
+                    {isAsking ? (
+                      <div className={s.topicAsk}>
+                        <div
+                          role="group"
+                          aria-label={`${t.DELETE} ${topic.name}`}
+                          className={s.actions}
+                        >
+                          <p className={s.ask}>
+                            {t.deleteQuestion(topic.name)}
+                          </p>
+                          <button
+                            type="button"
+                            data-pick="delete"
+                            className={s.confirm}
+                            aria-disabled={off}
+                            onClick={() => void remove(topic)}
                           >
-                            {isAsking ? (
-                              <>
-                                <p className={s.ask}>
-                                  {t.deleteQuestion(topic.name)}
-                                </p>
-                                <button
-                                  type="button"
-                                  className={s.confirm}
-                                  aria-disabled={off}
-                                  onClick={() => void remove(topic)}
-                                >
-                                  {t.DELETE}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={s.secondary}
-                                  aria-disabled={off}
-                                  onClick={() => setAsking(null)}
-                                >
-                                  {t.KEEP}
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                className={s.small}
-                                aria-label={`${t.DELETE} ${topic.name}`}
-                                onClick={() => setAsking(topic.id)}
-                              >
-                                {t.DELETE}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                        {isAsking && !closing && (
-                          <p className={s.aside}>{t.DELETE_ASIDE}</p>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Fragment>
-          );
-        })
+                            {t.DELETE}
+                          </button>
+                          <button
+                            type="button"
+                            data-pick="keep"
+                            className={s.secondary}
+                            aria-disabled={off}
+                            onClick={() => keep(topic.id)}
+                          >
+                            {t.KEEP}
+                          </button>
+                        </div>
+                        <p className={s.aside}>{t.DELETE_ASIDE}</p>
+                      </div>
+                    ) : (
+                      !closing && (
+                        <RowMenu
+                          label={`Actions for ${topic.name}`}
+                          items={[
+                            {
+                              key: "delete",
+                              text: t.DELETE_TOPIC_ITEM,
+                              danger: true,
+                              onPick: () => ask(topic.id),
+                            },
+                          ]}
+                        />
+                      )
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
       )}
     </section>
   );

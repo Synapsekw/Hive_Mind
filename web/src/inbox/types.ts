@@ -36,7 +36,11 @@ export type InboxData = {
 
 export type Result = { ok: boolean };
 
+/** A note's opening lines, read for the detail pane. Only ever asked for the person's own notes. */
+export type Opening = { ok: true; text: string } | { ok: false };
+
 export type InboxActions = {
   respondToLink(id: string, accept: boolean): Promise<Result>;
   releaseNote(id: string): Promise<Result>;
+  noteOpening(id: string): Promise<Opening>;
 };

@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
 import * as t from "./topicsText";
+import type { TopicRow } from "./types";
+
+const row = (id: string, kind: TopicRow["kind"], name: string): TopicRow => ({
+  id,
+  kind,
+  name,
+  notes: 0,
+});
+const ROWS: TopicRow[] = [
+  row("1", "client", "Zain"),
+  row("2", "vendor", "Terra Drone"),
+  row("3", "vendor", "Zeta Parts"),
+  row("4", "subject", "flare-stack"),
+];
+const names = (xs: TopicRow[]) => xs.map((x) => x.name);
 
 describe("the sentences of the Topics section", () => {
   it("names each kind in the plural", () => {
@@ -79,5 +94,57 @@ describe("the sentences of the Topics section", () => {
     expect(t.ticked(3, 40)).toBe("3 of 40 ticked");
     expect(t.tickAll("Vendors")).toBe("Tick all Vendors");
     expect(t.tickNone("Vendors")).toBe("Untick all Vendors");
+  });
+
+  it("names the search, the chips and the topic menu", () => {
+    expect(t.SEARCH).toBe("Find a topic");
+    expect(t.ALL).toBe("All");
+    expect(t.FIND_LONG).toBe("Find topics in my notes");
+    expect(t.DELETE_TOPIC_ITEM).toBe("Delete topic…");
+    expect(t.NO_MATCH).toBe("No topic matches.");
+  });
+
+  it("says how many topics Save will save", () => {
+    expect(t.saveN(0)).toBe("Save 0 topics");
+    expect(t.saveN(1)).toBe("Save 1 topic");
+    expect(t.saveN(2)).toBe("Save 2 topics");
+  });
+});
+
+describe("filterTopics", () => {
+  it("keeps everything with no kind and no text", () => {
+    expect(names(t.filterTopics(ROWS, null, ""))).toEqual(names(ROWS));
+    expect(names(t.filterTopics(ROWS, null, "   "))).toEqual(names(ROWS));
+  });
+
+  it("keeps one kind", () => {
+    expect(names(t.filterTopics(ROWS, "vendor", ""))).toEqual([
+      "Terra Drone",
+      "Zeta Parts",
+    ]);
+    expect(t.filterTopics(ROWS, "partner", "")).toEqual([]);
+  });
+
+  it("matches a part of the name, ignoring case and the spaces around it", () => {
+    expect(names(t.filterTopics(ROWS, null, "  ZE "))).toEqual(["Zeta Parts"]);
+    expect(names(t.filterTopics(ROWS, null, "a"))).toEqual([
+      "Zain",
+      "Terra Drone",
+      "Zeta Parts",
+      "flare-stack",
+    ]);
+    expect(names(t.filterTopics(ROWS, null, "drone"))).toEqual(["Terra Drone"]);
+  });
+
+  it("applies the kind and the text together", () => {
+    expect(names(t.filterTopics(ROWS, "vendor", "z"))).toEqual(["Zeta Parts"]);
+    expect(t.filterTopics(ROWS, "client", "terra")).toEqual([]);
+  });
+});
+
+describe("kindCounts", () => {
+  it("counts the topics of each kind that has any", () => {
+    expect(t.kindCounts(ROWS)).toEqual({ client: 1, vendor: 2, subject: 1 });
+    expect(t.kindCounts([])).toEqual({});
   });
 });

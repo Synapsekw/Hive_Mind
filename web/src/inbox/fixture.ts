@@ -92,3 +92,17 @@ export function fixtureInbox(
     heldTotal: opts.many ? 120 : held.length,
   };
 }
+
+/** The bodies of the person's own notes in the sample, for the dev page's opening lines. */
+export const FIXTURE_BODIES: Record<string, string> = {
+  "00000000-0000-4000-8000-00000000b001":
+    "# Harbour Logistics proposal\n\nScope: two warehouses in Rotterdam, one cold store. Timeline twelve weeks from signature, with a pilot in week four.",
+  "00000000-0000-4000-8000-00000000b002":
+    "# Northwind renewal\n\nDraft terms for the 2027 renewal. Volume discount stays at 8%; payment terms move to 45 days.",
+  "00000000-0000-4000-8000-00000000b003":
+    "# Site visit\n\nWalked the north hall with the operations lead. Racking is older than the drawings say.",
+  "00000000-0000-4000-8000-00000000b004":
+    "# Lead review\n\nSeven new leads this month; three qualified. Follow up with the two logistics firms first.",
+  "00000000-0000-4000-8000-00000000b005":
+    "# Kickoff\n\nAttendees: client operations, our delivery lead. Agreed weekly check-ins on Tuesdays.",
+};

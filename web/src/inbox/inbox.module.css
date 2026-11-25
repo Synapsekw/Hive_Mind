@@ -1,7 +1,7 @@
 /* The inbox screen in Keystone glass, in the vault's grammar (vault.module.css): the rail
-   (web/src/shell/) on the wash, then one frosted card holding the heading and one list that
-   scrolls inside it. Each row is a decision: what it is on the left, the answer on the right.
-   Colours are tokens only (themes.generated.css). */
+   (web/src/shell/) on the wash, then one frosted card holding the heading and two columns,
+   each scrolling on its own: the list of what waits on the left, the one selected item and
+   its decision on the right. Colours are tokens only (themes.generated.css). */
 
 .root {
   min-height: 100vh;
@@ -90,32 +90,67 @@
   color: var(--muted);
 }
 
+/* ---- The two columns ----
+   The split runs to the card's edges, so each scrollbar sits on an edge and a focus outline on
+   the outermost controls is not cut off. */
+
+.split {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 -20px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(320px, 440px) 1fr;
+  gap: 0;
+}
+
+.split[data-narrow] {
+  grid-template-columns: 1fr;
+}
+
+.split[data-narrow] .list {
+  border-right: none;
+}
+
+.back {
+  margin: 0 0 12px -10px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.back:hover {
+  border-color: var(--line);
+}
+
+.list,
+.detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
 /* ---- The list ---- */
 
-/* The scroll box runs to the card's edges, so the scrollbar sits on the edge and a focus
-   outline on the outermost controls is not cut off. */
-.scroller {
-  position: relative;
-  margin: 0 -20px;
-  padding: 18px 24px 24px;
-  border-top: 1px solid var(--line);
+.list {
+  padding: 14px 12px 20px;
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 22px;
 }
 
-/* A reading width: on a wide window the answer stays near the sentence it answers. */
-.section {
-  width: 100%;
-  max-width: 1040px;
-}
-
-.sectionHead {
+.group {
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 18px;
-  padding-bottom: 10px;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .label {
@@ -131,6 +166,10 @@
   color: var(--muted);
 }
 
+.group > .label {
+  padding: 0 16px 8px;
+}
+
 .count {
   font-size: 11px;
   color: var(--fg2);
@@ -142,84 +181,57 @@
   color: var(--muted);
 }
 
-.rows {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* The row's collapse: the cell shrinks from its full height to nothing as it fades. */
-.cell {
+/* A row. Its collapse: the option shrinks from its full height to nothing as it fades. */
+.option {
   display: grid;
   grid-template-rows: 1fr;
+  padding: 12px 16px;
+  border-radius: 8px;
+  cursor: pointer;
   opacity: 1;
   transition:
+    background 0.18s var(--ease),
     grid-template-rows 0.35s var(--ease),
+    padding 0.35s var(--ease),
     opacity 0.35s var(--ease);
 }
 
-.cell[data-leaving] {
-  grid-template-rows: 0fr;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.cell > .item {
-  min-height: 0;
-}
-
-/* Clip only while collapsing, so the at-rest hover fill is never cut off. */
-.cell[data-leaving] > .item {
-  overflow: hidden;
-}
-
-/* A row: the words on the left, the decision on the right, a hairline above. It lifts on hover
-   like a gallery card: the hairline brightens and a fill fades in. */
-.item {
-  position: relative;
-  isolation: isolate;
-  transition:
-    border-color var(--dur) var(--ease),
-    transform var(--dur) var(--ease);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px 28px;
-  padding: 14px 0 16px;
-  border-top: 1px solid var(--line);
-}
-
-.item::before {
-  content: "";
-  position: absolute;
-  inset: 0 -12px;
-  z-index: -1;
-  border-radius: 12px;
+.option:hover {
   background: var(--fill);
+}
+
+.option[aria-selected="true"] {
+  background: var(--sel);
+}
+
+.option:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+}
+
+.option[data-leaving] {
+  grid-template-rows: 0fr;
+  padding-block: 0;
   opacity: 0;
-  transition: opacity var(--dur) var(--ease);
   pointer-events: none;
 }
 
-.item:hover {
-  border-top-color: var(--line-hi);
-  transform: translateY(-1px);
-}
-
-.item:hover::before {
-  opacity: 1;
-}
-
-.text {
-  min-width: 0;
+.optionBody {
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
+}
+
+/* Clip only while collapsing. */
+.option[data-leaving] > .optionBody {
+  overflow: hidden;
 }
 
 .what {
   margin: 0;
-  max-width: 68ch;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.45;
   color: var(--fg2);
   overflow-wrap: anywhere;
@@ -230,19 +242,11 @@
   font-weight: 600;
 }
 
-/* The person's own note: the one thing in the sentence that opens. */
+/* The person's own note: the one thing in the sentence that is theirs. */
 .own {
+  font-style: normal;
   color: var(--fg);
   font-weight: 600;
-  text-decoration: underline;
-  text-decoration-color: var(--line-hi);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-  transition: text-decoration-color 0.18s var(--ease);
-}
-
-.own:hover {
-  text-decoration-color: var(--fg);
 }
 
 .path {
@@ -268,8 +272,127 @@
   color: var(--quiet);
 }
 
-/* What accepting does. Accepting shares the note, so this is never hidden: it sits on the row
-   in full-strength text, led by the vault's own mark for "shared with people". */
+.metaPath {
+  font-family: var(--font-mono), monospace;
+  overflow-wrap: anywhere;
+}
+
+/* "<Name> accepted": a small hairline tag, the vault's mark. */
+.tag {
+  margin-top: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--line-hi);
+  border-radius: 6px;
+  color: var(--fg2);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* Under a list cut at the newest 100. */
+.more {
+  margin: 6px 16px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---- The detail ---- */
+
+.detail {
+  padding: 20px 28px 28px;
+}
+
+.detailBody,
+.done {
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--fg2);
+  overflow-wrap: anywhere;
+}
+
+.detailTitle:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.pair {
+  align-self: stretch;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.box {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  transition: border-color 0.24s var(--ease);
+}
+
+.box:hover {
+  border-color: var(--line-hi);
+}
+
+.boxTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.swap {
+  align-self: center;
+  font-size: 16px;
+  color: var(--quiet);
+}
+
+/* The note's opening lines, or a blank holding their height while they are on their way. */
+.lines {
+  min-height: 3lh;
+}
+
+.opening {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg2);
+  overflow-wrap: anywhere;
+}
+
+.quiet {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--fg2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-hi);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.18s var(--ease);
+}
+
+.quiet:hover {
+  text-decoration-color: var(--fg);
+}
+
+/* What accepting does. Accepting shares the note, so this is never hidden: it sits beside the
+   decision in full-strength text, led by the vault's own mark for "shared with people". */
 .effect {
   margin: 4px 0 0;
   display: flex;
@@ -294,14 +417,6 @@
 }
 
 /* ---- The decision ---- */
-
-.side {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
 
 .actions {
   display: flex;
@@ -401,13 +516,25 @@
   box-shadow: inset 2px 0 0 var(--hue-6);
 }
 
-/* ---- Nothing waiting ---- */
+.aside {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- Nothing waiting: one block centred in the card ---- */
 
 .empty {
+  flex: 1 1 auto;
+  margin: 0 -20px;
+  padding: 32px 24px;
+  border-top: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
 }
 
 .emptyTitle {
@@ -423,41 +550,13 @@
   color: var(--muted);
 }
 
-/* Under a list cut at the newest 100: the hairline closes the last row. */
-.more {
-  margin: 0;
-  color: var(--muted);
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 13px;
-}
-
-/* ---- The answer beside the words ----
-   From a card wide enough for both. The decline question takes its own line above the two
-   buttons, so the column keeps its width when it is asked. */
-
-@media (min-width: 900px) {
-  .item {
-    grid-template-columns: minmax(0, 1fr) 300px;
-    align-items: start;
-  }
-
-  .side {
-    align-items: flex-end;
-  }
-
-  .actions {
-    justify-content: flex-end;
-  }
-
-  .ask {
-    text-align: right;
-  }
+.empty > .secondary {
+  margin-top: 6px;
 }
 
 /* ---- One window from 1100 x 560 ----
-   The page is exactly one window tall and the list scrolls inside the card. Narrower or very
-   short windows let the page scroll instead. */
+   The page is exactly one window tall and each column scrolls inside the card. Narrower or
+   very short windows let the page scroll instead. */
 
 @media (min-width: 1100px) and (min-height: 560px) {
   .root {
@@ -471,32 +570,16 @@
   .panel {
     min-height: 0;
   }
-
-  .scroller {
-    flex: 1 1 0;
-    min-height: 0;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--fill-on) transparent;
-  }
-
-  /* In a column that scrolls, a section keeps its own height. */
-  .section,
-  .empty {
-    flex: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .item:hover,
   .primary:hover {
     transform: none;
   }
 
-  .cell,
-  .item,
-  .item::before,
-  .own,
+  .option,
+  .box,
+  .quiet,
   .primary,
   .secondary,
   .confirm {
@@ -504,11 +587,15 @@
   }
 }
 
-/* Forced colours: the sharing mark keeps its shape. */
+/* Forced colours: the sharing mark keeps its shape, and the selected row its edge. */
 @media (forced-colors: active) {
   .glyph {
     forced-color-adjust: none;
     border-color: CanvasText;
     background: linear-gradient(90deg, CanvasText 50%, transparent 50%);
+  }
+
+  .option[aria-selected="true"] {
+    outline: 1px solid Highlight;
   }
 }
