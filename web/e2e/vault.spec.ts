@@ -31,6 +31,7 @@ import * as A from "../src/vault/attachText";
 import * as P from "../src/vault/topicText";
 import * as C from "../src/vault/connectText";
 import * as T from "../src/vault/importText";
+import { ADD_NOTES } from "../src/vault/importText";
 import { setLook } from "./look";
 
 // The fixture's content does not depend on `now`, only its dates do.
@@ -1474,15 +1475,37 @@ const many = (n: number) =>
     ]),
   );
 
-const importButton = (page: Page) =>
-  page.getByRole("button", { name: T.IMPORT, exact: true });
+const addNotes = (page: Page) =>
+  page.getByRole("button", { name: ADD_NOTES, exact: true });
+async function openPanel(page: Page, name: string) {
+  await addNotes(page).click();
+  await page
+    .getByRole("group", { name: ADD_NOTES })
+    .getByRole("button", { name, exact: true })
+    .click();
+}
+const dialogNamed = (page: Page, name: string) =>
+  page.getByRole("dialog", { name });
+/** A press on the dimmed card, above the dialog, where nothing but the dim is. */
+async function pressDim(page: Page) {
+  const box = (await page.getByRole("main", { name: "Vault" }).boundingBox())!;
+  await page.mouse.click(box.x + 6, box.y + 40);
+}
+/** Whether something else is drawn over the middle of `el`: it cannot be pressed. */
+const covered = (el: Element) => {
+  const r = el.getBoundingClientRect();
+  const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  return top !== el && !el.contains(top);
+};
+const filterField = (page: Page) =>
+  page.getByRole("searchbox", { name: "Filter notes" });
 const importPanel = (page: Page) =>
   page.getByRole("region", { name: /Import|Ready/ });
 const panelNamed = (page: Page, name: string) =>
   page.getByRole("region", { name, exact: true });
 
 async function pick(page: Page, dir: string) {
-  await importButton(page).click();
+  await openPanel(page, T.IMPORT);
   await page.getByLabel(T.FOLDER_INPUT).setInputFiles(dir);
 }
 
@@ -1509,26 +1532,107 @@ const MIXED = {
   "big.md": 1_000_001,
 };
 
-test("the import panel opens in place, and Escape or Close puts the focus back", async ({
+test("the bar has the filter and Add notes; Shared with me has no Add notes", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(addNotes(page)).toBeVisible();
+  await addNotes(page).click();
+  const menu = page.getByRole("group", { name: ADD_NOTES });
+  await expect(menu.getByRole("button")).toHaveText([
+    new RegExp(T.IMPORT),
+    new RegExp(C.CONNECT),
+    new RegExp(A.ATTACH),
+  ]);
+  await page.keyboard.press("Escape");
+  await expect(addNotes(page)).toBeFocused();
+  await open(page, "?tab=shared");
+  await expect(addNotes(page)).toHaveCount(0);
+});
+
+test("the import opens as a dialog and Escape returns to Add notes", async ({
+  page,
+}) => {
+  await open(page);
+  await openPanel(page, T.IMPORT);
+  await expect(page.getByRole("dialog", { name: T.IMPORT })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
+});
+
+test("each menu item is named by its name and described by its line", async ({
+  page,
+}) => {
+  await open(page);
+  await addNotes(page).click();
+  await expect(addNotes(page)).toHaveAttribute("aria-expanded", "true");
+  const menu = page.getByRole("group", { name: ADD_NOTES });
+  await expect(addNotes(page)).toHaveAttribute(
+    "aria-controls",
+    (await menu.getAttribute("id"))!,
+  );
+  for (const [name, line] of [
+    [T.IMPORT, T.IMPORT_LINE],
+    [C.CONNECT, C.CONNECT_LINE],
+    [A.ATTACH, A.ATTACH_LINE],
+  ] as const) {
+    const item = menu.getByRole("button", { name, exact: true });
+    await expect(item).toHaveAccessibleDescription(line);
+  }
+  // A press outside closes it.
+  await page
+    .getByRole("main", { name: "Vault" })
+    .click({ position: { x: 6, y: 6 } });
+  await expect(menu).toHaveCount(0);
+  await expect(addNotes(page)).toHaveAttribute("aria-expanded", "false");
+});
+
+test("the import panel opens in a dialog; Escape, Close or a press on the dimmed card put the focus back on Add notes", async ({
   page,
 }) => {
   await open(page);
   const urls = watch(page);
-  await importButton(page).click();
+  await openPanel(page, T.IMPORT);
   const panel = panelNamed(page, T.IMPORT);
   await expect(panel).toBeVisible();
   await expect(panel.getByRole("heading", { name: T.IMPORT })).toBeFocused();
-  await expect(importButton(page)).toHaveAttribute("aria-expanded", "true");
+  const dialog = dialogNamed(page, T.IMPORT);
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
   await expect(panel.getByRole("button", { name: T.CHOOSE })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
-  await expect(importButton(page)).toBeFocused();
-  await importButton(page).click();
+  await expect(addNotes(page)).toBeFocused();
+  await openPanel(page, T.IMPORT);
   await panel.getByRole("button", { name: /^Close/ }).click();
   await expect(panel).toHaveCount(0);
-  await expect(importButton(page)).toBeFocused();
+  await expect(addNotes(page)).toBeFocused();
+  await openPanel(page, T.IMPORT);
+  await expect(dialog).toBeVisible();
+  await pressDim(page);
+  await expect(dialog).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
   expect(urls()).toEqual([]);
   expect(await calls(page)).toEqual([]);
+});
+
+test("Tab stays inside the dialog", async ({ page }) => {
+  await open(page);
+  await openPanel(page, T.IMPORT);
+  const dialog = dialogNamed(page, T.IMPORT);
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    expect(
+      await dialog.evaluate((el) => el.contains(document.activeElement)),
+    ).toBe(true);
+  }
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Shift+Tab");
+    expect(
+      await dialog.evaluate((el) => el.contains(document.activeElement)),
+    ).toBe(true);
+  }
 });
 
 test("the summary counts the notes and what is left out, before anything is sent", async ({
@@ -1782,7 +1886,7 @@ test("a browser that gives no folder paths is told so plainly", async ({
   page,
 }) => {
   await open(page);
-  await importButton(page).click();
+  await openPanel(page, T.IMPORT);
   // Loose files have no path inside a folder, as in a browser without folder picking.
   await page.getByLabel(T.FOLDER_INPUT).evaluate((el) => {
     el.removeAttribute("webkitdirectory");
@@ -1809,13 +1913,14 @@ test("notes go a batch at a time, in order, with the progress said; leaving asks
   const status = running.getByRole("status");
   await expect(status).toHaveText(T.progress(0, 60));
   await expect(status).toHaveText(T.progress(25, 60));
-  // While it runs: no closing, by Escape, by Close or by the button that opened it.
+  // While it runs: no closing, by Escape, by Close or by a press on the dimmed card.
   await page.keyboard.press("Escape");
   await running
     .getByRole("button", { name: /^Close/ })
     .evaluate((el: HTMLElement) => el.click());
-  await importButton(page).evaluate((el: HTMLElement) => el.click());
+  await pressDim(page);
   await expect(running).toBeVisible();
+  await expect(dialogNamed(page, T.IMPORT)).toBeVisible();
   expect(
     await page.evaluate(() => {
       const e = new Event("beforeunload", { cancelable: true });
@@ -1920,8 +2025,8 @@ test("at 390 px the import panel and its controls stay inside the window", async
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await open(page, "?failbatch=1");
-  await importButton(page).scrollIntoViewIfNeeded();
-  expect(await importButton(page).evaluate(inView)).toBe(true);
+  await addNotes(page).scrollIntoViewIfNeeded();
+  expect(await addNotes(page).evaluate(inView)).toBe(true);
   await pick(
     page,
     folder("A folder with quite a long name", {
@@ -1958,8 +2063,6 @@ test("at 390 px the import panel and its controls stay inside the window", async
 
 // ---- Connect wiki links ----
 
-const connectButton = (page: Page) =>
-  page.getByRole("button", { name: C.CONNECT, exact: true });
 const connectCalls = async (page: Page) =>
   ((await calls(page)) as { name: string; args: unknown[] }[])
     .filter((c) => c.name === "connect")
@@ -2038,8 +2141,9 @@ test("after the last batch the import connects the wiki links and counts them", 
   await connecting
     .getByRole("button", { name: /^Close/ })
     .evaluate((el: HTMLElement) => el.click());
+  await pressDim(page);
   await expect(connecting).toBeVisible();
-  await expect(importButton(page)).toHaveAttribute("aria-disabled", "true");
+  await expect(dialogNamed(page, T.IMPORT)).toBeVisible();
   expect(await leavingAsks(page)).toBe(true);
 
   // Connecting, then attaching, each take three slow steps: the end is a good while off.
@@ -2091,30 +2195,31 @@ test("Stop pressed during the last batch ends the import without connecting", as
   expect(await connectCalls(page)).toEqual([]);
 });
 
-test("closing a connect panel whose opener is gone puts the focus on the import opener", async ({
+test("closing a connect dialog on Shared with me, which has no Add notes, puts the focus on the filter", async ({
   page,
 }) => {
   await open(page, "?slow=1");
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await panelNamed(page, C.CONNECT)
     .getByRole("button", { name: C.START, exact: true })
     .click();
   const running = panelNamed(page, C.CONNECTING);
   await expect(running).toBeVisible();
-  // Another tab while the run is in flight: the panel stays, its opener does not.
+  // Another tab while the run is in flight (the dialog covers the tabs; the address can still
+  // change, as by Back): the panel stays, Add notes does not.
   await page
     .getByRole("navigation", { name: "Workspaces" })
     .getByRole("link", { name: "Shared with me" })
-    .click();
+    .evaluate((el: HTMLElement) => el.click());
   await expect(page).toHaveURL(/tab=shared/);
-  await expect(connectButton(page)).toHaveCount(0);
+  await expect(addNotes(page)).toHaveCount(0);
   const done = panelNamed(page, C.CONNECTED);
   await expect(done.getByText("Links made 21", { exact: true })).toBeVisible({
     timeout: 15_000,
   });
   await done.getByRole("button", { name: T.CLOSE, exact: true }).click();
   await expect(done).toHaveCount(0);
-  await expect(importButton(page)).toBeFocused();
+  await expect(filterField(page)).toBeFocused();
 });
 
 test("an import whose every batch was refused connects nothing", async ({
@@ -2152,15 +2257,21 @@ test("an import whose links could not be connected says where to finish", async 
   ]);
 });
 
-test("Connect wiki links is offered on one's own workspace, not on Shared with me", async ({
+test("the menu lists Connect wiki links on a workspace; Shared with me has no Add notes", async ({
   page,
 }) => {
   await open(page);
-  await expect(connectButton(page)).toBeVisible();
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
+  await addNotes(page).click();
+  await expect(
+    page
+      .getByRole("group", { name: ADD_NOTES })
+      .getByRole("button", { name: C.CONNECT, exact: true }),
+  ).toBeVisible();
   await page.goto("/dev/vault?tab=shared", { waitUntil: "networkidle" });
-  await expect(importButton(page)).toBeVisible();
-  await expect(connectButton(page)).toHaveCount(0);
+  await expect(addNotes(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: C.CONNECT, exact: true }),
+  ).toHaveCount(0);
 });
 
 test("the connect panel: Start, progress, counts; it cannot be closed while it runs", async ({
@@ -2168,14 +2279,12 @@ test("the connect panel: Start, progress, counts; it cannot be closed while it r
 }) => {
   await open(page, "?slow=1");
   const urls = watch(page);
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   const ready = panelNamed(page, C.CONNECT);
   await expect(ready.getByRole("heading", { name: C.CONNECT })).toBeFocused();
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "true");
-  await expect(connectButton(page)).toHaveAttribute(
-    "aria-controls",
-    "vault-connect",
-  );
+  const dialog = dialogNamed(page, C.CONNECT);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("#vault-connect")).toBeVisible();
   await expect(ready.getByText(C.CONNECT_INTRO)).toBeVisible();
   await expect(
     ready.getByText(DATA.workspaces[0]!.name, { exact: true }),
@@ -2193,16 +2302,14 @@ test("the connect panel: Start, progress, counts; it cannot be closed while it r
   await expect(running).toHaveAttribute("aria-busy", "true");
   const status = running.getByRole("status");
   await expect(status).toHaveText(C.connectProgress(40, 90));
-  // While it runs: no closing, by Escape, by Close or by either opener.
+  // While it runs: no closing, by Escape, by Close or by a press on the dimmed card.
   await page.keyboard.press("Escape");
   await running
     .getByRole("button", { name: /^Close/ })
     .evaluate((el: HTMLElement) => el.click());
-  for (const opener of [connectButton(page), importButton(page)]) {
-    await expect(opener).toHaveAttribute("aria-disabled", "true");
-    await opener.evaluate((el: HTMLElement) => el.click());
-  }
+  await pressDim(page);
   await expect(running).toBeVisible();
+  await expect(dialog).toBeVisible();
   await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
   expect(await leavingAsks(page)).toBe(true);
   await expect(status).toHaveText(C.connectProgress(80, 90));
@@ -2220,8 +2327,6 @@ test("the connect panel: Start, progress, counts; it cannot be closed while it r
   await expect(done.getByRole("alert")).toHaveCount(0);
   expect(await nameless(page, "vault-connect")).toEqual([]);
   expect(await leavingAsks(page)).toBe(false);
-  for (const opener of [connectButton(page), importButton(page)])
-    await expect(opener).not.toHaveAttribute("aria-disabled", "true");
   const ws = DATA.workspaces[0]!.id;
   expect(await calls(page)).toEqual([
     { name: "connect", args: [ws, null] },
@@ -2229,27 +2334,33 @@ test("the connect panel: Start, progress, counts; it cannot be closed while it r
     { name: "connect", args: [ws, "80"] },
   ]);
 
-  // Close, by the button under the counts, by the one in the corner, and by Escape.
+  // Close, by the button under the counts, by the one in the corner, by Escape, and by a press
+  // on the dimmed card.
   await done.getByRole("button", { name: T.CLOSE, exact: true }).click();
   await expect(done).toHaveCount(0);
-  await expect(connectButton(page)).toBeFocused();
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
-  await connectButton(page).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
+  await expect(addNotes(page)).toHaveAttribute("aria-expanded", "false");
+  await openPanel(page, C.CONNECT);
   await ready.getByRole("button", { name: /^Close:/ }).click();
   await expect(ready).toHaveCount(0);
-  await expect(connectButton(page)).toBeFocused();
-  await connectButton(page).click();
+  await expect(addNotes(page)).toBeFocused();
+  await openPanel(page, C.CONNECT);
   await expect(ready.getByRole("heading", { name: C.CONNECT })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(ready).toHaveCount(0);
-  await expect(connectButton(page)).toBeFocused();
+  await expect(addNotes(page)).toBeFocused();
+  await openPanel(page, C.CONNECT);
+  await pressDim(page);
+  await expect(ready).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
 });
 
 test("Stop ends connecting after the step on its way, with the counts so far", async ({
   page,
 }) => {
   await open(page, "?slow=1");
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await panelNamed(page, C.CONNECT)
     .getByRole("button", { name: C.START, exact: true })
     .click();
@@ -2275,7 +2386,7 @@ test("Stop ends connecting after the step on its way, with the counts so far", a
 
 test("a refused step is tried again from where it was", async ({ page }) => {
   await open(page, "?failconnect=2");
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await panelNamed(page, C.CONNECT)
     .getByRole("button", { name: C.START, exact: true })
     .click();
@@ -2293,7 +2404,7 @@ test("three refused steps in a row stop connecting and say so", async ({
   page,
 }) => {
   await open(page, "?failconnect=all");
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await panelNamed(page, C.CONNECT)
     .getByRole("button", { name: C.START, exact: true })
     .click();
@@ -2307,24 +2418,22 @@ test("three refused steps in a row stop connecting and say so", async ({
   expect(await nameless(page, "vault-connect")).toEqual([]);
 });
 
-test("only one of the two panels is open; an import at work disables both openers", async ({
+test("one dialog at a time: Add notes is behind the dialog while it is open; an import at work stays", async ({
   page,
 }) => {
   await open(page, "?slow=1");
-  await connectButton(page).click();
-  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
-  await importButton(page).click();
+  await openPanel(page, C.CONNECT);
+  await expect(dialogNamed(page, C.CONNECT)).toBeVisible();
+  expect(await addNotes(page).evaluate(covered)).toBe(true);
+  await page.keyboard.press("Escape");
+  expect(await addNotes(page).evaluate(covered)).toBe(false);
+  await openPanel(page, T.IMPORT);
   await expect(panelNamed(page, T.IMPORT)).toBeVisible();
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
-  await expect(importButton(page)).toHaveAttribute("aria-expanded", "true");
-  await connectButton(page).click();
-  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
-  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
-  await expect(importButton(page)).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  expect(await addNotes(page).evaluate(covered)).toBe(true);
 
-  // An import at work: the connect opener does nothing either.
-  await importButton(page).click();
+  // An import at work: neither Escape nor a press on the dimmed card closes it.
   await page
     .getByLabel(T.FOLDER_INPUT)
     .setInputFiles(folder("Thirty", many(30)));
@@ -2333,38 +2442,36 @@ test("only one of the two panels is open; an import at work disables both opener
     .click();
   const running = panelNamed(page, T.RUNNING);
   await expect(running).toBeVisible();
-  for (const opener of [connectButton(page), importButton(page)]) {
-    await expect(opener).toHaveAttribute("aria-disabled", "true");
-    await opener.evaluate((el: HTMLElement) => el.click());
-  }
+  await page.keyboard.press("Escape");
+  await pressDim(page);
   await expect(running).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  expect(await addNotes(page).evaluate(covered)).toBe(true);
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
 });
 
-test("attach is the third opener: only one panel is open, and one at work disables the others", async ({
+test("attach is the menu's third item: each item opens its own dialog, one at a time, and one at work stays", async ({
   page,
 }) => {
   await open(page, "?slow=1");
-  await attachButton(page).click();
-  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
-  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "true");
-  await connectButton(page).click();
-  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
-  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
-  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "false");
-  await attachButton(page).click();
-  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
-  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
-  await importButton(page).click();
-  await expect(panelNamed(page, T.IMPORT)).toBeVisible();
-  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
-  await attachButton(page).click();
-  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
-  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
+  for (const [name, other] of [
+    [A.ATTACH, C.CONNECT],
+    [C.CONNECT, A.ATTACH],
+    [T.IMPORT, A.ATTACH],
+    [A.ATTACH, T.IMPORT],
+  ] as const) {
+    await openPanel(page, name);
+    await expect(dialogNamed(page, name)).toBeVisible();
+    await expect(panelNamed(page, name)).toBeVisible();
+    await expect(panelNamed(page, other)).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(addNotes(page)).toBeFocused();
+  }
 
-  // An import at work: the attach opener does nothing either.
-  await importButton(page).click();
+  // An import at work: nothing closes it, so no other panel can be opened.
+  await openPanel(page, T.IMPORT);
   await page
     .getByLabel(T.FOLDER_INPUT)
     .setInputFiles(folder("Thirty", many(30)));
@@ -2373,11 +2480,10 @@ test("attach is the third opener: only one panel is open, and one at work disabl
     .click();
   const running = panelNamed(page, T.RUNNING);
   await expect(running).toBeVisible();
-  for (const opener of [attachButton(page), connectButton(page)]) {
-    await expect(opener).toHaveAttribute("aria-disabled", "true");
-    await opener.evaluate((el: HTMLElement) => el.click());
-  }
+  await page.keyboard.press("Escape");
+  await pressDim(page);
   await expect(running).toBeVisible();
+  expect(await addNotes(page).evaluate(covered)).toBe(true);
   await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
 });
@@ -2386,7 +2492,7 @@ test("the attach panel at work: it cannot be closed, leaving asks, and it ends b
   page,
 }) => {
   await open(page, "?slow=1");
-  await attachButton(page).click();
+  await openPanel(page, A.ATTACH);
   const ready = panelNamed(page, A.ATTACH);
   await ready.getByRole("button", { name: A.START, exact: true }).click();
   const running = panelNamed(page, A.ATTACHING);
@@ -2398,15 +2504,9 @@ test("the attach panel at work: it cannot be closed, leaving asks, and it ends b
   await running
     .getByRole("button", { name: /^Close/ })
     .evaluate((el: HTMLElement) => el.click());
-  for (const opener of [
-    attachButton(page),
-    connectButton(page),
-    importButton(page),
-  ]) {
-    await expect(opener).toHaveAttribute("aria-disabled", "true");
-    await opener.evaluate((el: HTMLElement) => el.click());
-  }
+  await pressDim(page);
   await expect(running).toBeVisible();
+  await expect(dialogNamed(page, A.ATTACH)).toBeVisible();
   await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
   expect(await leavingAsks(page)).toBe(true);
@@ -2428,17 +2528,15 @@ test("the attach panel at work: it cannot be closed, leaving asks, and it ends b
   await expect(done.getByRole("alert")).toHaveCount(0);
   expect((await attachCalls(page)).length).toBe(3);
   expect(await leavingAsks(page)).toBe(false);
-  for (const opener of [
-    attachButton(page),
-    connectButton(page),
-    importButton(page),
-  ])
-    await expect(opener).not.toHaveAttribute("aria-disabled", "true");
+  // Its work over, a press on the dimmed card closes it.
+  await pressDim(page);
+  await expect(done).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
 });
 
 test("Stop in the attach panel keeps the counts so far", async ({ page }) => {
   await open(page, "?slow=1");
-  await attachButton(page).click();
+  await openPanel(page, A.ATTACH);
   await panelNamed(page, A.ATTACH)
     .getByRole("button", { name: A.START, exact: true })
     .click();
@@ -2500,30 +2598,34 @@ test("opening another workspace closes a connect panel that is not running", asy
   page,
 }) => {
   await open(page);
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await expect(panelNamed(page, C.CONNECT)).toBeVisible();
+  // The dialog covers the tabs; the address can still change, as by Back.
   await page
     .getByRole("navigation", { name: "Workspaces" })
     .getByRole("link", { name: "Operations" })
-    .click();
+    .evaluate((el: HTMLElement) => el.click());
   await expect(page).toHaveURL(/\?ws=/);
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await expect(
     panelNamed(page, C.CONNECT).getByText("Operations", { exact: true }),
   ).toBeVisible();
 });
 
-test("at 390 px both openers and the connect panel stay inside the window", async ({
+test("at 390 px Add notes, its menu and the connect dialog stay inside the window", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await open(page);
-  for (const opener of [importButton(page), connectButton(page)]) {
-    await opener.scrollIntoViewIfNeeded();
-    expect(await opener.evaluate(inView)).toBe(true);
-  }
-  await connectButton(page).click();
+  await addNotes(page).scrollIntoViewIfNeeded();
+  expect(await addNotes(page).evaluate(inView)).toBe(true);
+  await addNotes(page).click();
+  const menu = page.getByRole("group", { name: ADD_NOTES });
+  const inside = (await menu.boundingBox())!;
+  expect(inside.x).toBeGreaterThanOrEqual(0);
+  expect(inside.x + inside.width).toBeLessThanOrEqual(390);
+  await menu.getByRole("button", { name: C.CONNECT, exact: true }).click();
   const ready = panelNamed(page, C.CONNECT);
   const start = ready.getByRole("button", { name: C.START, exact: true });
   await start.scrollIntoViewIfNeeded();
@@ -2536,8 +2638,6 @@ test("at 390 px both openers and the connect panel stay inside the window", asyn
 
 // ---- Attach topics ----
 
-const attachButton = (page: Page) =>
-  page.getByRole("button", { name: A.ATTACH, exact: true });
 const attachCalls = async (page: Page) =>
   ((await calls(page)) as { name: string; args: unknown[] }[])
     .filter((c) => c.name === "attach")
@@ -2603,8 +2703,8 @@ test("Attach topics on one's own workspace: one sentence, Start, progress, then 
   page,
 }) => {
   await open(page);
-  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "false");
-  await attachButton(page).click();
+  await expect(addNotes(page)).toHaveAttribute("aria-expanded", "false");
+  await openPanel(page, A.ATTACH);
   const panel = panelNamed(page, A.ATTACH);
   await expect(panel.getByRole("heading", { name: A.ATTACH })).toBeFocused();
   await expect(panel.getByText(A.ATTACH_INTRO)).toBeVisible();
@@ -2616,10 +2716,14 @@ test("Attach topics on one's own workspace: one sentence, Start, progress, then 
     done.getByText("Attached to a topic 54", { exact: true }),
   ).toBeVisible();
   await done.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(attachButton(page)).toBeFocused();
-  // Not on "Shared with me".
+  await expect(addNotes(page)).toBeFocused();
+  // Not on "Shared with me": there is no Add notes there.
   await page.getByRole("link", { name: "Shared with me" }).click();
-  await expect(attachButton(page)).toHaveCount(0);
+  await expect(page).toHaveURL(/tab=shared/);
+  await expect(addNotes(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: A.ATTACH, exact: true }),
+  ).toHaveCount(0);
 });
 
 // ---- Topics: browsing by topic, and a note's topics ----

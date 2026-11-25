@@ -4,6 +4,9 @@ import type { AttachTally } from "./attachRun";
 import { num } from "./importText";
 
 export const ATTACH = "Attach topics";
+/** Its line in the Add notes menu. */
+export const ATTACH_LINE =
+  "Put each note here under the hive's topics it names.";
 export const ATTACH_INTRO =
   "Puts each of your notes in this workspace under the hive's topics it belongs to, by its folder, tags, title and text. Only your own notes are attached.";
 export const START = "Attach";
