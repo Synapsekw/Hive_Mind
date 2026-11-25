@@ -3,7 +3,8 @@
 // database's `respond_to_link` decides whether the link is theirs to answer. Only an error's
 // code and message are logged. Releasing a held note is the vault's `releaseIn`.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Result } from "../../inbox/types";
+import { openingOf } from "../../inbox/text";
+import type { Opening, Result } from "../../inbox/types";
 import { isUuid } from "../vault/validate";
 
 type Db = Pick<SupabaseClient, "rpc" | "auth">;
@@ -29,4 +30,32 @@ export async function respondIn(
     return NO;
   }
   return YES;
+}
+
+/**
+ * A note's opening lines, for the inbox's detail pane: one primary-key read of `body`, cut to
+ * 280 characters before it leaves the server. Row-level security decides whether the person may
+ * read it; an unreadable row answers `{ ok: false }`. Only the error's code is logged.
+ */
+export async function openingIn(
+  db: Pick<SupabaseClient, "from">,
+  id: unknown,
+): Promise<Opening> {
+  if (!isUuid(id)) return { ok: false };
+  const res = (await db
+    .from("notes")
+    .select("body")
+    .eq("id", id)
+    .limit(1)) as unknown as {
+    data: { body?: unknown }[] | null;
+    error: { code?: string } | null;
+  };
+  if (res.error) {
+    console.error("note opening failed", res.error.code);
+    return { ok: false };
+  }
+  const body = res.data?.[0]?.body;
+  return typeof body === "string"
+    ? { ok: true, text: openingOf(body) }
+    : { ok: false };
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { respondIn } from "./write";
+import { openingIn, respondIn } from "./write";
 
 const LINK = "00000000-0000-4000-8000-000000020001";
 
@@ -104,5 +104,54 @@ describe("respondIn", () => {
       "link not found",
     );
     expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+});
+
+function readStub(res: { data: unknown; error: Err | null }) {
+  const limit = vi.fn(async () => res);
+  const eq = vi.fn(() => ({ limit }));
+  const select = vi.fn(() => ({ eq }));
+  const from = vi.fn(() => ({ select }));
+  return { db: { from } as never, from, select, eq, limit };
+}
+
+const NOTE = "00000000-0000-4000-8000-00000000b001";
+
+describe("openingIn", () => {
+  it.each([
+    ["a word", "x"],
+    ["empty", ""],
+    ["a number", 3],
+    ["null", null],
+    ["a filter", `${NOTE},id.neq.x`],
+  ])("refuses an id that is %s with no query", async (_n, id) => {
+    const t = readStub({ data: [], error: null });
+    expect(await openingIn(t.db, id)).toEqual({ ok: false });
+    expect(t.from).not.toHaveBeenCalled();
+  });
+  it("reads one row's body by id and answers its opening", async () => {
+    const t = readStub({ data: [{ body: "# T\nHello there." }], error: null });
+    expect(await openingIn(t.db, NOTE)).toEqual({
+      ok: true,
+      text: "Hello there.",
+    });
+    expect(t.from).toHaveBeenCalledWith("notes");
+    expect(t.select).toHaveBeenCalledWith("body");
+    expect(t.eq).toHaveBeenCalledWith("id", NOTE);
+    expect(t.limit).toHaveBeenCalledWith(1);
+  });
+  it("answers not ok when the row is not readable or the query fails", async () => {
+    expect(
+      await openingIn(readStub({ data: [], error: null }).db, NOTE),
+    ).toEqual({ ok: false });
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      await openingIn(
+        readStub({ data: null, error: { code: "42501", message: "denied" } })
+          .db,
+        NOTE,
+      ),
+    ).toEqual({ ok: false });
+    expect(err).toHaveBeenCalledWith("note opening failed", "42501");
   });
 });
