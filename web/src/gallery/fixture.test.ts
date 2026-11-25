@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { fixtureGallery, fixtureMore } from "./fixture";
+import {
+  ARCHIVE_SIZE,
+  fixtureArchive,
+  fixtureGallery,
+  fixtureMore,
+} from "./fixture";
 import { fileKind, PDF_VIEW_MAX, THUMB_MAX } from "./kind";
 import type { GalleryFile, Kind } from "./types";
 
@@ -148,5 +153,27 @@ describe("fixtureMore", () => {
         expect(f.kind).toBe("image");
       }
     }
+  });
+});
+
+describe("fixtureArchive", () => {
+  const archive = fixtureArchive(NOW);
+  const rest = [...fixtureGallery(NOW).files, ...fixtureMore(NOW).files];
+
+  it("holds more than a page of PDFs, older than every other file, with unique uuids", () => {
+    expect(archive).toHaveLength(ARCHIVE_SIZE);
+    expect(ARCHIVE_SIZE).toBeGreaterThan(200);
+    expect(new Set(archive.map((f) => f.id)).size).toBe(ARCHIVE_SIZE);
+    for (const f of archive) {
+      expect(f.id).toMatch(UUID);
+      expect(f.kind).toBe(fileKind(f.name, "application/pdf"));
+    }
+    const oldest = Math.min(...rest.map(time));
+    for (let i = 0; i < archive.length; i++) {
+      expect(time(archive[i]!)).toBeLessThan(oldest);
+      if (i) expect(time(archive[i]!)).toBeLessThan(time(archive[i - 1]!));
+    }
+    const ids = new Set(rest.map((f) => f.id));
+    expect(archive.some((f) => ids.has(f.id))).toBe(false);
   });
 });

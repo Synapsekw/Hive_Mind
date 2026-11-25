@@ -1,6 +1,10 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type Request } from "@playwright/test";
-import { fixtureGallery, fixtureMore } from "../src/gallery/fixture";
+import {
+  fixtureArchive,
+  fixtureGallery,
+  fixtureMore,
+} from "../src/gallery/fixture";
 import {
   applyFilters,
   DEFAULT_FILTERS,
@@ -371,10 +375,7 @@ test("with more files on the server, a chip asks the server once after a pause",
   expect(asked).toEqual([
     {
       name: "loadPage",
-      args: [
-        toServerFilter({ ...DEFAULT_FILTERS, kinds: ["pdf"] }, NOW, null),
-        null,
-      ],
+      args: [toServerFilter({ ...DEFAULT_FILTERS, kinds: ["pdf"] }, NOW), null],
     },
   ]);
   // The name filter is applied in the page: no new call.
@@ -382,7 +383,7 @@ test("with more files on the server, a chip asks the server once after a pause",
   await expect(cards(page)).toHaveCount(1);
   await page.waitForTimeout(400);
   expect(await calls(page, "loadPage")).toHaveLength(1);
-  // No Load more while a server filter is on.
+  // The server's answer was complete: no Load more for it.
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 });
 
@@ -401,7 +402,7 @@ test("Load more appends the older files and then goes away", async ({
   expect(await calls(page, "loadPage")).toEqual([
     {
       name: "loadPage",
-      args: [toServerFilter(DEFAULT_FILTERS, NOW, null), DATA.next],
+      args: [toServerFilter(DEFAULT_FILTERS, NOW), DATA.next],
     },
   ]);
 });
@@ -915,7 +916,7 @@ test("a file stored but not recorded is recorded again on Retry, without a secon
   expect(await calls(page, "finishUpload")).toHaveLength(2);
 });
 
-test("with older files on the server, a folder asks for all of its files by id", async ({
+test("with older files on the server, a folder asks the server for that folder", async ({
   page,
 }) => {
   await open(page, "?more=1");
@@ -930,13 +931,144 @@ test("with older files on the server, a folder asks for all of its files by id",
     {
       name: "loadPage",
       args: [
-        toServerFilter({ ...DEFAULT_FILTERS, folder: HARBOUR.id }, NOW, [
-          older.id,
-        ]),
+        toServerFilter({ ...DEFAULT_FILTERS, folder: HARBOUR.id }, NOW),
         null,
       ],
     },
   ]);
+});
+
+// ?many=1: the server also holds 250 older PDFs of Ahmed's ChatGPT, in Inspiration.
+const ARCHIVE = fixtureArchive(NOW);
+const SERVER = [...DATA.files, ...MORE.files, ...ARCHIVE];
+const pdfs = SERVER.filter((f) => f.kind === "pdf")
+  .map((f) => f.id)
+  .sort()
+  .reverse();
+const after200 = (ids: GalleryFile[]) => {
+  const sorted = [...ids].sort(
+    (a, b) =>
+      b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
+  );
+  const last = sorted[199]!;
+  return { created_at: last.created_at, id: last.id };
+};
+
+test("a filtered answer of more than 200 files pages with Load more", async ({
+  page,
+}) => {
+  await open(page, "?more=1&many=1");
+  await view(page, "Grid").click();
+  await chip(page, "Type").click();
+  await page
+    .getByRole("group", { name: "Type" })
+    .getByRole("checkbox", { name: "PDF" })
+    .check();
+  await page.keyboard.press("Escape");
+  const filter = toServerFilter({ ...DEFAULT_FILTERS, kinds: ["pdf"] }, NOW);
+  await expect(cards(page)).toHaveCount(200);
+  const more = page.getByRole("button", { name: "Load more" });
+  await expect(more).toBeVisible();
+  await more.click();
+  await expect(cards(page)).toHaveCount(pdfs.length);
+  await expect(more).toHaveCount(0);
+  expect((await shownIds(page)).slice().sort().reverse()).toEqual(pdfs);
+  const all = SERVER.filter((f) => f.kind === "pdf");
+  expect(await calls(page, "loadPage")).toEqual([
+    { name: "loadPage", args: [filter, null] },
+    { name: "loadPage", args: [filter, after200(all)] },
+  ]);
+  // Clearing the chip goes back to the loaded list and its own Load more.
+  await page
+    .getByRole("group", { name: "Filters" })
+    .getByRole("button", { name: "Clear Type" })
+    .click();
+  await expect(cards(page)).toHaveCount(COUNTS.all);
+  await expect(more).toBeVisible();
+});
+
+test("the Agent chip and a large folder ask the server, and both page", async ({
+  page,
+}) => {
+  await open(page, "?more=1&many=1");
+  await view(page, "Grid").click();
+  await folder(page, "Inspiration").click();
+  const inspiration = SERVER.filter((f) => f.folders.includes(INSPIRATION.id));
+  await expect(cards(page)).toHaveCount(200);
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(cards(page)).toHaveCount(inspiration.length);
+  await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+  const byFolder = toServerFilter(
+    { ...DEFAULT_FILTERS, folder: INSPIRATION.id },
+    NOW,
+  );
+  expect(await calls(page, "loadPage")).toEqual([
+    { name: "loadPage", args: [byFolder, null] },
+    { name: "loadPage", args: [byFolder, after200(inspiration)] },
+  ]);
+});
+
+test("an agent filter carries the agent to the server", async ({ page }) => {
+  await open(page, "?more=1&many=1&agent=Ahmed%27s%20ChatGPT&view=grid");
+  const mine = SERVER.filter((f) => f.session_id === ARCHIVE[0]!.session_id);
+  await expect(cards(page)).toHaveCount(200);
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(cards(page)).toHaveCount(mine.length);
+  const asked = await calls(page, "loadPage");
+  expect(asked[0]).toEqual({
+    name: "loadPage",
+    args: [
+      toServerFilter({ ...DEFAULT_FILTERS, agent: "Ahmed's ChatGPT" }, NOW),
+      null,
+    ],
+  });
+});
+
+test("a file uploaded under a server filter shows when it matches", async ({
+  page,
+}) => {
+  await open(page, "?more=1&kinds=pdf&view=grid");
+  await expect(
+    main(page).getByRole("button", { name: /^Quarterly report Q3\.pdf/ }),
+  ).toBeVisible();
+  const before = await cards(page).count();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog.getByLabel("Choose files").setInputFiles([
+    { name: "fresh.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(8) },
+    { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hi") },
+  ]);
+  await dialog.getByRole("button", { name: "Upload 2 files" }).click();
+  await expect
+    .poll(async () => (await calls(page, "endUpload")).length)
+    .toBe(1);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  // The PDF matches the Type filter; the text file does not.
+  await expect(cards(page)).toHaveCount(before + 1);
+  await expect(
+    main(page).getByRole("button", { name: /^fresh\.pdf/ }),
+  ).toBeVisible();
+});
+
+test("clearing a server filter drops its answer and its error", async ({
+  page,
+}) => {
+  const banner = page.getByText("Couldn't search the older files");
+  const clearType = page
+    .getByRole("group", { name: "Filters" })
+    .getByRole("button", { name: "Clear Type" });
+  // A refused answer says so; clearing the filter clears the message.
+  await open(page, "?more=1&fail=1&kinds=pdf");
+  await expect(banner).toBeVisible();
+  await clearType.click();
+  await expect(banner).toHaveCount(0);
+  // An answer still on its way when the filter is cleared is not applied.
+  await open(page, "?more=1&fail=1&slowpage=1&kinds=pdf");
+  await expect.poll(async () => (await calls(page, "loadPage")).length).toBe(1);
+  await clearType.click();
+  await page.waitForTimeout(1800);
+  await expect(banner).toHaveCount(0);
+  await expect(cards(page)).toHaveCount(COUNTS.all);
 });
 
 test("files dropped from the computer open the upload dialog with them", async ({

@@ -79,9 +79,10 @@ describe("cleanServerFilter", () => {
     kinds: [],
     session: null,
     owner: null,
+    agent: null,
+    folder: null,
     from: null,
     to: null,
-    ids: null,
   };
 
   it("accepts the empty filter and returns a fresh object with only the known keys", () => {
@@ -96,18 +97,33 @@ describe("cleanServerFilter", () => {
         kinds: ["pdf", "slides", "pdf"],
         session: S,
         owner: ID,
+        agent: "Mac Claude",
+        folder: S,
         from: "2026-11-01T00:00:00Z",
         to: "2026-11-02T00:00:00.000Z",
-        ids: [ID, ID, S],
       }),
     ).toEqual({
       kinds: ["pdf", "slides"],
       session: S,
       owner: ID,
+      agent: "Mac Claude",
+      folder: S,
       from: "2026-11-01T00:00:00.000Z",
       to: "2026-11-02T00:00:00.000Z",
-      ids: [ID, S],
     });
+  });
+
+  it("keeps an agent name of 1 to 80 characters as given, commas and brackets included", () => {
+    expect(
+      cleanServerFilter({ ...base, agent: "Claude (work), v2" })?.agent,
+    ).toBe("Claude (work), v2");
+    expect(cleanServerFilter({ ...base, agent: "a".repeat(80) })?.agent).toBe(
+      "a".repeat(80),
+    );
+  });
+
+  it("drops a key it does not know, such as the old id list", () => {
+    expect(cleanServerFilter({ ...base, ids: [ID] })).toEqual(base);
   });
 
   it("refuses anything malformed", () => {
@@ -127,9 +143,14 @@ describe("cleanServerFilter", () => {
         from: "2026-11-02T00:00:00Z",
         to: "2026-11-01T00:00:00Z",
       },
-      { ...base, ids: ["nope"] },
-      { ...base, ids: Array(201).fill(ID) },
-      { ...base, ids: ID },
+      { ...base, agent: "" },
+      { ...base, agent: "   " },
+      { ...base, agent: "a".repeat(81) },
+      { ...base, agent: 7 },
+      { ...base, agent: ["Claude"] },
+      { ...base, folder: "f1" },
+      { ...base, folder: 1 },
+      { kinds: [], session: null, owner: null, from: null, to: null },
     ])
       expect(cleanServerFilter(bad)).toBeNull();
   });

@@ -7,7 +7,8 @@
 // Scopes, chips, folders, the view switch and selecting a card are client state over the loaded
 // files: no request. Only when more files exist than are loaded and a server-side filter is on
 // (`needsServer`) is the server asked, once per change after a 250 ms pause; an answer to an
-// earlier change is dropped. Every write goes through `actions`; the database decides what it
+// earlier change, or one arriving after the server filter is gone, is dropped. A server answer
+// pages like the unfiltered list: "Load more" asks for the same filter after its last file. Every write goes through `actions`; the database decides what it
 // may do, and the screen changes only when the server agrees.
 import {
   useEffect,
@@ -38,6 +39,7 @@ import { SessionStream } from "./SessionStream";
 import { Sidebar } from "./Sidebar";
 import { uploadTitle } from "./text";
 import type {
+  Cursor,
   Filters,
   GalleryActions,
   GalleryData,
@@ -128,6 +130,7 @@ export function Gallery({
   const [serverResult, setServerResult] = useState<{
     key: string;
     files: GalleryFile[];
+    next: Cursor | null;
   } | null>(null);
   const [serverError, setServerError] = useState(false);
   const [uploading, setUploading] = useState<File[] | null>(null);
@@ -154,17 +157,16 @@ export function Gallery({
 
   // The server is asked only when the loaded files cannot answer.
   const serverKey = needsServer(filters, next === null)
-    ? JSON.stringify(
-        toServerFilter(
-          filters,
-          now,
-          filters.folder ? [...folderFiles(filters.folder)] : null,
-        ),
-      )
+    ? JSON.stringify(toServerFilter(filters, now))
     : null;
   useEffect(() => {
-    if (serverKey === null) return;
+    // Every change of the server filter, its clearing included, outdates what is on its way.
     const turn = ++asked.current;
+    setMoreError(false);
+    if (serverKey === null) {
+      setServerError(false);
+      return;
+    }
     const timer = setTimeout(async () => {
       let page: Awaited<ReturnType<GalleryActions["loadPage"]>> = null;
       try {
@@ -175,7 +177,7 @@ export function Gallery({
       if (turn !== asked.current) return;
       setServerError(!page);
       if (!page) return;
-      setServerResult({ key: serverKey, files: page.files });
+      setServerResult({ key: serverKey, files: page.files, next: page.next });
       setSessions((m) => withSessions(m, page.sessions));
       setMemberships((m) => withFolders(m, page.files));
     }, PAUSE);
@@ -339,6 +341,8 @@ export function Gallery({
 
   function added(file: GalleryFile, batch: string, note: NoteRef) {
     setFiles((list) => merge([file], list));
+    // Shown under a server filter too, when it matches (applyFilters decides, as for any file).
+    setServerResult((r) => (r ? { ...r, files: merge([file], r.files) } : r));
     setMemberships((m) => withFolders(m, [file]));
     setSessions((m) =>
       m.has(batch)
@@ -372,10 +376,7 @@ export function Gallery({
     setMoreError(false);
     let page: Awaited<ReturnType<GalleryActions["loadPage"]>> = null;
     try {
-      page = await actions.loadPage(
-        toServerFilter(DEFAULT_FILTERS, now, null),
-        next,
-      );
+      page = await actions.loadPage(toServerFilter(DEFAULT_FILTERS, now), next);
     } catch {
       page = null;
     }
@@ -386,6 +387,35 @@ export function Gallery({
     setSessions((m) => withSessions(m, page.sessions));
     setMemberships((m) => withFolders(m, fresh));
     setNext(page.next);
+  }
+
+  /** The next page of the server's answer, for the same filter. */
+  async function moreFiltered() {
+    const key = serverKey;
+    const after = serverResult?.key === key ? serverResult.next : null;
+    if (key === null || !after || loading) return;
+    const turn = asked.current;
+    setLoading(true);
+    setMoreError(false);
+    let page: Awaited<ReturnType<GalleryActions["loadPage"]>> = null;
+    try {
+      page = await actions.loadPage(JSON.parse(key), after);
+    } catch {
+      page = null;
+    }
+    setLoading(false);
+    // The filter changed or was cleared while this was on its way.
+    if (turn !== asked.current) return;
+    if (!page) return setMoreError(true);
+    const fresh = page.files;
+    const cursor = page.next;
+    setServerResult((r) =>
+      r && r.key === key
+        ? { key, files: merge(r.files, fresh), next: cursor }
+        : r,
+    );
+    setSessions((m) => withSessions(m, page.sessions));
+    setMemberships((m) => withFolders(m, fresh));
   }
 
   function open(id: string) {
@@ -438,6 +468,14 @@ export function Gallery({
         </button>
       </>
     );
+
+  // Where "Load more" continues: the unfiltered list, or the server's answer to this filter.
+  const moreAfter =
+    serverKey === null
+      ? next
+      : serverResult?.key === serverKey
+        ? serverResult.next
+        : null;
 
   const viewed = slide !== -1 ? slides[slide]! : null;
   const sessionOf = (f: GalleryFile) =>
@@ -552,19 +590,19 @@ export function Gallery({
                   {inOrder.map(card)}
                 </ul>
               )}
-              {serverKey === null && (next || moreError) && (
+              {(moreAfter || moreError) && (
                 <div className={s.foot}>
                   {moreError && (
                     <p role="alert" className={s.refused}>
                       Couldn&apos;t load more files.
                     </p>
                   )}
-                  {next && (
+                  {moreAfter && (
                     <button
                       type="button"
                       className={s.secondary}
                       aria-busy={loading || undefined}
-                      onClick={more}
+                      onClick={serverKey === null ? more : moreFiltered}
                     >
                       {loading ? "Loading…" : "Load more"}
                     </button>

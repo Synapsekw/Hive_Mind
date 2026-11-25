@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PDF_THUMB_MAX, THUMB_MAX } from "../../gallery/kind";
-import { loadGallery, loadPage, NO_FILTER } from "./load-gallery";
+import { FILE_COLUMNS, loadGallery, loadPage, NO_FILTER } from "./load-gallery";
 
 const HIVE = "00000000-0000-4000-8000-000000000a01";
 const ME = "00000000-0000-4000-8000-000000000001";
@@ -968,9 +968,10 @@ describe("loadPage: server filters", () => {
         kinds: ["pdf", "slides"],
         session: S1,
         owner: AHMED,
+        agent: null,
+        folder: null,
         from: "2026-11-01T00:00:00.000Z",
         to: "2026-11-02T00:00:00.000Z",
-        ids: [fid(1), fid(2)],
       },
       null,
     );
@@ -989,80 +990,88 @@ describe("loadPage: server filters", () => {
       "created_at",
       "2026-11-02T00:00:00.000Z",
     ]);
-    expect(ops).toContainEqual(["in", "id", [fid(1), fid(2)]]);
     expect(ops).toContainEqual(["eq", "hive_id", HIVE]);
     expect(args(q!, "limit")).toEqual([201]);
     expect(op(q!, "or")).toHaveLength(0);
+    // No embedded filter without an agent or a folder.
+    expect(args(q!, "select")).toEqual([FILE_COLUMNS]);
   });
 
-  it("asks for 120 ids in three requests of at most 50, merged newest first", async () => {
-    const ids = Array.from({ length: 120 }, (_, i) => fid(i + 1));
-    // Each request answers its own ids' rows, in its own (newest-first) order.
-    const t = stub((c) => {
-      if (c.table !== "files") return world()(c);
-      const asked = (args(c, "in") as [string, string[]] | undefined)?.[1];
-      return ok(
-        (asked ?? [])
-          .map((id) => file(Number(id.slice(-12))))
-          .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
-      );
-    });
+  it("filters by agent through the file's session, in the same one request", async () => {
+    const t = stub(
+      world({
+        files: [
+          file(1, { session_id: S1, sessions: { agent_name: "Claude" } }),
+        ],
+        sessions: [session(S1)],
+      }),
+    );
+    const page = await loadPage(
+      t.db,
+      { ...NO_FILTER, agent: "Claude (work), v2" },
+      null,
+    );
+    const reads = table(t, "files");
+    expect(reads).toHaveLength(1);
+    expect(args(reads[0]!, "select")).toEqual([
+      `${FILE_COLUMNS},sessions!inner(agent_name)`,
+    ]);
+    // A parameter, never written into a filter string.
+    expect(reads[0]!.ops.map(([m, a]) => [m, ...a])).toContainEqual([
+      "eq",
+      "sessions.agent_name",
+      "Claude (work), v2",
+    ]);
+    expect(op(reads[0]!, "or")).toHaveLength(0);
+    expect(page!.files.map((f) => f.id)).toEqual([fid(1)]);
+    // The embedded session goes nowhere: the file is built from named values only.
+    expect(Object.keys(page!.files[0]!)).not.toContain("sessions");
+  });
+
+  it("filters by folder through the caller's memberships, however many files it holds", async () => {
+    const rowsIn = Array.from({ length: 201 }, (_, i) =>
+      file(i + 1, { gallery_folder_files: [{ folder_id: F2 }] }),
+    );
+    const t = stub(world({ files: rowsIn }));
     const cursor = {
       created_at: "2026-11-21T00:00:00.000000+00:00",
       id: fid(999),
     };
-    const page = await loadPage(t.db, { ...NO_FILTER, ids }, cursor);
+    const page = await loadPage(t.db, { ...NO_FILTER, folder: F2 }, cursor);
     const reads = table(t, "files");
-    expect(
-      reads.map((q) => (args(q, "in") as [string, string[]])[1].length),
-    ).toEqual([50, 50, 20]);
-    for (const q of reads) {
-      expect(args(q, "limit")).toEqual([201]);
-      expect(op(q, "or")).toHaveLength(1);
-    }
-    // file(n) is newer the smaller n is: the merged page is 1..120 in order, with no next.
-    expect(page!.files.map((f) => f.id)).toEqual(ids);
-    expect(page!.next).toBeNull();
-  });
-
-  it("cuts merged id requests to 200 and points next at the 200th", async () => {
-    // 60 ids are two requests (50 and 10); the stub answers 150 rows to each so the union
-    // holds more than a page, and the merge must keep only its newest 201.
-    const ids = Array.from({ length: 60 }, (_, i) => fid(i + 1));
-    let n = 0;
-    const t = stub((c) => {
-      if (c.table !== "files") return world()(c);
-      n += 1;
-      const start = n === 1 ? 1 : 2;
-      // Interleaved: the first answers odd rows, the second even rows.
-      return ok(Array.from({ length: 150 }, (_, i) => file(start + 2 * i)));
-    });
-    const page = await loadPage(t.db, { ...NO_FILTER, ids }, null);
+    expect(reads).toHaveLength(1);
+    expect(args(reads[0]!, "select")).toEqual([
+      `${FILE_COLUMNS},gallery_folder_files!inner(folder_id)`,
+    ]);
+    expect(reads[0]!.ops.map(([m, a]) => [m, ...a])).toContainEqual([
+      "eq",
+      "gallery_folder_files.folder_id",
+      F2,
+    ]);
+    expect(op(reads[0]!, "in")).toHaveLength(0);
+    expect(op(reads[0]!, "or")).toHaveLength(1);
     expect(page!.files).toHaveLength(200);
-    expect(page!.files.map((f) => f.id)).toEqual(
-      Array.from({ length: 200 }, (_, i) => fid(i + 1)),
-    );
     expect(page!.next).toEqual({
       created_at: file(200).created_at,
       id: fid(200),
     });
+    // Each file is in the folder, even with its membership beyond the 5000 read.
+    expect(page!.files.every((f) => f.folders.includes(F2))).toBe(true);
+    expect(Object.keys(page!.files[0]!)).not.toContain("gallery_folder_files");
   });
 
-  it("an empty id list is one request, and a failed id request fails the page", async () => {
+  it("combines agent and folder, and a failed filtered read fails the page", async () => {
     const t = stub(world({ files: [] }));
-    await loadPage(t.db, { ...NO_FILTER, ids: [] }, null);
-    expect(table(t, "files").map((q) => args(q, "in"))).toEqual([["id", []]]);
+    await loadPage(t.db, { ...NO_FILTER, agent: "Claude", folder: F1 }, null);
+    const [q] = table(t, "files");
+    expect(args(q!, "select")).toEqual([
+      `${FILE_COLUMNS},sessions!inner(agent_name),gallery_folder_files!inner(folder_id)`,
+    ]);
     vi.spyOn(console, "error").mockImplementation(() => {});
-    let n = 0;
-    const failing = stub((c) => {
-      if (c.table !== "files") return world()(c);
-      n += 1;
-      return n === 2
-        ? { data: null, error: { message: "boom", code: "XX000" } }
-        : ok([]);
-    });
-    const ids = Array.from({ length: 60 }, (_, i) => fid(i + 1));
-    expect(await loadPage(failing.db, { ...NO_FILTER, ids }, null)).toBeNull();
+    const failing = stub(world({ fail: "files" }));
+    expect(
+      await loadPage(failing.db, { ...NO_FILTER, folder: F1 }, null),
+    ).toBeNull();
   });
 
   it("adds nothing for an empty filter, and the keyset with a cursor", async () => {

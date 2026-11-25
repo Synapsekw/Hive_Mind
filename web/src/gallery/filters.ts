@@ -201,19 +201,17 @@ export function needsServer(f: Filters, complete: boolean): boolean {
   );
 }
 
-export function toServerFilter(
-  f: Filters,
-  now: number,
-  folderFileIds: string[] | null,
-): ServerFilter {
+/** Every filter `needsServer` counts, as the server applies it (scope and name stay here). */
+export function toServerFilter(f: Filters, now: number): ServerFilter {
   const b = dateBounds(f, now);
   return {
     kinds: f.kinds,
     session: f.session,
     owner: f.owner,
+    agent: f.agent,
+    folder: f.folder,
     from: b ? new Date(b.from).toISOString() : null,
     to: b ? new Date(b.to).toISOString() : null,
-    ids: folderFileIds ? folderFileIds.slice(0, 200) : null,
   };
 }
 

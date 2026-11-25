@@ -73,32 +73,45 @@ function instant(v: unknown): string | null | undefined {
   return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
 }
 
+/** The longest agent name a filter carries (the address keeps 80 characters). */
+const AGENT_MAX = 80;
+
+/**
+ * An agent name, compared as stored (sessions.agent_name), so kept exactly as given: 1 to 80
+ * characters, not blank. It goes to the database as a parameter, never into a filter string.
+ */
+function agentOrNull(v: unknown): string | null | undefined {
+  if (v === null) return null;
+  if (typeof v !== "string" || v.length > AGENT_MAX || v.trim() === "")
+    return undefined;
+  return v;
+}
+
 /** The filters the server applies, rebuilt from their known keys. Null when any is malformed. */
 export function cleanServerFilter(v: unknown): ServerFilter | null {
   if (!isObject(v)) return null;
-  const { kinds, session, owner, from, to, ids } = v;
+  const { kinds, session, owner, agent, folder, from, to } = v;
   if (!Array.isArray(kinds) || kinds.length > KINDS.length * 2) return null;
   if (!kinds.every((k) => (KINDS as readonly unknown[]).includes(k)))
     return null;
   const s = idOrNull(session);
   const o = idOrNull(owner);
+  const a = agentOrNull(agent);
+  const d = idOrNull(folder);
   const f = instant(from);
   const t = instant(to);
   if (s === undefined || o === undefined) return null;
+  if (a === undefined || d === undefined) return null;
   if (f === undefined || t === undefined) return null;
   if (f && t && f >= t) return null;
-  let list: string[] | null = null;
-  if (ids !== null) {
-    list = cleanIds(ids, { empty: true });
-    if (!list) return null;
-  }
   return {
     kinds: [...new Set(kinds as Kind[])],
     session: s,
     owner: o,
+    agent: a,
+    folder: d,
     from: f,
     to: t,
-    ids: list,
   };
 }
 

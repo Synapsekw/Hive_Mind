@@ -64,9 +64,12 @@ export type ServerFilter = {
   kinds: Kind[];
   session: string | null;
   owner: string | null;
+  /** A session's agent name (sessions.agent_name), 1 to 80 characters. */
+  agent: string | null;
+  /** One of the caller's gallery folders: the files it holds, however many. */
+  folder: string | null;
   from: string | null; // ISO instant, inclusive
   to: string | null; // ISO instant, exclusive
-  ids: string[] | null; // at most 200; for a folder's files not loaded yet
 };
 
 export type Cursor = { created_at: string; id: string };

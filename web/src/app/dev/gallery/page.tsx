@@ -12,6 +12,8 @@ import { DevGallery } from "./DevGallery";
 //   ?more=1      older files wait behind "Load more", so server-side filters ask the server
 //   ?slowstart=1 starting an upload takes 1.5 s
 //   ?failfinish=1 the first file an upload records is refused once (its bytes are stored)
+//   ?many=1      with ?more=1: the server also holds 250 older PDFs, so filtered answers page
+//   ?slowpage=1  the server's filtered pages arrive after 1.5 s
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -52,6 +54,8 @@ export default async function DevGalleryPage({
       everyFile={one(q.every) === "1"}
       slowStart={one(q.slowstart) === "1"}
       failFinish={one(q.failfinish) === "1"}
+      many={one(q.many) === "1"}
+      slowPage={one(q.slowpage) === "1"}
     />
   );
 }

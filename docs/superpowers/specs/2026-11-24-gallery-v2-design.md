@@ -230,7 +230,12 @@ fileIds[])`, `removeFromFolder`.
   memberships (owner-only, small), one batched thumbnail signing call.
 - **Tabs, chips, folder selection, view switch, panel:** 0 requests while the result is within
   the loaded set. When a filter needs rows beyond it (older date, a session not loaded), 1
-  `loadPage` call filtered on `kind`, `session_id`, `created_at` — all indexed — bounded at 200.
+  `loadPage` call filtered on `kind`, `session_id`, `member_id`, `created_at` — all indexed — and,
+  for the Agent chip and a folder, an embedded inner join on the file's session
+  (`sessions.agent_name`, by primary key) or the caller's `gallery_folder_files` (by its
+  `(folder_id, file_id)` key); bounded at 200 a page. A filtered answer with more than 200
+  matches shows "Load more", which asks for the same filter after its last file (keyset), so a
+  folder of any size and an agent's files of any number are reachable, 200 at a time.
 - **Writes (server data changes):** folder create/rename/delete, add/remove membership, set home,
   upload, delete. Each is 1 action and updates the loaded list in place; nothing else is re-read.
 - **PDF thumbnails:** rendered in the browser only for cards in view, at most 4 at once, cached

@@ -9,9 +9,16 @@
 //   everyFile every file opens in the viewer (the viewer's tests)
 //   slowStart startUpload answers after 1.5 s
 //   failFinish the first finishUpload answers null, as a refused record after a stored PUT
+//   many      the server also holds the 250-PDF archive, so a filtered answer pages
+//   slowPage  loadPage answers after 1.5 s
+// loadPage answers as the server does: every filter, newest first, 200 a page after the cursor.
 import { useRef } from "react";
 import { applyFilters, DEFAULT_FILTERS } from "../../../gallery/filters";
-import { fixtureGallery, fixtureMore } from "../../../gallery/fixture";
+import {
+  fixtureArchive,
+  fixtureGallery,
+  fixtureMore,
+} from "../../../gallery/fixture";
 import { Gallery } from "../../../gallery/Gallery";
 import { fileKind } from "../../../gallery/kind";
 import { mimeFor } from "../../../gallery/mime";
@@ -84,6 +91,8 @@ export function DevGallery({
   everyFile,
   slowStart,
   failFinish,
+  many,
+  slowPage,
 }: {
   data: GalleryData;
   now: number;
@@ -92,10 +101,13 @@ export function DevGallery({
   everyFile: boolean;
   slowStart: boolean;
   failFinish: boolean;
+  many: boolean;
+  slowPage: boolean;
 }) {
   const everything = (): GalleryFile[] => [
     ...fixtureGallery(now).files,
     ...fixtureMore(now).files,
+    ...(many ? fixtureArchive(now) : []),
   ];
   const find = (id: string): GalleryFile | undefined =>
     everything().find((f) => f.id === id);
@@ -140,30 +152,54 @@ export function DevGallery({
     },
     loadPage: async (filter, cursor) => {
       record("loadPage", [filter, cursor]);
+      if (slowPage) await new Promise((go) => setTimeout(go, 1500));
       if (fail) return null;
-      if (cursor) return fixtureMore(now);
       const sessions = new Map<string, GallerySession>(
         data.sessions.map((s) => [s.id, s]),
       );
-      const ids = filter.ids ? new Set(filter.ids) : null;
       const from = filter.from ? Date.parse(filter.from) : -Infinity;
       const to = filter.to ? Date.parse(filter.to) : Infinity;
-      const files = applyFilters(
+      const all = applyFilters(
         everything(),
         {
           ...DEFAULT_FILTERS,
           kinds: filter.kinds,
           session: filter.session,
           owner: filter.owner,
+          agent: filter.agent,
         },
         sessions,
         () => new Set(),
         now,
-      ).filter((f) => {
-        const t = Date.parse(f.created_at);
-        return t >= from && t < to && (!ids || ids.has(f.id));
-      });
-      return { files, sessions: [], next: null };
+      )
+        .filter((f) => {
+          const t = Date.parse(f.created_at);
+          return (
+            t >= from &&
+            t < to &&
+            (!filter.folder || f.folders.includes(filter.folder))
+          );
+        })
+        .sort(
+          (a, b) =>
+            b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
+        )
+        .filter(
+          (f) =>
+            !cursor ||
+            f.created_at < cursor.created_at ||
+            (f.created_at === cursor.created_at && f.id < cursor.id),
+        );
+      const files = all.slice(0, 200);
+      const last = files[files.length - 1];
+      return {
+        files,
+        sessions: [],
+        next:
+          all.length > 200 && last
+            ? { created_at: last.created_at, id: last.id }
+            : null,
+      };
     },
     setHome: async (fileId, noteId) => {
       record("setHome", [fileId, noteId]);

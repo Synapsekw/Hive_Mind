@@ -94,7 +94,7 @@ describe("range validation", () => {
   ])("falls back to any for %s", (q) => {
     const x = fromQuery(new URLSearchParams(q));
     expect(x).toEqual(DEFAULT_FILTERS);
-    expect(() => toServerFilter(x, NOW, null)).not.toThrow();
+    expect(() => toServerFilter(x, NOW)).not.toThrow();
   });
 });
 
@@ -176,17 +176,39 @@ describe("needsServer", () => {
 });
 
 describe("toServerFilter", () => {
-  it("turns presets into instants and passes a folder's ids", () => {
-    const s = toServerFilter(with_({ date: "today", kinds: ["pdf"] }), NOW, [
-      "id1",
-    ]);
+  it("turns presets into instants and passes the agent and the folder", () => {
+    const s = toServerFilter(
+      with_({
+        date: "today",
+        kinds: ["pdf"],
+        agent: "Mac Claude",
+        folder: "fold",
+      }),
+      NOW,
+    );
     expect(s).toEqual({
       kinds: ["pdf"],
       session: null,
       owner: null,
+      agent: "Mac Claude",
+      folder: "fold",
       from: "2026-11-24T00:00:00.000Z",
       to: "2026-11-25T00:00:00.000Z",
-      ids: ["id1"],
+    });
+  });
+
+  it("asks the server for every filter needsServer counts, the agent included", () => {
+    const s = toServerFilter(with_({ agent: "Codex" }), NOW);
+    expect(needsServer(with_({ agent: "Codex" }), false)).toBe(true);
+    expect(s.agent).toBe("Codex");
+    expect(toServerFilter(DEFAULT_FILTERS, NOW)).toEqual({
+      kinds: [],
+      session: null,
+      owner: null,
+      agent: null,
+      folder: null,
+      from: null,
+      to: null,
     });
   });
 });

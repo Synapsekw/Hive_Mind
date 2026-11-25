@@ -393,3 +393,30 @@ export function fixtureGallery(now: number): GalleryData {
 export function fixtureMore(now: number): GalleryPage {
   return { files: build(MORE, now, FIRST.length), sessions: [], next: null };
 }
+
+/** How many files the archive holds: more than one page of a server-filtered answer. */
+export const ARCHIVE_SIZE = 250;
+
+/**
+ * The archive behind `?many=1` on the dev page: 250 PDFs older than everything else, all from
+ * Ahmed's session 3 ("Ahmed's ChatGPT") and in the Inspiration folder, so a Type, Agent or folder
+ * filter matches more than the 200 a page holds. Only the server side of the dev page has them.
+ */
+export function fixtureArchive(now: number): GalleryFile[] {
+  return Array.from({ length: ARCHIVE_SIZE }, (_, i) => ({
+    id: `00000000-0000-4000-8000-00000000a${String(i + 1).padStart(3, "0")}`,
+    name: `Archive ${String(i + 1).padStart(3, "0")}.pdf`,
+    kind: "pdf" as const,
+    size: 120 * KB,
+    created_at: new Date(now - (10_000 + i) * HOUR).toISOString(),
+    owner: OWNERS.ahmed,
+    owner_id: MEMBER_ID.ahmed,
+    mine: false,
+    note: null,
+    sharing: "shared-with-me" as const,
+    thumb: null,
+    session_id: SESSION_ID(3),
+    refs: [],
+    folders: [FOLDER_ID(3)],
+  }));
+}
