@@ -166,8 +166,8 @@ its files with `note_id` null — owner-only.
      A later write with the same key opens a new session. The tool description asks agents to call
      it when a piece of work is finished.
 - **Idle sweep:** `pg_cron` every 15 minutes closes sessions idle ≥ 2 h with the same steps; title
-  = the most frequent `<type>/<customer>` of its files, else `Session · <agent> · <date>`; summary
-  "Closed automatically."
+  is always the neutral `Session · <agent> · <date>` (never a storage folder: `<customer>` would
+  land in a note whose sharing is inherited); summary "Closed automatically."
 - **`hive_save_file`** gains `references: string[]` (note paths in the agent's workspace) and
   returns the session id and title.
 - **`hive_read` / `hive_search`** list a note's files (id, name, kind, size, session title)

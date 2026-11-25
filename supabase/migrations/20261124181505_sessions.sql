@@ -70,14 +70,13 @@ $$;
 
 -- ------------------------------------------------------------ closing
 
+-- Always neutral: the agent and the day. Never derived from what the session
+-- produced (a storage folder names a customer), since the session note's sharing
+-- is inherited. A title given to session_end is used instead.
 create function public._session_title(s public.sessions) returns text
 language sql stable security definer set search_path = '' as $$
-  select coalesce(
-    (select split_part(f.storage_path, '/', 4) || ' / ' || split_part(f.storage_path, '/', 5)
-       from public.files f
-      where f.session_id = s.id and split_part(f.storage_path, '/', 3) = 'outputs'
-      group by 1 order by count(*) desc, 1 limit 1),
-    'Session · ' || s.agent_name || ' · ' || to_char(s.started_at at time zone 'UTC', 'YYYY-MM-DD'))
+  select 'Session · ' || s.agent_name || ' · '
+    || to_char(s.started_at at time zone 'UTC', 'YYYY-MM-DD')
 $$;
 
 -- Closes one open session: writes its note, homes its homeless files. Returns
@@ -138,6 +137,26 @@ begin
 end
 $$;
 
+-- Opens the agent's session for a key, or joins the one already open: two first
+-- writes of one key can run at once, and the one whose insert comes second gets
+-- the first one's session (sessions_open_key) instead of a unique violation.
+-- Internal.
+create function public._open_agent_session(p_agent uuid, p_key text) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_id uuid;
+begin
+  insert into public.sessions (hive_id, member_id, workspace_id, agent_id, agent_name, client_key)
+  select w.hive_id, a.member_id, a.workspace_id, a.id, a.name, p_key
+    from public.agents a join public.workspaces w on w.id = a.workspace_id
+   where a.id = p_agent
+  on conflict (member_id, client_key) where ended_at is null
+  do update set last_active_at = now()
+  returning id into v_id;
+  return v_id;
+end
+$$;
+
 -- The calling agent's open session for this request's key, opened or bumped.
 -- An open session idle for two hours is closed first. Internal.
 create function public._agent_session() returns uuid
@@ -146,7 +165,6 @@ declare
   a public.agents;
   k text;
   s public.sessions;
-  v_id uuid;
 begin
   select * into a from public.agents where id = public.jwt_agent_id();
   if not found then return null; end if;
@@ -160,11 +178,9 @@ begin
     update public.sessions set last_active_at = now() where id = s.id;
     return s.id;
   end if;
-  insert into public.sessions (hive_id, member_id, workspace_id, agent_id, agent_name, client_key)
-  select w.hive_id, a.member_id, a.workspace_id, a.id, a.name, k
-    from public.workspaces w where w.id = a.workspace_id
-  returning id into v_id;
-  return v_id;
+  -- No open session (or it was just closed): open one. A concurrent first write
+  -- of the same key may have opened it since the select; the upsert joins it.
+  return public._open_agent_session(a.id, k);
 end
 $$;
 
@@ -349,6 +365,7 @@ $$;
 revoke all on function public._session_title(public.sessions) from public, anon, authenticated;
 revoke all on function public._close_session(uuid, text, text) from public, anon, authenticated;
 revoke all on function public._agent_session() from public, anon, authenticated;
+revoke all on function public._open_agent_session(uuid, text) from public, anon, authenticated;
 revoke all on function public.tag_session() from public, anon, authenticated;
 revoke all on function public.request_session_key() from public, anon, authenticated;
 -- TRUNCATE fires no row trigger; the API has no call for it (see hive_deletion).

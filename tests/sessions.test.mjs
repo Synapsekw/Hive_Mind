@@ -231,7 +231,7 @@ test("an idle session is closed by the next write and by the sweep", async () =>
   assert.ok(closed.ended_at);
 });
 
-test("the sweep titles a session after its most frequent output folder", async () => {
+test("the sweep titles a session neutrally, never after a storage folder", async () => {
   const agent = await h.agentFor("dani");
   const f = await h.saveFile(agent, "dani", "s11.pdf", { headers: KEY("p11") });
   await h.db.exec("reset role");
@@ -242,10 +242,54 @@ test("the sweep titles a session after its most frequent output folder", async (
   await h.db.query(`select public.close_idle_sessions()`);
   const [s] = await h.as(
     dani(),
-    `select title from public.sessions where id = $1`,
+    `select s.title, s.started_at, n.title as note_title, n.path
+       from public.sessions s join public.notes n on n.id = s.note_id
+      where s.id = $1`,
     [f.session_id],
   );
-  assert.equal(s.title, "proposal / acme");
+  const day = new Date(s.started_at).toISOString().slice(0, 10);
+  assert.equal(s.title, `Session · Test agent · ${day}`);
+  assert.equal(s.note_title, s.title);
+  // The file sits under outputs/proposal/acme/: no customer folder reaches the note.
+  for (const v of [s.title, s.note_title, s.path])
+    assert.doesNotMatch(v, /acme|proposal/i);
+});
+
+test("opening a session upserts: a second open for the same key joins the first", async () => {
+  // PGlite is one connection, so two writers cannot race for real. This drives the path the
+  // loser of the race takes: its select found no open session, and by its insert the winner's
+  // open row exists. The open must return the winner's session, not fail on sessions_open_key.
+  const agent = await h.agentFor("dani");
+  await h.db.exec("reset role");
+  const open = async () =>
+    (
+      await h.db.query(`select public._open_agent_session($1, $2) as id`, [
+        agent.agent_id,
+        `${agent.agent_id}:race`,
+      ])
+    ).rows[0].id;
+  const first = await open();
+  const second = await open();
+  assert.ok(first);
+  assert.equal(second, first);
+  const rows = (
+    await h.db.query(
+      `select id from public.sessions where client_key = $1 and ended_at is null`,
+      [`${agent.agent_id}:race`],
+    )
+  ).rows;
+  assert.equal(rows.length, 1);
+  // The next write with that key lands in the same session.
+  const n = await h.addNote("dani", "s-race", {
+    as: agent,
+    headers: KEY("race"),
+  });
+  assert.equal(n.session_id, first);
+  // Nobody but the database owner may call it.
+  await assert.rejects(
+    h.as(agent, `select public._open_agent_session($1, 'x')`, [agent.agent_id]),
+    /permission denied/,
+  );
 });
 
 test("nobody but the database owner may run the sweep", async () => {
