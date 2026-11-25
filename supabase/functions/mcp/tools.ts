@@ -124,25 +124,44 @@ export function registerTools(server: McpServer, session: GetSession): void {
           .eq("note_id", data.id)
           .limit(50),
       ]);
-      const list = (files.data ?? []).map((f) => ({
-        id: f.id,
-        name: f.name,
-        kind: f.kind,
-        size_bytes: f.size_bytes,
-        session: (f.sessions as { title?: string } | null)?.title ?? null,
-      }));
-      const referenced = (refs.data ?? [])
-        .map(
-          (r) =>
-            r.files as unknown as {
-              id: string;
-              name: string;
-              kind: string;
-              size_bytes: number;
-            } | null,
-        )
-        .filter((f) => f !== null);
-      return asData({ ...data, files: list, referenced_files: referenced });
+      const list = files.error
+        ? null
+        : (files.data ?? []).map((f) => ({
+            id: f.id,
+            name: f.name,
+            kind: f.kind,
+            size_bytes: f.size_bytes,
+            session: (f.sessions as { title?: string } | null)?.title ?? null,
+          }));
+      const referenced = refs.error
+        ? null
+        : (refs.data ?? [])
+            .map(
+              (r) =>
+                r.files as unknown as {
+                  id: string;
+                  name: string;
+                  kind: string;
+                  size_bytes: number;
+                } | null,
+            )
+            .filter((f) => f !== null);
+      return asData({
+        ...data,
+        files: list,
+        ...(files.error
+          ? {
+              files_unavailable: "The note's files could not be read just now.",
+            }
+          : {}),
+        referenced_files: referenced,
+        ...(refs.error
+          ? {
+              referenced_files_unavailable:
+                "The note's referenced files could not be read just now.",
+            }
+          : {}),
+      });
     },
   );
 
@@ -257,7 +276,7 @@ export function registerTools(server: McpServer, session: GetSession): void {
 
   server.tool(
     "hive_end_session",
-    "Close your working session when a piece of work is finished: give it a short title and a summary of what you did. The hive writes a session note listing the notes and files you produced, and that note becomes the home of the files you saved without a note. Your next write starts a new session.",
+    "Close your working session when a piece of work is finished: give it a short title and a summary of what you did. The hive writes a session note with counts of the notes and files you produced, and that note becomes the home of the files you saved without a note. Your next write starts a new session.",
     {
       title: z.string().min(1).max(120),
       summary: z.string().max(4000),

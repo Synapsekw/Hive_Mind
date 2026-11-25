@@ -88,7 +88,7 @@ const EXPECTED = [
   {
     name: "hive_end_session",
     description:
-      "Close your working session when a piece of work is finished: give it a short title and a summary of what you did. The hive writes a session note listing the notes and files you produced, and that note becomes the home of the files you saved without a note. Your next write starts a new session.",
+      "Close your working session when a piece of work is finished: give it a short title and a summary of what you did. The hive writes a session note with counts of the notes and files you produced, and that note becomes the home of the files you saved without a note. Your next write starts a new session.",
     inputSchema: object(
       {
         title: { type: "string", minLength: 1, maxLength: 120 },
@@ -326,4 +326,25 @@ test("hive_read lists the note's files as data, with no link or storage path", a
   assert.match(text, /<hive-data>/);
   assert.match(text, /deck\.pdf/);
   assert.doesNotMatch(text, /storage_path|signedUrl|https?:\/\//);
+});
+
+test("hive_read keeps the note and marks the file lists unavailable when their queries fail", async () => {
+  const { client } = await connect({
+    notes: { data: { id: "n1", path: "a.md", title: "A" }, error: null },
+    files: { data: null, error: { message: "boom" } },
+    file_references: { data: null, error: { message: "boom" } },
+  });
+  const res = await client.callTool({
+    name: "hive_read",
+    arguments: { path: "a.md" },
+  });
+  assert.notEqual(res.isError, true);
+  const json = JSON.parse(
+    res.content[0].text.split("<hive-data>\n")[1].split("\n</hive-data>")[0],
+  );
+  assert.equal(json.id, "n1");
+  assert.equal(json.files, null);
+  assert.equal(json.referenced_files, null);
+  assert.match(json.files_unavailable, /could not be read/);
+  assert.match(json.referenced_files_unavailable, /could not be read/);
 });
