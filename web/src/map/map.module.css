@@ -149,6 +149,14 @@
   color: var(--fg);
 }
 
+.groupCount {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .groupTick {
   flex: none;
   display: grid;

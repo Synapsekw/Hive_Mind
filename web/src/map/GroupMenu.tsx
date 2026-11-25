@@ -1,22 +1,28 @@
-// "Group by" in the top bar (Rings only): a button that opens a small menu of the five
-// arrangements. Choosing one is client state, no request.
+// A choice in the top bar (Rings only): a button that opens a small menu. "Group by" lists the
+// five arrangements; beside it, under Topic, "Kind" lists the kinds of topic. Choosing is client
+// state, no request.
 import { useId, useRef, useState, type KeyboardEvent } from "react";
-import { ARRANGES, type Arrange } from "./arrange";
 import { useDismiss } from "./useDismiss";
 import s from "./map.module.css";
 
-export function GroupMenu({
-  arrange,
-  onArrange,
+export function GroupMenu<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
 }: {
-  arrange: Arrange;
-  onArrange: (a: Arrange) => void;
+  /** What is chosen here: the button's first words and the menu's name. */
+  label: string;
+  /** Each choice: its value, its name, and optionally a count shown after the name. */
+  options: readonly (readonly [T, string, number?])[];
+  value: T;
+  onChange: (v: T) => void;
 }) {
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const current = ARRANGES.find(([a]) => a === arrange)?.[1] ?? "";
+  const current = options.find(([a]) => a === value)?.[1] ?? "";
 
   useDismiss({
     open,
@@ -45,10 +51,10 @@ export function GroupMenu({
     });
   };
 
-  const choose = (a: Arrange) => {
+  const choose = (a: T) => {
     setOpen(false);
     button.current?.focus();
-    if (a !== arrange) onArrange(a);
+    if (a !== value) onChange(a);
   };
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -77,7 +83,7 @@ export function GroupMenu({
         aria-controls={open ? `${id}-menu` : undefined}
         onClick={() => (open ? setOpen(false) : show())}
       >
-        <span className={s.groupLabel}>Group by</span>
+        <span className={s.groupLabel}>{label}</span>
         <span>{current}</span>
         <svg
           aria-hidden="true"
@@ -98,22 +104,22 @@ export function GroupMenu({
         <div
           id={`${id}-menu`}
           role="menu"
-          aria-label="Group by"
+          aria-label={label}
           data-popover=""
           className={s.groupPop}
           onKeyDown={onKey}
         >
-          {ARRANGES.map(([a, name]) => (
+          {options.map(([a, name, count]) => (
             <button
               key={a}
               type="button"
               role="menuitemradio"
-              aria-checked={arrange === a}
+              aria-checked={value === a}
               className={s.groupRow}
               onClick={() => choose(a)}
             >
               <span aria-hidden="true" className={s.groupTick}>
-                {arrange === a && (
+                {value === a && (
                   <svg
                     width="10"
                     height="10"
@@ -129,6 +135,9 @@ export function GroupMenu({
                 )}
               </span>
               {name}
+              {count !== undefined && (
+                <span className={s.groupCount}>{count}</span>
+              )}
             </button>
           ))}
         </div>

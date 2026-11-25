@@ -89,6 +89,17 @@ async function groupBy(page: Page, from: string, name: string) {
   await expect(groupButton(page, name)).toBeVisible();
 }
 
+/** Under Group by Topic: the Kind button, and choosing a kind from its menu. */
+const kindButton = (page: Page) => page.getByRole("button", { name: /^Kind / });
+
+async function pickKind(page: Page, name: RegExp) {
+  await kindButton(page).click();
+  await page
+    .getByRole("menu", { name: "Kind" })
+    .getByRole("menuitemradio", { name })
+    .click();
+}
+
 /** A named group anywhere on the page (the Legend, a column of the Filter popover). */
 const groups = (page: Page, name = "Folders") =>
   page.getByRole("group", { name, exact: true });
@@ -1955,6 +1966,7 @@ test("choosing Topic names the topics, and a name shared by two kinds carries it
   await settle(page);
   const bad = await requestsDuring(page, async () => {
     await groupBy(page, "Folder", "Topic");
+    await pickKind(page, /^All kinds/);
     const list = await openList(page, "Topics");
     await expect(row(list, /^Qualcomm \(Partners\)/)).toBeVisible();
     await expect(row(list, /^Qualcomm \(Vendors\)/)).toBeVisible();
@@ -1963,6 +1975,41 @@ test("choosing Topic names the topics, and a name shared by two kinds carries it
     await closeFilter(page);
   });
   expect(bad).toEqual([]);
+});
+
+test("under Topic a Kind menu chooses whose topics are the groups, with no request; it goes with Topic", async ({
+  page,
+}) => {
+  await open(page);
+  await settle(page);
+  await expect(kindButton(page)).toHaveCount(0);
+  const bad = await requestsDuring(page, async () => {
+    await groupBy(page, "Folder", "Topic");
+    // The first kind the hive has: only customers are groups, and nothing is left over.
+    await expect(kindButton(page)).toHaveText(/Kind\s*Customers/);
+    let list = await openList(page, "Topics");
+    await expect(row(list, /^ADNOC/)).toBeVisible();
+    await expect(row(list, /^Emsteel/)).toBeVisible();
+    await expect(row(list, /^No topic/)).toHaveCount(0);
+    await expect(row(list, /^Skydio/)).toHaveCount(0);
+    await closeFilter(page);
+
+    // Vendors: the shared name needs no kind beside it here.
+    await pickKind(page, /^Vendors/);
+    await expect(kindButton(page)).toHaveText(/Kind\s*Vendors/);
+    list = await openList(page, "Topics");
+    await expect(row(list, /^Qualcomm/)).toBeVisible();
+    await expect(row(list, /^Qualcomm \(/)).toHaveCount(0);
+    await expect(row(list, /^Skydio/)).toBeVisible();
+    await expect(row(list, /^ADNOC/)).toHaveCount(0);
+    await closeFilter(page);
+  });
+  expect(bad).toEqual([]);
+  // The choice is kept while Topic is left and come back to; the menu is only there under Topic.
+  await groupBy(page, "Topic", "Category");
+  await expect(kindButton(page)).toHaveCount(0);
+  await groupBy(page, "Category", "Topic");
+  await expect(kindButton(page)).toHaveText(/Kind\s*Vendors/);
 });
 
 test("the search lights a group by its name under Category", async ({

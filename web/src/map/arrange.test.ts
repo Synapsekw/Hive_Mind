@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ARRANGES, GROUP_HEADING, grouping } from "./arrange";
+import {
+  ARRANGES,
+  GROUP_HEADING,
+  grouping,
+  ofKind,
+  topicKinds,
+} from "./arrange";
 import type { Kind } from "../topics/types";
 import type { MapNode } from "./types";
 
@@ -538,5 +544,69 @@ describe("grouping by topic", () => {
     const nodes = [tagged("a", ["ghost"]), node("b")];
     const g = grouping({ nodes, links: [] }, "topic", NOW);
     expect(g).toEqual({ names: ["No topic"], of: [0, 0] });
+  });
+});
+
+describe("grouping by topic within one kind", () => {
+  const nodes = [
+    tagged("a", ["c1", "v1"]),
+    tagged("b", ["v1", "c1"]),
+    tagged("c", ["v2"]),
+    tagged("d", ["s1"]),
+    tagged("e", []),
+    tagged("f", ["c1"], { locked: true }),
+    node("g", { kind: "file", topics: ["c1"] }),
+  ];
+  const p = {
+    nodes,
+    links: [
+      { from: "a", to: "b", tier: 1, score: 1 },
+      { from: "a", to: "d", tier: 1, score: 1 },
+    ],
+    topics: TOPICS,
+  };
+
+  it("counts, per kind in kind order, the readable notes that hold a topic of it", () => {
+    expect(topicKinds(p)).toEqual([
+      { kind: "client", notes: 2 },
+      { kind: "vendor", notes: 3 },
+      { kind: "solution", notes: 1 },
+    ]);
+    expect(topicKinds({ nodes, links: [] })).toEqual([]);
+  });
+
+  it("keeps only the notes with a topic of the kind, and the links between them", () => {
+    const v = ofKind(p, "vendor");
+    expect(v.nodes.map((n) => n.id)).toEqual(["a", "b", "c"]);
+    expect(v.links).toEqual([{ from: "a", to: "b", tier: 1, score: 1 }]);
+    expect(v.nodes[0]).toBe(nodes[0]);
+    expect(ofKind(p, "person").nodes).toEqual([]);
+  });
+
+  it("groups each note by its strongest topic of that kind, not its strongest overall", () => {
+    const v = ofKind(p, "vendor");
+    const g = grouping(v, "topic", NOW, 12, "vendor");
+    // a leads with a customer, but under Vendors it sits with its vendor.
+    expect(g.names).toEqual(["Qualcomm", "Bolt"]);
+    expect(g.of).toEqual([0, 0, 1]);
+  });
+
+  it("names the fold for the kind", () => {
+    const topics = Array.from({ length: 14 }, (_, i) =>
+      T(`x${i}`, `Maker ${String(i).padStart(2, "0")}`, "vendor"),
+    );
+    const many = topics.flatMap((t, i) =>
+      Array.from({ length: 14 - i }, (_, j) => tagged(`${t.id}-${j}`, [t.id])),
+    );
+    const g = grouping(
+      { nodes: many, links: [], topics },
+      "topic",
+      NOW,
+      12,
+      "vendor",
+    );
+    expect(g.names).toHaveLength(12);
+    expect(g.names[11]).toBe("Other vendors");
+    expect(g.names).not.toContain("No topic");
   });
 });

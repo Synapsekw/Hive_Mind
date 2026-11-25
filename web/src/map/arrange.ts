@@ -67,8 +67,11 @@ const NO_TOPIC = "No topic";
 
 type Strong = NonNullable<MapPayload["topics"]>[number];
 
-/** Each node's strongest topic: the first of its ids the payload lists, else null. */
-function strongest(p: Input): (Strong | null)[] {
+/**
+ * Each node's strongest topic: the first of its ids the payload lists, else null. With `kind`,
+ * the first of that kind.
+ */
+function strongest(p: Input, kind: Kind | null = null): (Strong | null)[] {
   const byId = new Map<string, Strong>();
   for (const t of p.topics ?? []) byId.set(t.id, t);
   return p.nodes.map((n) => {
@@ -76,7 +79,7 @@ function strongest(p: Input): (Strong | null)[] {
     if (n.locked || n.kind !== "note") return null;
     for (const id of n.topics ?? []) {
       const t = byId.get(id);
-      if (t) return t;
+      if (t && (kind === null || t.kind === kind)) return t;
     }
     return null;
   });
@@ -101,8 +104,8 @@ function category(p: Input): Grouping {
   return { names, of: top.map((t) => at.get(t ? t.kind : null)!) };
 }
 
-function topic(p: Input): Raw {
-  const top = strongest(p);
+function topic(p: Input, kind: Kind | null): Raw {
+  const top = strongest(p, kind);
   // A name held by two kinds that both appear carries its kind name.
   const kinds = new Map<string, Set<Kind>>();
   for (const t of top) {
@@ -123,10 +126,11 @@ function topic(p: Input): Raw {
 
 /**
  * The topic groups: the largest topics, folded past the cap, and No topic last. No topic is
- * never folded and takes one of the places, so the other groups share `max - 1` of them.
+ * never folded and takes one of the places, so the other groups share `max - 1` of them. With
+ * `kind` each note goes by its strongest topic of that kind, and the fold is named for the kind.
  */
-function topicGroups(p: Input, max: number): Grouping {
-  const raw = topic(p);
+function topicGroups(p: Input, max: number, kind: Kind | null): Grouping {
+  const raw = topic(p, kind);
   const named = raw.key.flatMap((k, i) => (k === NO_TOPIC ? [] : [i]));
   const hasNone = named.length < raw.key.length;
   const g = cap(
@@ -135,7 +139,7 @@ function topicGroups(p: Input, max: number): Grouping {
       order: raw.order.filter((k) => k !== NO_TOPIC),
     },
     hasNone ? max - 1 : max,
-    "Other topics",
+    kind ? `Other ${KIND_NAMES[kind].toLowerCase()}` : "Other topics",
     "More topics",
   );
   if (!hasNone) return { names: g.names, of: raw.key.map((_, i) => g.of[i]!) };
@@ -297,15 +301,55 @@ function cap(raw: Raw, max: number, fold: string, foldAlt: string): Grouping {
   return { names, of: raw.key.map((k) => at.get(k) ?? keep - 1) };
 }
 
+/**
+ * The kinds the readable notes have a topic of, in kind order, each with how many notes hold
+ * one. A note with a customer and a vendor counts under both.
+ */
+export function topicKinds(p: Input): { kind: Kind; notes: number }[] {
+  const byId = new Map<string, Kind>();
+  for (const t of p.topics ?? []) byId.set(t.id, t.kind);
+  const count = new Map<Kind, number>();
+  for (const n of p.nodes) {
+    if (n.locked || n.kind !== "note") continue;
+    const seen = new Set<Kind>();
+    for (const id of n.topics ?? []) {
+      const k = byId.get(id);
+      if (k) seen.add(k);
+    }
+    for (const k of seen) count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  return KINDS.flatMap((kind) => {
+    const notes = count.get(kind) ?? 0;
+    return notes > 0 ? [{ kind, notes }] : [];
+  });
+}
+
+/**
+ * The payload narrowed to the notes that hold a topic of `kind`, and the links between them.
+ * Nodes keep their order and are the same objects.
+ */
+export function ofKind<P extends Input>(p: P, kind: Kind): P {
+  const top = strongest(p, kind);
+  const nodes = p.nodes.filter((_, i) => top[i] !== null);
+  const ids = new Set(nodes.map((n) => n.id));
+  return {
+    ...p,
+    nodes,
+    links: p.links.filter((l) => ids.has(l.from) && ids.has(l.to)),
+  };
+}
+
 export function grouping(
   p: Input,
   arrange: Arrange,
   now: number,
   max = 12,
+  /** Group by Topic only: the one kind whose topics are the groups; null for every kind. */
+  kind: Kind | null = null,
 ): Grouping {
   if (p.nodes.length === 0) return { names: [], of: [] };
   if (arrange === "category") return category(p);
-  if (arrange === "topic") return topicGroups(p, max);
+  if (arrange === "topic") return topicGroups(p, max, kind);
   if (arrange === "time") return cap(time(p, now), max, EARLIER, EARLIER);
   if (arrange === "links") return cap(links(p), max, "Other", "Other clusters");
   return cap(folder(p), max, "Other", "Other topics");

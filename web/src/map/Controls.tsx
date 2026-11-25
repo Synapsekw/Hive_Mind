@@ -3,7 +3,7 @@
 // filter drops to a second row.
 import { useRef } from "react";
 import type { View } from "./types";
-import type { Arrange } from "./arrange";
+import { ARRANGES, type Arrange } from "./arrange";
 import { GroupMenu } from "./GroupMenu";
 import { useSlidingPill } from "../shell/useSlidingPill";
 import pill from "../shell/SlidingPill.module.css";
@@ -20,6 +20,9 @@ export function TopBar({
   onView,
   arrange,
   onArrange,
+  kinds,
+  kind,
+  onKind,
   filter,
   today,
 }: {
@@ -27,6 +30,10 @@ export function TopBar({
   onView: (v: View) => void;
   arrange: Arrange;
   onArrange: (a: Arrange) => void;
+  /** Under Group by Topic: the kinds of topic to choose from, each with its note count. */
+  kinds: readonly (readonly [string, string, number?])[];
+  kind: string;
+  onKind: (k: string) => void;
   /** The filter: search, the Filter button and its popover, the chips and the count. */
   filter: React.ReactNode;
   /** The Today button, last in the bar. */
@@ -51,7 +58,20 @@ export function TopBar({
         ))}
       </div>
       {view === "rings" && (
-        <GroupMenu arrange={arrange} onArrange={onArrange} />
+        <GroupMenu
+          label="Group by"
+          options={ARRANGES}
+          value={arrange}
+          onChange={onArrange}
+        />
+      )}
+      {view === "rings" && arrange === "topic" && kinds.length > 0 && (
+        <GroupMenu
+          label="Kind"
+          options={kinds}
+          value={kind}
+          onChange={onKind}
+        />
       )}
       {filter}
       {today}
