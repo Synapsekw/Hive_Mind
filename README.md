@@ -122,9 +122,30 @@ hive; that cap and the database's own check of a workspace's name (1 to 60 chara
 the `workspace_cap` migration on the database (see
 [docs/security.md](docs/security.md#13-importing-a-folder-from-the-app)).
 
-The gallery (**Gallery** in the left rail) shows the files you may read as cards. Images and
-PDFs open in a full-window viewer; every file downloads; your own files can be deleted. A file is
-shared exactly as the note it is attached to, so sharing is changed on the note, in the vault.
+The gallery (**Gallery** in the left rail) shows the files you may read, by session or as a
+flat grid. Images, PDFs, text, Markdown and CSV open in a full-window viewer; every file
+downloads; your own files can be deleted. A file has one home note, and the home note decides
+who may read it, so sharing is changed on the note, in the vault. Other notes can reference a
+file, and a reference never grants access. A file you own can be moved to another home note
+from its panel.
+
+An agent's working run is a session. The first write of a connection opens one, and the agent
+calls `hive_end_session` with a title and a short summary when a piece of work is finished. That
+writes a session note under `Sessions/` and gives the session's homeless files that note as
+home. A session idle for two hours is closed by a sweep. The sweep is a `pg_cron` job; schedule
+it once per project, after the migrations, with `scripts/setup-session-sweep.sh` (needs the
+Supabase CLI signed in; it uses no secret and can be run again safely).
+
+**Upload** in the gallery brings in files from your computer, for example what ChatGPT or
+Claude on the web produced. Choose the files or drop them on the page, pick a home note
+(default: your private Uploads note) and, if you like, a folder. Each file is stored and then
+recorded, and a failed file can be retried alone. A file is at most 50 MB and a batch at most 20
+files. The batch shows as its own session, "Upload", with the date.
+
+Folders are yours alone. Create them in the left column (two levels deep at most), drag a file
+onto one or use **Add to folder**; a file can be in several. A folder never changes who can read
+a file. The chips above the files filter by type, date, session, agent and owner; they work on
+the files already loaded, and ask the server only when older files are needed.
 
 The inbox (**Inbox** in the left rail, with the number waiting) lists what needs your own
 decision: links proposed between one of your notes and a colleague's, and notes held from a

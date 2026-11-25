@@ -283,6 +283,27 @@ Batches: **{1, 2, 3, 6}** → **{4, 5, 8, 9}** → **{7}** → **{10}**. Critica
 Units 1–3 are separate migrations minted in sequence by `scripts/new-migration.sh`, so the
 migration-minting step is serialised even when the SQL is written in parallel.
 
+## Corrections found during the build
+
+- The session note body is the summary plus counts only, for example "2 notes, 3 files. Open the
+  session in the gallery to see them." It lists no titles, paths or file names, because a note
+  that inherits "hive" sharing would otherwise leak them (corrected during the build).
+- The remote connector is stateless, so a remote agent gets one rolling session per agent, broken
+  by `hive_end_session` or two hours idle (corrected during the build).
+- `hive_read` marks its file lists unavailable (`files_unavailable`, `referenced_files_unavailable`)
+  when their query fails, and the read itself still succeeds (corrected during the build).
+- An upload goes into the workspace of the chosen home note, because `upload_session_end` needs
+  the note to be in the session's workspace. Duplicate names in one batch get `-2`, `-3`
+  (corrected during the build).
+- Uploads must be PUT with the type declared from the file name, not the browser's type, which
+  can differ (corrected during the build).
+- Cross-hive guards: a reference, a folder membership and an upload session each refuse a note,
+  file or workspace of another hive, even for a person who is a member of both (corrected during
+  the build).
+- A closing hive refuses new references, folder memberships and upload sessions, and the idle
+  sweep skips its sessions, so one such session cannot stop the sweep for everyone (corrected
+  during the build).
+
 ## Known gaps (accepted)
 
 - Remote agents cannot save binaries; a person uploads them.

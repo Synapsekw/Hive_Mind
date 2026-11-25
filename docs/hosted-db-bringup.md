@@ -104,6 +104,11 @@ deleted is in [Hive deletion](#hive-deletion).
      This is the one place the history table is touched by hand, and only to make it say what is
      true. Never do it to hide a difference between the files and the database.
 
+   After the migrations, run `scripts/setup-session-sweep.sh`. It enables `pg_cron` if needed
+   and schedules the job `close-idle-sessions` every 15 minutes, which closes agent sessions
+   idle for two hours. It needs the Supabase CLI signed in, uses no secret and is safe to run
+   again.
+
 3. **Create the hive as the owner.** `create_hive` refuses a caller with no identity. In SQL, set
    the owner's identity for the transaction first:
 
