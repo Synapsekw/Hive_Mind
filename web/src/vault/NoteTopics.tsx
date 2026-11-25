@@ -1,15 +1,15 @@
 "use client";
 
-// The open note's topics, under "Linked with": a chip for each (its name and kind), and, on the
-// person's own note, Remove on each chip and an Add control for the topics it does not carry yet.
-// Remove acts at once; the database decides whether a change is allowed. The chips are the note's
-// topics as last served, changed here as soon as a change worked.
+// The open note's topics, inline in its action row: a chip for each (its name and kind), and, on
+// the person's own note, × on each chip and + Topic, which opens the topic picker for the topics
+// it does not carry yet. A change acts at once; the database decides whether it is allowed. The
+// chips are the note's topics as last served, changed here as soon as a change worked.
 import { useEffect, useId, useRef, useState } from "react";
-import { KIND_NAMES, KINDS, MAX_TOPICS_PER_NOTE } from "../topics/types";
+import { useDismiss } from "../map/useDismiss";
+import { KIND_NAMES, MAX_TOPICS_PER_NOTE } from "../topics/types";
+import { TopicPicker } from "./TopicPicker";
 import {
-  ADD,
-  ADD_TOPIC,
-  NO_TOPICS_YET,
+  ADD_TOPIC_BUTTON,
   REFUSED,
   REFUSED_FULL,
   removeName,
@@ -48,10 +48,22 @@ export function NoteTopics({
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const [refused, setRefused] = useState<string | null>(null);
-  const [pick, setPick] = useState("");
-  // Where the focus goes after the next render: a chip's Remove by topic id, or the Add control.
+  const [picking, setPicking] = useState(false);
+  // Where the focus goes after the next render: a chip's × by topic id, or + Topic.
   const target = useRef<string | "add" | null>(null);
   const section = useRef<HTMLElement>(null);
+  const picker = useRef<HTMLDivElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+
+  useDismiss({
+    open: picking,
+    root: picker,
+    button: addButton,
+    onClose: (refocus) => {
+      setPicking(false);
+      if (refocus) addButton.current?.focus();
+    },
+  });
 
   useEffect(() => {
     const want = target.current;
@@ -59,7 +71,7 @@ export function NoteTopics({
     target.current = null;
     const el =
       want === "add"
-        ? section.current?.querySelector<HTMLElement>("select")
+        ? addButton.current
         : section.current?.querySelector<HTMLElement>(
             `[data-remove="${CSS.escape(want)}"]`,
           );
@@ -73,9 +85,6 @@ export function NoteTopics({
   const remaining = topics.filter((t) => !ids.includes(t.id));
   const canAdd =
     own && ids.length < MAX_TOPICS_PER_NOTE && remaining.length > 0;
-  const chosen = remaining.some((t) => t.id === pick)
-    ? pick
-    : (remaining[0]?.id ?? "");
 
   const inside = () => {
     const at = document.activeElement;
@@ -99,7 +108,7 @@ export function NoteTopics({
       setRefused(REFUSED);
       return;
     }
-    // The next chip's Remove, else the previous one's, else the Add control.
+    // The next chip's ×, else the previous one's, else + Topic.
     if (inside()) {
       const left = drawn.filter((t) => t.id !== topic.id);
       const at = drawn.findIndex((t) => t.id === topic.id);
@@ -108,8 +117,11 @@ export function NoteTopics({
     setIds((now) => now.filter((t) => t !== topic.id));
   }
 
-  async function add() {
-    if (running.current || chosen === "") return;
+  async function add(chosen: string) {
+    if (running.current) return;
+    // The picker closes at once; the focus goes back to + Topic.
+    setPicking(false);
+    target.current = "add";
     running.current = true;
     setBusy(true);
     setRefused(null);
@@ -125,7 +137,7 @@ export function NoteTopics({
       setRefused(change.reason === "full" ? REFUSED_FULL : REFUSED);
       return;
     }
-    // With the fifth topic the Add control leaves: the focus goes to the new chip's Remove.
+    // With the fifth topic + Topic leaves: the focus goes to the new chip's ×.
     if (inside() && ids.length + 1 >= MAX_TOPICS_PER_NOTE)
       target.current = chosen;
     setIds((now) => (now.includes(chosen) ? now : [...now, chosen]));
@@ -133,14 +145,9 @@ export function NoteTopics({
 
   const off = busy || undefined;
   return (
-    <section ref={section} aria-label={TOPICS_HEADING} className={s.tools}>
-      <h3 className={`${s.groupName} ${s.wide}`}>{TOPICS_HEADING}</h3>
-      {drawn.length === 0 ? (
-        <p className={`${s.sentence} ${s.wide}`} data-quiet>
-          {NO_TOPICS_YET}
-        </p>
-      ) : (
-        <ul className={`${s.chips} ${s.wide}`}>
+    <section ref={section} aria-label={TOPICS_HEADING} className={s.noteTopics}>
+      {drawn.length > 0 && (
+        <ul className={s.chips}>
           {drawn.map((t) => (
             <li key={t.id} className={s.chip}>
               <span className={s.chipName}>{t.name}</span>
@@ -148,13 +155,13 @@ export function NoteTopics({
               {own && (
                 <button
                   type="button"
-                  className={s.quiet}
+                  className={s.chipRemove}
                   data-remove={t.id}
                   aria-label={removeName(t.name)}
                   aria-disabled={off}
                   onClick={() => void remove(t)}
                 >
-                  Remove
+                  ×
                 </button>
               )}
             </li>
@@ -162,41 +169,29 @@ export function NoteTopics({
         </ul>
       )}
       {canAdd && (
-        <div className={`${s.addRow} ${s.wide}`}>
-          <label htmlFor={`${id}-add`} className={s.srOnly}>
-            {ADD_TOPIC}
-          </label>
-          <select
-            id={`${id}-add`}
-            className={`${s.search} ${s.addSelect}`}
-            value={chosen}
-            onChange={(e) => setPick(e.currentTarget.value)}
-          >
-            {KINDS.map((kind) => {
-              const group = remaining.filter((t) => t.kind === kind);
-              return group.length === 0 ? null : (
-                <optgroup key={kind} label={KIND_NAMES[kind]}>
-                  {group.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })}
-          </select>
+        <div ref={picker} className={s.pickRoot}>
           <button
+            ref={addButton}
             type="button"
-            className={s.secondary}
-            aria-disabled={off}
-            onClick={() => void add()}
+            className={s.addTopic}
+            aria-expanded={picking}
+            aria-controls={picking ? `${id}-pick` : undefined}
+            onClick={() => setPicking((p) => !p)}
           >
-            {ADD}
+            {ADD_TOPIC_BUTTON}
           </button>
+          {picking && (
+            <TopicPicker
+              id={`${id}-pick`}
+              remaining={remaining}
+              busy={busy}
+              onPick={(t) => void add(t)}
+            />
+          )}
         </div>
       )}
       {refused && (
-        <p role="alert" className={`${s.refused} ${s.wide}`}>
+        <p role="alert" className={s.refused}>
           {refused}
         </p>
       )}

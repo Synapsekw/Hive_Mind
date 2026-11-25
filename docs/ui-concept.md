@@ -270,36 +270,73 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   again." A declined pair of notes stays declined.
 - **Entities** — synthesis at the top with every fact citing its source on hover; contradictions
   pinned; linked notes and files below.
-- **Vault** — folder tree, note list, note preview. The left column has a switch, **Browse
-  notes by**, with **Folders** and **Topics**. Topics lists **All notes**, then each kind that
+- **Vault** — folder tree, note list, note preview. One bar runs along the top of the card:
+  the workspace tabs and **Shared with me**, a filter field ("Filter by title or path"), and, at
+  the right end, **Add notes**. Its menu lists **Import a folder** with "Markdown notes from your
+  computer. Each arrives private."; on one of the person's own workspaces it also lists
+  **Connect wiki links** and **Attach topics**, each with one line under its name. **Shared with
+  me** has no **Add notes**. Choosing an item opens that panel as a dialog over the dimmed card,
+  not a new page; focus stays inside it and returns to **Add notes** when it closes. The left
+  column has a switch, **Browse
+  notes by**, with **Folders** and **Topics**. A folder with no notes, and none below it, is
+  not listed, unless it or a folder below it has a sharing rule. A folder with a rule shows a
+  dot whose hover text and screen-reader text read "Folder sharing: Everyone". When notes are
+  held, the row for them reads "Held, waiting for you", in the accent colour, with its count.
+  Topics lists **All notes**, then each kind that
   has notes in the open tab, in the fixed kind order, with the number of notes under it; a kind
   opens to its topics, each with its own count, and a last row **No topic** appears when some
   notes have none. Choosing a topic, **No topic** or **All notes** filters the
   note list; switching back to Folders shows the folder tree with all notes again. A hive with
   no topics shows "This hive has no topics yet. Its owner finds them in Settings, under
-  Topics." Choosing a grouping sends no request. Under **Linked with**, the open note shows
-  its **Topics** as chips, each with the topic's name and kind. On one's own note each chip has
-  **Remove**, which acts at once with no question, and **Add topic** offers the hive's other
-  topics, grouped by kind, with **Add**; it appears only while the note has fewer than five
-  topics. If the app's server step refuses an add because the note is already full, the page says "A note
+  Topics." Choosing a grouping sends no request. Each row of the note list has the title on the
+  first line, and under it the short date, the Held, Agent and "Opened by a link" tags and the
+  note's first two topics by name, with "+N" when there are more. On one's own notes a mark at
+  the right end of the title shows the sharing: a filled dot for the whole hive, a half dot for
+  some people, nothing for a private note; its hover text and screen-reader text give the full
+  words. For a chosen folder of one's own workspace, the list's title has the folder's sharing
+  control under it. Its button reads "Folder sharing: Everyone", or "Folder sharing: none" when
+  the folder has no rule; the option in its panel that removes the rule reads "None (each note
+  decides)".
+
+  With no note open, the pane sums up the workspace: its name, four counts (notes, folders,
+  topics, changed today) and, when notes are held, a box with "N notes are held. Your agents
+  wrote them; nobody else sees them until you release them." and **Review**, which chooses
+  "Held, waiting for you" in the left column. Under it, **Recently changed** lists the six notes
+  changed last, each opening that note. On **Shared with me** it shows "N notes from M
+  colleagues" and **Newest**, the five newest. The opened note shows its title once: a first
+  line of the text that is a heading equal to the title is not repeated. Under the title comes
+  one small line with the path, when it changed and who wrote it ("written by you", "written by
+  your agent", "shared by" a name, or "opened by a link"), then one row of actions: the sharing
+  control, the note's **Topics** as chips with the topic's name and kind, **+ Topic** and a
+  **⋯** menu. On one's own note each chip ends in a **×** button, named
+  "Remove <topic>" for assistive tech, which acts at once with no
+  question. **+ Topic** opens a picker with a field, "Find a topic", and the hive's other
+  topics grouped by kind; choosing one adds it at once. It appears only while the note has
+  fewer than five topics and the hive has a topic left to add. If the app's server step refuses
+  an add because the note is already full, the page says "A note
   has at most five topics. Remove one first."; any other refusal says "That didn't work. Try
-  again." A note with none shows "No topics yet." A colleague's note shows
-  its chips without Remove or Add. Visibility shown inline and changed in place;
-  quarantine is a folder with a release action. The preview of your own note has a quiet
-  **Delete** after the sharing control. The first click asks "Delete this note? It is gone for
-  good, with its history and its links. Files attached to it stay in the gallery." with
-  **Delete** and **Keep**; the second Delete counts only half a second after the question
-  appears, as with the inbox's Decline. Afterwards the note's tab closes and a status line says
-  "Note deleted." A colleague's note has no Delete. A note with accepted links shows **Linked
-  with** under the sharing control: for each link the other note's title (which opens it in the
-  vault), its owner, and **Unlink**. A note with no accepted links shows no such heading.
+  again." When nothing matches the field, the picker says "No topic matches." A note with no
+  topics shows no chips. A colleague's note shows its chips without the × or **+ Topic**.
+  The **⋯** menu holds **Copy link**, which says "Link copied.", and, on one's own note,
+  **Delete note…**. Visibility shown inline and changed in place;
+  quarantine is a folder with a release action. **Delete note…** asks in place of the action
+  row: "Delete this note? It is gone for good, with its history and its links. Files attached
+  to it stay in the gallery." with **Delete** and **Keep**; the second Delete counts only half
+  a second after the question appears, as with the inbox's Decline. Afterwards the note closes (the
+  address loses it, the tab stays) and a status line says "Note deleted." A colleague's note has no Delete. A note with
+  accepted links shows **Linked with** under the action row: for each link the other note's
+  title (which opens it in the vault), its owner, and **Unlink**. A note with no accepted
+  links shows no such heading. When the card is under 1,000 px wide, the folder column is not
+  shown; the list's title becomes a button, "Choose folder or topic", that opens the Folders
+  and Topics list over the note list, and choosing a folder, topic or **Held, waiting for you**
+  closes it.
   Unlink asks in place, as Delete does: "Unlink these notes? You and (owner) will no longer
   read each other's note through this link. The two notes cannot be linked again." with
   **Unlink** and **Keep**. For two notes of your own it asks "Unlink these two notes of
   yours?", and those two can be linked again later. Afterwards the page refreshes; if the open
   note was a colleague's that you could read only through that link, it is gone and the vault
   shows its "not found" state.
-  **Import a folder** in the vault's header opens a panel in place, not a new page, for a
+  **Import a folder** opens a panel, in the dialog above, for a
   folder of markdown notes. It goes through five steps:
   1. **Pick.** The browser's folder picker; the files are read in the browser.
   2. **Summary**, before anything is saved: notes found, other files skipped, notes skipped
@@ -322,7 +359,7 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 
   For one of the person's own workspaces the vault has **Connect wiki links**, which turns the `[[wiki links]]` between that person's notes in the workspace into links.
 
-  Beside it, **Attach topics** puts each of the person's notes in that workspace under the
+  **Attach topics** puts each of the person's notes in that workspace under the
   hive's topics it belongs to (by folder, tag, title, then text; at most five), and shows three
   counts: attached, already attached, notes with no topic. A folder import runs it by itself as
   its last stage. In a hive with no topics it says where topics come from.

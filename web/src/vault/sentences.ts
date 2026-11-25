@@ -85,6 +85,46 @@ export function releaseSentence(mark: Mark): string {
   return `This note was written by a self-hosted agent. Releasing it makes it follow its sharing setting: ${mark.label}.`;
 }
 
+// The summary shown when no note is open.
+export const STAT_LABELS = {
+  notes: ["note", "notes"],
+  folders: ["folder", "folders"],
+  topics: ["topic", "topics"],
+  today: ["changed today", "changed today"],
+} as const;
+export const RECENTLY_CHANGED = "Recently changed";
+export const NEWEST = "Newest";
+export const REVIEW = "Review";
+export const SHARED_HEADING = "Shared with me";
+
+export const heldSentence = (n: number) =>
+  n === 1
+    ? "1 note is held. Your agents wrote it; nobody else sees it until you release it."
+    : `${n} notes are held. Your agents wrote them; nobody else sees them until you release them.`;
+
+export const sharedLine = (notes: number, people: number) =>
+  `${notes} ${notes === 1 ? "note" : "notes"} from ${people} ${people === 1 ? "colleague" : "colleagues"}`;
+
+// The left column and a folder's sharing control.
+export const HELD_ROW = "Held, waiting for you";
+export const FOLDER_SHARING = "Folder sharing";
+export const NO_FOLDER_RULE = "none";
+export const NONE_OPTION = "None (each note decides)";
+export const folderSharing = (text: string) => `${FOLDER_SHARING}: ${text}`;
+
+// The open note: who it is from, on its meta line.
+export const WRITTEN_BY_YOU = "written by you";
+export const WRITTEN_BY_AGENT = "written by your agent";
+export const sharedBy = (owner: string) => `shared by ${owner}`;
+export const OPENED_BY_LINK = "opened by a link";
+
+// The open note's menu, and what Copy link says.
+export const MORE_ACTIONS = "More actions for this note";
+export const COPY_LINK = "Copy link";
+export const DELETE_ITEM = "Delete note…";
+export const LINK_COPIED = "Link copied.";
+export const LINK_NOT_COPIED = "The link could not be copied.";
+
 // Deleting a note: the question before it, and what is said after.
 export const DELETE_QUESTION =
   "Delete this note? It is gone for good, with its history and its links. Files attached to it stay in the gallery.";

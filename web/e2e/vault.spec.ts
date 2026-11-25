@@ -8,13 +8,20 @@ import {
   HOSTILE_NOTE_ID,
 } from "../src/vault/fixture";
 import {
+  COPY_LINK,
   DELETE_FAILED,
   DELETE_QUESTION,
   DELETED,
   folderSentence,
+  folderSharing,
   keepLinkName,
+  LINK_COPIED,
+  LINK_NOT_COPIED,
   LINKED_WITH,
+  MORE_ACTIONS,
+  NONE_OPTION,
   noteSentence,
+  OPENED_BY_LINK,
   UNLINK_FAILED,
   UNLINK_GROUP,
   unlinkName,
@@ -24,6 +31,7 @@ import * as A from "../src/vault/attachText";
 import * as P from "../src/vault/topicText";
 import * as C from "../src/vault/connectText";
 import * as T from "../src/vault/importText";
+import { ADD_NOTES } from "../src/vault/importText";
 import { setLook } from "./look";
 
 // The fixture's content does not depend on `now`, only its dates do.
@@ -98,6 +106,48 @@ for (const look of LOOKS)
       expect(fit.panelRight).toBeLessThanOrEqual(size.width);
     });
   }
+
+test("in a narrow card the folders fold into the list title", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await open(page);
+  await expect(folders(page)).toHaveCount(0);
+  const picker = page.getByRole("button", { name: /^Choose folder or topic/ });
+  await picker.click();
+  await page
+    .getByRole("group", { name: "Folders and topics" })
+    .getByRole("button", { name: /^decisions\b/ })
+    .click();
+  await expect(
+    page.getByRole("group", { name: "Folders and topics" }),
+  ).toHaveCount(0);
+  await expect(picker).toBeFocused();
+  await expect(picker).toHaveAccessibleName(/decisions/);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(
+    folders(page).getByRole("button", { name: /^decisions\b/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("in a narrow card a folder chosen by keyboard leaves the focus on the picker", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await open(page);
+  const picker = page.getByRole("button", { name: /^Choose folder or topic/ });
+  await picker.focus();
+  await page.keyboard.press("Enter");
+  const pop = page.getByRole("group", { name: "Folders and topics" });
+  await pop.getByRole("button", { name: /^decisions\b/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(pop).toHaveCount(0);
+  await expect(picker).toBeFocused();
+  await expect(picker).toHaveAccessibleName(/decisions/);
+  await expect(
+    page.getByRole("navigation", { name: "Notes" }).getByRole("link").first(),
+  ).toBeVisible();
+});
 
 test("the vault is a solid card with no blur", async ({ page }) => {
   await open(page, `?note=${README}`);
@@ -330,10 +380,61 @@ test("the folder control shows the database's exact counts", async ({
       preview: fixturePreview(DATA, GROUP_FOLDER),
     }),
   );
-  await expect(control.getByRole("radio", { name: "No rule" })).toBeVisible();
+  await expect(control.getByRole("radio", { name: NONE_OPTION })).toBeVisible();
   expect(await calls(page)).toEqual([
     { name: "preview", args: [DATA.workspaces[0]!.id, GROUP_FOLDER] },
   ]);
+});
+
+test("rows show their topics and no sharing words", async ({ page }) => {
+  await open(page);
+  const row = noteLinks(page).filter({ hasText: "Kickoff notes" });
+  await expect(row).toContainText("Harbor Logistics");
+  await expect(row.locator("[title]")).toHaveAttribute(
+    "title",
+    /harbor-logistics/,
+  );
+  // The words are for screen readers only now: present, but clipped to a point.
+  const words = row.getByText("Ahmed, from harbor-logistics", { exact: true });
+  await expect(words).toHaveCount(1);
+  const box = await words.boundingBox();
+  expect(box!.width).toBeLessThanOrEqual(1);
+  expect(box!.height).toBeLessThanOrEqual(1);
+});
+
+test("a row with many topics shows two and a count", async ({ page }) => {
+  await open(page);
+  const row = noteLinks(page).filter({ hasText: "Scope and assumptions" });
+  await expect(row).toContainText("Harbor Logistics");
+  await expect(row).toContainText("Route optimisation");
+  await expect(row).toContainText("+3");
+});
+
+test("an empty folder without a rule is not listed", async ({ page }) => {
+  await open(page);
+  await expect(
+    folders(page).getByRole("button", { name: /^archive\b/ }),
+  ).toHaveCount(0);
+  await expect(
+    folders(page).getByRole("button", { name: /^clients\b/ }),
+  ).toBeVisible();
+});
+
+test("a folder's sharing reads Folder sharing", async ({ page }) => {
+  await open(page);
+  await folders(page)
+    .getByRole("button", { name: /^decisions\b/ })
+    .click();
+  await expect(
+    page.getByRole("button", { name: folderSharing("none") }),
+  ).toBeVisible();
+});
+
+test("the held row says it waits for you", async ({ page }) => {
+  await open(page);
+  await expect(
+    folders(page).getByRole("button", { name: /^Held, waiting for you/ }),
+  ).toBeVisible();
 });
 
 test("a note under a folder rule offers Same as folder", async ({ page }) => {
@@ -343,7 +444,7 @@ test("a note under a folder rule offers Same as folder", async ({ page }) => {
     noteControl(page).getByRole("radio", { name: "Same as folder" }),
   ).toBeChecked();
   await expect(
-    noteControl(page).getByRole("radio", { name: "No rule" }),
+    noteControl(page).getByRole("radio", { name: NONE_OPTION }),
   ).toHaveCount(0);
 });
 
@@ -408,7 +509,7 @@ test("the shared tab groups colleagues' notes and offers no control", async ({
   ).not.toContainText("Opened by a link");
   await list.getByRole("link", { name: /Pricing options/ }).click();
   const preview = page.getByRole("region", { name: "Note" });
-  await expect(preview).toContainText("Opened by a link");
+  await expect(preview).toContainText(OPENED_BY_LINK);
   await expect(page.getByRole("button", { name: /^Sharing: / })).toHaveCount(0);
 });
 
@@ -425,7 +526,15 @@ for (const look of LOOKS)
       if (look) await setLook(context, look);
       await page.setViewportSize(size);
       await open(page);
-      await folders(page)
+      // With the rail open the card here is narrow: the folders are in the list title's picker.
+      const picker = page.getByRole("button", {
+        name: /^Choose folder or topic/,
+      });
+      const scopes = (await picker.count())
+        ? (await picker.click(),
+          page.getByRole("group", { name: "Folders and topics" }))
+        : folders(page);
+      await scopes
         .getByRole("button", { name: new RegExp(`^${GROUP_FOLDER}\\b`) })
         .click();
       await page.getByRole("button", { name: /^Folder sharing: / }).click();
@@ -487,6 +596,13 @@ const CLIENT_LIST = idOf("Client list");
 const preview = (page: Page) => page.getByRole("region", { name: "Note" });
 const deleteButton = (page: Page) =>
   preview(page).getByRole("button", { name: "Delete note" });
+const moreButton = (page: Page) =>
+  preview(page).getByRole("button", { name: MORE_ACTIONS });
+/** Opens ⋯ and presses Delete note…: the question is asked. */
+async function askDelete(page: Page) {
+  await moreButton(page).click();
+  await preview(page).getByRole("button", { name: "Delete note" }).click();
+}
 const keepButton = (page: Page) =>
   preview(page).getByRole("button", { name: "Keep note" });
 const question = (page: Page) =>
@@ -511,52 +627,68 @@ const inList = (page: Page) =>
 
 /** Asks, waits out the guard and answers Delete. */
 async function confirmDelete(page: Page) {
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   await page.waitForTimeout(600);
   await deleteButton(page).click();
 }
 
-test("your own note has Delete, a held one too; a colleague's has none", async ({
+test("your own note has Delete in its menu, a held one too; a colleague's has none", async ({
   page,
 }) => {
   await open(page, `?note=${README}`);
+  // Not on the row: in the ⋯ menu.
+  await expect(deleteButton(page)).toHaveCount(0);
+  await moreButton(page).click();
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "true");
   await expect(deleteButton(page)).toBeVisible();
-  await expect(deleteButton(page)).toHaveText("Delete");
+  await expect(deleteButton(page)).toHaveText("Delete note…");
+  await expect(
+    preview(page).getByRole("button", { name: COPY_LINK }),
+  ).toBeVisible();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
 
   await open(page, `?note=${HELD}`);
   await expect(
     preview(page).getByRole("button", { name: "Release" }),
   ).toBeVisible();
+  await moreButton(page).click();
   await expect(deleteButton(page)).toBeVisible();
 
   await open(page, "?tab=shared");
   await noteLinks(page).filter({ hasText: "Site visit" }).click();
   await expect(openTitle(page, "Site visit")).toBeVisible();
-  await expect(preview(page).getByRole("button")).toHaveCount(0);
+  // A colleague's note: ⋯ alone, holding Copy link only.
+  await expect(preview(page).getByRole("button")).toHaveCount(1);
+  await moreButton(page).click();
+  await expect(preview(page).getByRole("button")).toHaveText(["⋯", COPY_LINK]);
+  await expect(deleteButton(page)).toHaveCount(0);
   // Opened by a link: the link can be ended, the note cannot be deleted or shared.
   await noteLinks(page).filter({ hasText: "Pricing options" }).click();
   await expect(openTitle(page, "Pricing options")).toBeVisible();
+  await expect(preview(page).getByRole("button")).toHaveText(["⋯", "Unlink"]);
+  await moreButton(page).click();
   await expect(deleteButton(page)).toHaveCount(0);
-  await expect(preview(page).getByRole("button")).toHaveCount(1);
-  await expect(preview(page).getByRole("button")).toHaveText("Unlink");
+  await expect(
+    preview(page).getByRole("button", { name: COPY_LINK }),
+  ).toBeVisible();
 });
 
 test("Delete asks first; Keep puts everything back", async ({ page }) => {
   await open(page, `?note=${README}`);
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   await expect(deleteButton(page)).toHaveCount(1);
   await expect(deleteButton(page)).toHaveText("Delete");
   await expect(keepButton(page)).toHaveText("Keep");
-  // The safe answer holds the focus.
+  // The safe answer holds the focus; the action row is hidden while it is asked.
   await expect(keepButton(page)).toBeFocused();
+  await expect(moreButton(page)).toBeHidden();
 
   await keepButton(page).click();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
   await expect(keepButton(page)).toHaveCount(0);
-  await expect(deleteButton(page)).toBeFocused();
+  await expect(moreButton(page)).toBeFocused();
   await expect(page.getByRole("button", { name: /^Sharing: / })).toBeVisible();
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length);
   await expect(status(page)).toHaveText("");
@@ -574,7 +706,7 @@ for (const width of [390, 700, 1600]) {
       .locator("main")
       .evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     // Where the question's Delete will be: ask once, measure, answer Keep.
-    await deleteButton(page).click();
+    await askDelete(page);
     await expect(keepButton(page)).toBeFocused();
     const box = await deleteButton(page).boundingBox();
     expect(box).not.toBeNull();
@@ -601,14 +733,18 @@ for (const width of [390, 700, 1600]) {
       );
     });
     // Ask, and press again at once where the question's Delete has just appeared.
-    await deleteButton(page).click();
+    await askDelete(page);
     await page.mouse.click(x, y);
     await page.waitForTimeout(300);
     expect(
       await page.evaluate(
         () => (window as unknown as { __hits: string[] }).__hits,
       ),
-    ).toEqual(["page: Delete note", "question: Delete note"]);
+    ).toEqual([
+      `page: ${MORE_ACTIONS}`,
+      "page: Delete note",
+      "question: Delete note",
+    ]);
     expect(await calls(page)).toEqual([]);
     await expect(preview(page)).toContainText(DELETE_QUESTION);
     await expect(openTitle(page, "Readme")).toBeVisible();
@@ -619,7 +755,7 @@ test("a burst of presses on the question's Delete deletes nothing; a later one d
   page,
 }) => {
   await open(page, `?note=${README}`);
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   const box = await deleteButton(page).boundingBox();
   expect(box).not.toBeNull();
@@ -644,7 +780,7 @@ test("a burst of presses on the question's Delete deletes nothing; a later one d
 
 test("a second, deliberate Delete removes the note", async ({ page }) => {
   await open(page, `?note=${README}`);
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   // Past the double-click guard.
   await page.waitForTimeout(600);
@@ -658,7 +794,9 @@ test("a second, deliberate Delete removes the note", async ({ page }) => {
   expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
   // The note is closed and out of the list.
   await expect(page).not.toHaveURL(/note=/);
-  await expect(preview(page)).toContainText("Choose a note to read it.");
+  await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText(
+    DATA.workspaces[0]!.name,
+  );
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length - 1);
   await expect(noteLinks(page).filter({ hasText: "Readme" })).toHaveCount(0);
   expect(await inList(page)).toBe(true);
@@ -734,7 +872,7 @@ test("a refused delete says so, keeps the note and closes the question", async (
   await expect(status(page)).toBeVisible();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
   await expect(keepButton(page)).toHaveCount(0);
-  await expect(deleteButton(page)).toBeFocused();
+  await expect(moreButton(page)).toBeFocused();
   await expect(openTitle(page, "Readme")).toBeVisible();
   await expect(page).toHaveURL(/note=/);
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length);
@@ -837,7 +975,9 @@ test("deleting the only note a filter lists leaves the empty list and a focused 
   await expect(page.getByRole("navigation", { name: "Notes" })).toContainText(
     "No notes match the filter.",
   );
-  await expect(preview(page)).toContainText("Choose a note to read it.");
+  await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText(
+    DATA.workspaces[0]!.name,
+  );
   await expect(tab(page, "Consulting")).toBeFocused();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(300);
@@ -872,7 +1012,9 @@ test("deleting the last held note goes back to all notes", async ({ page }) => {
     page.getByRole("heading", { name: "All notes", level: 2 }),
   ).toBeVisible();
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length - 2);
-  await expect(preview(page)).toContainText("Choose a note to read it.");
+  await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText(
+    DATA.workspaces[0]!.name,
+  );
   await expect(noteLinks(page).first()).toBeFocused();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(300);
@@ -880,11 +1022,27 @@ test("deleting the last held note goes back to all notes", async ({ page }) => {
   await expect(noteLinks(page).first()).toBeFocused();
 });
 
-test("by keyboard: Delete follows the sharing control; Escape answers Keep", async ({
+test("by keyboard: the topics and ⋯ follow the sharing control; Delete note asks; Escape answers Keep", async ({
   page,
 }) => {
-  await open(page, `?note=${README}`);
+  // A note with two topics: Tab goes sharing, ×, ×, + Topic, ⋯.
+  await open(page, `?note=${INTERVIEW_1}`);
   await page.getByRole("button", { name: /^Sharing: / }).focus();
+  await page.keyboard.press("Tab");
+  await expect(removeButton(page, "Harbor Logistics")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(removeButton(page, "Route optimisation")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(addTopicButton(page)).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(moreButton(page)).toBeFocused();
+  // Enter opens the menu; Tab reaches Copy link, then Delete note…, which asks.
+  await page.keyboard.press("Enter");
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Tab");
+  await expect(
+    preview(page).getByRole("button", { name: COPY_LINK }),
+  ).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(deleteButton(page)).toBeFocused();
   await page.keyboard.press("Enter");
@@ -892,9 +1050,14 @@ test("by keyboard: Delete follows the sharing control; Escape answers Keep", asy
   await expect(keepButton(page)).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
-  await expect(deleteButton(page)).toBeFocused();
+  await expect(moreButton(page)).toBeFocused();
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "false");
 
   // Delete comes before Keep; Enter on it after the guard deletes.
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(deleteButton(page)).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(keepButton(page)).toBeFocused();
   await page.keyboard.press("Shift+Tab");
@@ -902,17 +1065,20 @@ test("by keyboard: Delete follows the sharing control; Escape answers Keep", asy
   await page.waitForTimeout(600);
   await page.keyboard.press("Enter");
   await expect(status(page)).toHaveText(DELETED);
-  expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
+  expect(await calls(page)).toEqual([
+    { name: "deleteNote", args: [INTERVIEW_1] },
+  ]);
 });
 
 test("opening another note closes a pending question", async ({ page }) => {
   await open(page, `?note=${README}`);
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   await noteLinks(page).filter({ hasText: "Client list" }).click();
   await expect(openTitle(page, "Client list")).toBeVisible();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
-  await expect(deleteButton(page)).toBeVisible();
+  await expect(moreButton(page)).toBeVisible();
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "false");
   // And it is not waiting when the first note is opened again.
   await noteLinks(page).filter({ hasText: "Readme" }).click();
   await expect(openTitle(page, "Readme")).toBeVisible();
@@ -948,7 +1114,7 @@ for (const look of LOOKS)
       await page.setViewportSize(size);
       // A held note: the tallest header, with the release box under the question.
       await open(page, `?note=${HELD}`);
-      await deleteButton(page).click();
+      await askDelete(page);
       await expect(preview(page)).toContainText(DELETE_QUESTION);
       for (const button of [deleteButton(page), keepButton(page)]) {
         await button.scrollIntoViewIfNeeded();
@@ -980,6 +1146,41 @@ for (const look of LOOKS)
         if (size.width >= 1100) expect(page_.down).toBe(false);
       });
   }
+
+// ---- The note pane: the title once, and Copy link ----
+
+test("the open note shows its title once", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await expect(
+    preview(page).getByRole("heading", { name: "Readme" }),
+  ).toHaveCount(1);
+});
+
+test("Copy link says it copied", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await open(page, `?note=${README}`);
+  await moreButton(page).click();
+  await preview(page).getByRole("button", { name: COPY_LINK }).click();
+  await expect(status(page)).toHaveText(LINK_COPIED);
+  // The note's absolute address, and the menu is closed.
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(new URL(copied).searchParams.get("note")).toBe(README);
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "false");
+  expect(await calls(page)).toEqual([]);
+});
+
+test("Copy link says so when the browser refuses", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("refused")) },
+    });
+  });
+  await moreButton(page).click();
+  await preview(page).getByRole("button", { name: COPY_LINK }).click();
+  await expect(status(page)).toHaveText(LINK_NOT_COPIED);
+});
 
 // ---- Linked with, and Unlink ----
 
@@ -1044,18 +1245,23 @@ test("an open note lists the notes it is linked with, under the sharing control"
   );
   for (const title of ["Pricing options", "Call notes"])
     await expect(unlinkButton(page, title)).toHaveText("Unlink");
-  // After the sharing control and Delete, before the note's text.
-  const order = await page.evaluate(() => {
-    const at = (sel: string) => document.querySelector(sel)!;
-    const before = (a: Element, b: Element) =>
-      !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const list = at('section[aria-label="Note"] section');
-    return [
-      before(at('button[aria-label^="Sharing: "]'), list),
-      before(at('button[aria-label="Delete note"]'), list),
-      before(list, at('section[aria-label="Note"] article > :last-child')),
-    ];
-  });
+  // After the action row (the sharing control and ⋯), before the note's text.
+  const order = await page.evaluate(
+    ([linkedWith, more]) => {
+      const at = (sel: string) => document.querySelector(sel)!;
+      const before = (a: Element, b: Element) =>
+        !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      const list = at(
+        `section[aria-label="Note"] section[aria-label="${linkedWith}"]`,
+      );
+      return [
+        before(at('button[aria-label^="Sharing: "]'), list),
+        before(at(`button[aria-label="${more}"]`), list),
+        before(list, at('section[aria-label="Note"] article > :last-child')),
+      ];
+    },
+    [LINKED_WITH, MORE_ACTIONS] as const,
+  );
   expect(order).toEqual([true, true, true]);
   expect(await calls(page)).toEqual([]);
 });
@@ -1319,15 +1525,37 @@ const many = (n: number) =>
     ]),
   );
 
-const importButton = (page: Page) =>
-  page.getByRole("button", { name: T.IMPORT, exact: true });
+const addNotes = (page: Page) =>
+  page.getByRole("button", { name: ADD_NOTES, exact: true });
+async function openPanel(page: Page, name: string) {
+  await addNotes(page).click();
+  await page
+    .getByRole("group", { name: ADD_NOTES })
+    .getByRole("button", { name, exact: true })
+    .click();
+}
+const dialogNamed = (page: Page, name: string) =>
+  page.getByRole("dialog", { name });
+/** A press on the dimmed card, above the dialog, where nothing but the dim is. */
+async function pressDim(page: Page) {
+  const box = (await page.getByRole("main", { name: "Vault" }).boundingBox())!;
+  await page.mouse.click(box.x + 6, box.y + 40);
+}
+/** Whether something else is drawn over the middle of `el`: it cannot be pressed. */
+const covered = (el: Element) => {
+  const r = el.getBoundingClientRect();
+  const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  return top !== el && !el.contains(top);
+};
+const filterField = (page: Page) =>
+  page.getByRole("searchbox", { name: "Filter notes" });
 const importPanel = (page: Page) =>
   page.getByRole("region", { name: /Import|Ready/ });
 const panelNamed = (page: Page, name: string) =>
   page.getByRole("region", { name, exact: true });
 
 async function pick(page: Page, dir: string) {
-  await importButton(page).click();
+  await openPanel(page, T.IMPORT);
   await page.getByLabel(T.FOLDER_INPUT).setInputFiles(dir);
 }
 
@@ -1354,26 +1582,107 @@ const MIXED = {
   "big.md": 1_000_001,
 };
 
-test("the import panel opens in place, and Escape or Close puts the focus back", async ({
+test("the bar has the filter and Add notes; Shared with me has no Add notes", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(addNotes(page)).toBeVisible();
+  await addNotes(page).click();
+  const menu = page.getByRole("group", { name: ADD_NOTES });
+  await expect(menu.getByRole("button")).toHaveText([
+    new RegExp(T.IMPORT),
+    new RegExp(C.CONNECT),
+    new RegExp(A.ATTACH),
+  ]);
+  await page.keyboard.press("Escape");
+  await expect(addNotes(page)).toBeFocused();
+  await open(page, "?tab=shared");
+  await expect(addNotes(page)).toHaveCount(0);
+});
+
+test("the import opens as a dialog and Escape returns to Add notes", async ({
+  page,
+}) => {
+  await open(page);
+  await openPanel(page, T.IMPORT);
+  await expect(page.getByRole("dialog", { name: T.IMPORT })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
+});
+
+test("each menu item is named by its name and described by its line", async ({
+  page,
+}) => {
+  await open(page);
+  await addNotes(page).click();
+  await expect(addNotes(page)).toHaveAttribute("aria-expanded", "true");
+  const menu = page.getByRole("group", { name: ADD_NOTES });
+  await expect(addNotes(page)).toHaveAttribute(
+    "aria-controls",
+    (await menu.getAttribute("id"))!,
+  );
+  for (const [name, line] of [
+    [T.IMPORT, T.IMPORT_LINE],
+    [C.CONNECT, C.CONNECT_LINE],
+    [A.ATTACH, A.ATTACH_LINE],
+  ] as const) {
+    const item = menu.getByRole("button", { name, exact: true });
+    await expect(item).toHaveAccessibleDescription(line);
+  }
+  // A press outside closes it.
+  await page
+    .getByRole("main", { name: "Vault" })
+    .click({ position: { x: 6, y: 6 } });
+  await expect(menu).toHaveCount(0);
+  await expect(addNotes(page)).toHaveAttribute("aria-expanded", "false");
+});
+
+test("the import panel opens in a dialog; Escape, Close or a press on the dimmed card put the focus back on Add notes", async ({
   page,
 }) => {
   await open(page);
   const urls = watch(page);
-  await importButton(page).click();
+  await openPanel(page, T.IMPORT);
   const panel = panelNamed(page, T.IMPORT);
   await expect(panel).toBeVisible();
   await expect(panel.getByRole("heading", { name: T.IMPORT })).toBeFocused();
-  await expect(importButton(page)).toHaveAttribute("aria-expanded", "true");
+  const dialog = dialogNamed(page, T.IMPORT);
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
   await expect(panel.getByRole("button", { name: T.CHOOSE })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
-  await expect(importButton(page)).toBeFocused();
-  await importButton(page).click();
+  await expect(addNotes(page)).toBeFocused();
+  await openPanel(page, T.IMPORT);
   await panel.getByRole("button", { name: /^Close/ }).click();
   await expect(panel).toHaveCount(0);
-  await expect(importButton(page)).toBeFocused();
+  await expect(addNotes(page)).toBeFocused();
+  await openPanel(page, T.IMPORT);
+  await expect(dialog).toBeVisible();
+  await pressDim(page);
+  await expect(dialog).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
   expect(urls()).toEqual([]);
   expect(await calls(page)).toEqual([]);
+});
+
+test("Tab stays inside the dialog", async ({ page }) => {
+  await open(page);
+  await openPanel(page, T.IMPORT);
+  const dialog = dialogNamed(page, T.IMPORT);
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    expect(
+      await dialog.evaluate((el) => el.contains(document.activeElement)),
+    ).toBe(true);
+  }
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Shift+Tab");
+    expect(
+      await dialog.evaluate((el) => el.contains(document.activeElement)),
+    ).toBe(true);
+  }
 });
 
 test("the summary counts the notes and what is left out, before anything is sent", async ({
@@ -1627,7 +1936,7 @@ test("a browser that gives no folder paths is told so plainly", async ({
   page,
 }) => {
   await open(page);
-  await importButton(page).click();
+  await openPanel(page, T.IMPORT);
   // Loose files have no path inside a folder, as in a browser without folder picking.
   await page.getByLabel(T.FOLDER_INPUT).evaluate((el) => {
     el.removeAttribute("webkitdirectory");
@@ -1654,13 +1963,14 @@ test("notes go a batch at a time, in order, with the progress said; leaving asks
   const status = running.getByRole("status");
   await expect(status).toHaveText(T.progress(0, 60));
   await expect(status).toHaveText(T.progress(25, 60));
-  // While it runs: no closing, by Escape, by Close or by the button that opened it.
+  // While it runs: no closing, by Escape, by Close or by a press on the dimmed card.
   await page.keyboard.press("Escape");
   await running
     .getByRole("button", { name: /^Close/ })
     .evaluate((el: HTMLElement) => el.click());
-  await importButton(page).evaluate((el: HTMLElement) => el.click());
+  await pressDim(page);
   await expect(running).toBeVisible();
+  await expect(dialogNamed(page, T.IMPORT)).toBeVisible();
   expect(
     await page.evaluate(() => {
       const e = new Event("beforeunload", { cancelable: true });
@@ -1765,8 +2075,8 @@ test("at 390 px the import panel and its controls stay inside the window", async
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await open(page, "?failbatch=1");
-  await importButton(page).scrollIntoViewIfNeeded();
-  expect(await importButton(page).evaluate(inView)).toBe(true);
+  await addNotes(page).scrollIntoViewIfNeeded();
+  expect(await addNotes(page).evaluate(inView)).toBe(true);
   await pick(
     page,
     folder("A folder with quite a long name", {
@@ -1803,8 +2113,6 @@ test("at 390 px the import panel and its controls stay inside the window", async
 
 // ---- Connect wiki links ----
 
-const connectButton = (page: Page) =>
-  page.getByRole("button", { name: C.CONNECT, exact: true });
 const connectCalls = async (page: Page) =>
   ((await calls(page)) as { name: string; args: unknown[] }[])
     .filter((c) => c.name === "connect")
@@ -1883,8 +2191,9 @@ test("after the last batch the import connects the wiki links and counts them", 
   await connecting
     .getByRole("button", { name: /^Close/ })
     .evaluate((el: HTMLElement) => el.click());
+  await pressDim(page);
   await expect(connecting).toBeVisible();
-  await expect(importButton(page)).toHaveAttribute("aria-disabled", "true");
+  await expect(dialogNamed(page, T.IMPORT)).toBeVisible();
   expect(await leavingAsks(page)).toBe(true);
 
   // Connecting, then attaching, each take three slow steps: the end is a good while off.
@@ -1936,30 +2245,31 @@ test("Stop pressed during the last batch ends the import without connecting", as
   expect(await connectCalls(page)).toEqual([]);
 });
 
-test("closing a connect panel whose opener is gone puts the focus on the import opener", async ({
+test("closing a connect dialog on Shared with me, which has no Add notes, puts the focus on the filter", async ({
   page,
 }) => {
   await open(page, "?slow=1");
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await panelNamed(page, C.CONNECT)
     .getByRole("button", { name: C.START, exact: true })
     .click();
   const running = panelNamed(page, C.CONNECTING);
   await expect(running).toBeVisible();
-  // Another tab while the run is in flight: the panel stays, its opener does not.
+  // Another tab while the run is in flight (the dialog covers the tabs; the address can still
+  // change, as by Back): the panel stays, Add notes does not.
   await page
     .getByRole("navigation", { name: "Workspaces" })
     .getByRole("link", { name: "Shared with me" })
-    .click();
+    .evaluate((el: HTMLElement) => el.click());
   await expect(page).toHaveURL(/tab=shared/);
-  await expect(connectButton(page)).toHaveCount(0);
+  await expect(addNotes(page)).toHaveCount(0);
   const done = panelNamed(page, C.CONNECTED);
   await expect(done.getByText("Links made 21", { exact: true })).toBeVisible({
     timeout: 15_000,
   });
   await done.getByRole("button", { name: T.CLOSE, exact: true }).click();
   await expect(done).toHaveCount(0);
-  await expect(importButton(page)).toBeFocused();
+  await expect(filterField(page)).toBeFocused();
 });
 
 test("an import whose every batch was refused connects nothing", async ({
@@ -1997,15 +2307,21 @@ test("an import whose links could not be connected says where to finish", async 
   ]);
 });
 
-test("Connect wiki links is offered on one's own workspace, not on Shared with me", async ({
+test("the menu lists Connect wiki links on a workspace; Shared with me has no Add notes", async ({
   page,
 }) => {
   await open(page);
-  await expect(connectButton(page)).toBeVisible();
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
+  await addNotes(page).click();
+  await expect(
+    page
+      .getByRole("group", { name: ADD_NOTES })
+      .getByRole("button", { name: C.CONNECT, exact: true }),
+  ).toBeVisible();
   await page.goto("/dev/vault?tab=shared", { waitUntil: "networkidle" });
-  await expect(importButton(page)).toBeVisible();
-  await expect(connectButton(page)).toHaveCount(0);
+  await expect(addNotes(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: C.CONNECT, exact: true }),
+  ).toHaveCount(0);
 });
 
 test("the connect panel: Start, progress, counts; it cannot be closed while it runs", async ({
@@ -2013,14 +2329,12 @@ test("the connect panel: Start, progress, counts; it cannot be closed while it r
 }) => {
   await open(page, "?slow=1");
   const urls = watch(page);
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   const ready = panelNamed(page, C.CONNECT);
   await expect(ready.getByRole("heading", { name: C.CONNECT })).toBeFocused();
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "true");
-  await expect(connectButton(page)).toHaveAttribute(
-    "aria-controls",
-    "vault-connect",
-  );
+  const dialog = dialogNamed(page, C.CONNECT);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("#vault-connect")).toBeVisible();
   await expect(ready.getByText(C.CONNECT_INTRO)).toBeVisible();
   await expect(
     ready.getByText(DATA.workspaces[0]!.name, { exact: true }),
@@ -2038,16 +2352,14 @@ test("the connect panel: Start, progress, counts; it cannot be closed while it r
   await expect(running).toHaveAttribute("aria-busy", "true");
   const status = running.getByRole("status");
   await expect(status).toHaveText(C.connectProgress(40, 90));
-  // While it runs: no closing, by Escape, by Close or by either opener.
+  // While it runs: no closing, by Escape, by Close or by a press on the dimmed card.
   await page.keyboard.press("Escape");
   await running
     .getByRole("button", { name: /^Close/ })
     .evaluate((el: HTMLElement) => el.click());
-  for (const opener of [connectButton(page), importButton(page)]) {
-    await expect(opener).toHaveAttribute("aria-disabled", "true");
-    await opener.evaluate((el: HTMLElement) => el.click());
-  }
+  await pressDim(page);
   await expect(running).toBeVisible();
+  await expect(dialog).toBeVisible();
   await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
   expect(await leavingAsks(page)).toBe(true);
   await expect(status).toHaveText(C.connectProgress(80, 90));
@@ -2065,8 +2377,6 @@ test("the connect panel: Start, progress, counts; it cannot be closed while it r
   await expect(done.getByRole("alert")).toHaveCount(0);
   expect(await nameless(page, "vault-connect")).toEqual([]);
   expect(await leavingAsks(page)).toBe(false);
-  for (const opener of [connectButton(page), importButton(page)])
-    await expect(opener).not.toHaveAttribute("aria-disabled", "true");
   const ws = DATA.workspaces[0]!.id;
   expect(await calls(page)).toEqual([
     { name: "connect", args: [ws, null] },
@@ -2074,27 +2384,33 @@ test("the connect panel: Start, progress, counts; it cannot be closed while it r
     { name: "connect", args: [ws, "80"] },
   ]);
 
-  // Close, by the button under the counts, by the one in the corner, and by Escape.
+  // Close, by the button under the counts, by the one in the corner, by Escape, and by a press
+  // on the dimmed card.
   await done.getByRole("button", { name: T.CLOSE, exact: true }).click();
   await expect(done).toHaveCount(0);
-  await expect(connectButton(page)).toBeFocused();
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
-  await connectButton(page).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
+  await expect(addNotes(page)).toHaveAttribute("aria-expanded", "false");
+  await openPanel(page, C.CONNECT);
   await ready.getByRole("button", { name: /^Close:/ }).click();
   await expect(ready).toHaveCount(0);
-  await expect(connectButton(page)).toBeFocused();
-  await connectButton(page).click();
+  await expect(addNotes(page)).toBeFocused();
+  await openPanel(page, C.CONNECT);
   await expect(ready.getByRole("heading", { name: C.CONNECT })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(ready).toHaveCount(0);
-  await expect(connectButton(page)).toBeFocused();
+  await expect(addNotes(page)).toBeFocused();
+  await openPanel(page, C.CONNECT);
+  await pressDim(page);
+  await expect(ready).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
 });
 
 test("Stop ends connecting after the step on its way, with the counts so far", async ({
   page,
 }) => {
   await open(page, "?slow=1");
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await panelNamed(page, C.CONNECT)
     .getByRole("button", { name: C.START, exact: true })
     .click();
@@ -2120,7 +2436,7 @@ test("Stop ends connecting after the step on its way, with the counts so far", a
 
 test("a refused step is tried again from where it was", async ({ page }) => {
   await open(page, "?failconnect=2");
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await panelNamed(page, C.CONNECT)
     .getByRole("button", { name: C.START, exact: true })
     .click();
@@ -2138,7 +2454,7 @@ test("three refused steps in a row stop connecting and say so", async ({
   page,
 }) => {
   await open(page, "?failconnect=all");
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await panelNamed(page, C.CONNECT)
     .getByRole("button", { name: C.START, exact: true })
     .click();
@@ -2152,24 +2468,22 @@ test("three refused steps in a row stop connecting and say so", async ({
   expect(await nameless(page, "vault-connect")).toEqual([]);
 });
 
-test("only one of the two panels is open; an import at work disables both openers", async ({
+test("one dialog at a time: Add notes is behind the dialog while it is open; an import at work stays", async ({
   page,
 }) => {
   await open(page, "?slow=1");
-  await connectButton(page).click();
-  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
-  await importButton(page).click();
+  await openPanel(page, C.CONNECT);
+  await expect(dialogNamed(page, C.CONNECT)).toBeVisible();
+  expect(await addNotes(page).evaluate(covered)).toBe(true);
+  await page.keyboard.press("Escape");
+  expect(await addNotes(page).evaluate(covered)).toBe(false);
+  await openPanel(page, T.IMPORT);
   await expect(panelNamed(page, T.IMPORT)).toBeVisible();
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
-  await expect(importButton(page)).toHaveAttribute("aria-expanded", "true");
-  await connectButton(page).click();
-  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
-  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
-  await expect(importButton(page)).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  expect(await addNotes(page).evaluate(covered)).toBe(true);
 
-  // An import at work: the connect opener does nothing either.
-  await importButton(page).click();
+  // An import at work: neither Escape nor a press on the dimmed card closes it.
   await page
     .getByLabel(T.FOLDER_INPUT)
     .setInputFiles(folder("Thirty", many(30)));
@@ -2178,38 +2492,36 @@ test("only one of the two panels is open; an import at work disables both opener
     .click();
   const running = panelNamed(page, T.RUNNING);
   await expect(running).toBeVisible();
-  for (const opener of [connectButton(page), importButton(page)]) {
-    await expect(opener).toHaveAttribute("aria-disabled", "true");
-    await opener.evaluate((el: HTMLElement) => el.click());
-  }
+  await page.keyboard.press("Escape");
+  await pressDim(page);
   await expect(running).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  expect(await addNotes(page).evaluate(covered)).toBe(true);
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
 });
 
-test("attach is the third opener: only one panel is open, and one at work disables the others", async ({
+test("attach is the menu's third item: each item opens its own dialog, one at a time, and one at work stays", async ({
   page,
 }) => {
   await open(page, "?slow=1");
-  await attachButton(page).click();
-  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
-  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "true");
-  await connectButton(page).click();
-  await expect(panelNamed(page, C.CONNECT)).toBeVisible();
-  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
-  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "false");
-  await attachButton(page).click();
-  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
-  await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
-  await expect(connectButton(page)).toHaveAttribute("aria-expanded", "false");
-  await importButton(page).click();
-  await expect(panelNamed(page, T.IMPORT)).toBeVisible();
-  await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
-  await attachButton(page).click();
-  await expect(panelNamed(page, A.ATTACH)).toBeVisible();
-  await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
+  for (const [name, other] of [
+    [A.ATTACH, C.CONNECT],
+    [C.CONNECT, A.ATTACH],
+    [T.IMPORT, A.ATTACH],
+    [A.ATTACH, T.IMPORT],
+  ] as const) {
+    await openPanel(page, name);
+    await expect(dialogNamed(page, name)).toBeVisible();
+    await expect(panelNamed(page, name)).toBeVisible();
+    await expect(panelNamed(page, other)).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(addNotes(page)).toBeFocused();
+  }
 
-  // An import at work: the attach opener does nothing either.
-  await importButton(page).click();
+  // An import at work: nothing closes it, so no other panel can be opened.
+  await openPanel(page, T.IMPORT);
   await page
     .getByLabel(T.FOLDER_INPUT)
     .setInputFiles(folder("Thirty", many(30)));
@@ -2218,11 +2530,10 @@ test("attach is the third opener: only one panel is open, and one at work disabl
     .click();
   const running = panelNamed(page, T.RUNNING);
   await expect(running).toBeVisible();
-  for (const opener of [attachButton(page), connectButton(page)]) {
-    await expect(opener).toHaveAttribute("aria-disabled", "true");
-    await opener.evaluate((el: HTMLElement) => el.click());
-  }
+  await page.keyboard.press("Escape");
+  await pressDim(page);
   await expect(running).toBeVisible();
+  expect(await addNotes(page).evaluate(covered)).toBe(true);
   await expect(panelNamed(page, A.ATTACH)).toHaveCount(0);
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
 });
@@ -2231,7 +2542,7 @@ test("the attach panel at work: it cannot be closed, leaving asks, and it ends b
   page,
 }) => {
   await open(page, "?slow=1");
-  await attachButton(page).click();
+  await openPanel(page, A.ATTACH);
   const ready = panelNamed(page, A.ATTACH);
   await ready.getByRole("button", { name: A.START, exact: true }).click();
   const running = panelNamed(page, A.ATTACHING);
@@ -2243,15 +2554,9 @@ test("the attach panel at work: it cannot be closed, leaving asks, and it ends b
   await running
     .getByRole("button", { name: /^Close/ })
     .evaluate((el: HTMLElement) => el.click());
-  for (const opener of [
-    attachButton(page),
-    connectButton(page),
-    importButton(page),
-  ]) {
-    await expect(opener).toHaveAttribute("aria-disabled", "true");
-    await opener.evaluate((el: HTMLElement) => el.click());
-  }
+  await pressDim(page);
   await expect(running).toBeVisible();
+  await expect(dialogNamed(page, A.ATTACH)).toBeVisible();
   await expect(panelNamed(page, T.IMPORT)).toHaveCount(0);
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
   expect(await leavingAsks(page)).toBe(true);
@@ -2273,17 +2578,15 @@ test("the attach panel at work: it cannot be closed, leaving asks, and it ends b
   await expect(done.getByRole("alert")).toHaveCount(0);
   expect((await attachCalls(page)).length).toBe(3);
   expect(await leavingAsks(page)).toBe(false);
-  for (const opener of [
-    attachButton(page),
-    connectButton(page),
-    importButton(page),
-  ])
-    await expect(opener).not.toHaveAttribute("aria-disabled", "true");
+  // Its work over, a press on the dimmed card closes it.
+  await pressDim(page);
+  await expect(done).toHaveCount(0);
+  await expect(addNotes(page)).toBeFocused();
 });
 
 test("Stop in the attach panel keeps the counts so far", async ({ page }) => {
   await open(page, "?slow=1");
-  await attachButton(page).click();
+  await openPanel(page, A.ATTACH);
   await panelNamed(page, A.ATTACH)
     .getByRole("button", { name: A.START, exact: true })
     .click();
@@ -2345,30 +2648,34 @@ test("opening another workspace closes a connect panel that is not running", asy
   page,
 }) => {
   await open(page);
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await expect(panelNamed(page, C.CONNECT)).toBeVisible();
+  // The dialog covers the tabs; the address can still change, as by Back.
   await page
     .getByRole("navigation", { name: "Workspaces" })
     .getByRole("link", { name: "Operations" })
-    .click();
+    .evaluate((el: HTMLElement) => el.click());
   await expect(page).toHaveURL(/\?ws=/);
   await expect(panelNamed(page, C.CONNECT)).toHaveCount(0);
-  await connectButton(page).click();
+  await openPanel(page, C.CONNECT);
   await expect(
     panelNamed(page, C.CONNECT).getByText("Operations", { exact: true }),
   ).toBeVisible();
 });
 
-test("at 390 px both openers and the connect panel stay inside the window", async ({
+test("at 390 px Add notes, its menu and the connect dialog stay inside the window", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await open(page);
-  for (const opener of [importButton(page), connectButton(page)]) {
-    await opener.scrollIntoViewIfNeeded();
-    expect(await opener.evaluate(inView)).toBe(true);
-  }
-  await connectButton(page).click();
+  await addNotes(page).scrollIntoViewIfNeeded();
+  expect(await addNotes(page).evaluate(inView)).toBe(true);
+  await addNotes(page).click();
+  const menu = page.getByRole("group", { name: ADD_NOTES });
+  const inside = (await menu.boundingBox())!;
+  expect(inside.x).toBeGreaterThanOrEqual(0);
+  expect(inside.x + inside.width).toBeLessThanOrEqual(390);
+  await menu.getByRole("button", { name: C.CONNECT, exact: true }).click();
   const ready = panelNamed(page, C.CONNECT);
   const start = ready.getByRole("button", { name: C.START, exact: true });
   await start.scrollIntoViewIfNeeded();
@@ -2381,8 +2688,6 @@ test("at 390 px both openers and the connect panel stay inside the window", asyn
 
 // ---- Attach topics ----
 
-const attachButton = (page: Page) =>
-  page.getByRole("button", { name: A.ATTACH, exact: true });
 const attachCalls = async (page: Page) =>
   ((await calls(page)) as { name: string; args: unknown[] }[])
     .filter((c) => c.name === "attach")
@@ -2448,8 +2753,8 @@ test("Attach topics on one's own workspace: one sentence, Start, progress, then 
   page,
 }) => {
   await open(page);
-  await expect(attachButton(page)).toHaveAttribute("aria-expanded", "false");
-  await attachButton(page).click();
+  await expect(addNotes(page)).toHaveAttribute("aria-expanded", "false");
+  await openPanel(page, A.ATTACH);
   const panel = panelNamed(page, A.ATTACH);
   await expect(panel.getByRole("heading", { name: A.ATTACH })).toBeFocused();
   await expect(panel.getByText(A.ATTACH_INTRO)).toBeVisible();
@@ -2461,10 +2766,14 @@ test("Attach topics on one's own workspace: one sentence, Start, progress, then 
     done.getByText("Attached to a topic 54", { exact: true }),
   ).toBeVisible();
   await done.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(attachButton(page)).toBeFocused();
-  // Not on "Shared with me".
+  await expect(addNotes(page)).toBeFocused();
+  // Not on "Shared with me": there is no Add notes there.
   await page.getByRole("link", { name: "Shared with me" }).click();
-  await expect(attachButton(page)).toHaveCount(0);
+  await expect(page).toHaveURL(/tab=shared/);
+  await expect(addNotes(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: A.ATTACH, exact: true }),
+  ).toHaveCount(0);
 });
 
 // ---- Topics: browsing by topic, and a note's topics ----
@@ -2488,10 +2797,22 @@ const topicsSection = (page: Page) =>
 const chips = (page: Page) => topicsSection(page).getByRole("listitem");
 const removeButton = (page: Page, name: string) =>
   topicsSection(page).getByRole("button", { name: P.removeName(name) });
-const addSelect = (page: Page) =>
-  topicsSection(page).getByRole("combobox", { name: P.ADD_TOPIC });
-const addButton = (page: Page) =>
-  topicsSection(page).getByRole("button", { name: P.ADD, exact: true });
+const addTopicButton = (page: Page) =>
+  topicsSection(page).getByRole("button", {
+    name: P.ADD_TOPIC_BUTTON,
+    exact: true,
+  });
+const picker = (page: Page) =>
+  topicsSection(page).getByRole("group", { name: P.ADD_TOPIC });
+const findTopic = (page: Page) =>
+  picker(page).getByRole("searchbox", { name: P.FIND_TOPIC });
+/** The picker's topic buttons, in order. */
+const pickable = (page: Page) => picker(page).getByRole("button");
+/** Opens + Topic and chooses the topic called `name`. */
+async function pickTopic(page: Page, name: string) {
+  await addTopicButton(page).click();
+  await picker(page).getByRole("button", { name, exact: true }).click();
+}
 const listHeading = (page: Page, name: string) =>
   page.getByRole("heading", { level: 2, name, exact: true });
 const chipNames = (page: Page) =>
@@ -2613,9 +2934,8 @@ test("a note's chips are its topics in order, with their kind", async ({
   page,
 }) => {
   await open(page, `?note=${SCOPE}`);
-  await expect(
-    topicsSection(page).getByRole("heading", { name: P.TOPICS_HEADING }),
-  ).toBeVisible();
+  // Inline in the action row: no heading of their own.
+  await expect(topicsSection(page).getByRole("heading")).toHaveCount(0);
   expect(await chipNames(page)).toEqual([
     "Harbor Logistics",
     "Route optimisation",
@@ -2628,18 +2948,36 @@ test("a note's chips are its topics in order, with their kind", async ({
   await expect(chips(page).nth(2)).toContainText("Subjects");
   await expect(chips(page).nth(3)).toContainText("Partners");
   await expect(chips(page).nth(4)).toContainText("Vendors");
-  // Five topics: Remove on each, no Add control.
+  // Five topics: × on each, no + Topic.
   await expect(
     topicsSection(page).getByRole("button", { name: /^Remove / }),
   ).toHaveCount(5);
-  await expect(addSelect(page)).toHaveCount(0);
-  await expect(addButton(page)).toHaveCount(0);
-  // The section sits under the sharing control.
-  const tools = await page
+  await expect(
+    topicsSection(page)
+      .getByRole("button", { name: /^Remove / })
+      .first(),
+  ).toHaveText("×");
+  await expect(addTopicButton(page)).toHaveCount(0);
+  // The chips follow the sharing control, and ⋯ follows them, in one row.
+  const order = await page
     .getByRole("button", { name: /^Sharing: / })
-    .boundingBox();
+    .evaluate((pill, label) => {
+      const section = pill
+        .closest("header")
+        ?.querySelector(`section[aria-label="${label}"]`);
+      return {
+        sameRow: !!section?.parentElement?.contains(pill),
+        after: !!(
+          section &&
+          pill.compareDocumentPosition(section) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+        ),
+      };
+    }, P.TOPICS_HEADING);
+  expect(order).toEqual({ sameRow: true, after: true });
   const section = await topicsSection(page).boundingBox();
-  expect(section!.y).toBeGreaterThan(tools!.y);
+  const more = await moreButton(page).boundingBox();
+  expect(more!.x).toBeGreaterThan(section!.x);
 });
 
 test("Remove takes a topic off at once, says so and records one call", async ({
@@ -2653,7 +2991,7 @@ test("Remove takes a topic off at once, says so and records one call", async ({
   await removeButton(page, "Harbor Logistics").click();
   await expect(status(page)).toHaveText(P.removed("Harbor Logistics"));
   expect(await chipNames(page)).toEqual(["Route optimisation"]);
-  // The focus lands on the next chip's Remove.
+  // The focus lands on the next chip's ×.
   await expect(removeButton(page, "Route optimisation")).toBeFocused();
   expect(await calls(page)).toEqual([
     {
@@ -2661,12 +2999,12 @@ test("Remove takes a topic off at once, says so and records one call", async ({
       args: [INTERVIEW_1, topicId("Harbor Logistics")],
     },
   ]);
-  // The last one: no chip is left, the Add control takes the focus.
+  // The last one: no chip is left, and no words say so; + Topic takes the focus.
   await removeButton(page, "Route optimisation").click();
   await expect(status(page)).toHaveText(P.removed("Route optimisation"));
   await expect(chips(page)).toHaveCount(0);
-  await expect(topicsSection(page).getByText(P.NO_TOPICS_YET)).toBeVisible();
-  await expect(addSelect(page)).toBeFocused();
+  await expect(topicsSection(page)).not.toContainText("No topics");
+  await expect(addTopicButton(page)).toBeFocused();
   expect(await calls(page)).toHaveLength(2);
 });
 
@@ -2677,47 +3015,77 @@ test("removing the last chip of several moves the focus to the one before", asyn
   await removeButton(page, "Survey Kit Co").click();
   await expect(status(page)).toHaveText(P.removed("Survey Kit Co"));
   await expect(removeButton(page, "Bluewater Partners")).toBeFocused();
-  // Under five now, the Add control is there, with the removed topic in it.
-  await expect(addSelect(page)).toBeVisible();
-  await expect(addSelect(page).locator("option")).toHaveText([
+  // Under five now, + Topic is there, and its picker offers the removed topic.
+  await expect(addTopicButton(page)).toBeVisible();
+  await addTopicButton(page).click();
+  await expect(pickable(page)).toHaveText([
     "Northfield Foods",
     "Survey Kit Co",
   ]);
 });
 
-test("Add offers the topics the note does not carry, by kind, and adds the chosen one", async ({
+test("+ Topic offers the topics the note does not carry, by kind, and adds the chosen one", async ({
   page,
 }) => {
   await open(page, `?note=${KICKOFF}`);
+  const requests = watch(page);
   expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
-  await expect(addSelect(page).locator("optgroup")).toHaveCount(5);
+  await expect(picker(page)).toHaveCount(0);
+  await addTopicButton(page).click();
+  await expect(addTopicButton(page)).toHaveAttribute("aria-expanded", "true");
+  // The search field takes the focus.
+  await expect(findTopic(page)).toBeFocused();
+  const kinds = picker(page).getByRole("group");
+  await expect(kinds).toHaveCount(5);
   expect(
-    await addSelect(page)
-      .locator("optgroup")
-      .evaluateAll((els) => els.map((e) => e.getAttribute("label"))),
+    await kinds.evaluateAll((els) =>
+      els.map((e) => e.firstElementChild?.textContent ?? ""),
+    ),
   ).toEqual(["Customers", "Partners", "Vendors", "Solutions", "Subjects"]);
-  await expect(addSelect(page).locator("option")).toHaveText([
+  await expect(pickable(page)).toHaveText([
     "Northfield Foods",
     "Bluewater Partners",
     "Survey Kit Co",
     "Route optimisation",
     "Pricing",
   ]);
-  await addSelect(page).selectOption({ label: "Pricing" });
-  await addButton(page).click();
+  // Opening it is client state only.
+  expect(requests()).toEqual([]);
+  await picker(page).getByRole("button", { name: "Pricing" }).click();
+  await expect(picker(page)).toHaveCount(0);
+  await expect(addTopicButton(page)).toBeFocused();
   await expect(status(page)).toHaveText(P.added("Pricing"));
   expect(await chipNames(page)).toEqual(["Harbor Logistics", "Pricing"]);
   expect(await calls(page)).toEqual([
     { name: "addTopic", args: [KICKOFF, topicId("Pricing")] },
   ]);
-  await expect(addSelect(page).locator("option")).toHaveCount(4);
+  await addTopicButton(page).click();
+  await expect(pickable(page)).toHaveCount(4);
+});
+
+test("the topic picker filters by its text, says when nothing matches and closes with Escape", async ({
+  page,
+}) => {
+  await open(page, `?note=${KICKOFF}`);
+  await addTopicButton(page).click();
+  await findTopic(page).fill("  sURVEY ");
+  await expect(pickable(page)).toHaveText(["Survey Kit Co"]);
+  await expect(picker(page).getByRole("group")).toHaveCount(1);
+  await findTopic(page).fill("zzz");
+  await expect(pickable(page)).toHaveCount(0);
+  await expect(picker(page)).toContainText(P.NO_TOPIC_MATCHES);
+  await page.keyboard.press("Escape");
+  await expect(picker(page)).toHaveCount(0);
+  await expect(addTopicButton(page)).toBeFocused();
+  await expect(addTopicButton(page)).toHaveAttribute("aria-expanded", "false");
+  expect(await calls(page)).toEqual([]);
 });
 
 test("a refused add or remove says so and leaves the chips as they were", async ({
   page,
 }) => {
   await open(page, `?fail=1&note=${KICKOFF}`);
-  await addButton(page).click();
+  await pickTopic(page, "Northfield Foods");
   await expect(topicsSection(page).getByRole("alert")).toHaveText(P.REFUSED);
   expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
   await removeButton(page, "Harbor Logistics").click();
@@ -2756,8 +3124,9 @@ test("a colleague's note shows its chips and nothing to change", async ({
 }) => {
   await open(page, `?tab=shared&note=${SHARED_SITE_VISIT}`);
   expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  // Chips without ×, and no + Topic.
   await expect(topicsSection(page).getByRole("button")).toHaveCount(0);
-  await expect(addSelect(page)).toHaveCount(0);
+  await expect(addTopicButton(page)).toHaveCount(0);
   // And no switch, as there is no folder column.
   await expect(switchGroup(page)).toHaveCount(0);
   // Without topics there is no section at all.
@@ -2769,11 +3138,41 @@ test("a note with no topics of one's own offers to add one", async ({
   page,
 }) => {
   await open(page, `?note=${README}`);
-  await expect(topicsSection(page).getByText(P.NO_TOPICS_YET)).toBeVisible();
-  await expect(addSelect(page)).toBeVisible();
-  await expect(addSelect(page).locator("option")).toHaveCount(
-    DATA.topics.length,
-  );
+  // No chips and no words for their absence: + Topic alone.
+  await expect(chips(page)).toHaveCount(0);
+  await expect(topicsSection(page)).toHaveText(P.ADD_TOPIC_BUTTON);
+  await addTopicButton(page).click();
+  await expect(pickable(page)).toHaveCount(DATA.topics.length);
+});
+
+test("+ Topic finds and adds a topic; × removes it", async ({ page }) => {
+  // Kickoff notes carries one topic (Harbor Logistics), so + Topic is offered.
+  await open(page, `?note=${KICKOFF}`);
+  expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  await addTopicButton(page).click();
+  await findTopic(page).fill("route");
+  await expect(pickable(page)).toHaveText(["Route optimisation"]);
+  await pickable(page).first().click();
+  await expect(status(page)).toHaveText(P.added("Route optimisation"));
+  expect(await chipNames(page)).toEqual([
+    "Harbor Logistics",
+    "Route optimisation",
+  ]);
+  await expect(chips(page).nth(1)).toContainText("Solutions");
+  expect(await calls(page)).toEqual([
+    { name: "addTopic", args: [KICKOFF, topicId("Route optimisation")] },
+  ]);
+
+  await removeButton(page, "Route optimisation").click();
+  await expect(status(page)).toHaveText(P.removed("Route optimisation"));
+  expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  expect(await calls(page)).toEqual([
+    { name: "addTopic", args: [KICKOFF, topicId("Route optimisation")] },
+    {
+      name: "detachTopic",
+      args: [KICKOFF, topicId("Route optimisation")],
+    },
+  ]);
 });
 
 test("by keyboard: the switch, a kind, a topic and the chips are reached by Tab and worked by Enter or Space", async ({
@@ -2807,7 +3206,8 @@ test("by keyboard: the switch, a kind, a topic and the chips are reached by Tab 
   await expect(listHeading(page, "Harbor Logistics")).toBeVisible();
   await expect(noteLinks(page)).toHaveCount(3);
 
-  // The chips: Remove, Remove, the Add control, its button.
+  // The chips: ×, ×, + Topic; Space opens the picker on its search field, Tab reaches the
+  // first topic and Space adds it.
   await page.goto(`/dev/vault?note=${INTERVIEW_1}`, {
     waitUntil: "networkidle",
   });
@@ -2815,13 +3215,15 @@ test("by keyboard: the switch, a kind, a topic and the chips are reached by Tab 
   await page.keyboard.press("Tab");
   await expect(removeButton(page, "Route optimisation")).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(addSelect(page)).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(addButton(page)).toBeFocused();
+  await expect(addTopicButton(page)).toBeFocused();
   await page.keyboard.press("Space");
-  await expect(status(page)).toHaveText(
-    P.added(DATA.topics.find((x) => x.name === "Northfield Foods")!.name),
-  );
+  await expect(findTopic(page)).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    picker(page).getByRole("button", { name: "Northfield Foods" }),
+  ).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(status(page)).toHaveText(P.added("Northfield Foods"));
   await removeButton(page, "Harbor Logistics").focus();
   await page.keyboard.press("Enter");
   await expect(status(page)).toHaveText(P.removed("Harbor Logistics"));
@@ -2833,6 +3235,9 @@ test("at 390 px the column and the chips stay inside the window", async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await open(page, `?note=${SCOPE}`);
+  // Narrow: the switch and the topic list are in the list title's picker.
+  const pick = page.getByRole("button", { name: /^Choose folder or topic/ });
+  await pick.click();
   await switchGroup(page).getByRole("button", { name: P.BY_TOPICS }).click();
   const nav = topicNav(page);
   await nav.getByRole("button", { name: /^Customers/ }).click();
@@ -2850,13 +3255,89 @@ test("at 390 px the column and the chips stay inside the window", async ({
     expect(box.x + box.width).toBeLessThanOrEqual(390);
   }
   expect((await scrolls(page)).across).toBe(false);
+  await page.keyboard.press("Escape");
   await removeButton(page, "Survey Kit Co").click();
   await expect(status(page)).toHaveText(P.removed("Survey Kit Co"));
-  for (const control of [addSelect(page), addButton(page)]) {
+  await addTopicButton(page).click();
+  for (const control of [
+    addTopicButton(page),
+    findTopic(page),
+    ...(await pickable(page).all()),
+  ]) {
     await control.scrollIntoViewIfNeeded();
     const box = (await control.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(390);
   }
   expect((await scrolls(page)).across).toBe(false);
+});
+
+test("with no note open the vault shows its summary", async ({ page }) => {
+  await open(page);
+  const pane = preview(page);
+  await expect(pane.getByRole("heading", { level: 2 })).toHaveText(
+    DATA.workspaces[0]!.name,
+  );
+  await expect(pane).toContainText(/\d+\s*notes/);
+  await expect(pane.getByRole("link")).toHaveCount(6);
+});
+
+test("Review shows the held notes", async ({ page }) => {
+  await open(page);
+  await preview(page).getByRole("button", { name: "Review" }).click();
+  await expect(
+    folders(page).getByRole("button", { name: /^Held, waiting for you/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(noteLinks(page)).toHaveCount(
+    DATA.notes.filter(
+      (n) => n.quarantined && n.workspace_id === DATA.workspaces[0]!.id,
+    ).length,
+  );
+});
+
+test("in a narrow card Review shows the held notes and the picker stays shut", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await open(page);
+  await preview(page).getByRole("button", { name: "Review" }).click();
+  const picker = page.getByRole("button", { name: /^Choose folder or topic/ });
+  await expect(picker).toHaveAccessibleName(/: Held$/);
+  await expect(picker).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    page.getByRole("group", { name: "Folders and topics" }),
+  ).toHaveCount(0);
+  await expect(noteLinks(page)).toHaveCount(
+    DATA.notes.filter(
+      (n) => n.quarantined && n.workspace_id === DATA.workspaces[0]!.id,
+    ).length,
+  );
+});
+
+test("the narrow picker closes on an outside press and on Escape", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await open(page);
+  const picker = page.getByRole("button", { name: /^Choose folder or topic/ });
+  const pop = page.getByRole("group", { name: "Folders and topics" });
+  await picker.click();
+  await expect(pop).toBeVisible();
+  // An outside press on a spot that takes no focus.
+  await page
+    .getByRole("main", { name: "Vault" })
+    .click({ position: { x: 600, y: 4 } });
+  await expect(pop).toHaveCount(0);
+  await picker.click();
+  await expect(pop).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(pop).toHaveCount(0);
+  await expect(picker).toBeFocused();
+});
+
+test("Shared with me says how many notes from how many colleagues", async ({
+  page,
+}) => {
+  await open(page, "?tab=shared");
+  await expect(preview(page)).toContainText(/\d+ notes? from \d+ colleagues?/);
 });

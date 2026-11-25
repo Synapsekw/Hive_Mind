@@ -14,17 +14,29 @@ import {
 } from "react";
 import type { ImportActions } from "../import/types";
 import { Shell } from "../shell/Shell";
+import { AddNotes, type AddNotesKey } from "./AddNotes";
 import { Connect } from "./Connect";
-import { CONNECT } from "./connectText";
+import { CONNECT, CONNECT_LINE } from "./connectText";
 import { Attach } from "./Attach";
-import { ATTACH } from "./attachText";
+import { ATTACH, ATTACH_LINE } from "./attachText";
 import { Folders } from "./Folders";
 import { Import } from "./Import";
-import { IMPORT } from "./importText";
+import { IMPORT, IMPORT_LINE } from "./importText";
+import { PanelDialog } from "./PanelDialog";
 import { folderMark } from "./marks";
 import { NoteList } from "./NoteList";
+import { Summary } from "./Summary";
+import { overview, sharedOverview } from "./overview";
 import { Preview } from "./Preview";
-import { DELETE_FAILED, DELETED, UNLINK_FAILED } from "./sentences";
+import { ScopePicker } from "./ScopePicker";
+import { useNarrow } from "./useNarrow";
+import {
+  DELETE_FAILED,
+  DELETED,
+  LINK_COPIED,
+  LINK_NOT_COPIED,
+  UNLINK_FAILED,
+} from "./sentences";
 import { ShareControl } from "./ShareControl";
 import { Tabs } from "./Tabs";
 import { TopicList } from "./TopicList";
@@ -119,8 +131,9 @@ export function Vault({
   }, [servedOpen]);
   // Deletes on their way, by note: a second request for the same note joins the first.
   const deleting = useRef(new Map<string, Promise<boolean>>());
-  // The panel under the bar: the import, connecting wiki links, attaching topics, or none; never
-  // two. While one is at work it cannot be closed and the others cannot be opened.
+  // The panel in the dialog over the vault: the import, connecting wiki links, attaching topics,
+  // or none; never two. While one is at work it cannot be closed, and the dialog covers the bar,
+  // so no other can be opened.
   const [panel, setPanel] = useState<"import" | "connect" | "attach" | null>(
     null,
   );
@@ -131,27 +144,25 @@ export function Vault({
     id: string;
     name: string;
   } | null>(null);
-  const importOpener = useRef<HTMLButtonElement>(null);
-  const connectOpener = useRef<HTMLButtonElement>(null);
-  const attachOpener = useRef<HTMLButtonElement>(null);
+  // The Add notes button, where the focus goes back to when a panel closes.
+  const addRef = useRef<HTMLButtonElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
   const importing = panel === "import";
   const connecting = panel === "connect" && connectIn !== null;
   const attaching = panel === "attach" && connectIn !== null;
-  function closeImport() {
+  function closePanel() {
     setPanel(null);
-    importOpener.current?.focus();
-  }
-  function closeConnect() {
-    setPanel(null);
-    // Its opener is not there on "Shared with me", reached while a run was in flight: the
-    // import's is, so the focus never falls to the page.
-    (connectOpener.current ?? importOpener.current)?.focus();
-  }
-  function closeAttach() {
-    setPanel(null);
-    (attachOpener.current ?? importOpener.current)?.focus();
+    // Add notes is not there on "Shared with me", reached while a run was in flight: the
+    // filter is, so the focus never falls to the page.
+    (addRef.current ?? filterRef.current)?.focus();
   }
   const main = useRef<HTMLElement>(null);
+  const narrow = useNarrow(main);
+  const [picking, setPicking] = useState(false);
+  // The popover belongs to the narrow card: wide again, it is closed for good.
+  useEffect(() => {
+    if (!narrow) setPicking(false);
+  }, [narrow]);
   // Where the focus goes once a deleted note has left the page.
   const target = useRef<{ row: HTMLElement | null } | null>(null);
 
@@ -385,6 +396,21 @@ export function Vault({
   )
     scope = { kind: "all" };
 
+  const summary = useMemo(
+    () =>
+      shared
+        ? { kind: "shared" as const, data: sharedOverview(data.notes) }
+        : {
+            kind: "workspace" as const,
+            data: overview(data.notes, tree, now),
+          },
+    [data.notes, tree, now, shared],
+  );
+  const wsName =
+    ownWorkspace?.name ??
+    data.workspaces.find((w) => w.id === wsId)?.name ??
+    "";
+
   const listed = notesIn(data.notes, scope, local.q);
   const groups = shared ? byOwner(listed, data) : null;
 
@@ -419,12 +445,96 @@ export function Vault({
   if (scope.kind === "topic")
     title = data.topics.find((x) => x.id === scope.id)?.name ?? ALL_NOTES;
 
+  const scopeList = (
+    <>
+      <div role="group" aria-label={SWITCH} className={`${s.tabs} ${s.switch}`}>
+        {(
+          [
+            ["folders", BY_FOLDERS],
+            ["topics", BY_TOPICS],
+          ] as const
+        ).map(([by, label]) => (
+          <button
+            key={by}
+            type="button"
+            className={s.tab}
+            aria-pressed={local.by === by}
+            onClick={() =>
+              setLocal((l) =>
+                l.by === by ? l : { ...l, by, scope: { kind: "all" } },
+              )
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {local.by === "topics" ? (
+        <TopicList
+          tree={byTopic}
+          total={data.notes.length}
+          hiveEmpty={data.topics.length === 0}
+          scope={scope}
+          opened={local.kinds}
+          onScope={(next) => {
+            setPicking(false);
+            setLocal((l) => ({ ...l, scope: next }));
+          }}
+          onToggle={(kind) =>
+            setLocal((l) => {
+              const kinds = new Set(l.kinds);
+              if (kinds.has(kind)) kinds.delete(kind);
+              else kinds.add(kind);
+              return { ...l, kinds };
+            })
+          }
+        />
+      ) : (
+        <Folders
+          root={tree}
+          scope={scope}
+          opened={local.opened}
+          held={held}
+          members={data.members}
+          onScope={(next) => {
+            setPicking(false);
+            setLocal((l) => {
+              const opened = new Set(l.opened);
+              if (next.kind === "folder") opened.add(next.path);
+              return { ...l, scope: next, opened };
+            });
+          }}
+          onToggle={(path) =>
+            setLocal((l) => {
+              const opened = new Set(l.opened);
+              if (opened.has(path)) opened.delete(path);
+              else opened.add(path);
+              return { ...l, opened };
+            })
+          }
+        />
+      )}
+    </>
+  );
+
   const header = (
     <div className={s.listHead}>
       <div className={s.listTitleRow}>
-        <h2 className={s.listTitle} title={title}>
-          {title}
-        </h2>
+        {narrow && !shared ? (
+          <h2 className={s.listTitlePick}>
+            <ScopePicker
+              title={title}
+              open={picking && narrow}
+              onOpenChange={setPicking}
+            >
+              {scopeList}
+            </ScopePicker>
+          </h2>
+        ) : (
+          <h2 className={s.listTitle} title={title}>
+            {title}
+          </h2>
+        )}
         <span className={s.listCount}>{count(listed.length)}</span>
       </div>
       {scope.kind === "folder" && folderNode && wsId && (
@@ -467,68 +577,10 @@ export function Vault({
             hrefWorkspace={hrefWorkspace}
             hrefShared={hrefShared}
           />
-          {importer && (
-            <div className={s.openers}>
-              <button
-                ref={importOpener}
-                type="button"
-                className={s.secondary}
-                aria-expanded={importing}
-                aria-controls={importing ? "vault-import" : undefined}
-                aria-disabled={panelBusy || undefined}
-                onClick={() => {
-                  if (panelBusy) return;
-                  if (importing) closeImport();
-                  else setPanel("import");
-                }}
-              >
-                {IMPORT}
-              </button>
-              {ownWorkspace && (
-                <button
-                  ref={connectOpener}
-                  type="button"
-                  className={s.secondary}
-                  aria-expanded={connecting}
-                  aria-controls={connecting ? "vault-connect" : undefined}
-                  aria-disabled={panelBusy || undefined}
-                  onClick={() => {
-                    if (panelBusy) return;
-                    if (connecting) closeConnect();
-                    else {
-                      setConnectIn(ownWorkspace);
-                      setPanel("connect");
-                    }
-                  }}
-                >
-                  {CONNECT}
-                </button>
-              )}
-              {ownWorkspace && (
-                <button
-                  ref={attachOpener}
-                  type="button"
-                  className={s.secondary}
-                  aria-expanded={attaching}
-                  aria-controls={attaching ? "vault-attach" : undefined}
-                  aria-disabled={panelBusy || undefined}
-                  onClick={() => {
-                    if (panelBusy) return;
-                    if (attaching) closeAttach();
-                    else {
-                      setConnectIn(ownWorkspace);
-                      setPanel("attach");
-                    }
-                  }}
-                >
-                  {ATTACH}
-                </button>
-              )}
-            </div>
-          )}
           <label className={s.filter}>
             <span className={s.srOnly}>Filter notes</span>
             <input
+              ref={filterRef}
               type="search"
               className={s.search}
               placeholder="Filter by title or path"
@@ -539,6 +591,24 @@ export function Vault({
               }}
             />
           </label>
+          {importer && !shared && (
+            <AddNotes
+              buttonRef={addRef}
+              items={[
+                { key: "import", name: IMPORT, line: IMPORT_LINE },
+                ...(ownWorkspace
+                  ? ([
+                      { key: "connect", name: CONNECT, line: CONNECT_LINE },
+                      { key: "attach", name: ATTACH, line: ATTACH_LINE },
+                    ] as const)
+                  : []),
+              ]}
+              onChoose={(key: AddNotesKey) => {
+                if (key !== "import") setConnectIn(ownWorkspace);
+                setPanel(key);
+              }}
+            />
+          )}
         </div>
         {/* How the last delete or unlink went. The status element is always here, so it is announced. */}
         <div
@@ -560,103 +630,43 @@ export function Vault({
           )}
         </div>
         {importer && importing && (
-          <Import
-            workspaces={data.workspaces}
-            current={wsId}
-            actions={importer}
-            hrefWorkspace={hrefWorkspace}
-            onClose={closeImport}
-            onBusy={setPanelBusy}
-          />
+          <PanelDialog label={IMPORT} busy={panelBusy} onClose={closePanel}>
+            <Import
+              workspaces={data.workspaces}
+              current={wsId}
+              actions={importer}
+              hrefWorkspace={hrefWorkspace}
+              onClose={closePanel}
+              onBusy={setPanelBusy}
+            />
+          </PanelDialog>
         )}
         {importer && connecting && connectIn && (
-          <Connect
-            workspace={connectIn}
-            connect={importer.connect}
-            onClose={closeConnect}
-            onBusy={setPanelBusy}
-          />
+          <PanelDialog label={CONNECT} busy={panelBusy} onClose={closePanel}>
+            <Connect
+              workspace={connectIn}
+              connect={importer.connect}
+              onClose={closePanel}
+              onBusy={setPanelBusy}
+            />
+          </PanelDialog>
         )}
         {importer && attaching && connectIn && (
-          <Attach
-            workspace={connectIn}
-            attach={importer.attach}
-            onClose={closeAttach}
-            onBusy={setPanelBusy}
-          />
+          <PanelDialog label={ATTACH} busy={panelBusy} onClose={closePanel}>
+            <Attach
+              workspace={connectIn}
+              attach={importer.attach}
+              onClose={closePanel}
+              onBusy={setPanelBusy}
+            />
+          </PanelDialog>
         )}
-        <div className={s.cols} data-shared={shared || undefined}>
-          {!shared && (
-            <div className={s.folders}>
-              <div
-                role="group"
-                aria-label={SWITCH}
-                className={`${s.tabs} ${s.switch}`}
-              >
-                {(
-                  [
-                    ["folders", BY_FOLDERS],
-                    ["topics", BY_TOPICS],
-                  ] as const
-                ).map(([by, label]) => (
-                  <button
-                    key={by}
-                    type="button"
-                    className={s.tab}
-                    aria-pressed={local.by === by}
-                    onClick={() =>
-                      setLocal((l) =>
-                        l.by === by ? l : { ...l, by, scope: { kind: "all" } },
-                      )
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {local.by === "topics" ? (
-                <TopicList
-                  tree={byTopic}
-                  total={data.notes.length}
-                  hiveEmpty={data.topics.length === 0}
-                  scope={scope}
-                  opened={local.kinds}
-                  onScope={(next) => setLocal((l) => ({ ...l, scope: next }))}
-                  onToggle={(kind) =>
-                    setLocal((l) => {
-                      const kinds = new Set(l.kinds);
-                      if (kinds.has(kind)) kinds.delete(kind);
-                      else kinds.add(kind);
-                      return { ...l, kinds };
-                    })
-                  }
-                />
-              ) : (
-                <Folders
-                  root={tree}
-                  scope={scope}
-                  opened={local.opened}
-                  held={held}
-                  members={data.members}
-                  onScope={(next) =>
-                    setLocal((l) => {
-                      const opened = new Set(l.opened);
-                      if (next.kind === "folder") opened.add(next.path);
-                      return { ...l, scope: next, opened };
-                    })
-                  }
-                  onToggle={(path) =>
-                    setLocal((l) => {
-                      const opened = new Set(l.opened);
-                      if (opened.has(path)) opened.delete(path);
-                      else opened.add(path);
-                      return { ...l, opened };
-                    })
-                  }
-                />
-              )}
-            </div>
-          )}
+        <div
+          className={s.cols}
+          data-shared={shared || undefined}
+          data-narrow={(narrow && !shared) || undefined}
+        >
+          {!shared && !narrow && <div className={s.folders}>{scopeList}</div>}
           <NoteList
             header={header}
             notes={listed}
@@ -665,6 +675,7 @@ export function Vault({
             hrefFor={hrefFor}
             now={now}
             members={data.members}
+            topics={data.topics}
             empty={empty}
             more={more}
           />
@@ -677,6 +688,38 @@ export function Vault({
             onRemoveTopic={removeTopic}
             onAddTopic={addTopic}
             hrefNote={hrefNote}
+            idle={
+              summary.kind === "shared" ? (
+                <Summary
+                  kind="shared"
+                  data={summary.data}
+                  hrefFor={hrefFor}
+                  now={now}
+                />
+              ) : (
+                <Summary
+                  kind="workspace"
+                  name={wsName}
+                  data={summary.data}
+                  hrefFor={hrefFor}
+                  now={now}
+                  onReview={() => {
+                    setPicking(false);
+                    setLocal((l) => ({
+                      ...l,
+                      by: "folders",
+                      scope: { kind: "held" },
+                    }));
+                  }}
+                />
+              )
+            }
+            onCopied={(ok) =>
+              setSaid({
+                text: ok ? LINK_COPIED : LINK_NOT_COPIED,
+                failed: !ok,
+              })
+            }
           />
         </div>
       </main>

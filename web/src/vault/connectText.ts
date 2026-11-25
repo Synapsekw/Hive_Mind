@@ -4,6 +4,9 @@ import type { ConnectTally } from "./connectRun";
 import { num } from "./importText";
 
 export const CONNECT = "Connect wiki links";
+/** Its line in the Add notes menu. */
+export const CONNECT_LINE =
+  "Turn [[wiki links]] between your notes here into links.";
 export const CONNECT_INTRO =
   "Turns the [[wiki links]] between your notes in this workspace into links. Only your own notes are linked. Links that are already there stay as they are.";
 export const START = "Connect";

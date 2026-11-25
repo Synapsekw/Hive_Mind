@@ -2,6 +2,10 @@
 // and from what the server answered.
 
 export const IMPORT = "Import a folder";
+/** The bar's one menu of the rare ways in, and the import's line in it. */
+export const ADD_NOTES = "Add notes";
+export const IMPORT_LINE =
+  "Markdown notes from your computer. Each arrives private.";
 export const CLOSE = "Close";
 export const CHOOSE = "Choose a folder";
 export const CHOOSE_ANOTHER = "Choose another folder";
