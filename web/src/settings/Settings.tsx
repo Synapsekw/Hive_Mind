@@ -189,9 +189,17 @@ export function Settings({
       const row = [...root.querySelectorAll<HTMLElement>("[data-row]")].find(
         (el) => el.dataset.row === want.row,
       );
+      // Once the question has closed, "revoke" means the row's ⋯ button, which opens it.
       to = want.pick
-        ? (row?.querySelector<HTMLElement>(`[data-pick="${want.pick}"]`) ?? row)
+        ? (row?.querySelector<HTMLElement>(`[data-pick="${want.pick}"]`) ??
+          (want.pick === "revoke"
+            ? row?.querySelector<HTMLElement>("[data-menu]")
+            : null) ??
+          row)
         : row;
+      // A row that went under a closed fold (a revoked agent) cannot take the focus: its fold does.
+      const fold = to?.closest("details:not([open])");
+      if (fold) to = fold.querySelector<HTMLElement>("summary");
     }
     (to ?? heading.current)?.focus();
     // A form that opens low in the card is brought whole into view, not just its first field.

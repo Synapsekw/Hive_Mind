@@ -303,6 +303,13 @@
   isolation: isolate;
 }
 
+/* Each row is its own stacking context, so an open ⋯ menu would sit under the next row: the
+   row whose menu is open comes forward. */
+.item:has(.moreButton[aria-expanded="true"]),
+.member:has(.moreButton[aria-expanded="true"]) {
+  z-index: 5;
+}
+
 /* The shared row hover: a fill fades in behind the row, the hairline above it brightens. */
 .item::before,
 .member::before {
@@ -804,6 +811,76 @@
 
 .formFoot .refused {
   margin-left: 8px;
+}
+
+/* ---- The connect form, as the content of its dialog: no box of its own ---- */
+
+.dialogForm {
+  margin: 0;
+  padding: 18px 20px 20px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  animation: none;
+}
+
+.dialogFoot {
+  justify-content: flex-end;
+}
+
+.dialogFoot .refused {
+  margin: 0 auto 0 0;
+}
+
+/* ---- Agents that no longer work, folded under the active ones ---- */
+
+.agentFold {
+  margin-top: 14px;
+}
+
+.foldSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.foldSummary::-webkit-details-marker {
+  display: none;
+}
+
+.foldSummary::before {
+  content: "";
+  margin: 0 2px 0 3px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.agentFold[open] > .foldSummary::before {
+  transform: rotate(45deg);
+}
+
+.foldSummary:hover {
+  color: var(--fg);
+}
+
+.foldSummary:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.agentFold > .rows {
+  margin-top: 6px;
 }
 
 /* ---- Topics: a kind folds, and what it holds is set in columns inside its own scroll box,

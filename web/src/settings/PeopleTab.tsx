@@ -6,11 +6,16 @@
 import { useId, useRef, useState } from "react";
 import { shortDate } from "../vault/format";
 import type { Notice, Open } from "./Settings";
-import { FAILED, INVITATIONS_NOTE, INVITE_HELP, inviteNotice } from "./text";
+import {
+  FAILED,
+  INVITATIONS_NOTE,
+  INVITE_HELP,
+  NAME_MAX,
+  inviteNotice,
+} from "./text";
 import type { Invitation, SettingsData } from "./types";
 import s from "./settings.module.css";
 
-const NAME_MAX = 60;
 const EMAIL_MAX = 254;
 
 /** One `@` with something on both sides, no whitespace, at most 254 characters. */

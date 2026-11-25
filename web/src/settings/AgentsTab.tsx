@@ -1,12 +1,24 @@
 "use client";
 
-// The Agents tab: the person's own agents, Connect an agent and its form, and each agent's
-// revoke question. Markup only: the state and what each press does live in `Settings`, which
-// also holds the new agent's token; this file never sees it.
+// The Agents tab: the person's own agents, Connect an agent and its dialog, each active agent's
+// ⋯ menu and revoke question, and the agents that no longer work folded away. What each press
+// does lives in `Settings`, which also holds the new agent's token; this file never sees it.
+// Only the connect form keeps state of its own: what is being typed into it.
 import { useId, useRef, useState } from "react";
-import { shortDate } from "../vault/format";
+import { PanelDialog } from "../vault/PanelDialog";
+import { RowMenu } from "./RowMenu";
 import type { Open } from "./Settings";
-import { FAILED, statusText, tierHelp, tierText } from "./text";
+import {
+  CONNECT_TITLE,
+  FAILED,
+  NAME_MAX,
+  REVOKE_ITEM,
+  agentLine,
+  foldedAgents,
+  statusText,
+  tierHelp,
+  tierText,
+} from "./text";
 import {
   PROVIDERS,
   type Agent,
@@ -18,7 +30,6 @@ import {
 } from "./types";
 import s from "./settings.module.css";
 
-const NAME_MAX = 60;
 const TIERS: TrustTier[] = ["vendor", "self_hosted"];
 
 export function AgentsTab({
@@ -54,57 +65,61 @@ export function AgentsTab({
   onSay: (text: string) => void;
   workspaceName: (id: string) => string | null;
 }) {
+  // `sortAgents` keeps the active ones first; each group keeps its order.
+  const active = agents.filter((a) => a.status === "active");
+  const off = agents.filter((a) => a.status !== "active");
+  const row = (a: Agent) => (
+    <AgentRow
+      key={a.id}
+      agent={a}
+      workspace={workspaceName(a.workspaceId)}
+      now={now}
+      busy={busy === a.id}
+      failed={failed.has(a.id)}
+      asking={open?.kind === "revoke" && open.id === a.id}
+      onAsk={() => onAsk(a.id)}
+      onKeep={() => onKeep(a.id)}
+      onRevoke={() => onRevoke(a)}
+    />
+  );
   return (
     <section aria-labelledby="settings-agents" className={s.section}>
       <div className={s.sectionHead}>
         <div className={s.headText}>
           <h2 className={s.label}>
             <span id="settings-agents">Agents</span>
-            <span className={s.count}>{agents.length}</span>
+            <span className={s.count}>{active.length}</span>
           </h2>
           <p className={s.note}>
             An agent writes into one workspace as you. It can never change
             sharing, accept links or delete notes.
           </p>
         </div>
-        {open?.kind !== "connect" && (
-          <button
-            type="button"
-            data-open="connect"
-            className={s.primary}
-            onClick={onShow}
-          >
-            Connect an agent
-          </button>
-        )}
+        <button
+          type="button"
+          data-open="connect"
+          className={s.primary}
+          onClick={onShow}
+        >
+          {CONNECT_TITLE}
+        </button>
       </div>
       {open?.kind === "connect" && (
-        <ConnectForm
-          workspaces={data.workspaces}
+        <PanelDialog
+          label={CONNECT_TITLE}
           busy={busy === "connect"}
-          onCreate={onCreate}
-          onCancel={onCancel}
-          onSay={onSay}
-        />
+          onClose={onCancel}
+        >
+          <ConnectForm
+            workspaces={data.workspaces}
+            busy={busy === "connect"}
+            onCreate={onCreate}
+            onCancel={onCancel}
+            onSay={onSay}
+          />
+        </PanelDialog>
       )}
-      {agents.length > 0 ? (
-        <ul role="list" aria-label="Agents" className={s.rows}>
-          {agents.map((a) => (
-            <AgentRow
-              key={a.id}
-              agent={a}
-              workspace={workspaceName(a.workspaceId)}
-              now={now}
-              busy={busy === a.id}
-              failed={failed.has(a.id)}
-              asking={open?.kind === "revoke" && open.id === a.id}
-              onAsk={() => onAsk(a.id)}
-              onKeep={() => onKeep(a.id)}
-              onRevoke={() => onRevoke(a)}
-            />
-          ))}
-        </ul>
-      ) : (
+      {agents.length === 0 ? (
         <div className={s.empty}>
           <p className={s.emptyTitle}>No agents yet.</p>
           <p className={s.emptyText}>
@@ -112,6 +127,28 @@ export function AgentsTab({
             workspace you choose.
           </p>
         </div>
+      ) : (
+        <>
+          {active.length > 0 && (
+            <ul role="list" aria-label="Agents" className={s.rows}>
+              {active.map(row)}
+            </ul>
+          )}
+          {off.length > 0 && (
+            <details className={`${s.fold} ${s.agentFold}`}>
+              <summary className={s.foldSummary}>
+                {foldedAgents(off.length)}
+              </summary>
+              <ul
+                role="list"
+                aria-label="Revoked or expired agents"
+                className={s.rows}
+              >
+                {off.map(row)}
+              </ul>
+            </details>
+          )}
+        </>
       )}
     </section>
   );
@@ -158,28 +195,20 @@ function AgentRow({
           {status && <span className={s.mark}>{status}</span>}
         </p>
         <p className={s.meta}>
-          <span>{agent.provider}</span>
-          {workspace && <span>{workspace}</span>}
-          <span>{tierText(agent.trustTier)}</span>
-        </p>
-        <p className={s.meta}>
-          <span>Connected {shortDate(agent.createdAt, now)}</span>
-          <span>
-            {agent.lastUsedAt
-              ? `Last used ${shortDate(agent.lastUsedAt, now)}`
-              : "Never used"}
-          </span>
+          {agentLine(agent, workspace, now).map((part, i) => (
+            <span key={i}>{part}</span>
+          ))}
         </p>
       </div>
       {active && (
         <div className={s.side}>
-          <div
-            role="group"
-            aria-label={`Revoke ${agent.name}`}
-            className={s.actions}
-          >
-            {asking ? (
-              <>
+          {asking ? (
+            <>
+              <div
+                role="group"
+                aria-label={`Revoke ${agent.name}`}
+                className={s.actions}
+              >
                 <p className={s.ask}>Revoke {agent.name}?</p>
                 <button
                   type="button"
@@ -199,21 +228,21 @@ function AgentRow({
                 >
                   Keep
                 </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                data-pick="revoke"
-                className={s.secondary}
-                aria-label={`Revoke ${agent.name}`}
-                onClick={onAsk}
-              >
-                Revoke
-              </button>
-            )}
-          </div>
-          {asking && (
-            <p className={s.aside}>It stops working within the hour.</p>
+              </div>
+              <p className={s.aside}>It stops working within the hour.</p>
+            </>
+          ) : (
+            <RowMenu
+              label={`Actions for ${agent.name}`}
+              items={[
+                {
+                  key: "revoke",
+                  text: REVOKE_ITEM,
+                  danger: true,
+                  onPick: onAsk,
+                },
+              ]}
+            />
           )}
           {failed && <p className={s.refused}>{FAILED}</p>}
         </div>
@@ -277,9 +306,9 @@ function ConnectForm({
 
   return (
     <form
-      aria-label="Connect an agent"
+      aria-label={CONNECT_TITLE}
       data-form="connect"
-      className={s.form}
+      className={`${s.form} ${s.dialogForm}`}
       noValidate
       aria-busy={busy || undefined}
       onSubmit={(e) => {
@@ -293,6 +322,7 @@ function ConnectForm({
         }
       }}
     >
+      <h2 className={s.dialogTitle}>{CONNECT_TITLE}</h2>
       <div className={s.fields}>
         <div className={s.field}>
           <label htmlFor={`${id}-name`} className={s.fieldLabel}>
@@ -382,14 +412,8 @@ function ConnectForm({
           ))}
         </div>
       </fieldset>
-      <div className={s.formFoot}>
-        <button
-          type="submit"
-          className={s.primary}
-          aria-disabled={busy || undefined}
-        >
-          Create
-        </button>
+      <div className={`${s.formFoot} ${s.dialogFoot}`}>
+        {problem && <p className={s.refused}>{problem}</p>}
         <button
           type="button"
           className={s.secondary}
@@ -398,7 +422,13 @@ function ConnectForm({
         >
           Cancel
         </button>
-        {problem && <p className={s.refused}>{problem}</p>}
+        <button
+          type="submit"
+          className={s.primary}
+          aria-disabled={busy || undefined}
+        >
+          Create
+        </button>
       </div>
     </form>
   );

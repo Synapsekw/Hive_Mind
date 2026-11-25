@@ -1,5 +1,6 @@
 // The sentences and labels of the settings screen, and the order of its agents. Plain functions,
 // so the screen and the tests read the same words.
+import { shortDate } from "../vault/format";
 import type {
   Agent,
   AgentStatus,
@@ -96,6 +97,37 @@ export function sortAgents(agents: Agent[]): Agent[] {
   const group = (a: Agent) => (a.status === "active" ? 0 : 1);
   const time = (a: Agent) => new Date(a.createdAt).getTime();
   return [...agents].sort((a, b) => group(a) - group(b) || time(b) - time(a));
+}
+
+// ---- Agents ----
+
+/** The connect dialog's heading and name. */
+export const CONNECT_TITLE: string = "Connect an agent";
+/** The item in an active agent's ⋯ menu that opens the revoke question. */
+export const REVOKE_ITEM: string = "Revoke…";
+/** The longest name an agent or an invitation may carry. */
+export const NAME_MAX = 60;
+
+/** The fold that holds the agents that no longer work. */
+export function foldedAgents(n: number): string {
+  return `${n} revoked or expired agent${n === 1 ? "" : "s"}`;
+}
+
+/** An agent's one grey line, in parts: provider, tier, workspace (when known), last used. */
+export function agentLine(
+  a: Agent,
+  workspace: string | null,
+  now: number,
+): string[] {
+  const used = a.lastUsedAt
+    ? `Last used ${shortDate(a.lastUsedAt, now)}`
+    : "Never used";
+  return [
+    a.provider,
+    tierText(a.trustTier),
+    ...(workspace ? [workspace] : []),
+    used,
+  ];
 }
 
 /** The line that goes into the `.env` file the agent's server reads. */

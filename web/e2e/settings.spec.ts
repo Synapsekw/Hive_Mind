@@ -1,10 +1,13 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { fixtureSettings } from "../src/settings/fixture";
 import {
+  CONNECT_TITLE,
   INVITATIONS_NOTE,
   INVITE_HELP,
   MCP_COMMAND,
+  REVOKE_ITEM,
   envLine,
+  foldedAgents,
   inviteNotice,
 } from "../src/settings/text";
 
@@ -70,6 +73,21 @@ const connect = (page: Page) =>
   main(page).getByRole("button", { name: "Connect an agent" });
 const connectForm = (page: Page) =>
   main(page).getByRole("form", { name: "Connect an agent" });
+const connectDialog = (page: Page) =>
+  page.getByRole("dialog", { name: CONNECT_TITLE });
+/** The agents that no longer work, folded under the active ones. */
+const fold = (page: Page) => section(page, "Agents").locator("details");
+const foldSummary = (page: Page) => fold(page).locator("summary");
+const offRow = (page: Page, name: string) =>
+  rows(page, "Revoked or expired agents").filter({ hasText: name });
+/** An agent row's ⋯ button. */
+const moreButton = (row: Locator) =>
+  row.getByRole("button", { name: /^Actions for/ });
+/** Opens an agent's ⋯ menu and picks Revoke…, which asks the question in the row. */
+async function askRevoke(row: Locator) {
+  await moreButton(row).click();
+  await row.getByRole("button", { name: REVOKE_ITEM }).click();
+}
 const inviteButton = (page: Page) =>
   main(page).getByRole("button", { name: "Invite a member" });
 const inviteForm = (page: Page) =>
@@ -86,7 +104,11 @@ async function invite(page: Page, email = "mira@example.com", name = "Mira") {
   await form.getByLabel("Display name").fill(name);
   await form.getByRole("button", { name: "Invite", exact: true }).click();
 }
-const dialog = (page: Page) => page.getByRole("dialog");
+/** The token dialog: every dialog but the connect form's. */
+const dialog = (page: Page) =>
+  page
+    .getByRole("dialog")
+    .filter({ hasNot: page.getByRole("form", { name: CONNECT_TITLE }) });
 const live = (page: Page) => main(page).locator('[aria-live="polite"]');
 const revokeButton = (row: Locator) =>
   row.getByRole("button", { name: /^Revoke/ });
@@ -99,6 +121,7 @@ const LIMIT =
 /** Fills the connect form and presses Create. */
 async function create(page: Page, name = "Desk agent") {
   await connect(page).click();
+  await expect(connectDialog(page)).toBeVisible();
   const form = connectForm(page);
   await form.getByLabel("Name", { exact: true }).fill(name);
   await form.getByLabel("Workspace").selectOption({ label: DRA.name });
@@ -120,7 +143,7 @@ const stored = (page: Page) =>
     ]),
   );
 
-test("the rail marks Settings; the tabs show with counts; Agents is open; a revoked agent comes last, says so and cannot be revoked", async ({
+test("the rail marks Settings; the tabs show with counts; Agents is open; revoked agents are folded under '1 revoked or expired agent' and have no menu", async ({
   page,
 }) => {
   await open(page);
@@ -157,29 +180,50 @@ test("the rail marks Settings; the tabs show with counts; Agents is open; a revo
   // The other tabs' sections are in the page, hidden.
   await expect(section(page, "Members")).toHaveCount(0);
 
-  // Active agents first, the newest on top; then the one that no longer works.
-  await expect(rows(page, "Agents")).toHaveCount(3);
+  // The heading counts the active agents, as the tab does.
+  await expect(section(page, "Agents").getByRole("heading")).toHaveText(
+    /^Agents\s*2$/,
+  );
+  // The active agents, the newest on top.
+  await expect(rows(page, "Agents")).toHaveCount(2);
   await expect(rows(page, "Agents").nth(0)).toContainText(LOCAL.name);
   await expect(rows(page, "Agents").nth(1)).toContainText(CLAUDE_CODE.name);
-  await expect(rows(page, "Agents").nth(2)).toContainText(OLD.name);
 
-  const used = agentRow(page, "Connected 18 Nov");
-  await expect(used).toContainText("Claude Code");
-  await expect(used).toContainText(MAIN.name);
-  await expect(used).toContainText("Vendor-hosted");
-  await expect(used).toContainText("Last used 23 Nov");
-  await expect(revokeButton(used)).toBeVisible();
+  // One grey line each: provider, tier, workspace, last used; and a ⋯ menu.
+  const used = agentRow(page, CLAUDE_CODE.name);
+  await expect(used.locator("p").nth(1).locator("span")).toHaveText([
+    "Claude Code",
+    "Vendor-hosted",
+    MAIN.name,
+    "Last used 23 Nov",
+  ]);
+  await expect(used).not.toContainText("Connected");
+  await expect(moreButton(used)).toHaveAccessibleName(
+    `Actions for ${CLAUDE_CODE.name}`,
+  );
+  await moreButton(used).click();
+  await expect(used.getByRole("button", { name: REVOKE_ITEM })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(used.getByRole("button", { name: REVOKE_ITEM })).toHaveCount(0);
 
   const local = agentRow(page, LOCAL.name);
-  await expect(local).toContainText("Other");
-  await expect(local).toContainText(DRA.name);
-  await expect(local).toContainText("Self-hosted, notes held for release");
-  await expect(local).toContainText("Connected 21 Nov");
-  await expect(local).toContainText("Never used");
+  await expect(local.locator("p").nth(1).locator("span")).toHaveText([
+    "Other",
+    "Self-hosted, notes held for release",
+    DRA.name,
+    "Never used",
+  ]);
 
-  const old = agentRow(page, OLD.name);
+  // The one that no longer works is folded away, closed, below the active ones.
+  await expect(foldSummary(page)).toHaveText(foldedAgents(1));
+  await expect(foldSummary(page)).toHaveText("1 revoked or expired agent");
+  await expect(fold(page)).not.toHaveAttribute("open");
+  await expect(offRow(page, OLD.name)).toBeHidden();
+  await foldSummary(page).click();
+  const old = offRow(page, OLD.name);
+  await expect(old).toBeVisible();
   await expect(old.getByText("Revoked", { exact: true })).toBeVisible();
-  await expect(old).toContainText("Connected 2 Oct");
+  await expect(old).toContainText("Last used 30 Oct");
   await expect(old.getByRole("button")).toHaveCount(0);
 
   await openTab(page, "People");
@@ -204,7 +248,14 @@ test("Connect an agent: a name and a workspace are needed; a valid form calls cr
 }) => {
   await open(page);
   await connect(page).click();
+  // The form is in a dialog of its own, headed with its name.
+  await expect(connectDialog(page)).toBeVisible();
+  await expect(connectDialog(page)).toHaveAttribute("aria-modal", "true");
   const form = connectForm(page);
+  await expect(form.getByRole("heading", { level: 2 })).toHaveText(
+    "Connect an agent",
+  );
+  await expect(form.getByRole("button")).toHaveText(["Cancel", "Create"]);
   const name = form.getByLabel("Name", { exact: true });
   await expect(name).toBeFocused();
   // Two workspaces: none is chosen for the person.
@@ -250,9 +301,15 @@ test("Connect an agent: a name and a workspace are needed; a valid form calls cr
   await expect(dialog(page)).toHaveCount(0);
   expect(await calls(page)).toEqual([]);
 
-  // Cancel closes the form and gives the focus back; the next one starts empty.
+  // Cancel closes the dialog and gives the focus back; the next one starts empty.
   await form.getByRole("button", { name: "Cancel" }).click();
-  await expect(form).toHaveCount(0);
+  await expect(connectDialog(page)).toHaveCount(0);
+  await expect(connect(page)).toBeFocused();
+  // So does Escape.
+  await connect(page).click();
+  await expect(connectDialog(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(connectDialog(page)).toHaveCount(0);
   await expect(connect(page)).toBeFocused();
   await connect(page).click();
   await expect(name).toHaveValue("");
@@ -263,7 +320,9 @@ test("Connect an agent: a name and a workspace are needed; a valid form calls cr
   await form.getByLabel("Provider").selectOption("ChatGPT");
   await form.getByRole("radio", { name: /^Self-hosted/ }).check();
   await form.getByRole("button", { name: "Create" }).click();
+  // On success the connect dialog closes and the token dialog opens.
   await expect(dialog(page)).toBeVisible();
+  await expect(connectDialog(page)).toHaveCount(0);
   expect(await calls(page)).toEqual([
     {
       name: "createAgent",
@@ -333,7 +392,7 @@ test("the token dialog: shown once, not closed by Escape or a click outside; Cop
   await box.getByRole("button", { name: "Done" }).click();
   await expect(box).toHaveCount(0);
   await expect(connect(page)).toBeFocused();
-  await expect(rows(page, "Agents")).toHaveCount(4);
+  await expect(rows(page, "Agents")).toHaveCount(3);
   const made = agentRow(page, "Desk agent");
   await expect(made).toContainText("ChatGPT");
   await expect(made).toContainText(DRA.name);
@@ -378,9 +437,11 @@ test("Revoke asks first with the agent's name; Keep restores; a double click rev
 }) => {
   await open(page);
   const target = agentRow(page, LOCAL.name);
-  await revokeButton(target).click();
+  // The ⋯ menu holds Revoke…, which asks the question in the row in place of the menu.
+  await askRevoke(target);
   await expect(target).toContainText(`Revoke ${LOCAL.name}?`);
   await expect(target).toContainText("It stops working within the hour.");
+  await expect(moreButton(target)).toHaveCount(0);
   // The safe answer has the focus.
   await expect(target.getByRole("button", { name: "Keep" })).toBeFocused();
   expect(await calls(page)).toEqual([]);
@@ -388,48 +449,53 @@ test("Revoke asks first with the agent's name; Keep restores; a double click rev
   await target.getByRole("button", { name: "Keep" }).click();
   await expect(target).not.toContainText(`Revoke ${LOCAL.name}?`);
   await expect(target.getByRole("button", { name: "Keep" })).toHaveCount(0);
-  await expect(revokeButton(target)).toBeFocused();
+  await expect(moreButton(target)).toBeFocused();
 
   // Escape is Keep.
-  await revokeButton(target).click();
+  await askRevoke(target);
   await expect(target).toContainText(`Revoke ${LOCAL.name}?`);
   await page.keyboard.press("Escape");
   await expect(target).not.toContainText(`Revoke ${LOCAL.name}?`);
-  await expect(revokeButton(target)).toBeFocused();
+  await expect(moreButton(target)).toBeFocused();
   expect(await calls(page)).toEqual([]);
 
   // One question at a time: asking about another agent closes this one.
-  await revokeButton(target).click();
-  const other = agentRow(page, "Connected 18 Nov");
-  await revokeButton(other).click();
+  await askRevoke(target);
+  const other = agentRow(page, CLAUDE_CODE.name);
+  await askRevoke(other);
   await expect(other).toContainText(`Revoke ${CLAUDE_CODE.name}?`);
   await expect(target).not.toContainText(`Revoke ${LOCAL.name}?`);
   await other.getByRole("button", { name: "Keep" }).click();
 
-  await revokeButton(target).click();
+  await askRevoke(target);
   // A confirming press straight after the question is taken as a double click and ignored.
   // Keep this assertion: it is the one that exercises the 500 ms guard. The double clicks by
-  // coordinates further down land on Keep or on the question's text, never on this button.
+  // coordinates further down land on the ⋯ button, which only opens and closes its menu.
   await target.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(target).toContainText(`Revoke ${LOCAL.name}?`);
   expect(await calls(page)).toEqual([]);
   await page.waitForTimeout(600);
   await target.getByRole("button", { name: "Revoke", exact: true }).click();
-  await expect(target.getByText("Revoked", { exact: true })).toBeVisible();
-  await expect(target.getByRole("button")).toHaveCount(0);
+  await expect(live(page)).toHaveText(`${LOCAL.name} revoked.`);
   expect(await calls(page)).toEqual([
     { name: "revokeAgent", args: [LOCAL.id] },
   ]);
-  // It joins the ones that no longer work, under the active one.
-  await expect(rows(page, "Agents").nth(0)).toContainText("Connected 18 Nov");
-  await expect(rows(page, "Agents")).toHaveCount(3);
+  // It joins the ones that no longer work, folded under the active one; the fold has the focus.
+  await expect(rows(page, "Agents")).toHaveCount(1);
+  await expect(rows(page, "Agents").nth(0)).toContainText(CLAUDE_CODE.name);
+  await expect(foldSummary(page)).toHaveText(foldedAgents(2));
+  await expect(foldSummary(page)).toBeFocused();
+  await foldSummary(page).click();
+  const gone = offRow(page, LOCAL.name);
+  await expect(gone.getByText("Revoked", { exact: true })).toBeVisible();
+  await expect(gone.getByRole("button")).toHaveCount(0);
 
   // By coordinates, where a real double click lands, narrow and wide.
   for (const width of [390, 1600]) {
     await page.setViewportSize({ width, height: 800 });
     await open(page);
     const row = agentRow(page, LOCAL.name);
-    const box = await revokeButton(row).boundingBox();
+    const box = await moreButton(row).boundingBox();
     expect(box).not.toBeNull();
     const x = box!.x + box!.width / 2;
     const y = box!.y + box!.height / 2;
@@ -439,7 +505,33 @@ test("Revoke asks first with the agent's name; Keep restores; a double click rev
     await page.waitForTimeout(300);
     expect(await calls(page)).toEqual([]);
     await expect(row.getByText("Revoked", { exact: true })).toHaveCount(0);
+    await expect(row).not.toContainText(`Revoke ${LOCAL.name}?`);
   }
+});
+
+test("the Agents tab shows one primary button", async ({ page }) => {
+  await open(page);
+  const primaries = () =>
+    page.evaluate(() => {
+      const panel = document.getElementById("panel-agents")!;
+      const yellow = getComputedStyle(
+        document.querySelector('[data-open="connect"]')!,
+      ).backgroundColor;
+      return [...panel.querySelectorAll("button")].filter(
+        (b) =>
+          b.getClientRects().length > 0 &&
+          getComputedStyle(b).backgroundColor === yellow,
+      ).length;
+    });
+  expect(await primaries()).toBe(1);
+  // With a question open, and with the fold open, still one.
+  await askRevoke(agentRow(page, LOCAL.name));
+  await foldSummary(page).click();
+  expect(await primaries()).toBe(1);
+  // With no agents, the one is Connect an agent.
+  await open(page, "?none=1");
+  expect(await primaries()).toBe(1);
+  await expect(connect(page)).toBeVisible();
 });
 
 test("a failed create says so in the form and shows no dialog; a failed revoke keeps the row and says so", async ({
@@ -455,16 +547,17 @@ test("a failed create says so in the form and shows no dialog; a failed revoke k
   await expect(form.getByLabel("Name", { exact: true })).toHaveValue(
     "Desk agent",
   );
-  await expect(rows(page, "Agents")).toHaveCount(3);
+  await expect(rows(page, "Agents")).toHaveCount(2);
   await form.getByRole("button", { name: "Cancel" }).click();
 
   const target = agentRow(page, LOCAL.name);
-  await revokeButton(target).click();
+  await askRevoke(target);
   await page.waitForTimeout(600);
   await target.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(target).toContainText(FAILED);
   await expect(target.getByText("Revoked", { exact: true })).toHaveCount(0);
-  await expect(revokeButton(target)).toBeVisible();
+  // The question closes and the focus is back on the row's ⋯.
+  await expect(moreButton(target)).toBeFocused();
   await expect(live(page)).toHaveText(FAILED);
   await expect(rows(page, "Agents").nth(0)).toContainText(LOCAL.name);
 });
@@ -499,11 +592,14 @@ test("Invite a member: the form says what will happen; a bad email or an empty n
   await expect(form).toContainText("Keep the name to 60 characters or fewer.");
   expect(await calls(page)).toEqual([]);
 
-  // Opening the other form, on the Agents tab, closes this one: one at a time.
+  // Opening the other form, on the Agents tab, closes this one: one at a time. The connect
+  // dialog covers the card, so it is put away before the tabs can be reached again.
   await openTab(page, "Agents");
   await connect(page).click();
   await expect(form).toHaveCount(0);
   await expect(connectForm(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(connectDialog(page)).toHaveCount(0);
   await openTab(page, "People");
   await inviteButton(page).click();
   await expect(connectForm(page)).toHaveCount(0);
@@ -876,7 +972,7 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   expect((await scrolls()).inside).toBe(true);
   expect((await scrolls()).sideways).toBe(false);
 
-  // From the heading, Tab reaches the open tab, then walks its panel: Connect and each Revoke.
+  // From the heading, Tab reaches the open tab, then walks its panel: Connect and each ⋯.
   // Each other tab, once chosen, is followed by its own panel: each workspace's Delete, the
   // topics' controls, Invite a member, then each invitation's Send again and Revoke.
   await main(page).getByRole("heading", { level: 1 }).focus();
@@ -892,9 +988,12 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   });
   expect(outline).toBe(true);
   await page.keyboard.press("Tab");
-  await expect(revokeButton(agentRow(page, LOCAL.name))).toBeFocused();
+  await expect(moreButton(agentRow(page, LOCAL.name))).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(revokeButton(agentRow(page, "Connected 18 Nov"))).toBeFocused();
+  await expect(moreButton(agentRow(page, CLAUDE_CODE.name))).toBeFocused();
+  // Then the fold of the agents that no longer work.
+  await page.keyboard.press("Tab");
+  await expect(foldSummary(page)).toBeFocused();
   await openTab(page, "Workspaces");
   await expect(tabOf(page, "Workspaces")).toBeFocused();
   for (const space of [MAIN, DRA]) {
@@ -958,13 +1057,17 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   await page.keyboard.press("ArrowDown");
   await expect(form.getByRole("radio", { name: /^Self-hosted/ })).toBeChecked();
   await page.keyboard.press("Tab");
-  await expect(form.getByRole("button", { name: "Create" })).toBeFocused();
-  await page.keyboard.press("Tab");
   await expect(form.getByRole("button", { name: "Cancel" })).toBeFocused();
-  // With the form open the card is longer than the window: it scrolls, the page does not.
-  expect((await scrolls()).scrolls).toBe(true);
-  expect((await fits()).pageScrolls).toBe(false);
+  await page.keyboard.press("Tab");
+  await expect(form.getByRole("button", { name: "Create" })).toBeFocused();
+  // The dialog holds the focus: past Create, Tab turns round to Name, and back.
+  await page.keyboard.press("Tab");
+  await expect(form.getByLabel("Name", { exact: true })).toBeFocused();
   await page.keyboard.press("Shift+Tab");
+  await expect(form.getByRole("button", { name: "Create" })).toBeFocused();
+  // With the dialog open the page does not scroll, and Create is inside the window.
+  expect((await fits()).pageScrolls).toBe(false);
+  await expect(form.getByRole("button", { name: "Create" })).toBeInViewport();
   await page.keyboard.press("Enter");
 
   const box = dialog(page);
@@ -1056,7 +1159,7 @@ test("with the token dialog open, Back keeps the page, the dialog and the token;
   await moved(page, 4);
   await expect(page).toHaveURL(/\/dev\/settings$/);
   await expect(main(page)).toBeVisible();
-  await expect(rows(page, "Agents")).toHaveCount(4);
+  await expect(rows(page, "Agents")).toHaveCount(3);
   await expect(agentRow(page, "Desk agent")).toContainText("Never used");
   await expect(connect(page)).toBeFocused();
   expect(await page.content()).not.toContain("hive_devtoken");
@@ -1542,10 +1645,11 @@ test("Workspaces: Delete asks first with the note count; an agent in use refuses
 
   await openTab(page, "Agents");
   const local = agentRow(page, LOCAL.name);
-  await revokeButton(local).click();
+  await askRevoke(local);
   await page.waitForTimeout(600);
   await local.getByRole("button", { name: "Revoke", exact: true }).click();
-  await expect(local).toContainText("Revoked");
+  await expect(live(page)).toHaveText(`${LOCAL.name} revoked.`);
+  await expect(foldSummary(page)).toHaveText(foldedAgents(2));
 
   await openTab(page, "Workspaces");
   await deleteSpace(dra).click();
