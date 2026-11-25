@@ -1,0 +1,48 @@
+/* The loading screen's card: the notice card (notice.module.css) with a quiet pulse in it, so a
+   navigation shows at once that something is on its way. Tokens only, read with var(). */
+
+.status {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 4px;
+}
+
+/* Three low-contrast bars where the screen's content will be. */
+.bar {
+  height: 14px;
+  border-radius: 7px;
+  background: var(--fill);
+}
+
+.bar:nth-child(1) {
+  width: 40%;
+}
+
+.bar:nth-child(2) {
+  width: 72%;
+}
+
+.bar:nth-child(3) {
+  width: 56%;
+}
+
+.pulse {
+  animation: pulse 1.6s var(--ease) infinite alternate;
+}
+
+@keyframes pulse {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}

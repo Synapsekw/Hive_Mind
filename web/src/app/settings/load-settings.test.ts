@@ -158,7 +158,9 @@ function stub(
   });
   const user = opts.user === undefined ? { id: U_DANI } : opts.user;
   const auth = {
-    getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getUser: vi.fn(async (): Promise<never> => {
+      throw new Error("a loader must not call the auth server");
+    }),
     getSession: vi.fn(async () => ({
       data: { session: user ? { access_token: tokenOf(user.id) } : null },
       error: null,
@@ -431,8 +433,8 @@ describe("loadSettings", () => {
       ["order", ["id", { ascending: true }]],
       ["limit", [50]],
     ]);
-    // One call to the auth server, as before.
-    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
+    // No call to the auth server: the user id is the one the session's token names.
+    expect(t.auth.getUser).not.toHaveBeenCalled();
 
     expect(args(t.of("members"), "select")).toEqual([
       "id, display_name, role, user_id",

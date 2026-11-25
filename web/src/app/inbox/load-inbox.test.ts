@@ -317,7 +317,12 @@ describe("loadInbox", () => {
     const [own] = t.calls;
     expect(own!.table).toBe("members");
     expect(own!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name, delete_after)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", USER]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
@@ -379,6 +384,14 @@ describe("loadInboxCount", () => {
     expect(args(t.calls[0]!, "eq")).toEqual(["user_id", USER]);
     expect(t.rpc).toHaveBeenCalledWith("inbox_count", { p_hive: HIVE });
     expect(t.auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it("counts in the hive it is given, with no read of the memberships", async () => {
+    const t = stub({ rpc: ok(4) });
+    expect(await loadInboxCount(t.db, HIVE)).toBe(4);
+    expect(t.from).not.toHaveBeenCalled();
+    expect(t.auth.getSession).not.toHaveBeenCalled();
+    expect(t.rpc).toHaveBeenCalledWith("inbox_count", { p_hive: HIVE });
   });
 
   it("is 0 without a session", async () => {

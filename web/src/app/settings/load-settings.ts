@@ -10,7 +10,7 @@
 // only decides whether to ask: the database refuses anyone who is not an owner, and a refusal
 // or a failure there leaves the counts out and never fails the page.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ownHive } from "../own-hive";
+import { ownHive, sessionUserId } from "../own-hive";
 import { KINDS, type Kind, type TopicRow } from "../../topics/types";
 import type {
   Agent,
@@ -217,8 +217,7 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
   if (hive === "error") return ERROR;
   if (hive === null) return { state: "no-hive" };
 
-  const { data: session } = await db.auth.getUser();
-  const userId = session.user?.id;
+  const userId = await sessionUserId(db);
   if (!userId) {
     console.error("settings load has no session");
     return ERROR;

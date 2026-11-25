@@ -6,9 +6,12 @@
 //
 // Row-level security still decides what can be read; this only picks among the person's own
 // memberships. One bounded read: `members` filtered by `user_id`, with the hive's name beside
-// it, oldest first, 50 at most. The chosen hive's id comes from a cookie (`chosen-hive.ts`) and
+// it, oldest first, 50 at most. Within one server render it is made once per client and user
+// (React's `cache`): the rail, the page and the inbox count share it. Outside a render (server
+// actions) every call reads afresh; nothing is kept across requests. The chosen hive's id comes from a cookie (`chosen-hive.ts`) and
 // is only compared with the rows the database answered: a value that names no hive of the
 // person's picks nothing, and the oldest membership is the answer.
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { chosenHiveId } from "./chosen-hive";
 import { isUuid } from "./vault/validate";
@@ -46,9 +49,11 @@ export type Membership = {
 type Db = Pick<SupabaseClient, "from" | "auth">;
 type Res = { data: unknown; error: { code?: string; message: string } | null };
 
-/** The hive is named through the membership's own `hive_id`, so no other path can be meant. */
-const COLUMNS = "id, hive_id, hive:hives!hive_id(name, delete_after)";
-const PROFILE_COLUMNS =
+/**
+ * The hive is named through the membership's own `hive_id`, so no other path can be meant. One
+ * shape for every caller, so one read answers them all.
+ */
+const COLUMNS =
   "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)";
 
 /**
@@ -78,15 +83,17 @@ export async function sessionUserId(
 /** The most memberships one read answers; a person in more sees their oldest 50. */
 const MOST = 50;
 
-/** The person's own memberships, oldest first; ties on the time are broken by the id. */
-async function memberships(
+/**
+ * The person's own memberships, oldest first; ties on the time are broken by the id. Kept per
+ * client and user id for the render, never by anything the request supplies on its own.
+ */
+const memberships = cache(async function memberships(
   db: Db,
   uid: string,
-  columns: string,
 ): Promise<unknown[] | "error"> {
   const res = (await db
     .from("members")
-    .select(columns)
+    .select(COLUMNS)
     .eq("user_id", uid)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true })
@@ -101,7 +108,7 @@ async function memberships(
     return "error";
   }
   return res.data;
-}
+});
 
 /** An id as it is compared: lower case, or null when it is not an id at all. */
 const asId = (v: unknown): string | null =>
@@ -142,7 +149,7 @@ export async function ownHive(
     console.error("own hive read has no session");
     return "error";
   }
-  const rows = await memberships(db, uid, profile ? PROFILE_COLUMNS : COLUMNS);
+  const rows = await memberships(db, uid);
   if (rows === "error") return "error";
   if (rows.length === 0) return null;
   const chosen =
@@ -167,7 +174,7 @@ export async function myHives(
     console.error("own hive read has no session");
     return "error";
   }
-  const rows = await memberships(db, uid, PROFILE_COLUMNS);
+  const rows = await memberships(db, uid);
   if (rows === "error") return "error";
   const out: Membership[] = [];
   for (const row of rows) {
