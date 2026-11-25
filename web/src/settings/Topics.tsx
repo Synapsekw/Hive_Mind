@@ -50,6 +50,7 @@ export function Topics({
   onSay,
   onChanged,
   onModal,
+  visible = true,
 }: {
   topics: TopicRow[];
   /** The owner's own workspaces: where their notes are read from. */
@@ -62,6 +63,9 @@ export function Topics({
   onChanged: () => void;
   /** Whether the candidates' dialog is open, so the screen can hold its tabs meanwhile. */
   onModal?: (open: boolean) => void;
+  /** Whether this tab is the one shown. Candidates that arrive while it is hidden take the
+   * focus once it is shown again. */
+  visible?: boolean;
 }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [problem, setProblem] = useState<string | null>(null);
@@ -106,13 +110,15 @@ export function Topics({
       alive.current = false;
     };
   }, []);
-  // The candidates open in a dialog: the focus goes to their heading.
+  // The candidates open in a dialog: the focus goes to their heading, at once or, when they
+  // arrived while the tab was hidden, as soon as the tab is shown again.
   const picking = stage.kind === "picking";
   useEffect(() => {
-    if (picking) heading.current?.focus();
-  }, [picking]);
+    if (picking && visible) heading.current?.focus();
+  }, [picking, visible]);
   useEffect(() => {
     onModal?.(picking);
+    return () => onModal?.(false);
   }, [picking, onModal]);
   // Leaving the candidates (Save or Cancel) closes the dialog: Find takes the focus.
   const wasPicking = useRef(false);

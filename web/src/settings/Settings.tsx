@@ -133,13 +133,15 @@ export function Settings({
   // The dialogs the Topics and Hive tabs keep themselves: whether each is open.
   const [topicsModal, setTopicsModal] = useState(false);
   const [hiveModal, setHiveModal] = useState(false);
-  // While any dialog is open the tabs take no focus and no press: the dialog's tab stays shown,
-  // and no other tab's dialog can open on top of it.
+  // While a dialog is open on the tab shown, the tabs take no focus and no press: the dialog's
+  // tab stays shown, and no other tab's dialog can open on top of it. Candidates that a Find
+  // topics brought while another tab was shown wait on their hidden tab and hold nothing until
+  // the person goes back to Topics.
   const modal =
     open?.kind === "connect" ||
     open?.kind === "invite" ||
-    topicsModal ||
-    hiveModal;
+    (tab === "topics" && topicsModal) ||
+    (tab === "hive" && hiveModal);
 
   // From Create until Done the token exists only here, so a reload or a closed tab asks first.
   useEffect(() => {
@@ -561,6 +563,7 @@ export function Settings({
                   onSay={setSaid}
                   onChanged={() => router.refresh()}
                   onModal={setTopicsModal}
+                  visible={tab === "topics"}
                 />
               </section>
             )}

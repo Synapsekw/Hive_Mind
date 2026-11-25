@@ -67,6 +67,7 @@ export function HiveTab({
   }, [asking]);
   useEffect(() => {
     onModal?.(asking);
+    return () => onModal?.(false);
   }, [asking, onModal]);
 
   function ask() {

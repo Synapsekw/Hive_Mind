@@ -2481,6 +2481,64 @@ test("?tab=topics opens Topics; choosing a tab writes ?tab= without a request", 
   await expect(section(page, "People")).toBeVisible();
 });
 
+test("a Find topics under way survives a switch: finishing on a hidden tab holds nothing, and the candidates wait there", async ({
+  page,
+}) => {
+  await open(page, "?slow=1&tab=topics");
+  await findTopics(page).click();
+  // While it reads, the tabs are free: the person goes to People.
+  await openTab(page, "People");
+  await expect(section(page, "People")).toBeVisible();
+  await expect
+    .poll(async () => (await calls(page)).some((c) => c.name === "scanTopics"))
+    .toBe(true);
+  // The read ends while Topics is hidden: the candidates open there, and People keeps its tabs.
+  const waiting = page.getByRole("dialog", {
+    name: "Topics found in your notes",
+    includeHidden: true,
+  });
+  await expect(waiting).toHaveCount(1, { timeout: 5000 });
+  await expect(waiting).toBeHidden();
+  await openTab(page, "Workspaces");
+  await expect(section(page, "Workspaces")).toBeVisible();
+  await openTab(page, "People");
+  await inviteButton(page).focus();
+  await expect(inviteButton(page)).toBeFocused();
+
+  // Back on Topics the candidates are there, the focus is in their dialog, and the tabs are
+  // held until Save or Cancel.
+  await openTab(page, "Topics");
+  await expect(foundDialog(page)).toBeVisible();
+  await expect(foundForm(page)).toContainText("2 of 4 ticked");
+  expect(
+    await page.evaluate(() =>
+      Boolean(document.activeElement?.closest('[role="dialog"]')),
+    ),
+  ).toBe(true);
+  const away = tabOf(page, "People");
+  await away.evaluate((el) => (el as HTMLElement).focus());
+  await expect(away).not.toBeFocused();
+  await foundForm(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(foundDialog(page)).toHaveCount(0);
+  await expect(findTopics(page)).toBeFocused();
+  await openTab(page, "People");
+  await expect(section(page, "People")).toBeVisible();
+
+  // Once more, and Save works from a dialog that waited on a hidden tab.
+  await openTab(page, "Topics");
+  await findTopics(page).click();
+  await openTab(page, "Hive");
+  await expect(waiting).toHaveCount(1, { timeout: 5000 });
+  await openTab(page, "Topics");
+  await foundForm(page).getByRole("button", { name: "Save 2 topics" }).click();
+  await expect(foundDialog(page)).toHaveCount(0);
+  await expect(live(page)).toHaveText(
+    "2 topics saved. Now open the vault and press Attach topics.",
+  );
+  await openTab(page, "People");
+  await expect(section(page, "People")).toBeVisible();
+});
+
 test("arrow keys, Home and End move between tabs", async ({ page }) => {
   await open(page);
   const selected = (name: string) =>
