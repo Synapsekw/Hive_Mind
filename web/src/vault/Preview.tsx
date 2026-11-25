@@ -23,6 +23,8 @@ import {
   keepLinkName,
   LINKED_WITH,
   OPENED_BY_LINK,
+  OPEN_FAILED,
+  OPENING,
   releaseSentence,
   sharedBy,
   UNLINK,
@@ -455,6 +457,8 @@ function Head({
 
 export function Preview({
   data,
+  pending = false,
+  failed = false,
   onSave,
   onRelease,
   onDelete,
@@ -466,6 +470,10 @@ export function Preview({
   idle,
 }: {
   data: VaultData;
+  /** Another note is on its way; this one stays until it arrives. */
+  pending?: boolean;
+  /** The note last asked for could not be opened; this one stays. */
+  failed?: boolean;
   onSave: (noteId: string, choice: Choice) => Promise<Result>;
   onRelease: (noteId: string) => Promise<Result>;
   /** Deletes the note and says whether it worked. */
@@ -484,6 +492,12 @@ export function Preview({
   idle?: ReactNode;
 }) {
   const open = data.open;
+  const shownId = open && "note" in open ? open.note.id : null;
+  // A newly opened note is read from its top.
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (box.current) box.current.scrollTop = 0;
+  }, [shownId]);
   let body;
   if (open === null) {
     body = idle ?? <p className={s.empty}>Choose a note to read it.</p>;
@@ -520,10 +534,17 @@ export function Preview({
   }
   return (
     <section
+      ref={box}
       aria-label="Note"
+      aria-busy={pending || undefined}
       className={s.preview}
-      data-idle={open === null || undefined}
+      data-idle={(open === null && !failed) || undefined}
+      data-pending={pending || undefined}
     >
+      {/* Announced as it changes; not a status of its own, the screen has one. */}
+      <p aria-live="polite" data-opening className={failed ? s.cut : s.srOnly}>
+        {failed ? OPEN_FAILED : pending ? OPENING : ""}
+      </p>
       {body}
     </section>
   );

@@ -14,11 +14,16 @@ import type {
 } from "../../import/types";
 import { createServerSupabase } from "../../lib/supabase/server";
 import type { AttachResult } from "../../topics/types";
-import type { Result, SharePreview, TopicChange } from "../../vault/types";
+import type {
+  OpenAnswer,
+  Result,
+  SharePreview,
+  TopicChange,
+} from "../../vault/types";
 import { attachBatchIn } from "./attach";
 import { connectBatchIn } from "./connect";
 import { createImportWorkspaceIn, importBatchIn } from "./import";
-import { openNoteIn, type OpenAnswer } from "./load-vault";
+import { openNoteIn } from "./load-vault";
 import {
   addTopicIn,
   deleteNoteIn,

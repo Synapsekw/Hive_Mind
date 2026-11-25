@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   FolderRule,
   NoteLink,
+  OpenAnswer,
   Tab,
   VaultData,
   VaultNote,
@@ -235,9 +236,6 @@ async function noteTopics(
   }
   return known;
 }
-
-/** What `openNote` answers. */
-export type OpenAnswer = { ok: true; open: VaultData["open"] } | { ok: false };
 
 /**
  * One note for the preview, without reading the hive's index again: the person's member id

@@ -5,6 +5,7 @@ import { DevVault } from "./DevVault";
 // A development page: the vault over the built-in fixture. Never served in production.
 //   ?fail=1   every write is refused
 //   ?slow=1   deleting a note or ending a link takes over a second; an import batch most of one
+//   ?failopen=1     opening a note from the list is refused
 //   ?failbatch=2    the import's second batch is refused (any number, or "all")
 //   ?failconnect=2  the second step of connecting wiki links is refused (any number, or "all")
 //   ?failattach=2   the second step of attaching topics is refused (any number, or "all")
@@ -41,6 +42,7 @@ export default async function DevVaultPage({
       now={NOW}
       fail={one(q.fail) === "1"}
       slow={one(q.slow) === "1"}
+      failOpen={one(q.failopen) === "1"}
       importFlags={{
         failbatch: one(q.failbatch) ?? null,
         failconnect: one(q.failconnect) ?? null,

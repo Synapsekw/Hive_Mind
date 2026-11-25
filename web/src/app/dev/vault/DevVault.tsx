@@ -18,7 +18,7 @@
 // 10), 12 topics in the hive. `failattach` works as `failconnect`;
 // `notopics` answers that the hive has none.
 import { useMemo, useRef, useState } from "react";
-import { fixturePreview } from "../../../vault/fixture";
+import { fixturePreview, fixtureVault } from "../../../vault/fixture";
 import type { AttachResult } from "../../../topics/types";
 import type {
   BatchResult,
@@ -28,6 +28,7 @@ import type {
 } from "../../../import/types";
 import { MAX_TOPICS_PER_NOTE } from "../../../topics/types";
 import type {
+  OpenAnswer,
   TopicChange,
   VaultActions,
   VaultData,
@@ -71,12 +72,15 @@ export function DevVault({
   now,
   fail,
   slow,
+  failOpen = false,
   importFlags,
 }: {
   data: VaultData;
   now: number;
   fail: boolean;
   slow: boolean;
+  /** Opening a note is refused, as when the read fails. */
+  failOpen?: boolean;
   importFlags: ImportFlags;
 }) {
   // Workspaces made by an import here, and what each workspace was sent, by path.
@@ -93,6 +97,26 @@ export function DevVault({
   const [changed, setChanged] = useState<Readonly<Record<string, string[]>>>(
     {},
   );
+  // The note last opened through `openNote` on this sample, as the server would serve it on a
+  // re-read of the address; a new sample (a load, a tab) brings its own.
+  const [asked, setAsked] = useState<{
+    sample: VaultData;
+    open: VaultData["open"];
+  } | null>(null);
+  const baseOpen = asked?.sample === sample ? asked.open : sample.open;
+  // A note as this page shows it now: a deleted note is missing, and so is a colleague's note
+  // whose only link was ended.
+  const view = (
+    raw: VaultData["open"],
+  ): { open: VaultData["open"]; closed: string | null } => {
+    if (!raw || !("note" in raw)) return { open: raw, closed: null };
+    const links = raw.links.filter((l) => !unlinked.includes(l.id));
+    if (deleted.includes(raw.note.id))
+      return { open: { missing: true }, closed: null };
+    if (raw.note.access === "link" && links.length === 0)
+      return { open: { missing: true }, closed: raw.note.id };
+    return { open: { ...raw, links }, closed: null };
+  };
   // The sample data without the notes deleted and the links ended here; asking for a deleted
   // note finds nothing, and neither does a colleague's note whose only link was ended.
   const data = useMemo<VaultData>(() => {
@@ -102,19 +126,10 @@ export function DevVault({
       madeWorkspaces.length === 0 &&
       Object.keys(changed).length === 0
     )
-      return sample;
+      return baseOpen === sample.open ? sample : { ...sample, open: baseOpen };
     const withTopics = <N extends { id: string; topics: string[] }>(n: N): N =>
       changed[n.id] ? { ...n, topics: changed[n.id]! } : n;
-    let open = sample.open;
-    let closed: string | null = null;
-    if (open && "note" in open) {
-      const links = open.links.filter((l) => !unlinked.includes(l.id));
-      if (deleted.includes(open.note.id)) open = { missing: true };
-      else if (open.note.access === "link" && links.length === 0) {
-        closed = open.note.id;
-        open = { missing: true };
-      } else open = { ...open, links };
-    }
+    const { open, closed } = view(baseOpen);
     return {
       ...sample,
       workspaces: [...sample.workspaces, ...madeWorkspaces],
@@ -123,11 +138,11 @@ export function DevVault({
         .map(withTopics),
       open,
     };
-  }, [sample, deleted, unlinked, madeWorkspaces, changed]);
+  }, [sample, baseOpen, deleted, unlinked, madeWorkspaces, changed]);
   /** A note's topics as this page shows them now. */
   const topicsNow = (noteId: string): string[] => {
     if (changed[noteId]) return changed[noteId]!;
-    const open = sample.open && "note" in sample.open ? sample.open.note : null;
+    const open = baseOpen && "note" in baseOpen ? baseOpen.note : null;
     const found =
       sample.notes.find((n) => n.id === noteId) ??
       (open?.id === noteId ? open : null);
@@ -177,8 +192,7 @@ export function DevVault({
       if (slow) await wait(SLOW_WAIT);
       if (fail) return { ok: false, reason: "failed" };
       // As the database: a note that is not the person's own is refused.
-      const open =
-        sample.open && "note" in sample.open ? sample.open.note : null;
+      const open = baseOpen && "note" in baseOpen ? baseOpen.note : null;
       const found =
         sample.notes.find((n) => n.id === noteId) ??
         (open?.id === noteId ? open : null);
@@ -190,6 +204,13 @@ export function DevVault({
         return { ok: false, reason: "full" };
       setChanged((c) => ({ ...c, [noteId]: [...carried, topicId] }));
       return { ok: true };
+    },
+    openNote: async (noteId): Promise<OpenAnswer> => {
+      record("openNote", [noteId]);
+      if (failOpen) return { ok: false };
+      const raw = fixtureVault(now, { note: noteId }).open;
+      setAsked({ sample, open: raw });
+      return { ok: true, open: view(raw).open };
     },
     preview: async (workspaceId, path) => {
       record("preview", [workspaceId, path]);

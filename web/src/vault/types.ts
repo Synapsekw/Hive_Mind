@@ -51,6 +51,8 @@ export type VaultData = {
     | { note: VaultNote; body: string; cut: boolean; links: NoteLink[] }
     | { missing: true };
 };
+/** What opening one note answers: the note, or that it could not be read. */
+export type OpenAnswer = { ok: true; open: VaultData["open"] } | { ok: false };
 export type SharePreview = {
   follows: number;
   own_setting: number;
@@ -77,4 +79,6 @@ export type VaultActions = {
   /** Puts a topic on a note: at most five. The database decides whether the caller may. */
   addTopic(noteId: string, topicId: string): Promise<TopicChange>;
   preview(workspaceId: string, path: string): Promise<SharePreview | null>;
+  /** One note for the preview, read under the session; the list is not read again. */
+  openNote(noteId: string): Promise<OpenAnswer>;
 };
