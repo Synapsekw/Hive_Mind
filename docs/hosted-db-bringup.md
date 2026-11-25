@@ -65,6 +65,12 @@ deleted is in [Hive deletion](#hive-deletion).
   for an agent or a connected app they are the real moment) and `map_graph` (every item carries
   `created_at`). It also adds the trigger `files_keep_date`: nobody sets a file's date through
   the API.
+- Gallery v2's migrations `20261124181505_sessions`, `20261124184944_file_links` and
+  `20261124190145_gallery_folders` are applied (2026-11-25) with `supabase db push --include-all`
+  (the project was already past `20261124185153_topics_view`) and recorded under those versions.
+  They add agent sessions and session notes, `files.kind`, file references, `file_set_home` and
+  personal gallery folders. `scripts/setup-session-sweep.sh` has been run: job
+  `close-idle-sessions` every 15 minutes (pg_cron was already on).
 - The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
   the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
   still the build from before its signing code moved to `_shared/`; behaviour is the same.

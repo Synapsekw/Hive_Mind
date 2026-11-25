@@ -1,7 +1,7 @@
 ---
 type: spec
-status: draft
-last-updated: 2026-11-24
+status: shipped
+last-updated: 2026-11-25
 tags: [project/hive-mind, spec, ui, db, mcp]
 ---
 
