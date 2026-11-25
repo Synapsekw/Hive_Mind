@@ -9,7 +9,7 @@ related:
   - "[[2026-11-23-1139-file-gallery-and-inbox-merged]]"
 ---
 
-# Gallery v2 built and checked live, not yet merged
+# Gallery v2 built, checked live and merged
 
 ## What changed
 
@@ -25,7 +25,7 @@ The gallery only listed files. Danijel wanted the binaries his agents produce st
 
 ## How to test (for the user)
 
-Not merged yet; run from the worktree (`cd .claude/worktrees/gallery-v2/web && pnpm exec next dev -p 3000`), against hosted dev.
+Merged into `develop` as `f9134cb` (gates green). Run `pnpm dev:web` in the main checkout, against hosted dev.
 
 1. Open http://localhost:3000/gallery. Expected: files grouped under session headers or "Uploaded", with chips for type, date, session, agent, owner and folder.
 2. Upload a PDF, a CSV and a `.md` into one of your notes. Expected: they appear at once with thumbnails; the type is a small badge in the corner. (Confirmed by Danijel.)
@@ -35,11 +35,11 @@ Not merged yet; run from the worktree (`cd .claude/worktrees/gallery-v2/web && p
 
 ## Open threads
 
-- Danijel to confirm steps 4 and 5; then stop the dev server, run `scripts/finish-task.sh`, delete the leftover worktree folder, and delete `.superpowers/sdd/2026-11-24-gallery-v2/`.
-- After the merge: rebuild the MCP server in the main checkout, run a live agent session from `~/Dev/hive-work` (write a note, save a file, `hive_end_session`) and check the session group in the gallery; try the Agent chip and a large folder on hosted (the PostgREST inner-join filters were tested only against a stub).
+- Danijel to confirm steps 4 and 5 (merged before he did, at his request).
+- Restart the `~/Dev/hive-work` Claude (the MCP server in the main checkout is rebuilt), run a live agent session from `~/Dev/hive-work` (write a note, save a file, `hive_end_session`) and check the session group in the gallery; try the Agent chip and a large folder on hosted (the PostgREST inner-join filters were tested only against a stub).
 - Flip the spec status to shipped; record the three migrations and the sweep in `docs/hosted-db-bringup.md` "Current state".
-- Known gaps: an object uploaded through a slot but never finished (tab closed) stays orphaned in storage; the PDF thumbnail badge has no automated test; deferred minors are in the SDD ledger (copy any that matter before deleting it).
+- Known gaps: an object uploaded through a slot but never finished (tab closed) stays orphaned in storage; the PDF thumbnail badge has no automated test; deferred minors are in the SDD ledger (deleted with the worktree).
 
 ## Next session entry point
 
-Get Danijel's answer on the viewer and Change home note, then run `scripts/finish-task.sh` from `.claude/worktrees/gallery-v2` and do the live agent-session test.
+Do the live agent-session test from `~/Dev/hive-work` and the viewer and Change home note checks, then redeploy the `mcp` Edge Function and deploy `develop`.
