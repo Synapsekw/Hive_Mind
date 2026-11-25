@@ -182,7 +182,8 @@ export function DevGallery({
         })
         .sort(
           (a, b) =>
-            b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
+            b.created_at.localeCompare(a.created_at) ||
+            b.id.localeCompare(a.id),
         )
         .filter(
           (f) =>
