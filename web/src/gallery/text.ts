@@ -2,7 +2,7 @@
 // timestamp (see `vault/format.ts`), so server and client render alike.
 import { shortDate } from "../vault/format";
 import { kindLabel } from "./kind";
-import type { GalleryFile } from "./types";
+import type { GalleryFile, GalleryFolder, GallerySession } from "./types";
 
 const UNITS = ["KB", "MB", "GB", "TB"];
 
@@ -54,4 +54,34 @@ export function whoCanRead(f: GalleryFile): string {
   return f.sharing === "through-note"
     ? `Whoever can read “${f.note.title}”.`
     : `Only you, for now: it follows “${f.note.title}”, which is private.`;
+}
+
+const hhmm = (d: Date) => d.toISOString().slice(11, 16);
+
+/** A session's time span: "22 Nov, 09:00–10:20", across days with both dates, or
+ * "22 Nov, from 09:00" while it is open. UTC, like every date on the screen. */
+export function spanText(s: GallerySession, now: number): string {
+  const start = new Date(s.started_at);
+  if (Number.isNaN(start.getTime())) return "";
+  const day = shortDate(s.started_at, now);
+  const end = s.ended_at ? new Date(s.ended_at) : null;
+  if (!end || Number.isNaN(end.getTime())) return `${day}, from ${hhmm(start)}`;
+  if (s.started_at.slice(0, 10) === end.toISOString().slice(0, 10))
+    return `${day}, ${hhmm(start)}–${hhmm(end)}`;
+  return `${day} ${hhmm(start)} – ${shortDate(end.toISOString(), now)} ${hhmm(end)}`;
+}
+
+/** The title an upload batch carries until the server names it: "Upload · 2026-11-22". */
+export function uploadTitle(iso: string): string {
+  return `Upload · ${iso.slice(0, 10)}`;
+}
+
+/** "Harbour / Proposals" for a sub-folder, "Harbour" for a top-level one. */
+export function folderPath(id: string, folders: GalleryFolder[]): string {
+  const folder = folders.find((f) => f.id === id);
+  if (!folder) return "";
+  const parent = folder.parent_id
+    ? folders.find((f) => f.id === folder.parent_id)
+    : undefined;
+  return parent ? `${parent.name} / ${folder.name}` : folder.name;
 }
