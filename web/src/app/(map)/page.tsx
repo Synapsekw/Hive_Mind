@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
-import { HiveMap } from "../map/Map";
-import { NoHive } from "../shell/NoHive";
-import { Notice } from "../shell/Notice";
-import { createServerSupabase } from "../lib/supabase/server";
-import { loadInboxCount } from "./inbox/load-inbox";
-import { loadMap } from "./load-map";
-import { afterNoHive } from "./no-hive";
-import { Refresher } from "./Refresher";
+import { HiveMap } from "../../map/Map";
+import { NoHive } from "../../shell/NoHive";
+import { Notice } from "../../shell/Notice";
+import { createServerSupabase } from "../../lib/supabase/server";
+import { loadInboxCount } from "../inbox/load-inbox";
+import { loadMap } from "../load-map";
+import { afterNoHive } from "../no-hive";
+import { Refresher } from "../Refresher";
 
 // Reads the session cookie, so never prerendered.
 export const dynamic = "force-dynamic";

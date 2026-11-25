@@ -12,6 +12,8 @@ export const CREATE = "Create";
 export const CANCEL = "Cancel";
 export const FAILED = "That didn't work. Try again.";
 export const NO_HIVE = "You're not in a hive yet. Ask its owner to invite you.";
+/** What a route's loading screen tells assistive tech while it waits. */
+export const LOADING = "Loading…";
 export const NO_HIVE_OR_START =
   "You're not in a hive yet. Ask its owner to invite you, or start one.";
 
