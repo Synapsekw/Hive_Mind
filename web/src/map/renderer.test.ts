@@ -3,6 +3,7 @@ import { fixturePayload } from "./fixture";
 import { activity, buildModel } from "./graph";
 import { layout } from "./layouts";
 import {
+  dotBatches,
   dotDiameter,
   drawFrame,
   fitGroupLabel,
@@ -91,11 +92,12 @@ function world(view: "rings" | "timeline"): {
   model: MapModel;
   scene: Scene;
   pos: [number, number][];
+  lit: boolean[];
 } {
   const model = buildModel(fixturePayload(NOW));
   const pos = layout(view, model, NOW);
   const scene = buildScene(model, view, pos, activity(model, NOW), NOW);
-  return { model, scene, pos };
+  return { model, scene, pos, lit: model.nodes.map(() => true) };
 }
 
 function frame(
@@ -108,7 +110,7 @@ function frame(
     cam: { k: 1, tx: 0, ty: 0 },
     world: { w: 1000, h: 760 },
     pos: w.pos,
-    lit: w.model.nodes.map(() => true),
+    lit: w.lit,
     soft: null,
     hot: null,
     sel: null,
@@ -252,5 +254,58 @@ describe("hub glow", () => {
       log.sets.filter(([k, v]) => k === "shadowBlur" && v).map(([, v]) => v),
     );
     expect(blurs.has(14)).toBe(false);
+  });
+});
+
+describe("hover and zoom keep the caches", () => {
+  function setup(view: "rings" | "timeline") {
+    const w = world(view);
+    const { canvas, ctx } = fakeCanvas();
+    canvas.width = 1000;
+    canvas.height = 760;
+    const draw = (over: Partial<FrameState> = {}) =>
+      drawFrame(ctx, 1, w.scene, w.model, frame(view, w, over), PAL);
+    const strokes = () =>
+      made.reduce((n, c) => n + (c.log.calls.get("stroke") ?? 0), 0);
+    const hub = w.model.nodes.find((n) => n.kind === "hub" && n.nb.length)!;
+    const soft = new Set([hub.i, ...hub.nb]);
+    return { w, draw, strokes, hub, soft };
+  }
+
+  for (const view of ["rings", "timeline"] as const)
+    it(`${view}: hovering a dot reuses the dot batches`, () => {
+      const { w, draw, hub, soft } = setup(view);
+      draw();
+      const before = dotBatches(w.scene);
+      expect(before).toBeDefined();
+      draw({ hot: hub.i, soft });
+      expect(dotBatches(w.scene)).toBe(before);
+      draw();
+      expect(dotBatches(w.scene)).toBe(before);
+    });
+
+  it("hovering a dot does not stroke the edge layer again", () => {
+    const { draw, strokes, hub, soft } = setup("rings");
+    draw();
+    const n = strokes();
+    expect(n).toBeGreaterThan(0);
+    draw({ hot: hub.i, soft });
+    draw({ sel: hub.i });
+    draw();
+    expect(strokes()).toBe(n);
+  });
+
+  it("a zoom keeps the dot batches while it moves and rebuilds them once settled", () => {
+    const { w, draw } = setup("rings");
+    draw();
+    const before = dotBatches(w.scene);
+    draw({ cam: { k: 1.5, tx: -100, ty: -80 }, moving: true });
+    draw({ cam: { k: 2, tx: -200, ty: -160 }, moving: true });
+    expect(dotBatches(w.scene)).toBe(before);
+    draw({ cam: { k: 2, tx: -200, ty: -160 }, moving: false });
+    const settled = dotBatches(w.scene);
+    expect(settled).not.toBe(before);
+    draw({ cam: { k: 2, tx: -200, ty: -160 }, moving: false });
+    expect(dotBatches(w.scene)).toBe(settled);
   });
 });
