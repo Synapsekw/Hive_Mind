@@ -23,6 +23,11 @@ export type FrameState = {
   labels: Set<number>;
   pulses: Pulse[];
   time: number; // performance.now() for animations
+  /**
+   * The decorative phase (breathing, the index's turn, the level-7 halos): advances only while
+   * the ambient motion is awake, so it freezes in place when the map goes idle. Defaults to time.
+   */
+  clock?: number;
   reducedMotion: boolean;
   /** The camera is moving (wheel, drag, glide): the resting layer is moved, not redrawn. */
   moving?: boolean;
@@ -827,7 +832,9 @@ function drawCore(F: Frame) {
   const { ctx, scene, f, pal, px, still } = F;
   if (!scene.core.length || f.cam.k > 1.8) return;
   if (!still) F.ambient = true;
-  ctx.globalAlpha = still ? 0.8 : 0.8 + 0.2 * Math.sin((TAU * f.time) / 4000);
+  ctx.globalAlpha = still
+    ? 0.8
+    : 0.8 + 0.2 * Math.sin((TAU * (f.clock ?? f.time)) / 4000);
   ctx.fillStyle = pal.brand;
   ctx.beginPath();
   for (const [x, y] of scene.core) {
@@ -909,7 +916,9 @@ function fillGroup(
       ctx.shadowColor = colour;
       ctx.shadowBlur =
         glow ||
-        (still ? 14 : 19 + 5 * Math.sin(TAU * (f.time / 5000 + topic / T)));
+        (still
+          ? 14
+          : 19 + 5 * Math.sin(TAU * ((f.clock ?? f.time) / 5000 + topic / T)));
       ctx.globalAlpha = 0.35 * alpha;
       ctx.fill(outer);
       ctx.shadowBlur = 0;
@@ -1189,7 +1198,9 @@ function drawDots(F: Frame) {
       if (!b.halo.length) continue;
       const hub = b.kind === "hub";
       if (!hub && !F.c.glow) continue;
-      const peak = hub ? 0.3 : haloAlpha(b.level, F.f.time, F.still);
+      const peak = hub
+        ? 0.3
+        : haloAlpha(b.level, F.f.clock ?? F.f.time, F.still);
       if (!hub && b.level === 7 && !F.still) F.ambient = true;
       for (const i of b.halo) {
         const [x, y] = P(F, i);
@@ -1269,7 +1280,7 @@ function drawRoot(F: Frame, s0: number, glow: number) {
   const scale = s0 * depthOf(F, scene.root);
   const [x, y] = P(F, scene.root);
   if (!still) F.ambient = true;
-  const turn = still ? 0 : (TAU * (f.time % 30_000)) / 30_000;
+  const turn = still ? 0 : (TAU * ((f.clock ?? f.time) % 30_000)) / 30_000;
   const p = new Path2D();
   hex(p, x, y, (diam(F, n) / 2) * scale * px, turn);
   if (F.fresh)
@@ -1313,7 +1324,7 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
         x,
         y,
         (diam(F, n) / 2) * scale * depthOf(F, i) * F.px * HALO_REACH,
-        haloAlpha(level, F.f.time, F.still) * dim,
+        haloAlpha(level, F.f.clock ?? F.f.time, F.still) * dim,
       );
     }
     fillGroup(
@@ -1459,7 +1470,7 @@ function drawNear(F: Frame) {
     for (const b of nc.batches) {
       const hub = b.kind === "hub";
       if (!b.halo.length || (!hub && !F.c.glow)) continue;
-      const peak = hub ? 0.3 : haloAlpha(b.level, f.time, F.still);
+      const peak = hub ? 0.3 : haloAlpha(b.level, f.clock ?? f.time, F.still);
       if (!hub && b.level === 7 && !F.still) F.ambient = true;
       for (const i of b.halo) {
         const [x, y] = P(F, i);

@@ -16,6 +16,12 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import {
+  ambientAwake,
+  mayStartPulse,
+  nextFrameDelay,
+  type AmbientState,
+} from "./ambient";
 import { toScreen } from "./camera";
 import { buildHitGrid, hitTest, type HitGrid } from "./hitGrid";
 import { projectOrbit, type OrbitProjection } from "./orbit3d";
@@ -102,10 +108,6 @@ type Tween = {
 
 const CENTRE: [number, number] = [500, 380];
 const MOVING_MS = 120;
-/** ~12 fps for the ambient breathing and turning. */
-const AMBIENT_MS = 83;
-/** ~30 fps while a faint ambient pulse travels (smooth enough, a third of the cost). */
-const AMBIENT_PULSE_MS = 33;
 /** The largest hit radius any shape can have, in screen px (the hot index, x1.7). */
 const MAX_REACH = 24;
 /** The smallest hit radius in Timeline, in screen px. */
@@ -120,8 +122,6 @@ const GROW_MS = 600;
 const PULSE_MS = 1100;
 /** A hub can link to hundreds of items; one firing draws at most this many pulses. */
 const MAX_FIRE = 160;
-const AMBIENT_EVERY = 700;
-const AMBIENT_MAX = 3;
 const ORBIT_SPIN = 0.0012; // rad per frame at 60 fps
 const ORBIT_DRAG = 0.006; // rad per px
 const ORBIT_REST_MS = 3000;
@@ -157,7 +157,17 @@ export function MapCanvas(props: Props): JSX.Element {
   const grow = useRef<{ nodes: Set<number>; t0: number } | null>(null);
   const reported = useRef<[number, number][] | null>(null);
   const pulses = useRef<Pulse[]>([]);
-  const lastAmbient = useRef(-Infinity);
+  // The decorative motion's schedule (ambient.ts): awake for 15 s after the last input, one
+  // ambient pulse at a time. Its clock (the breathing and turning phase) advances only while
+  // awake, so going idle freezes the motion where it is instead of snapping it to rest.
+  const ambient = useRef<AmbientState>({
+    lastInput: -Infinity,
+    lastPulseEnd: -Infinity,
+  });
+  const clock = useRef<{ value: number | null; lastT: number | null }>({
+    value: null,
+    lastT: null,
+  });
   const orbitState = useRef({
     ry: 0,
     zoom: 1,
@@ -186,12 +196,20 @@ export function MapCanvas(props: Props): JSX.Element {
     if (raf.current === null)
       raf.current = requestAnimationFrame((t) => drawRef.current(t));
   }, []);
+  /** Input (pointer, wheel, key, a data change or view switch) wakes the decorative motion. */
+  const wake = useCallback(() => {
+    ambient.current.lastInput = performance.now();
+    // A loop already running picks it up; only a stopped one needs a frame (so a moving pointer
+    // does not turn a calm 15 fps into one frame per event).
+    if (raf.current === null && ambientTimer.current === null) request();
+  }, [request]);
 
   // When the camera last moved: while it moves, the renderer moves its resting layer instead of
   // redrawing it, and redraws it crisp once the camera has been still for MOVING_MS.
   const lastMove = useRef(-Infinity);
   const onCamera = useCallback(() => {
     lastMove.current = performance.now();
+    ambient.current.lastInput = lastMove.current;
     request();
   }, [request]);
 
@@ -201,6 +219,7 @@ export function MapCanvas(props: Props): JSX.Element {
       const o = orbitState.current;
       o.zoom = Math.max(0.6, Math.min(2.4, o.zoom * f));
       setOrbitZoom(o.zoom);
+      ambient.current.lastInput = performance.now();
       request();
     },
     [request],
@@ -214,6 +233,7 @@ export function MapCanvas(props: Props): JSX.Element {
             const o = orbitState.current;
             o.dragging = true;
             o.ry += dx * ORBIT_DRAG;
+            ambient.current.lastInput = performance.now();
             request();
           },
           end: () => {
@@ -307,6 +327,11 @@ export function MapCanvas(props: Props): JSX.Element {
     }
     const p = latest.current;
     let motion = false;
+    const awake = ambientAwake(ambient.current, time, still.current);
+    const ck = clock.current;
+    if (ck.value === null) ck.value = time;
+    else if (awake && ck.lastT !== null) ck.value += time - ck.lastT;
+    ck.lastT = awake ? time : null;
 
     // Positions: the glide, a move, or where the dots are.
     syncMotion(p, time);
@@ -339,7 +364,9 @@ export function MapCanvas(props: Props): JSX.Element {
       }
     }
 
-    // Orbit: turn unless dragged (or within 3 s of a drag), hovered, or still; then project.
+    // Orbit: turn unless dragged (or within 3 s of a drag), hovered, still or idle; then project.
+    // The turn is decorative: it runs at the ambient rate.
+    let turning = false;
     let proj: OrbitProjection | null = null;
     const o = orbitState.current;
     if (p.view !== "orbit") {
@@ -349,37 +376,33 @@ export function MapCanvas(props: Props): JSX.Element {
     }
     if (p.view === "orbit" && p.orbit) {
       const spin =
-        !still.current &&
+        awake &&
         p.hot === null &&
         !o.dragging &&
         time - o.lastDrag > ORBIT_REST_MS;
       if (spin && o.lastT !== null)
         o.ry += ORBIT_SPIN * Math.min(4, (time - o.lastT) / (1000 / 60));
       o.lastT = spin ? time : null;
-      if (spin) motion = true;
+      turning = spin;
       // The previous frame's buffers are reused (little garbage while it turns).
       proj = projectOrbit(p.orbit, o.ry, o.zoom, sw, sh, orbitProj.current);
       el.setAttribute("data-ry", o.ry.toFixed(3));
     } else el.removeAttribute("data-ry");
     orbitProj.current = proj;
 
-    // Pulses: firing ones, and a faint ambient one about every 700 ms in a calm Rings view,
-    // along an edge drawn at rest (the spokes).
+    // Pulses: firing ones, and in a calm Rings view a faint ambient one along an edge drawn at
+    // rest (the spokes), one at a time and only while the map is awake.
     // A hot dot stops the ambient pulses at once (its own firing pulses stay).
     pulses.current = pulses.current.filter(
       (q) => time < q.t0 + q.dur && !(q.ambient && p.hot !== null),
     );
     const ambientOk =
-      !still.current &&
+      awake &&
       PULSE_VIEWS.has(p.view) &&
       p.hot === null &&
       !tw?.glide &&
       p.scene.rest.length > 0;
-    if (
-      ambientOk &&
-      time - lastAmbient.current >= AMBIENT_EVERY &&
-      pulses.current.filter((q) => q.ambient).length < AMBIENT_MAX
-    ) {
+    if (ambientOk && mayStartPulse(ambient.current, time, still.current)) {
       const [u, v] =
         p.scene.rest[Math.floor(Math.random() * p.scene.rest.length)]!;
       const flip = Math.random() < 0.5;
@@ -391,7 +414,7 @@ export function MapCanvas(props: Props): JSX.Element {
         colour: pal.current.brand,
         ambient: true,
       });
-      lastAmbient.current = time;
+      ambient.current.lastPulseEnd = time + PULSE_MS;
     }
 
     // Still for MOVING_MS, even with the pointer held down: the resting layer is redrawn crisp.
@@ -425,6 +448,7 @@ export function MapCanvas(props: Props): JSX.Element {
         labels,
         pulses: pulses.current,
         time,
+        clock: ck.value,
         reducedMotion: still.current,
         moving,
         grow: growing,
@@ -435,26 +459,25 @@ export function MapCanvas(props: Props): JSX.Element {
       pal.current,
     );
     el.setAttribute("data-k", cam.current.k.toFixed(2));
-    // Real motion runs every frame; the calm breathing and turning only ~12 times a second.
-    const kind =
-      motion || anim === "motion"
-        ? "motion"
-        : anim || (ambientOk ? "ambient" : false);
-    if (kind === "motion") {
+    // Real motion runs every frame; the decorative breathing, turning and ambient pulses at
+    // AMBIENT_FPS while awake. An ambient pulse already in flight when the map goes idle runs
+    // out (no new one starts); then the loop stops on this, the settled frame.
+    const interactive = motion || anim === "motion";
+    const decorative =
+      (awake && (anim === "ambient" || ambientOk || turning)) ||
+      pulses.current.some((q) => q.ambient);
+    const delay = nextFrameDelay({ moving, interactive, ambient: decorative });
+    if (delay !== null && (interactive || moving)) {
       el.setAttribute("data-animating", "");
       el.removeAttribute("data-ambient");
       request();
-    } else if (kind === "ambient") {
+    } else if (delay !== null) {
       el.removeAttribute("data-animating");
       el.setAttribute("data-ambient", "");
-      const fast = pulses.current.some((q) => q.ambient);
-      ambientTimer.current = setTimeout(
-        () => {
-          ambientTimer.current = null;
-          request();
-        },
-        fast ? AMBIENT_PULSE_MS : AMBIENT_MS,
-      );
+      ambientTimer.current = setTimeout(() => {
+        ambientTimer.current = null;
+        request();
+      }, delay);
     } else {
       el.removeAttribute("data-animating");
       el.removeAttribute("data-ambient");
@@ -474,6 +497,28 @@ export function MapCanvas(props: Props): JSX.Element {
   useEffect(() => {
     request();
   });
+
+  // A data change, a view switch, or what the person points at or picks wakes the motion.
+  const { model: wModel, view: wView, hot: wHot, sel: wSel } = props;
+  useEffect(() => {
+    wake();
+  }, [wModel, wView, wHot, wSel, props.preview, props.lit, wake]);
+
+  // Pointer, wheel and key input anywhere on the stage or page wakes it too.
+  useEffect(() => {
+    const el = stage.current;
+    const opts = { passive: true } as const;
+    el?.addEventListener("pointermove", wake, opts);
+    el?.addEventListener("pointerdown", wake, opts);
+    el?.addEventListener("wheel", wake, opts);
+    window.addEventListener("keydown", wake);
+    return () => {
+      el?.removeEventListener("pointermove", wake);
+      el?.removeEventListener("pointerdown", wake);
+      el?.removeEventListener("wheel", wake);
+      window.removeEventListener("keydown", wake);
+    };
+  }, [wake]);
 
   // Firing: one pulse out along each link of a dot that became hot or selected.
   const { fire } = props;
