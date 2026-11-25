@@ -73,6 +73,7 @@ export function DevSettings({
   initial,
   now,
   fail,
+  many = false,
   slow,
   reason,
   unsent,
@@ -84,6 +85,8 @@ export function DevSettings({
   initial: SettingsData;
   now: number;
   fail: boolean;
+  /** Find offers forty vendors instead of the handful. */
+  many?: boolean;
   slow: boolean;
   reason: Exclude<InviteReason, "failed"> | null;
   unsent: boolean;
@@ -219,7 +222,7 @@ export function DevSettings({
       if (fail) return { ok: false };
       // Everything on the first workspace's first page; the others hold nothing.
       const first = data.workspaces[0]?.id === workspaceId && after === null;
-      return { ok: true, heads: first ? fixtureHeads() : [], next: null };
+      return { ok: true, heads: first ? fixtureHeads(many) : [], next: null };
     },
     saveTopics: async (picks) => {
       record("saveTopics", [picks]);

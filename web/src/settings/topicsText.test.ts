@@ -74,4 +74,10 @@ describe("the sentences of the Topics section", () => {
       "Notes stay. They are no longer under this topic.",
     );
   });
+
+  it("says how many candidates are ticked, and names the tick-all buttons by kind", () => {
+    expect(t.ticked(3, 40)).toBe("3 of 40 ticked");
+    expect(t.tickAll("Vendors")).toBe("Tick all Vendors");
+    expect(t.tickNone("Vendors")).toBe("Untick all Vendors");
+  });
 });

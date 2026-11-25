@@ -857,7 +857,14 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   await expect(
     main(page).getByRole("button", { name: "Find topics in my notes" }),
   ).toBeFocused();
-  for (const topic of ["Zain", "Terra Drone"]) {
+  for (const [kind, topic] of [
+    ["Customers", "Zain"],
+    ["Vendors", "Terra Drone"],
+  ]) {
+    await page.keyboard.press("Tab");
+    await expect(
+      main(page).getByRole("button", { name: new RegExp(`^${kind}`) }),
+    ).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(
       main(page).getByRole("button", { name: `Delete ${topic}` }),
@@ -1624,6 +1631,79 @@ test("Topics: Delete asks first and says the notes stay; a failed read or save s
   await expect(topics(page)).toContainText(
     "Your notes could not be read. Try again.",
   );
+});
+
+test("Topics: a long kind starts folded, opens into a box that scrolls on its own, and Save stays in view", async ({
+  page,
+}) => {
+  await open(page, "?many=1");
+  // Thirty-one vendors: folded, so none of them is drawn; the one customer is.
+  const vendors = topics(page).getByRole("button", { name: /^Vendors/ });
+  await expect(vendors).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    topics(page).getByText("Supplier 7", { exact: true }),
+  ).toHaveCount(0);
+  await expect(topics(page).getByText("Zain", { exact: true })).toBeVisible();
+  await vendors.click();
+  await expect(vendors).toHaveAttribute("aria-expanded", "true");
+  const list = topics(page).getByRole("list", { name: "Vendors" });
+  await expect(list.getByRole("listitem")).toHaveCount(31);
+  const box = await list.evaluate((el) => ({
+    height: el.clientHeight,
+    inner: el.scrollHeight,
+  }));
+  expect(box.height).toBeLessThanOrEqual(270);
+  expect(box.inner).toBeGreaterThan(box.height);
+  // Delete still asks in the row.
+  await list
+    .getByRole("button", { name: "Delete Supplier 3", exact: true })
+    .click();
+  await expect(list).toContainText("Delete the topic Supplier 3?");
+  await list.getByRole("button", { name: "Keep" }).click();
+  await vendors.click();
+
+  await findTopics(page).click();
+  const found = topics(page).getByRole("form", {
+    name: "Topics found in your notes",
+  });
+  const group = found.getByRole("group", { name: /^Vendors/ });
+  const toggle = group.getByRole("button", { name: /^Vendors/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(group).toContainText("40 of 40 ticked");
+  await expect(found.getByRole("checkbox")).toHaveCount(0);
+  // Save is on screen without scrolling, and says how many it will save.
+  const save = found.getByRole("button", { name: "Save topics" });
+  await expect(save).toBeInViewport();
+  await expect(found).toContainText("40 of 40 ticked");
+
+  await group.getByRole("button", { name: "Untick all Vendors" }).click();
+  await expect(group).toContainText("0 of 40 ticked");
+  await expect(save).toHaveAttribute("aria-disabled", "true");
+  await toggle.click();
+  await expect(found.getByRole("checkbox")).toHaveCount(40);
+  await found
+    .getByRole("checkbox", { name: "Vendors: Maker 9", exact: true })
+    .check();
+  await group
+    .getByRole("button", { name: "Tick all Vendors", exact: true })
+    .click();
+  await found
+    .getByRole("checkbox", { name: "Vendors: Maker 2", exact: true })
+    .uncheck();
+  await expect(group).toContainText("39 of 40 ticked");
+  await expect(save).toBeInViewport();
+  await save.click();
+  await expect(
+    topics(page).getByText(
+      "39 topics saved. Now open the vault and press Attach topics.",
+    ),
+  ).toBeVisible();
+  const saves = (await calls(page)).filter((c) => c.name === "saveTopics");
+  const names = saves.flatMap((c) =>
+    (c.args[0] as { name: string }[]).map((p) => p.name),
+  );
+  expect(names).toHaveLength(39);
+  expect(names).not.toContain("Maker 2");
 });
 
 test("Topics: a member who is not the owner has no such section", async ({

@@ -36,6 +36,9 @@ type Stage =
 
 const keyOf = (kind: Kind, name: string) => `${kind}|${normal(name)}`;
 
+/** A kind with more entries than this starts folded: the page stays one screen long. */
+const OPEN_UP_TO = 12;
+
 export function Topics({
   topics,
   workspaces,
@@ -61,6 +64,11 @@ export function Topics({
   const [asking, setAsking] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  // Which kinds the person folded or unfolded by hand; the rest follow their size.
+  const [folds, setFolds] = useState<Readonly<Record<string, boolean>>>({});
+  const isOpen = (id: string, size: number) => folds[id] ?? size <= OPEN_UP_TO;
+  const toggle = (id: string, size: number) =>
+    setFolds((f) => ({ ...f, [id]: !(f[id] ?? size <= OPEN_UP_TO) }));
   const running = useRef(false);
   const alive = useRef(true);
   const opener = useRef<HTMLButtonElement>(null);
@@ -272,52 +280,111 @@ export function Topics({
               .map((c, i) => ({ c, i }))
               .filter(({ c }) => c.kind === kind);
             if (of.length === 0) return null;
+            const fold = `found-${kind}`;
+            const open = isOpen(fold, of.length);
+            const on = of.filter(({ i }) => stage.ticked.has(i)).length;
+            const setAll = (to: boolean) => {
+              if (stage.saving) return;
+              const ticked = new Set(stage.ticked);
+              for (const { i } of of) {
+                if (to) ticked.add(i);
+                else ticked.delete(i);
+              }
+              setStage({ ...stage, ticked });
+            };
             return (
-              <fieldset key={kind} className={s.field}>
-                <legend className={s.fieldLabel}>
-                  {t.KIND_NAMES[kind]}{" "}
-                  <span className={s.count}>{of.length}</span>
-                </legend>
-                <ul role="list" className={s.rows}>
-                  {of.map(({ c, i }) => {
-                    const extra = t.candidateNotes(c.kind, c.notes);
-                    const also = t.alsoKnown(c.aliases);
-                    const elsewhere = stage.under.get(i) ?? null;
-                    return (
-                      <li key={i} className={s.item}>
-                        <label className={s.text}>
-                          <input
-                            type="checkbox"
-                            checked={stage.ticked.has(i)}
-                            disabled={stage.saving}
-                            aria-label={t.pickLabel(
-                              t.KIND_NAMES[kind],
-                              c.name,
-                              c.aliases,
-                              elsewhere,
-                            )}
-                            onChange={(e) => {
-                              const ticked = new Set(stage.ticked);
-                              if (e.currentTarget.checked) ticked.add(i);
-                              else ticked.delete(i);
-                              setStage({ ...stage, ticked });
-                            }}
-                          />{" "}
-                          <span className={s.name}>{c.name}</span>
-                          {extra && <span className={s.mark}>{extra}</span>}
-                          {also && <span className={s.meta}>{also}</span>}
-                          {elsewhere && (
-                            <span className={s.meta}>{elsewhere}</span>
-                          )}
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </fieldset>
+              <div
+                key={kind}
+                role="group"
+                aria-labelledby={`${fold}-title`}
+                className={s.fold}
+              >
+                <div className={s.foldHead}>
+                  <h4 id={`${fold}-title`} className={s.foldTitle}>
+                    <button
+                      type="button"
+                      className={s.foldToggle}
+                      aria-expanded={open}
+                      aria-controls={`${fold}-list`}
+                      onClick={() => toggle(fold, of.length)}
+                    >
+                      {t.KIND_NAMES[kind]}{" "}
+                      <span className={s.count}>{of.length}</span>
+                    </button>
+                  </h4>
+                  <span className={s.count}>{t.ticked(on, of.length)}</span>
+                  <button
+                    type="button"
+                    className={s.small}
+                    aria-label={t.tickAll(t.KIND_NAMES[kind])}
+                    aria-disabled={
+                      stage.saving || on === of.length || undefined
+                    }
+                    onClick={() => setAll(true)}
+                  >
+                    {t.ALL}
+                  </button>
+                  <button
+                    type="button"
+                    className={s.small}
+                    aria-label={t.tickNone(t.KIND_NAMES[kind])}
+                    aria-disabled={stage.saving || on === 0 || undefined}
+                    onClick={() => setAll(false)}
+                  >
+                    {t.NONE}
+                  </button>
+                </div>
+                {open && (
+                  <ul id={`${fold}-list`} role="list" className={s.picks}>
+                    {of.map(({ c, i }) => {
+                      const extra = t.candidateNotes(c.kind, c.notes);
+                      const also = t.alsoKnown(c.aliases);
+                      const elsewhere = stage.under.get(i) ?? null;
+                      return (
+                        <li key={i}>
+                          <label className={s.pick}>
+                            <input
+                              type="checkbox"
+                              checked={stage.ticked.has(i)}
+                              disabled={stage.saving}
+                              aria-label={t.pickLabel(
+                                t.KIND_NAMES[kind],
+                                c.name,
+                                c.aliases,
+                                elsewhere,
+                              )}
+                              onChange={(e) => {
+                                const ticked = new Set(stage.ticked);
+                                if (e.currentTarget.checked) ticked.add(i);
+                                else ticked.delete(i);
+                                setStage({ ...stage, ticked });
+                              }}
+                            />
+                            <span className={s.pickText}>
+                              <span className={s.pickName}>{c.name}</span>
+                              {extra && (
+                                <span className={s.pickMore}>{extra}</span>
+                              )}
+                              {also && (
+                                <span className={s.pickMore}>{also}</span>
+                              )}
+                              {elsewhere && (
+                                <span className={s.pickMore}>{elsewhere}</span>
+                              )}
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             );
           })}
-          <div className={s.formFoot}>
+          <div className={`${s.formFoot} ${s.saveBar}`}>
+            <span className={s.count}>
+              {t.ticked(stage.ticked.size, stage.found.length)}
+            </span>
             <button
               type="submit"
               className={s.primary}
@@ -354,34 +421,43 @@ export function Topics({
         KINDS.map((kind) => {
           const of = shown.filter((x) => x.kind === kind);
           if (of.length === 0) return null;
+          const fold = `saved-${kind}`;
+          const open = isOpen(fold, of.length);
           return (
             <Fragment key={kind}>
-              <h3 className={s.fieldLabel}>
-                {t.KIND_NAMES[kind]}{" "}
-                <span className={s.count}>{of.length}</span>
+              <h3 className={s.foldTitle}>
+                <button
+                  type="button"
+                  className={s.foldToggle}
+                  aria-expanded={open}
+                  aria-controls={`${fold}-list`}
+                  onClick={() => toggle(fold, of.length)}
+                >
+                  {t.KIND_NAMES[kind]}{" "}
+                  <span className={s.count}>{of.length}</span>
+                </button>
               </h3>
-              <ul
-                role="list"
-                aria-label={t.KIND_NAMES[kind]}
-                className={s.rows}
-              >
-                {of.map((topic) => {
-                  const notes = t.topicNotes(topic.notes);
-                  const isAsking = asking === topic.id;
-                  const off = busy === topic.id || undefined;
-                  return (
-                    <li key={topic.id} className={s.item} aria-busy={off}>
-                      <div className={s.text}>
-                        <p className={s.what}>
-                          <span className={s.name}>{topic.name}</span>
-                        </p>
-                        <p className={s.meta}>
-                          <span>{t.KIND_NAMES[kind]}</span>
-                          {notes && <span>{notes}</span>}
-                        </p>
-                      </div>
-                      {!closing && (
-                        <div className={s.side}>
+              {open && (
+                <ul
+                  id={`${fold}-list`}
+                  role="list"
+                  aria-label={t.KIND_NAMES[kind]}
+                  className={s.topics}
+                >
+                  {of.map((topic) => {
+                    const notes = t.topicNotes(topic.notes);
+                    const isAsking = asking === topic.id;
+                    const off = busy === topic.id || undefined;
+                    return (
+                      <li
+                        key={topic.id}
+                        className={s.topic}
+                        data-asking={isAsking || undefined}
+                        aria-busy={off}
+                      >
+                        <span className={s.topicName}>{topic.name}</span>
+                        {notes && <span className={s.pickMore}>{notes}</span>}
+                        {!closing && (
                           <div
                             role="group"
                             aria-label={`${t.DELETE} ${topic.name}`}
@@ -412,7 +488,7 @@ export function Topics({
                             ) : (
                               <button
                                 type="button"
-                                className={s.secondary}
+                                className={s.small}
                                 aria-label={`${t.DELETE} ${topic.name}`}
                                 onClick={() => setAsking(topic.id)}
                               >
@@ -420,15 +496,15 @@ export function Topics({
                               </button>
                             )}
                           </div>
-                          {isAsking && (
-                            <p className={s.aside}>{t.DELETE_ASIDE}</p>
-                          )}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+                        )}
+                        {isAsking && !closing && (
+                          <p className={s.aside}>{t.DELETE_ASIDE}</p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </Fragment>
           );
         })

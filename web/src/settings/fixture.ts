@@ -98,11 +98,28 @@ const TOPICS: TopicRow[] = [
   },
 ];
 
+/** With `many`: thirty vendors beside the two sample topics, so a kind starts folded. */
+const MANY_TOPICS: TopicRow[] = Array.from({ length: 30 }, (_, i) => ({
+  id: `00000000-0000-4000-8000-0000000b${String(i).padStart(4, "0")}`,
+  kind: "vendor" as const,
+  name: `Supplier ${i + 1}`,
+  notes: i,
+}));
+
 /**
- * The heads the dev page's scan answers: one new customer, one known, a partner named like the
+ * With `many`, forty vendors the hive does not have. Otherwise the heads the dev page's scan
+ * answers: one new customer, one known, a partner named like the
  * saved customer, a solution, a tag on five notes.
  */
-export function fixtureHeads(): NoteHead[] {
+export function fixtureHeads(many = false): NoteHead[] {
+  if (many)
+    return Array.from({ length: 40 }, (_, i) => ({
+      path: `Knowledge/Vendors/Maker ${i + 1}.md`,
+      title: `Maker ${i + 1}`,
+      type: "vendor",
+      aliases: [],
+      tags: [],
+    }));
   const tagged = Array.from({ length: 5 }, (_, i) => ({
     path: `Sessions/s${i}.md`,
     title: `Session ${i}`,
@@ -149,7 +166,7 @@ export function fixtureHeads(): NoteHead[] {
  * agents yet.
  */
 export function fixtureSettings(
-  opts: { member?: boolean; none?: boolean } = {},
+  opts: { member?: boolean; none?: boolean; many?: boolean } = {},
 ): SettingsData {
   const me = opts.member ? AHMED : DANIJEL;
   return {
@@ -159,7 +176,9 @@ export function fixtureSettings(
     agents: opts.none ? [] : AGENTS.map((a) => ({ ...a })),
     members: MEMBERS.map((m) => ({ ...m, isMe: m.id === me })),
     invitations: opts.member ? [] : INVITATIONS.map((i) => ({ ...i })),
-    topics: opts.member ? [] : TOPICS.map((x) => ({ ...x })),
+    topics: opts.member
+      ? []
+      : [...TOPICS, ...(opts.many ? MANY_TOPICS : [])].map((x) => ({ ...x })),
   };
 }
 
