@@ -110,6 +110,15 @@ echo ""
 
 # --- 1. The extension (DDL, alone in its batch) -------------------------------
 echo "1/3  In the database: pg_cron, if not there yet..."
+# On a project where pg_cron is already on (the hive purge job enables it),
+# running the DDL again sets off Supabase's own re-grant, which refuses with
+# "dependent privileges exist". So look first, and only enable it when missing.
+printf '%s\n' "select count(*) as present from pg_extension where extname = 'pg_cron';" >"$DDL_FILE"
+if run_sql "$DDL_FILE" && grep -Eq '"present": *1|present.*\b1\b' "$LOG"; then
+  rm -f "$DDL_FILE" "$LOG"
+  echo "     already on."
+  echo ""
+else
 printf '%s\n' \
   "create extension if not exists pg_cron with schema pg_catalog;" \
   "grant usage on schema cron to postgres;" \
@@ -125,6 +134,7 @@ fi
 rm -f "$DDL_FILE" "$LOG"
 echo "     done."
 echo ""
+fi
 
 # --- 2. The schedule ----------------------------------------------------------
 echo "2/3  In the database: the job $JOB ($SCHEDULE UTC)..."
