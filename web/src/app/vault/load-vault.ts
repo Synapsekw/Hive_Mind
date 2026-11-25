@@ -10,7 +10,7 @@ import type {
 } from "../../vault/types";
 import { compareRanked, type Ranked } from "../../topics/order";
 import { KINDS, type Kind } from "../../topics/types";
-import { ownHive } from "../own-hive";
+import { ownHive, sessionUserId } from "../own-hive";
 import { counting, paged } from "./connect";
 import { isUuid } from "./validate";
 
@@ -241,7 +241,7 @@ export async function loadVault(
       .select("id, name")
       .eq("hive_id", hiveId)
       .order("created_at", { ascending: true }) as unknown as Promise<Res>,
-    db.auth.getUser(),
+    sessionUserId(db),
     wantNote
       ? (db
           .from("notes")
@@ -256,7 +256,7 @@ export async function loadVault(
   if (failed("workspaces query", workspaces)) return { state: "error" };
   if (opened && failed("note query", opened)) return { state: "error" };
 
-  const userId = user.data.user?.id;
+  const userId = user;
   if (!userId) return { state: "error" };
   const memberRows = rows(members);
   const me = memberRows.find((m) => m.user_id === userId);

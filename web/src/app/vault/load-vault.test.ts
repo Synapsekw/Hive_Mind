@@ -43,7 +43,7 @@ const tokenOf = (sub: string) =>
 
 /**
  * A stand-in client: every `from(table)` chain is recorded and resolves to what `answer`
- * returns for it. `getUser` answers with the caller's user id, and the session's token names it.
+ * returns for it. The session's token names the caller; `getUser` throws, as no loader asks the auth server.
  */
 function stub(
   answer: (c: Call) => Res | undefined,
@@ -69,7 +69,9 @@ function stub(
   });
   const rpc = vi.fn(async (..._args: unknown[]) => links());
   const auth = {
-    getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getUser: vi.fn(async (): Promise<never> => {
+      throw new Error("a loader must not call the auth server");
+    }),
     getSession: vi.fn(async () => ({
       data: { session: user ? { access_token: tokenOf(user.id) } : null },
       error: null,
@@ -163,14 +165,19 @@ describe("loadVault", () => {
     expect(t.calls[0]!.table).toBe("own");
     expect(t.from.mock.calls[0]).toEqual(["members"]);
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name, delete_after)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", U_ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
       ["limit", [50]],
     ]);
-    // One call to the auth server, as before.
-    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
+    // No call to the auth server: the user id is the one the session's token names.
+    expect(t.auth.getUser).not.toHaveBeenCalled();
     const index = t.calls.find((c) => c.table === "notes")!;
     expect(has(index, "eq", "workspace_id", W1)).toBe(true);
     expect(has(index, "order", "path")).toBe(true);

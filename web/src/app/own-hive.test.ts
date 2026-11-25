@@ -199,7 +199,12 @@ describe("ownHive", () => {
     expect(t.calls).toHaveLength(1);
     expect(t.calls[0]!.table).toBe("members");
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name, delete_after)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
