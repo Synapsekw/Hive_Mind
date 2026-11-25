@@ -6,6 +6,7 @@ import { DevSettings } from "./DevSettings";
 // A fixed clock keeps every render, and so every test and screenshot, the same.
 //   ?member=1               the view of a member who is not the owner
 //   ?none=1                 no agents yet
+//   ?many=1                 thirty more topics, and forty more for Find to offer
 //   ?fail=1                 every action is refused
 //   ?slow=1                 creating an agent takes over a second
 //   ?unsent=1               inviting saves the invitation, but its email is not sent
@@ -38,12 +39,14 @@ export default async function DevSettingsPage({
   const data = fixtureSettings({
     member: one(q.member) === "1",
     none: one(q.none) === "1",
+    many: one(q.many) === "1",
   });
   return (
     <DevSettings
       initial={data}
       now={NOW}
       fail={one(q.fail) === "1"}
+      many={one(q.many) === "1"}
       slow={one(q.slow) === "1"}
       reason={reasonOf(one(q.reason))}
       unsent={one(q.unsent) === "1"}

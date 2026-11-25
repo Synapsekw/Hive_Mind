@@ -14,6 +14,12 @@ export const NOTHING_NEW =
 export const SCAN_FAILED = "Your notes could not be read. Try again.";
 export const SAVE = "Save topics";
 export const CANCEL = "Cancel";
+export const ALL = "All";
+export const NONE = "None";
+export const tickAll = (kindName: string) => `Tick all ${kindName}`;
+export const tickNone = (kindName: string) => `Untick all ${kindName}`;
+/** Beside a kind, and beside Save: how many of the candidates are ticked. */
+export const ticked = (n: number, of: number) => `${n} of ${of} ticked`;
 export const SAVE_FAILED = "The topics could not be saved. Try again.";
 export const NEXT = "Now open the vault and press Attach topics.";
 export const EMPTY_TITLE = "No topics yet.";
