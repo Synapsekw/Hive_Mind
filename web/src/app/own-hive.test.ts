@@ -177,6 +177,7 @@ describe("ownHive", () => {
       id: MINE,
       name: "Synapse",
       memberId: "00000000-0000-4000-8000-00000000c001",
+      deleteAfter: null,
     });
   });
 
@@ -198,7 +199,12 @@ describe("ownHive", () => {
     expect(t.calls).toHaveLength(1);
     expect(t.calls[0]!.table).toBe("members");
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
@@ -282,6 +288,7 @@ describe("ownHive: the chosen hive", () => {
       id: THEIRS,
       name: "Side",
       memberId: "00000000-0000-4000-8000-00000000c002",
+      deleteAfter: null,
     });
   });
 
@@ -294,6 +301,7 @@ describe("ownHive: the chosen hive", () => {
       name: "Side",
       memberId: "00000000-0000-4000-8000-00000000c002",
       displayName: "Dani",
+      deleteAfter: null,
       role: "member",
     });
   });
@@ -390,6 +398,7 @@ describe("myHives", () => {
         role: "owner",
         memberId: "00000000-0000-4000-8000-00000000c001",
         displayName: "Danijel",
+        deleteAfter: null,
       },
       {
         id: THEIRS,
@@ -397,12 +406,18 @@ describe("myHives", () => {
         role: "member",
         memberId: "00000000-0000-4000-8000-00000000c002",
         displayName: "Dani",
+        deleteAfter: null,
       },
     ]);
     expect(t.calls).toHaveLength(1);
     expect(t.calls[0]!.table).toBe("members");
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, display_name, role, hive:hives!hive_id(name)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
@@ -438,6 +453,7 @@ describe("myHives", () => {
         role: "owner",
         memberId: "00000000-0000-4000-8000-00000000c007",
         displayName: "Danijel",
+        deleteAfter: null,
       },
     ]);
   });
@@ -478,6 +494,7 @@ describe("currentOf", () => {
       role: "owner",
       memberId: "m1",
       displayName: "D",
+      deleteAfter: null,
     },
     {
       id: THEIRS,
@@ -485,6 +502,7 @@ describe("currentOf", () => {
       role: "member",
       memberId: "m2",
       displayName: "D",
+      deleteAfter: null,
     },
   ];
   it("is the chosen hive when it is in the list, else the first", () => {
@@ -504,7 +522,9 @@ describe("ownHive with { profile: true }", () => {
     expect(t.calls).toHaveLength(1);
     expect(t.calls[0]!.ops[0]).toEqual([
       "select",
-      ["id, hive_id, display_name, role, hive:hives!hive_id(name)"],
+      [
+        "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+      ],
     ]);
   });
 
@@ -515,6 +535,7 @@ describe("ownHive with { profile: true }", () => {
       name: "Synapse",
       memberId: "00000000-0000-4000-8000-00000000c001",
       displayName: "Danijel",
+      deleteAfter: null,
       role: "owner",
     });
   });
@@ -525,6 +546,7 @@ describe("ownHive with { profile: true }", () => {
       id: MINE,
       name: "Synapse",
       memberId: "00000000-0000-4000-8000-00000000c001",
+      deleteAfter: null,
     });
   });
 
@@ -546,5 +568,47 @@ describe("ownHive with { profile: true }", () => {
     expect(await ownHive(answering({ data, error: null }).db)).toMatchObject({
       id: MINE,
     });
+  });
+});
+
+describe("a hive that is being deleted", () => {
+  const AFTER = "2026-12-01T09:00:00+00:00";
+
+  it("carries the date the hive goes, from the same one read", async () => {
+    const t = table([
+      member({ hive: { name: "Synapse", delete_after: AFTER } }),
+    ]);
+    expect(await ownHive(t.db)).toMatchObject({ id: MINE, deleteAfter: AFTER });
+    expect(await ownHive(t.db, undefined, { profile: true })).toMatchObject({
+      role: "owner",
+      deleteAfter: AFTER,
+    });
+    expect(t.calls).toHaveLength(2);
+    expect(String(t.calls[0]!.ops[0]![1][0])).toContain(
+      "hive:hives!hive_id(name, delete_after)",
+    );
+  });
+
+  it.each([
+    ["absent", { name: "Synapse" }],
+    ["null", { name: "Synapse", delete_after: null }],
+    ["a number", { name: "Synapse", delete_after: 1 }],
+    ["an object", { name: "Synapse", delete_after: {} }],
+  ])("has no date when it is %s", async (_n, hive) => {
+    expect(await ownHive(table([member({ hive })]).db)).toMatchObject({
+      id: MINE,
+      deleteAfter: null,
+    });
+  });
+
+  it("marks each of the person's hives on its own", async () => {
+    const rows = both();
+    rows[0]!.hive = { name: "Side", delete_after: AFTER };
+    const hives = await myHives(table(rows).db);
+    if (hives === "error") throw new Error("not read");
+    expect(hives.map((h) => [h.name, h.deleteAfter])).toEqual([
+      ["Synapse", null],
+      ["Side", AFTER],
+    ]);
   });
 });

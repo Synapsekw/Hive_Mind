@@ -55,8 +55,6 @@
   border: 1px solid var(--edge-card);
   border-radius: 20px;
   background: var(--glow), var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
   box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
@@ -668,6 +666,179 @@
   margin-left: 8px;
 }
 
+/* ---- Topics: a kind folds, and what it holds is set in columns inside its own scroll box,
+   so 300 topics stay one screen long ---- */
+
+.fold {
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.foldHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.foldTitle {
+  margin: 0 auto 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.foldToggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.foldToggle::before {
+  content: "";
+  align-self: center;
+  margin: 0 2px 3px 3px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.foldToggle[aria-expanded="true"]::before {
+  transform: rotate(45deg);
+}
+
+.foldToggle:focus-visible,
+.small:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.small {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: none;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.small:hover {
+  border-color: var(--line-hi);
+  background: var(--fill);
+}
+
+.small[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.picks,
+.topics {
+  margin: 6px 0 0;
+  padding: 2px 8px 2px 2px;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 0 24px;
+  max-height: 264px;
+  overflow-y: auto;
+}
+
+.topics {
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  margin-bottom: 10px;
+}
+
+.pick {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pick > input {
+  flex: none;
+  margin: 0;
+  transform: translateY(2px);
+}
+
+.pickText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pickName,
+.topicName {
+  min-width: 0;
+  color: var(--fg);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.pickMore {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.topic {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.topicName {
+  flex: 1 1 0;
+}
+
+/* The question needs the row's whole width. */
+.topic[data-asking] {
+  grid-column: 1 / -1;
+  padding: 8px 0;
+}
+
+/* Save stays in reach however long the candidates run. The scroll box has 24px of padding
+   under its content, which a sticky edge is measured from: the bar sits on the box's edge. */
+.saveBar {
+  position: sticky;
+  bottom: -24px;
+  z-index: 1;
+  margin: 0 -16px -16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 13px 13px;
+  background: var(--surface);
+}
+
 /* ---- No agents yet ---- */
 
 .empty {
@@ -819,16 +990,6 @@
   min-width: 88px;
 }
 
-/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
-
-@supports not (
-  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
-) {
-  .panel {
-    background: var(--glow), var(--bg);
-  }
-}
-
 /* ---- The answer beside the words ----
    From a card wide enough for both. */
 
@@ -858,7 +1019,8 @@
 
 @media (min-width: 1100px) and (min-height: 560px) {
   .page {
-    height: 100dvh;
+    /* Less the banner of a hive that is being deleted, when there is one. */
+    height: calc(100dvh - var(--closing-banner, 0px));
     min-height: 0;
     flex-wrap: nowrap;
     overflow: hidden;

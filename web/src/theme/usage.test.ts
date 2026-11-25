@@ -87,30 +87,23 @@ describe("token usage under web/src", () => {
     expect([...new Set(hits)]).toEqual([]);
   });
 
-  it("gives every glass surface a solid background without backdrop-filter", () => {
-    const supportsNot =
-      /@supports not \(\s*\(backdrop-filter: blur\(1px\)\) or \(-webkit-backdrop-filter: blur\(1px\)\)\s*\)/;
-    // Popovers carry data-scope="reset"; globals.css makes that scope solid in one place.
-    const globals = all.find((f) => f.file === "app/globals.css")!.src;
-    expect(globals.slice(globals.search(supportsNot))).toMatch(
-      /\[data-scope="reset"\] \{\s*background: var\(--surface\);/,
-    );
-    // The rail's only glass is the Appearance popover, a reset scope.
-    const RESET_ONLY = ["shell/shell.module.css"];
-    const glass = all.filter(
-      (f) =>
-        f.file.endsWith(".css") &&
-        /^\s*backdrop-filter:/m.test(f.src) &&
-        !RESET_ONLY.includes(f.file),
-    );
-    expect(glass.length).toBeGreaterThan(0);
-    for (const { file, src } of glass) {
-      const at = src.search(supportsNot);
-      expect(at, `${file} has no @supports not block`).toBeGreaterThan(-1);
-      const block = src.slice(at);
-      expect(block, `${file}: fallback sets no solid background`).toMatch(
-        /background: (var\(--glow\), )?var\(--(bg|panel-solid|surface)\)/,
-      );
+  it("uses no glass and no theme scope", () => {
+    const hits: string[] = [];
+    for (const { file, src } of all) {
+      if (file === "theme/usage.test.ts") continue;
+      for (const gone of [
+        "backdrop-filter",
+        "backdropFilter",
+        "data-scope",
+        "data-reach",
+        "data-dots",
+        "--wash",
+        "--bloom",
+        "--rings-hub",
+        "--rings-glow",
+      ])
+        if (src.includes(gone)) hits.push(`${file}: ${gone}`);
     }
+    expect(hits).toEqual([]);
   });
 });

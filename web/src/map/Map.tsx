@@ -1,12 +1,13 @@
 "use client";
 
-// The map screen. The only state holder: view, topic, kind, person, selection, search text and
+// The map screen. The only state holder: view, groups, kinds, people, selection, search text and
 // labels. Everything is computed from the payload in memory; nothing here touches the network.
 // Every view, Orbit included, is drawn on one canvas (MapCanvas); a visually hidden list of
 // real buttons (DotList) carries the keyboard and screen readers. Hover and keyboard focus make a
 // dot hot (the peek card, firing links, the soft dim).
 import {
   startTransition,
+  useDeferredValue,
   useCallback,
   useEffect,
   useMemo,
@@ -14,22 +15,41 @@ import {
   useState,
 } from "react";
 import { activity, agentStatus, buildModel } from "./graph";
-import { layout, orbit, ringsLayout, type RingsLayout } from "./layouts";
+import {
+  layout,
+  orbit,
+  ringsLayout,
+  timelineScale,
+  type RingsLayout,
+} from "./layouts";
+import type { Scale } from "./timescale";
 import {
   GROUP_HEADING,
   grouping,
+  ofKind,
+  topicKinds,
   type Arrange,
   type Grouping,
 } from "./arrange";
-import { lit, nodeIndex, nodeKey, topicIndexOf } from "./select";
+import { lit, nodeIndex, nodeKey, shown, topicIndexOf } from "./select";
 import { buildScene } from "./scene";
 import type { MapModel, MapPayload, NodeKind, View } from "./types";
+import { KIND_NAMES, type Kind } from "../topics/types";
 import { TopBar } from "./Controls";
-import { Dock } from "./Dock";
+import { TodayButton } from "./TodayButton";
 import { DetailRail } from "./DetailRail";
 import { DotList } from "./DotList";
+import { FilterBar } from "./FilterBar";
+import { Legend } from "./Legend";
 import { MapCanvas, type CameraApi, type Preview } from "./MapCanvas";
 import { Peek } from "./Peek";
+import {
+  foldKeyIgnored,
+  foldWide,
+  quietTarget,
+  useFold,
+  useFoldSidePresent,
+} from "../shell/FoldProvider";
 import { Shell, type AgentRow } from "../shell/Shell";
 import s from "./map.module.css";
 
@@ -40,6 +60,8 @@ type Entry = {
   model: MapModel;
   timeline: [number, number][] | null;
   timelineAt: number;
+  /** The scale `timeline` was laid out on; the scene takes its labels and agent row from it. */
+  scale: Scale | null;
   rings: RingsLayout | null;
   orbit: [number, number, number][] | null;
   orbitFlat: [number, number][] | null;
@@ -61,23 +83,31 @@ export function HiveMap({
 }) {
   const [view, setView] = useState<View>("rings");
   const [arrange, setArrange] = useState<Arrange>("folder");
-  // The topic filter and the selection are kept by name and by key, not by index, so they
-  // follow the same topic and node when a refresh shifts the indices (see `nodeKey`).
-  const [topicName, setTopicName] = useState<string | null>(null);
-  const [kind, setKind] = useState<NodeKind | null>(null);
-  const [memberId, setMemberId] = useState<string | null>(null);
+  // Under Group by Topic: the kind whose topics are the groups, "all" for every kind mixed, or
+  // null while nothing is chosen (the first kind the hive has is then shown).
+  const [pickedKind, setPickedKind] = useState<Kind | "all" | null>(null);
+  // The group filter and the selection are kept by name and by key, not by index, so they
+  // follow the same group and node when a refresh shifts the indices (see `nodeKey`); people by id.
+  const [topicNames, setTopicNames] = useState<string[]>([]);
+  const [kinds, setKinds] = useState<NodeKind[]>([]);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
   const [selKey, setSelKey] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  // The search box shows every keystroke at once; what it lights (and the dot list after it)
+  // follows a moment later, so typing never waits on a 5,000-node pass.
+  const dq = useDeferredValue(q);
   const [names, setNames] = useState(true);
   const [hot, setHotNow] = useState<number | null>(null);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const [focusDot, setFocusDot] = useState<number | null>(null);
-  // What the legend dock points at (the dock calls setPreview); null = nothing.
+  // What the filter bar or the detail rail points at; null = nothing.
   const [preview, setPreview] = useState<Preview | null>(null);
   const [fire, setFire] = useState<{ from: number; at: number } | null>(null);
   const cameraRef = useRef<CameraApi | null>(null);
   const hotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hotRef = useRef<number | null>(null);
+  const { fold, togglePanel, openPanel } = useFold();
+  const sidePresent = useFoldSidePresent();
 
   // A refresh that delivers the same payload keeps the model, so no layout runs again.
   const sig = useMemo(() => JSON.stringify(payload), [payload]);
@@ -89,13 +119,20 @@ export function HiveMap({
   // they are not rebuilt every minute. Going back to one already seen returns the same object.
   const entries = useMemo(() => new Map<string, Entry>(), [parsed]);
   const dayNow = Math.floor(now / DAY_MS) * DAY_MS;
-  const entryOf = (key: string, groups: () => Grouping): Entry => {
+  const entryOf = (
+    key: string,
+    groups: (p: MapPayload) => Grouping,
+    // The payload the model is built from: all of it, or the notes of one kind of topic.
+    from: () => MapPayload = () => parsed,
+  ): Entry => {
     let e = entries.get(key);
     if (!e) {
+      const p = from();
       e = {
-        model: buildModel(parsed, groups()),
+        model: buildModel(p, groups(p)),
         timeline: null,
         timelineAt: 0,
+        scale: null,
         rings: null,
         orbit: null,
         orbitFlat: null,
@@ -104,8 +141,29 @@ export function HiveMap({
     }
     return e;
   };
+  const kindRows = useMemo(() => topicKinds(parsed), [parsed]);
+  // The kind in force: the one chosen if the hive still has it, else the first it has.
+  const kind: Kind | null =
+    pickedKind === "all"
+      ? null
+      : (kindRows.find((r) => r.kind === pickedKind)?.kind ??
+        kindRows[0]?.kind ??
+        null);
+  const kindOptions = useMemo(
+    () => [
+      ...kindRows.map((r) => [r.kind, KIND_NAMES[r.kind], r.notes] as const),
+      ["all", "All kinds"] as const,
+    ],
+    [kindRows],
+  );
   let entry: Entry;
-  if (view === "rings")
+  if (view === "rings" && arrange === "topic" && kind !== null)
+    entry = entryOf(
+      `rings:topic:${kind}`,
+      (p) => grouping(p, "topic", dayNow, 12, kind),
+      () => ofKind(parsed, kind),
+    );
+  else if (view === "rings")
     entry = entryOf(
       arrange === "time" ? `rings:time:${dayNow}` : `rings:${arrange}`,
       () => grouping(parsed, arrange, dayNow),
@@ -123,15 +181,32 @@ export function HiveMap({
   const act = useMemo(() => activity(model, now), [model, now]);
 
   const sel = useMemo(() => nodeIndex(model, selKey), [model, selKey]);
-  const topic = topicIndexOf(model, topicName);
-  const member =
-    memberId !== null && model.members.some((m) => m.id === memberId)
-      ? memberId
-      : null;
-  // Drop what the new payload no longer has.
+  // Groups and people the model does not have are left out here at once, then dropped from state
+  // for good once the model changes (another view family or payload), so a filter never comes
+  // back on its own when an earlier model returns.
+  useEffect(() => {
+    setTopicNames((cur) => {
+      const next = cur.filter((name) => topicIndexOf(model, name) !== null);
+      return next.length === cur.length ? cur : next;
+    });
+    setMemberIds((cur) => {
+      const next = cur.filter((id) => model.members.some((m) => m.id === id));
+      return next.length === cur.length ? cur : next;
+    });
+  }, [model]);
+  const topics = useMemo(
+    () =>
+      topicNames
+        .map((name) => topicIndexOf(model, name))
+        .filter((i): i is number => i !== null),
+    [model, topicNames],
+  );
+  const members = useMemo(
+    () => memberIds.filter((id) => model.members.some((m) => m.id === id)),
+    [model, memberIds],
+  );
+  // Drop a selection the new payload no longer has.
   if (selKey !== null && sel === null) setSelKey(null);
-  if (topicName !== null && topic === null) setTopicName(null);
-  if (memberId !== null && member === null) setMemberId(null);
 
   const lastUsed = useMemo(
     () => new Map(payload.agents.map((a) => [a.id, a.last_used_at] as const)),
@@ -148,7 +223,10 @@ export function HiveMap({
   let flatPos: [number, number][];
   if (view === "timeline") {
     if (!cache.timeline || cache.timelineAt !== now) {
-      cache.timeline = layout("timeline", model, now);
+      // One pass over the items for the scale, then the same scale for the positions and, in
+      // the scene below, for the column labels and the agent row.
+      cache.scale = timelineScale(model, now);
+      cache.timeline = layout("timeline", model, now, cache.scale);
       cache.timelineAt = now;
     }
     flatPos = cache.timeline;
@@ -190,6 +268,7 @@ export function HiveMap({
         act,
         now,
         view === "rings" ? cache.rings : null,
+        view === "timeline" ? cache.scale : null,
       ),
     [model, view, pos, act, now, cache],
   );
@@ -225,13 +304,28 @@ export function HiveMap({
         }),
     [model, agentInfo, lastUsed],
   );
-  const query = q.trim();
+  const query = dq.trim();
   // In Rings by Links or Time a group's name is a note's title or a month, not a word the user
   // filed by, so the search does not light whole groups by it.
-  const groupNames = view !== "rings" || arrange === "folder";
+  const groupNames =
+    view !== "rings" ||
+    arrange === "folder" ||
+    arrange === "category" ||
+    arrange === "topic";
+  // What the filter and the search light, without the selection. The bar's count follows only
+  // this, so selecting a dot runs `lit` once (for `on`) and leaves the count alone.
+  const base = useMemo(
+    () => lit(model, { topics, kinds, members, q: dq, sel: null, groupNames }),
+    [model, topics, kinds, members, dq, groupNames],
+  );
+  const counts = useMemo(() => shown(model, base), [model, base]);
+  // With no selection `on` is `base` itself, so the canvas caches keyed on it still hit.
   const on = useMemo(
-    () => lit(model, { topic, kind, member, q, sel, groupNames }),
-    [model, topic, kind, member, q, sel, groupNames],
+    () =>
+      sel === null
+        ? base
+        : lit(model, { topics, kinds, members, q: dq, sel, groupNames }),
+    [base, model, topics, kinds, members, dq, sel, groupNames],
   );
   const hits = query ? on.filter(Boolean).length : 0;
   const selNode = sel !== null ? model.nodes[sel] : undefined;
@@ -250,21 +344,12 @@ export function HiveMap({
           (names && n.kind === "hub" && view === "orbit") ||
           (!!selNode && near.has(n.i) && selNode.nb.length <= 14) ||
           (!!query && hits <= 14) ||
-          ((view === "timeline" || kind === "agent") && n.kind === "agent"));
+          ((view === "timeline" || kinds.includes("agent")) &&
+            n.kind === "agent"));
       if (label) out.add(n.i);
     }
     return out;
-  }, [model, on, sel, selNode, names, view, query, hits, kind]);
-
-  const items = useMemo(
-    () =>
-      model.nodes.filter((n) => n.kind === "note" || n.kind === "file").length,
-    [model],
-  );
-  const stats = query
-    ? `${hits} ${hits === 1 ? "match" : "matches"}`
-    : `${items} ${items === 1 ? "item" : "items"}, ${model.linkCount} ${model.linkCount === 1 ? "link" : "links"}` +
-      (model.truncated ? ". Showing the 5,000 most recent items" : "");
+  }, [model, on, sel, selNode, names, view, query, hits, kinds]);
 
   // A pick toggles the selection; selecting frames the dot and its neighbours.
   const posRef = useRef(pos);
@@ -276,6 +361,8 @@ export function HiveMap({
       const key = nodeKey(model, i);
       if (selKeyRef.current === key) return setSelKey(null);
       setSelKey(key);
+      // A folded panel opens to show what was selected; a narrow window stacks and never folds.
+      if (foldWide()) openPanel();
       setFire({ from: i, at: performance.now() });
       const p = posRef.current;
       const n = model.nodes[i];
@@ -285,7 +372,7 @@ export function HiveMap({
           ...n.nb.map((j) => p[j]).filter((v) => v !== undefined),
         ]);
     },
-    [model],
+    [model, openPanel],
   );
   const canvasPick = useCallback(
     (i: number | null) => {
@@ -338,15 +425,17 @@ export function HiveMap({
     setHotNow(null);
   }
 
-  // The soft dim: the hot dot's neighbourhood (no selection), or what the dock points at.
+  // The soft dim: the hot dot's neighbourhood (no selection), or what a preview points at: the
+  // filter with the previewed list as that one entry, the other lists and the search kept.
   const soft = useMemo(() => {
     if (preview) {
       const keep = lit(model, {
-        topic: preview.topic ?? null,
-        kind: preview.kind ?? null,
-        member: preview.member ?? null,
-        q: "",
+        topics: preview.topic != null ? [preview.topic] : topics,
+        kinds: preview.kind != null ? [preview.kind] : kinds,
+        members: preview.member != null ? [preview.member] : members,
+        q: dq,
         sel: null,
+        groupNames,
       });
       const out = new Set<number>();
       keep.forEach((v, i) => v && out.add(i));
@@ -355,7 +444,13 @@ export function HiveMap({
     if (hot !== null && sel === null)
       return new Set([hot, ...(model.nodes[hot]?.nb ?? [])]);
     return null;
-  }, [model, preview, hot, sel]);
+  }, [model, preview, hot, sel, topics, kinds, members, dq, groupNames]);
+  // While a preview is on, the canvas also lights what it points at, so a row the filter leaves
+  // out still shows: its dots at full strength, the rest of the filter at the soft dim.
+  const drawn = useMemo(
+    () => (preview && soft ? on.map((v, i) => v || soft.has(i)) : on),
+    [on, preview, soft],
+  );
 
   const switchView = (v: View) => {
     setView(v);
@@ -366,10 +461,20 @@ export function HiveMap({
   const changeArrange = (a: Arrange) => {
     if (a === arrange) return;
     setArrange(a);
-    // The group filter and the dock preview name groups of the old arrangement.
-    setTopicName(null);
+    // The group filter and the preview name groups of the old arrangement.
+    setTopicNames([]);
     setPreview(null);
     setHot(null);
+    cameraRef.current?.fitView();
+  };
+
+  const changeKind = (k: string) => {
+    setPickedKind(k as Kind | "all");
+    // As with a new arrangement: the group filter names groups of the old one.
+    setTopicNames([]);
+    setPreview(null);
+    setHot(null);
+    setSelKey(null);
     cameraRef.current?.fitView();
   };
 
@@ -385,16 +490,15 @@ export function HiveMap({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target;
-      if (
-        t instanceof HTMLElement &&
-        (t.isContentEditable ||
-          t.closest(
-            'input, textarea, select, [data-popover], [role="radiogroup"], [role="dialog"]',
-          ))
-      )
+      // `]` follows the fold keys' own rule, which lets AltGr and Option type it.
+      if (e.key === "]") {
+        if (foldKeyIgnored(e) || !sidePresent("panel") || !foldWide()) return;
+        e.preventDefault();
+        togglePanel();
         return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (quietTarget(e.target)) return;
       const cam = cameraRef.current;
       switch (e.key) {
         case "+":
@@ -433,22 +537,62 @@ export function HiveMap({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [togglePanel, sidePresent]);
 
   return (
     <div className={s.root}>
       <Shell current="map" agents={agents} inbox={inbox} now={now} />
       <main aria-label="Hive map" className={s.panel}>
         <TopBar
-          stats={stats}
           view={view}
           onView={switchView}
           arrange={arrange}
           onArrange={changeArrange}
-          names={names}
-          onNames={() => setNames((v) => !v)}
-          q={q}
-          onQ={filter(setQ)}
+          kinds={kindRows.length > 0 ? kindOptions : []}
+          kind={kind ?? "all"}
+          onKind={changeKind}
+          filter={
+            <FilterBar
+              model={model}
+              heading={view === "rings" ? GROUP_HEADING[arrange] : "Topics"}
+              rings={view === "rings"}
+              topics={topics}
+              onTopics={filter((next: number[]) =>
+                setTopicNames(
+                  next.flatMap((t) => {
+                    const name = model.topics[t]?.name;
+                    return name === undefined ? [] : [name];
+                  }),
+                ),
+              )}
+              kinds={kinds}
+              onKinds={filter(setKinds)}
+              members={members}
+              onMembers={filter(setMemberIds)}
+              q={q}
+              onQ={filter(setQ)}
+              onClearSearch={() => filter(setQ)("")}
+              counts={counts}
+              truncated={model.truncated}
+              onClearAll={() => {
+                setTopicNames([]);
+                setKinds([]);
+                setMemberIds([]);
+                setQ("");
+                setSelKey(null);
+              }}
+              onPreview={setPreview}
+            />
+          }
+          today={
+            <TodayButton
+              today={act.today}
+              needs={inbox ?? 0}
+              open={fold.panel === "open"}
+              controls="hv-details"
+              onToggle={togglePanel}
+            />
+          }
         />
         <div className={s.stageFit} data-map-stage="">
           <MapCanvas
@@ -457,13 +601,20 @@ export function HiveMap({
             view={view}
             pos={pos}
             orbit={isOrbit ? cache.orbit : null}
-            lit={on}
+            lit={drawn}
             soft={soft}
             preview={preview}
             hot={hot}
             sel={sel}
             focusRing={focusDot}
             labelsOn={names}
+            onNames={() => setNames((v) => !v)}
+            legend={
+              <Legend
+                rings={view === "rings"}
+                hubs={view === "rings" ? "Group hub" : "Topic hub"}
+              />
+            }
             labels={labels}
             onHover={setHot}
             onPick={canvasPick}
@@ -479,19 +630,6 @@ export function HiveMap({
             sel={sel}
             onFocusDot={onFocusDot}
             onPick={pick}
-          />
-          <Dock
-            model={model}
-            heading={view === "rings" ? GROUP_HEADING[arrange] : "Topics"}
-            topic={topic}
-            onTopic={filter((t: number | null) =>
-              setTopicName(t === null ? null : (model.topics[t]?.name ?? null)),
-            )}
-            kind={kind}
-            onKind={filter(setKind)}
-            member={member}
-            onMember={filter(setMemberId)}
-            onPreview={setPreview}
           />
         </div>
         {hotNode && anchor && (
@@ -513,6 +651,8 @@ export function HiveMap({
         agentInfo={agentInfo}
         now={now}
         inbox={inbox}
+        members={members}
+        onMembers={filter(setMemberIds)}
         onPick={pick}
         onHot={setHot}
         onPreview={setPreview}

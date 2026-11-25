@@ -43,7 +43,9 @@ const tokenOf = (sub: string) =>
 
 /**
  * A stand-in client: every `from(table)` chain is recorded and resolves to what `answer`
- * returns for it. `getUser` answers with the caller's user id, and the session's token names it.
+ * returns for it; so is every `rpc(name, args)` chain other than `note_links`, filed as
+ * `rpc:<name>` with the args as its first op. `note_links` answers what `links` returns.
+ * The session's token names the caller; `getUser` throws, as no loader asks the auth server.
  */
 function stub(
   answer: (c: Call) => Res | undefined,
@@ -51,11 +53,10 @@ function stub(
   links: () => Res | Promise<Res> = () => ok([]),
 ) {
   const calls: Call[] = [];
-  const from = vi.fn((table: string) => {
-    const call: Call = { table, ops: [] };
-    calls.push(call);
+  const chainFor = (call: Call, settle: () => Res | Promise<Res>) => {
+    const { table } = call;
     const chain: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "neq", "order", "limit", "in"])
+    for (const m of ["select", "eq", "neq", "order", "limit", "in", "range"])
       chain[m] = (...args: unknown[]) => {
         // The read of the person's own oldest membership is filed apart from the hive's members.
         if (table === "members" && m === "eq" && args[0] === "user_id")
@@ -63,13 +64,30 @@ function stub(
         call.ops.push([m, args]);
         return chain;
       };
-    chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) =>
-      Promise.resolve(answer(call) ?? ok([])).then(res, rej);
+    chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) => {
+      try {
+        return Promise.resolve(settle()).then(res, rej);
+      } catch (e) {
+        return Promise.reject(e).then(res, rej);
+      }
+    };
     return chain;
+  };
+  const from = vi.fn((table: string) => {
+    const call: Call = { table, ops: [] };
+    calls.push(call);
+    return chainFor(call, () => answer(call) ?? ok([]));
   });
-  const rpc = vi.fn(async (..._args: unknown[]) => links());
+  const rpc = vi.fn((name: string, args?: unknown) => {
+    const call: Call = { table: `rpc:${name}`, ops: [["args", [args]]] };
+    if (name === "note_links") return chainFor(call, links);
+    calls.push(call);
+    return chainFor(call, () => answer(call) ?? ok([]));
+  });
   const auth = {
-    getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getUser: vi.fn(async (): Promise<never> => {
+      throw new Error("a loader must not call the auth server");
+    }),
     getSession: vi.fn(async () => ({
       data: { session: user ? { access_token: tokenOf(user.id) } : null },
       error: null,
@@ -79,6 +97,12 @@ function stub(
 }
 
 const op = (c: Call, name: string) => c.ops.filter(([m]) => m === name);
+/** The index reads: `vault_index` calls, in order. */
+const indexReads = (calls: Call[]) =>
+  calls.filter((c) => c.table === "rpc:vault_index");
+/** The calls to `rpc(name)`. */
+const rpcCalls = (rpc: { mock: { calls: unknown[][] } }, name: string) =>
+  rpc.mock.calls.filter(([n]) => n === name);
 const selected = (c: Call) => String(op(c, "select")[0]?.[1][0] ?? "");
 const has = (c: Call, name: string, ...args: unknown[]) =>
   c.ops.some(
@@ -91,7 +115,13 @@ function world(opts: {
   shared?: unknown[];
   open?: unknown[];
   fail?: string;
+  topics?: (c: Call) => Res;
+  /** The most rows the API answers per request (the hosted API's max-rows). */
+  maxRows?: number;
+  /** Answer the second index request with this error. */
+  failPage?: number;
 }) {
+  let indexRequests = 0;
   return (c: Call): Res | undefined => {
     if (opts.fail === c.table)
       return {
@@ -110,13 +140,24 @@ function world(opts: {
         { id: W1, name: "Main" },
         { id: W2, name: "Ops" },
       ]);
+    if (c.table === "entities") return opts.topics ? opts.topics(c) : ok([]);
     if (c.table === "folders")
       return ok([{ path: "Decisions", visibility: "group", shared_with: [] }]);
     if (c.table === "notes") {
       if (has(c, "eq", "id", MINE) || has(c, "eq", "id", THEIRS))
         return ok(opts.open ?? []);
       if (op(c, "neq").length) return ok(opts.shared ?? []);
-      return ok(opts.index ?? []);
+      return undefined;
+    }
+    if (c.table === "rpc:vault_index") {
+      const all = opts.index ?? [];
+      const r = op(c, "range")[0]?.[1] as [number, number] | undefined;
+      if (!r) return ok(all);
+      indexRequests += 1;
+      if (opts.failPage === indexRequests)
+        return { data: null, error: { message: "boom", code: "XX000" } };
+      const to = Math.min(r[1], r[0] + (opts.maxRows ?? Infinity) - 1);
+      return ok(all.slice(r[0], to + 1));
     }
     return undefined;
   };
@@ -149,26 +190,38 @@ describe("loadVault", () => {
     expect(t.calls[0]!.table).toBe("own");
     expect(t.from.mock.calls[0]).toEqual(["members"]);
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", U_ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
       ["limit", [50]],
     ]);
-    // One call to the auth server, as before.
-    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
-    const index = t.calls.find((c) => c.table === "notes")!;
-    expect(has(index, "eq", "workspace_id", W1)).toBe(true);
-    expect(has(index, "order", "path")).toBe(true);
-    expect(has(index, "limit", 2001)).toBe(true);
-    expect(selected(index)).toContain("effective:note_visibility");
-    expect(selected(index)).toContain("effective_with:note_shared_with");
-    expect(selected(index)).toContain("rule_folder:note_rule_folder");
-    expect(selected(index)).toContain("access:note_access");
+    // No call to the auth server: the user id is the one the session's token names.
+    expect(t.auth.getUser).not.toHaveBeenCalled();
+    // The index is one call to vault_index for the tab's workspace, by path, in ranges.
+    const [index, ...more] = indexReads(t.calls);
+    expect(more).toEqual([]);
+    expect(index!.ops).toEqual([
+      ["args", [{ p_workspace: W1 }]],
+      ["order", ["path"]],
+      ["range", [0, 999]],
+    ]);
     expect(t.calls.map((c) => c.table).sort()).toEqual(
-      ["folders", "members", "notes", "own", "workspaces"].sort(),
+      [
+        "entities",
+        "folders",
+        "members",
+        "own",
+        "rpc:vault_index",
+        "workspaces",
+      ].sort(),
     );
-    expect(t.rpc).not.toHaveBeenCalled();
+    expect(rpcCalls(t.rpc, "note_links")).toEqual([]);
   });
 
   it("never selects a body in an index read", async () => {
@@ -176,8 +229,9 @@ describe("loadVault", () => {
     await loadVault(t.db, {});
     await loadVault(t.db, { tab: "shared" });
     const reads = t.calls.filter((c) => c.table === "notes");
-    expect(reads).toHaveLength(2);
+    expect(reads).toHaveLength(1);
     for (const c of reads) expect(selected(c)).not.toMatch(/\bbody\b/);
+    expect(indexReads(t.calls)).toHaveLength(1);
   });
 
   it("caps the index at 2,000 notes and says it was cut", async () => {
@@ -189,6 +243,54 @@ describe("loadVault", () => {
     if (out.state !== "ok") throw new Error(out.state);
     expect(out.data.notes).toHaveLength(2000);
     expect(out.data.truncated).toBe(true);
+  });
+
+  it("reads a workspace's index in ranges of 1,000: 1,641 notes in exactly two requests, none lost", async () => {
+    const rows = Array.from({ length: 1641 }, (_, i) =>
+      row(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+    );
+    const t = stub(world({ index: rows, maxRows: 1000 }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes).toHaveLength(1641);
+    expect(out.data.truncated).toBe(false);
+    const reads = indexReads(t.calls);
+    expect(reads).toHaveLength(2);
+    expect(has(reads[0]!, "range", 0, 999)).toBe(true);
+    expect(has(reads[1]!, "range", 1000, 1999)).toBe(true);
+  });
+
+  it("cuts a 2,500-note workspace at 2,000, says so, and makes at most three requests", async () => {
+    const rows = Array.from({ length: 2500 }, (_, i) =>
+      row(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+    );
+    const t = stub(world({ index: rows, maxRows: 1000 }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes).toHaveLength(2000);
+    expect(out.data.truncated).toBe(true);
+    const reads = indexReads(t.calls);
+    expect(reads.length).toBeLessThanOrEqual(3);
+  });
+
+  it("makes exactly one index request for a workspace under 1,000 notes", async () => {
+    const t = stub(world({ index: [row(MINE), row(THEIRS)], maxRows: 1000 }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes).toHaveLength(2);
+    const reads = indexReads(t.calls);
+    expect(reads).toHaveLength(1);
+  });
+
+  it("is error when the second page of the index fails, logging only code and message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rows = Array.from({ length: 1641 }, (_, i) =>
+      row(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`),
+    );
+    const t = stub(world({ index: rows, maxRows: 1000, failPage: 2 }));
+    expect(await loadVault(t.db, {})).toEqual({ state: "error" });
+    expect(spy).toHaveBeenCalledWith("notes query failed", "XX000", "boom");
+    spy.mockRestore();
   });
 
   it("opens the workspace named in ?ws=, and falls back to the first for an unknown one", async () => {
@@ -214,6 +316,34 @@ describe("loadVault", () => {
     expect(has(read, "neq", "member_id", ME)).toBe(true);
     expect(has(read, "order", "updated_at", { ascending: false })).toBe(true);
     expect(t.calls.some((c) => c.table === "folders")).toBe(false);
+    // Still the per-row columns: a colleague's notes are not vault_index's to answer.
+    expect(selected(read)).toContain("effective:note_visibility");
+    expect(selected(read)).toContain("access:note_access");
+    expect(selected(read)).toContain(
+      "note_entities(entity_id,confidence,detached_at)",
+    );
+    expect(rpcCalls(t.rpc, "vault_index")).toEqual([]);
+  });
+
+  it("is error when the shared tab's read fails", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub(world({ fail: "notes" }));
+    expect(await loadVault(t.db, { tab: "shared" })).toEqual({
+      state: "error",
+    });
+    expect(spy).toHaveBeenCalledWith("notes query failed", "XX000", "boom");
+    spy.mockRestore();
+  });
+
+  it("opens the opened note's read with the per-row columns and its body", async () => {
+    const mine = row(MINE, { body: "Hello" });
+    const t = stub(world({ open: [mine], index: [mine] }));
+    await loadVault(t.db, { note: MINE });
+    const read = t.calls.find(
+      (c) => c.table === "notes" && has(c, "eq", "id", MINE),
+    )!;
+    expect(selected(read)).toContain("rule_folder:note_rule_folder");
+    expect(selected(read)).toMatch(/,body$/);
   });
 
   it("opens a colleague's note on the shared tab", async () => {
@@ -237,6 +367,9 @@ describe("loadVault", () => {
       (c) => c.table === "notes" && has(c, "eq", "id", THEIRS),
     )!;
     expect(selected(one)).toMatch(/\bbody\b/);
+    expect(selected(one)).toContain(
+      "note_entities(entity_id,confidence,detached_at)",
+    );
   });
 
   it("opens my own note in its own workspace", async () => {
@@ -258,7 +391,9 @@ describe("loadVault", () => {
     const b = await loadVault(u.db, { note: "x' or 1=1" });
     if (b.state !== "ok") throw new Error(b.state);
     expect(b.data.open).toEqual({ missing: true });
-    expect(u.calls.filter((c) => c.table === "notes")).toHaveLength(1);
+    // No note read for an id that is not a uuid: only the index.
+    expect(u.calls.filter((c) => c.table === "notes")).toHaveLength(0);
+    expect(indexReads(u.calls)).toHaveLength(1);
   });
 
   it("cuts a body over 200,000 characters", async () => {
@@ -282,7 +417,13 @@ describe("loadVault", () => {
     expect(await loadVault(t.db, {})).toEqual({ state: "error" });
   });
 
-  for (const table of ["own", "members", "workspaces", "folders", "notes"]) {
+  for (const table of [
+    "own",
+    "members",
+    "workspaces",
+    "folders",
+    "rpc:vault_index",
+  ]) {
     it(`is error when the ${table} read fails, logging only code and message`, async () => {
       const spy = vi.spyOn(console, "error").mockImplementation(() => {});
       const t = stub(world({ fail: table }));
@@ -326,11 +467,15 @@ describe("loadVault: the open note's links", () => {
     );
     const out = await loadVault(t.db, { note: MINE });
     if (out.state !== "ok") throw new Error(out.state);
-    expect(t.rpc).toHaveBeenCalledTimes(1);
-    expect(t.rpc).toHaveBeenCalledWith("note_links", { p_note: MINE });
+    expect(rpcCalls(t.rpc, "note_links")).toEqual([
+      ["note_links", { p_note: MINE }],
+    ]);
     // Started with the first batch (own hive, members, workspaces, the note), before any of
     // it was awaited, and so before the second batch (folders, the index).
-    const rpcAt = t.rpc.mock.invocationCallOrder[0]!;
+    const rpcAt =
+      t.rpc.mock.invocationCallOrder[
+        t.rpc.mock.calls.findIndex(([n]) => n === "note_links")
+      ]!;
     const tables = (when: (n: number) => boolean) =>
       t.from.mock.calls
         .filter((_, i) => when(t.from.mock.invocationCallOrder[i]!))
@@ -341,7 +486,11 @@ describe("loadVault: the open note's links", () => {
       "workspaces",
       "notes",
     ]);
-    expect(tables((n) => n > rpcAt)).toEqual(["folders", "notes"]);
+    // The hive's topics are read in the first batch too, after the note's links.
+    expect(tables((n) => n > rpcAt)).toEqual(["entities", "folders"]);
+    expect(rpcCalls(t.rpc, "vault_index")).toEqual([
+      ["vault_index", { p_workspace: W1 }],
+    ]);
     expect(out.data.open).toEqual({
       note: toNote(mine, ME),
       body: "Hello",
@@ -355,7 +504,7 @@ describe("loadVault: the open note's links", () => {
     await loadVault(t.db, {});
     await loadVault(t.db, { tab: "shared" });
     await loadVault(t.db, { note: "x' or 1=1" });
-    expect(t.rpc).not.toHaveBeenCalled();
+    expect(rpcCalls(t.rpc, "note_links")).toEqual([]);
   });
 
   it("keeps only the five fields, and drops malformed rows", async () => {
@@ -460,6 +609,7 @@ describe("toNote", () => {
       effective_with: [],
       rule_folder: null,
       access: "link",
+      topics: [],
     });
   });
 
@@ -485,5 +635,256 @@ describe("toNote", () => {
       access: "own",
       by_agent: false,
     });
+  });
+});
+
+const T = (n: number) =>
+  `00000000-0000-4000-8000-0000000d${String(n).padStart(4, "0")}`;
+
+describe("toNote: topics", () => {
+  const link = (
+    n: number,
+    confidence: unknown,
+    detached_at: unknown = null,
+  ) => ({
+    entity_id: T(n),
+    confidence,
+    detached_at,
+  });
+
+  it("lists the attached topics strongest first, ties in the order answered", () => {
+    const n = toNote(
+      row(MINE, {
+        note_entities: [
+          link(1, 0.5),
+          link(2, 0.9),
+          link(3, 0.5),
+          link(4, 1),
+          link(5, 0.9),
+        ],
+      }),
+      ME,
+    );
+    expect(n.topics).toEqual([T(4), T(2), T(5), T(1), T(3)]);
+  });
+
+  it("reads vault_index's topics column ({entity_id, confidence}) the same way", () => {
+    const n = toNote(
+      row(MINE, {
+        topics: [
+          { entity_id: T(1), confidence: 0.5 },
+          { entity_id: T(2), confidence: 0.9 },
+          { entity_id: T(3), confidence: "high" },
+          { confidence: 1 },
+          null,
+        ],
+      }),
+      ME,
+    );
+    expect(n.topics).toEqual([T(2), T(1)]);
+    expect(toNote(row(MINE, { topics: [] }), ME).topics).toEqual([]);
+    expect(toNote(row(MINE, { topics: null }), ME).topics).toEqual([]);
+  });
+
+  it("drops detached and malformed rows", () => {
+    const n = toNote(
+      row(MINE, {
+        note_entities: [
+          link(1, 0.8),
+          link(2, 0.9, "2026-11-20T00:00:00Z"),
+          link(3, "high"),
+          { entity_id: 7, confidence: 1, detached_at: null },
+          { confidence: 1, detached_at: null },
+          null,
+          "row",
+          link(4, 0.7, undefined),
+        ],
+      }),
+      ME,
+    );
+    expect(n.topics).toEqual([T(1), T(4)]);
+  });
+
+  it("has none when the column is absent or not a list", () => {
+    expect(toNote(row(MINE), ME).topics).toEqual([]);
+    expect(toNote(row(MINE, { note_entities: null }), ME).topics).toEqual([]);
+    expect(
+      toNote(row(MINE, { note_entities: { entity_id: T(1) } }), ME).topics,
+    ).toEqual([]);
+  });
+});
+
+describe("loadVault: the hive's topics", () => {
+  const entity = (n: number, type: string, canonical_name: string) => ({
+    id: T(n),
+    type,
+    canonical_name,
+  });
+
+  /** What the API answers: the rows on the first page, then nothing. */
+  const firstPage = (rows: unknown[]) => (c: Call) =>
+    ok((op(c, "range")[0]![1][0] as number) === 0 ? rows : []);
+
+  it("reads the hive's entities by id, in pages of 1,000, and sorts by kind then name", async () => {
+    const t = stub(
+      world({
+        topics: firstPage([
+          entity(1, "subject", "Pricing"),
+          entity(2, "client", "Zed"),
+          entity(3, "client", "Acme"),
+          entity(4, "partner", "Mid"),
+        ]),
+      }),
+    );
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.topics).toEqual([
+      { id: T(3), kind: "client", name: "Acme" },
+      { id: T(2), kind: "client", name: "Zed" },
+      { id: T(4), kind: "partner", name: "Mid" },
+      { id: T(1), kind: "subject", name: "Pricing" },
+    ]);
+    const read = t.calls.find((c) => c.table === "entities")!;
+    expect(selected(read)).toBe("id, type, canonical_name");
+    expect(has(read, "eq", "hive_id", HIVE)).toBe(true);
+    expect(has(read, "order", "id")).toBe(true);
+    expect(has(read, "range", 0, 999)).toBe(true);
+  });
+
+  it("loses nothing when the API answers 1,000 rows and then 3", async () => {
+    const t = stub(
+      world({
+        topics: (c) => {
+          const [from] = op(c, "range")[0]![1] as [number, number];
+          const n = from === 0 ? 1000 : 3;
+          const base = from === 0 ? 0 : 1000;
+          return {
+            data: Array.from({ length: n }, (_, i) =>
+              entity(
+                base + i,
+                "client",
+                `Client ${String(base + i).padStart(5, "0")}`,
+              ),
+            ),
+            error: null,
+            ...(from === 0 ? { count: 1003 } : {}),
+          } as Res;
+        },
+      }),
+    );
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.topics).toHaveLength(1003);
+    expect(out.data.topics[0]!.name).toBe("Client 00000");
+    expect(out.data.topics[1002]!.name).toBe("Client 01002");
+    expect(t.calls.filter((c) => c.table === "entities")).toHaveLength(2);
+  });
+
+  it("skips a row whose kind is unknown or that is malformed", async () => {
+    const t = stub(
+      world({
+        topics: firstPage([
+          entity(1, "client", "Acme"),
+          entity(2, "galaxy", "Andromeda"),
+          { id: T(3), type: "client" },
+          { id: 4, type: "client", canonical_name: "X" },
+          null,
+        ]),
+      }),
+    );
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.topics).toEqual([
+      { id: T(1), kind: "client", name: "Acme" },
+    ]);
+  });
+
+  it("still loads, with no topics, when that read fails; logs only the code", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub(world({ index: [row(MINE)], fail: "entities" }));
+    const out = await loadVault(t.db, {});
+    expect(out.state).toBe("ok");
+    if (out.state !== "ok") return;
+    expect(out.data.topics).toEqual([]);
+    expect(out.data.notes).toHaveLength(1);
+    expect(spy).toHaveBeenCalled();
+    expect(JSON.stringify(spy.mock.calls)).toContain("XX000");
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    spy.mockRestore();
+  });
+});
+
+describe("loadVault: a note's topics follow the map's order", () => {
+  const entity = (n: number, type: string, canonical_name: string) => ({
+    id: T(n),
+    type,
+    canonical_name,
+  });
+  const link = (n: number, confidence: number) => ({
+    entity_id: T(n),
+    confidence,
+    detached_at: null,
+  });
+  const hive = [
+    entity(1, "vendor", "Zeta"),
+    entity(2, "client", "Acme"),
+    entity(3, "client", "Beta"),
+    entity(4, "vendor", "Alpha"),
+  ];
+  const firstPage = (c: Call) =>
+    ok((op(c, "range")[0]![1][0] as number) === 0 ? hive : []);
+
+  it("orders equal confidence by kind, then name, whatever order the API answered; an unknown id is last", async () => {
+    const mine = row(MINE, {
+      body: "x",
+      note_entities: [
+        link(1, 0.9),
+        link(2, 0.9),
+        link(9, 0.9),
+        link(4, 0.9),
+        link(3, 0.9),
+      ],
+    });
+    const t = stub(world({ index: [mine], open: [mine], topics: firstPage }));
+    const out = await loadVault(t.db, { note: MINE });
+    if (out.state !== "ok") throw new Error(out.state);
+    // customers first (Acme, Beta), then vendors (Alpha, Zeta), then the unknown id.
+    const want = [T(2), T(3), T(4), T(1), T(9)];
+    expect(out.data.notes[0]!.topics).toEqual(want);
+    expect(
+      (out.data.open as { note: { topics: string[] } }).note.topics,
+    ).toEqual(want);
+  });
+
+  it("puts the vendor the API answered first behind the customer it answered second", async () => {
+    const mine = row(MINE, { note_entities: [link(1, 0.8), link(2, 0.8)] });
+    const t = stub(world({ index: [mine], topics: firstPage }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes[0]!.topics).toEqual([T(2), T(1)]);
+  });
+
+  it("reads vault_index's topics the same way, in the map's order", async () => {
+    const pair = (n: number, confidence: number) => ({
+      entity_id: T(n),
+      confidence,
+    });
+    const mine = row(MINE, {
+      topics: [pair(1, 0.9), pair(2, 0.9), pair(9, 0.9), pair(4, 0.9)],
+    });
+    const t = stub(world({ index: [mine], topics: firstPage }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes[0]!.topics).toEqual([T(2), T(4), T(1), T(9)]);
+  });
+
+  it("does not cut the list at five", async () => {
+    const mine = row(MINE, {
+      note_entities: [1, 2, 3, 4, 5, 6, 7].map((n) => link(n, 0.5)),
+    });
+    const t = stub(world({ index: [mine], topics: firstPage }));
+    const out = await loadVault(t.db, {});
+    if (out.state !== "ok") throw new Error(out.state);
+    expect(out.data.notes[0]!.topics).toHaveLength(7);
   });
 });

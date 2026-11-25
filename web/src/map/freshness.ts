@@ -1,10 +1,7 @@
-// How fresh an item is, as a level the renderer turns into opacity and glow. Pure.
+// How fresh an item is, as a level the renderer turns into a ramp colour and a halo. Pure.
 const DAY_MS = 86_400_000;
 
 export const FRESH_LEVELS = 8;
-export const FRESH_ALPHA: readonly number[] = [
-  0.11, 0.15, 0.23, 0.33, 0.45, 0.6, 0.76, 0.94,
-];
 
 /** 0 (oldest) to 7 (changed in the last two days). A time of 0 or in the future of `now` counts as level 0 and 7. */
 export function freshLevel(updatedAt: number, now: number): number {

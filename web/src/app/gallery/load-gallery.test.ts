@@ -82,7 +82,9 @@ function stub(
   });
   const user = opts.user === undefined ? { id: U_ME } : opts.user;
   const auth = {
-    getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getUser: vi.fn(async (): Promise<never> => {
+      throw new Error("a loader must not call the auth server");
+    }),
     getSession: vi.fn(async () => ({
       data: { session: user ? { access_token: tokenOf(user.id) } : null },
       error: null,
@@ -233,15 +235,20 @@ describe("loadGallery: the files query", () => {
     expect(t.calls[0]!.table).toBe("own");
     expect(t.from.mock.calls[0]).toEqual(["members"]);
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", U_ME]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
       ["limit", [50]],
     ]);
     expect(args(table(t, "files")[0]!, "eq")).toEqual(["hive_id", HIVE]);
-    // One call to the auth server, as before.
-    expect(t.getUser).toHaveBeenCalledTimes(1);
+    // No call to the auth server: the user id is the one the session's token names.
+    expect(t.getUser).not.toHaveBeenCalled();
   });
 
   it("reads the members of the hive with their names and users", async () => {

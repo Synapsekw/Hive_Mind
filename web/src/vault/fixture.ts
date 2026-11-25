@@ -14,6 +14,7 @@ import type {
   SharePreview,
   VaultData,
   VaultNote,
+  VaultTopic,
   Visibility,
 } from "./types";
 
@@ -319,6 +320,46 @@ const LINKS: [string, string, string][] = [
   ],
 ];
 
+const topicId = (n: number) =>
+  `00000000-0000-4000-8000-${(0xd0001 + n).toString(16).padStart(12, "0")}`;
+const T_HARBOR = topicId(0);
+const T_NORTHFIELD = topicId(1);
+const T_PARTNER = topicId(2);
+const T_VENDOR = topicId(3);
+const T_SOLUTION = topicId(4);
+const T_SUBJECT = topicId(5);
+
+/** The hive's topics: two customers, a partner, a vendor, a solution and a subject. */
+const TOPICS: VaultTopic[] = [
+  { id: T_HARBOR, kind: "client", name: "Harbor Logistics" },
+  { id: T_NORTHFIELD, kind: "client", name: "Northfield Foods" },
+  { id: T_PARTNER, kind: "partner", name: "Bluewater Partners" },
+  { id: T_VENDOR, kind: "vendor", name: "Survey Kit Co" },
+  { id: T_SOLUTION, kind: "solution", name: "Route optimisation" },
+  { id: T_SUBJECT, kind: "subject", name: "Pricing" },
+];
+
+// The topics of some notes by path, strongest first; a note not listed has none.
+const NOTE_TOPICS: Record<string, string[]> = {
+  "clients/harbor-logistics/kickoff-notes.md": [T_HARBOR],
+  "clients/harbor-logistics/scope-and-assumptions.md": [
+    T_HARBOR,
+    T_SOLUTION,
+    T_SUBJECT,
+    T_PARTNER,
+    T_VENDOR,
+  ],
+  "clients/harbor-logistics/interview-summary-1.md": [T_HARBOR, T_SOLUTION],
+  "clients/northfield-foods/brief.md": [T_NORTHFIELD],
+  "clients/northfield-foods/workshop-notes.md": [T_NORTHFIELD, T_SUBJECT],
+  "sessions/2026-11-12-vendor-call.md": [T_VENDOR, T_SUBJECT],
+  "research/competitor-notes.md": [T_PARTNER],
+  "finance/rate-card.md": [T_SUBJECT],
+  // Colleagues' notes
+  "clients/harbor-logistics/site-visit.md": [T_HARBOR],
+  "clients/redwood-energy/pricing-options.md": [T_SUBJECT],
+};
+
 const MEMBERS = [
   { id: ME, display_name: "Danijel" },
   { id: AHMED, display_name: "Ahmed" },
@@ -390,6 +431,7 @@ function allNotes(now: number): VaultNote[] {
       effective_with,
       rule_folder: ruled?.path ?? null,
       access: "own",
+      topics: [...(NOTE_TOPICS[path] ?? [])],
     });
   });
   SHARED.forEach(([member_id, workspace_id, path, title, v, w, access], k) => {
@@ -409,6 +451,7 @@ function allNotes(now: number): VaultNote[] {
       effective_with: w,
       rule_folder: null,
       access,
+      topics: [...(NOTE_TOPICS[path] ?? [])],
     });
   });
   return out;
@@ -453,6 +496,7 @@ export function fixtureVault(
     folders: isShared ? [] : (RULES[ws.id] ?? []),
     notes,
     truncated: false,
+    topics: TOPICS.map((t) => ({ ...t })),
     open,
   };
 }

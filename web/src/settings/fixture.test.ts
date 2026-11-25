@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fixtureSettings } from "./fixture";
+import { fixtureHeads, fixtureSettings } from "./fixture";
 import { PROVIDERS } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -119,6 +119,21 @@ describe("fixtureSettings", () => {
     }
   });
 
+  it("owner: two topics, Zain with notes and Terra Drone without; a member has none", () => {
+    expect(data.topics.map((x) => [x.kind, x.name, x.notes])).toEqual([
+      ["client", "Zain", 198],
+      ["vendor", "Terra Drone", 0],
+    ]);
+    expect(fixtureSettings({ member: true }).topics).toEqual([]);
+  });
+
+  it("heads: a new customer, a known one, a partner named like a saved customer, a solution and a tag on five notes", () => {
+    const heads = fixtureHeads();
+    expect(heads).toHaveLength(9);
+    expect(heads.filter((h) => h.tags.includes("flare-stack"))).toHaveLength(5);
+    expect(fixtureHeads()).toEqual(heads);
+  });
+
   it("member: not the owner, and Ahmed is me", () => {
     const m = fixtureSettings({ member: true });
     expect(m.isOwner).toBe(false);
@@ -148,5 +163,16 @@ describe("fixtureSettings", () => {
     expect(b.agents).toEqual([]);
     expect(b.invitations).toEqual([]);
     expect(b.members.find((x) => x.isMe)!.name).toBe("Ahmed");
+  });
+});
+
+describe("the sample deletion", () => {
+  it("counts the sample hive's members, and is a fresh copy each time", async () => {
+    const { fixtureDeletion, FIXTURE_DELETE_AFTER } = await import("./fixture");
+    expect(fixtureDeletion()).toEqual({ members: 3, notes: 128, files: 14 });
+    expect(fixtureDeletion()).not.toBe(fixtureDeletion());
+    expect(new Date(FIXTURE_DELETE_AFTER).toISOString()).toBe(
+      FIXTURE_DELETE_AFTER,
+    );
   });
 });

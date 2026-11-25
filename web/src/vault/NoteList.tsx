@@ -1,11 +1,15 @@
 // The note column: one link per note with its last change, an agent or held tag, and its
 // sharing mark. On the shared tab the notes are grouped by owner. Every title is a text node.
+// A row is drawn again only when its own note, address or state changes: opening a note
+// redraws two rows, not the list. The screen opens a plain click on a row itself (`Vault`); the
+// link is still a link, for a new tab or no script.
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { shortDate } from "./format";
 import { noteMark } from "./marks";
-import { MarkTag } from "./MarkTag";
-import type { VaultData, VaultNote } from "./types";
+import { Glyph, markText, markTitle } from "./MarkTag";
+import { rowTopics, topicsById } from "./rowTopics";
+import type { VaultData, VaultNote, VaultTopic } from "./types";
 import s from "./vault.module.css";
 
 type RowProps = {
@@ -15,10 +19,20 @@ type RowProps = {
   now: number;
   members: VaultData["members"];
   showMark: boolean;
+  topics: Map<string, VaultTopic>;
 };
 
-function Row({ note, current, href, now, members, showMark }: RowProps) {
+const Row = memo(function Row({
+  note,
+  current,
+  href,
+  now,
+  members,
+  showMark,
+  topics,
+}: RowProps) {
   const mark = noteMark(note, members);
+  const { shown, more } = rowTopics(note.topics, topics);
   return (
     <li>
       <Link
@@ -27,7 +41,18 @@ function Row({ note, current, href, now, members, showMark }: RowProps) {
         className={s.row}
         aria-current={current ? "page" : undefined}
       >
-        <span className={s.rowTitle}>{note.title}</span>
+        <span className={s.rowTop}>
+          <span className={s.rowTitle}>{note.title}</span>
+          {showMark && mark.kind !== "private" && (
+            <span className={s.rowMark} title={markTitle(mark)}>
+              <Glyph kind={mark.kind} />
+              <span className={s.srOnly}>{markText(mark)}</span>
+            </span>
+          )}
+          {showMark && mark.kind === "private" && (
+            <span className={s.srOnly}>Private</span>
+          )}
+        </span>
         <span className={s.rowMeta}>
           <span>{shortDate(note.updated_at, now)}</span>
           {note.quarantined && <span className={s.tag}>Held</span>}
@@ -35,19 +60,17 @@ function Row({ note, current, href, now, members, showMark }: RowProps) {
           {note.access === "link" && (
             <span className={s.tag}>Opened by a link</span>
           )}
-          {showMark && mark.kind !== "private" && (
-            <span className={s.rowMark}>
-              <MarkTag mark={mark} />
+          {shown.map((t) => (
+            <span key={t.id} className={s.rowTopic}>
+              {t.name}
             </span>
-          )}
-          {showMark && mark.kind === "private" && (
-            <span className={s.srOnly}>Private</span>
-          )}
+          ))}
+          {more > 0 && <span className={s.rowTopic}>+{more}</span>}
         </span>
       </Link>
     </li>
   );
-}
+});
 
 export function NoteList({
   header,
@@ -57,6 +80,7 @@ export function NoteList({
   hrefFor,
   now,
   members,
+  topics,
   empty,
   more,
 }: {
@@ -68,9 +92,11 @@ export function NoteList({
   hrefFor: (n: VaultNote) => string;
   now: number;
   members: VaultData["members"];
+  topics: VaultTopic[];
   empty: string | null;
   more: string | null;
 }) {
+  const byId = useMemo(() => topicsById(topics), [topics]);
   const row = (n: VaultNote, showMark: boolean) => (
     <Row
       key={n.id}
@@ -80,6 +106,7 @@ export function NoteList({
       now={now}
       members={members}
       showMark={showMark}
+      topics={byId}
     />
   );
   return (

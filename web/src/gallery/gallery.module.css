@@ -1,7 +1,7 @@
-/* The gallery screen in Keystone glass, in the vault's grammar (vault.module.css): the rail
-   (web/src/shell/) on the wash, then one frosted card holding the tabs, the filter and a grid of
-   file cards that scrolls inside it. The details of a file open under its card as a reset
-   popover (data-scope="reset"); the viewer is a glass sheet over the whole window. Colours are
+/* The gallery screen, in the vault's grammar (vault.module.css): the rail
+   (web/src/shell/) on the page colour, then one card holding the tabs, the filter and a grid of
+   file cards that scrolls inside it. The details of a file open under its card as a
+   popover; the viewer is a sheet over the whole window. Colours are
    tokens only (themes.generated.css). */
 
 .root {
@@ -49,8 +49,6 @@
   border: 1px solid var(--edge-card);
   border-radius: 20px;
   background: var(--glow), var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
   box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
@@ -98,7 +96,7 @@
 }
 
 .tab[aria-pressed="true"] {
-  color: var(--fg);
+  color: var(--active-fg);
   font-weight: 500;
 }
 
@@ -602,7 +600,7 @@
   margin-right: -4px;
 }
 
-/* ---- The viewer: one glass sheet over the whole window ---- */
+/* ---- The viewer: one sheet over the whole window ---- */
 
 .viewer {
   position: fixed;
@@ -610,9 +608,7 @@
   z-index: 10;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
+  background: var(--bg);
   color: var(--fg);
   animation: arrive var(--dur) var(--ease);
 }
@@ -741,27 +737,14 @@
   font-weight: 500;
 }
 
-/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
-
-@supports not (
-  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
-) {
-  .panel {
-    background: var(--glow), var(--bg);
-  }
-
-  .viewer {
-    background: var(--bg);
-  }
-}
-
 /* ---- One window from 1100 x 560 ----
    The page is exactly one window tall and the grid scrolls inside the card. Narrower or very
    short windows let the page scroll instead. */
 
 @media (min-width: 1100px) and (min-height: 560px) {
   .page {
-    height: 100dvh;
+    /* Less the banner of a hive that is being deleted, when there is one. */
+    height: calc(100dvh - var(--closing-banner, 0px));
     min-height: 0;
     flex-wrap: nowrap;
     overflow: hidden;

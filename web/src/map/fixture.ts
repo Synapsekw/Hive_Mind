@@ -1,5 +1,8 @@
 // A deterministic sample hive for the dev page and the tests: about 300 items across 10 topics,
-// 3 members, 4 agents, files, links and locked nodes. Dates are relative to `now`.
+// 3 members, 4 agents, files, links and locked nodes. Dates are relative to `now`: everything was
+// written and last changed within the last 14 days, so the Timeline shows days. With `old` the
+// items were written over the last 1,000 days (and last changed as before), so it shows quarters.
+import type { Kind } from "../topics/types";
 import type { MapNode, MapPayload } from "./types";
 
 const TOPICS: [string, number][] = [
@@ -14,6 +17,19 @@ const TOPICS: [string, number][] = [
   ["Hiring", 14],
   ["Ops handbook", 10],
 ];
+/** The hive's topics: five kinds, and "Qualcomm" is both a partner and a vendor. */
+const HIVE_TOPICS: { id: string; name: string; kind: Kind }[] = [
+  ["t-adnoc", "ADNOC", "client"],
+  ["t-emsteel", "Emsteel", "client"],
+  ["t-qcom-p", "Qualcomm", "partner"],
+  ["t-qcom-v", "Qualcomm", "vendor"],
+  ["t-skydio", "Skydio", "vendor"],
+  ["t-kestrel", "Kestrel", "product"],
+  ["t-inspect", "Tower inspection", "solution"],
+  ["t-regs", "Airspace rules", "subject"],
+].map(
+  ([id, name, kind]) => ({ id, name, kind }) as (typeof HIVE_TOPICS)[number],
+);
 const NOTE_TITLES = [
   "Overview",
   "Pricing basis",
@@ -66,7 +82,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 export function fixturePayload(
   now: number,
-  opts: { items?: number } = {},
+  opts: { items?: number; old?: boolean } = {},
 ): MapPayload {
   let seed = 7;
   const rnd = () => {
@@ -101,7 +117,15 @@ export function fixturePayload(
           suffix;
         const byAgent = rnd() < 0.6;
         const id = `00000000-0000-4000-9000-${String(round * 100_000 + ti * 1000 + j).padStart(12, "0")}`;
-        const updated = now - Math.floor(Math.pow(rnd(), 2.2) * 20 * DAY);
+        // Most changes are recent; the tail is held at 13 days so the sample fits 14 day columns.
+        const updated =
+          now - Math.min(13 * DAY, Math.floor(Math.pow(rnd(), 2.2) * 20 * DAY));
+        // Written when last changed, or with `old` up to 1,000 days before that. No random
+        // number is drawn for it, so everything else is the same sample either way.
+        const back = ((round * 17 + ti * 37 + j * 101) % 211) / 210;
+        const created = opts.old
+          ? updated - Math.floor(back * 1000 * DAY)
+          : updated;
         const path = `${topic}/${slug(title)}${file ? "" : ".md"}`;
         nodes.push({
           id,
@@ -109,6 +133,7 @@ export function fixturePayload(
           topic,
           member_id: member,
           updated_at: iso(updated),
+          created_at: iso(created),
           locked,
           title: locked ? null : title,
           path: locked ? null : path,
@@ -121,6 +146,16 @@ export function fixturePayload(
                 : AGENT_CHATGPT
               : null,
           note_id: !locked && file ? lastNote : null,
+          // A note carries none to three topics; a file or a locked note none.
+          topics:
+            locked || file
+              ? []
+              : Array.from(
+                  { length: (j + ti) % 4 },
+                  (_, k) =>
+                    HIVE_TOPICS[(j * 3 + ti * 5 + k * 3) % HIVE_TOPICS.length]!
+                      .id,
+                ),
         });
         if (!locked) {
           readable.push(id);
@@ -138,6 +173,7 @@ export function fixturePayload(
     topic: "Ops handbook",
     member_id: ME,
     updated_at: iso(now - 2 * 60 * MIN),
+    created_at: iso(now - 2 * 60 * MIN),
     locked: false,
     title: HOSTILE_TITLE,
     path: "Ops handbook/hostile-title.md",
@@ -145,6 +181,7 @@ export function fixturePayload(
     by_agent: true,
     agent_id: AGENT_CLAUDE,
     note_id: null,
+    topics: [],
   });
 
   const links: MapPayload["links"] = [];
@@ -205,6 +242,7 @@ export function fixturePayload(
     ],
     nodes,
     links,
+    topics: HIVE_TOPICS,
     truncated: false,
   };
 }

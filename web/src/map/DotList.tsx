@@ -4,7 +4,7 @@
 // a selection or a new arrangement touches only the attributes that moved, and React never has
 // to compare a 5,000-node model once per item.
 import { memo } from "react";
-import { ariaLabel } from "./nodeShape";
+import { ariaLabels } from "./nodeShape";
 import type { MapModel, NodeKind } from "./types";
 import s from "./map.module.css";
 
@@ -74,15 +74,16 @@ export const DotList = memo(function DotList({
   onFocusDot(i: number | null): void;
   onPick(i: number): void;
 }) {
+  const labels = ariaLabels(model);
   return (
     <ul aria-label="Items on the map" className={s.srList} data-view={view}>
-      {model.nodes.map((n) => {
+      {model.nodes.map((n, k) => {
         const [x, y] = pos[n.i] ?? [500, 380];
         return (
           <Item
             key={n.i}
             i={n.i}
-            label={ariaLabel(model, n)}
+            label={labels[k]!}
             kind={n.kind}
             topic={n.topic}
             locked={n.locked}

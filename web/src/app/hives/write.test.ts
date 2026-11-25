@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createHiveIn, switchHiveIn } from "./write";
+import {
+  cancelHiveDeletionIn,
+  createHiveIn,
+  requestHiveDeletionIn,
+  switchHiveIn,
+} from "./write";
 
 const ME = "00000000-0000-4000-8000-0000000000a1";
 const HIVE = "00000000-0000-4000-8000-000000000b01";
@@ -338,5 +343,194 @@ describe("createHiveIn", () => {
     });
     expect(j.set).not.toHaveBeenCalled();
     expect(JSON.stringify(log.mock.calls)).not.toContain("Side");
+  });
+});
+
+describe("requestHiveDeletionIn", () => {
+  const AFTER = "2026-12-01T09:00:00+00:00";
+
+  it("asks the database once, with the hive and the name trimmed", async () => {
+    const t = stub({ rpc: { data: AFTER, error: null } });
+    expect(await requestHiveDeletionIn(t.db, HIVE, "  Synapse ")).toEqual({
+      ok: true,
+    });
+    expect(t.rpc).toHaveBeenCalledTimes(1);
+    expect(t.rpc).toHaveBeenCalledWith("request_hive_deletion", {
+      p_hive: HIVE,
+      p_name: "Synapse",
+    });
+    expect(t.from).not.toHaveBeenCalled();
+    expect(t.auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a word", "synapse"],
+    ["nothing", undefined],
+    ["an object", { id: HIVE }],
+  ])("answers failed for an id that is %s, asking nothing", async (_n, id) => {
+    const t = stub();
+    expect(await requestHiveDeletionIn(t.db, id, "Synapse")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.from).not.toHaveBeenCalled();
+    expect(t.auth.getSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["empty", ""],
+    ["only spaces", " \t\n "],
+    ["61 characters", "a".repeat(61)],
+    ["not text", 7],
+    ["nothing", undefined],
+  ])("answers name for a name that is %s, asking nothing", async (_n, name) => {
+    const t = stub();
+    expect(await requestHiveDeletionIn(t.db, HIVE, name)).toEqual({
+      ok: false,
+      reason: "name",
+    });
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it("accepts a name of exactly 60 characters", async () => {
+    const t = stub({ rpc: { data: AFTER, error: null } });
+    const name = "𝓐".repeat(60);
+    expect(await requestHiveDeletionIn(t.db, HIVE, name)).toEqual({ ok: true });
+    expect(t.rpc).toHaveBeenCalledWith("request_hive_deletion", {
+      p_hive: HIVE,
+      p_name: name,
+    });
+  });
+
+  it("answers failed without a session, asking nothing", async () => {
+    const t = stub({ token: null });
+    expect(await requestHiveDeletionIn(t.db, HIVE, "Synapse")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it("maps the database's refusal of the name to name", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      rpc: {
+        data: null,
+        error: { message: "that is not the name of this hive", code: "P0001" },
+      },
+    });
+    expect(await requestHiveDeletionIn(t.db, HIVE, "Sinapse")).toEqual({
+      ok: false,
+      reason: "name",
+    });
+  });
+
+  it.each([
+    ["hive not found"],
+    ["only the owner can delete a hive"],
+    ["only a person can delete a hive"],
+    ["an app pass cannot do this"],
+    ["this hive is being deleted"],
+    ["That is not the name of this hive"],
+    ["toString"],
+  ])(
+    "answers failed for '%s', and never the database's words",
+    async (message) => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const t = stub({
+        rpc: {
+          data: null,
+          error: { message, code: "P0001", details: "secret payload" },
+        },
+      });
+      const answer = await requestHiveDeletionIn(t.db, HIVE, "Synapse");
+      expect(answer).toEqual({ ok: false, reason: "failed" });
+      expect(JSON.stringify(answer)).not.toContain(message);
+      // Code and message only: no payload, and not what was typed.
+      expect(log).toHaveBeenCalledWith(
+        "request_hive_deletion failed",
+        "P0001",
+        message,
+      );
+      const said = JSON.stringify(log.mock.calls);
+      expect(said).not.toContain("secret payload");
+      expect(said).not.toContain("Synapse");
+    },
+  );
+
+  it("answers failed when the client throws, saying nothing of what was typed", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      rpc: () => {
+        throw new Error("network: Synapse");
+      },
+    });
+    expect(await requestHiveDeletionIn(t.db, HIVE, "Synapse")).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("Synapse");
+  });
+});
+
+describe("cancelHiveDeletionIn", () => {
+  it("asks the database once, with the hive", async () => {
+    const t = stub({ rpc: { data: null, error: null } });
+    expect(await cancelHiveDeletionIn(t.db, HIVE)).toEqual({ ok: true });
+    expect(t.rpc).toHaveBeenCalledTimes(1);
+    expect(t.rpc).toHaveBeenCalledWith("cancel_hive_deletion", {
+      p_hive: HIVE,
+    });
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a word", "synapse"],
+    ["nothing", undefined],
+  ])("answers no for an id that is %s, asking nothing", async (_n, id) => {
+    const t = stub();
+    expect(await cancelHiveDeletionIn(t.db, id)).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.auth.getSession).not.toHaveBeenCalled();
+  });
+
+  it("answers no without a session, asking nothing", async () => {
+    const t = stub({ token: null });
+    expect(await cancelHiveDeletionIn(t.db, HIVE)).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["this hive is not being deleted"],
+    ["only the owner can delete a hive"],
+    ["hive not found"],
+  ])("answers no for '%s', logging code and message only", async (message) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      rpc: {
+        data: null,
+        error: { message, code: "P0001", details: "secret payload" },
+      },
+    });
+    const answer = await cancelHiveDeletionIn(t.db, HIVE);
+    expect(answer).toEqual({ ok: false });
+    expect(log).toHaveBeenCalledWith(
+      "cancel_hive_deletion failed",
+      "P0001",
+      message,
+    );
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+
+  it("answers no when the client throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      rpc: () => {
+        throw new Error("network");
+      },
+    });
+    expect(await cancelHiveDeletionIn(t.db, HIVE)).toEqual({ ok: false });
   });
 });

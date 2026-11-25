@@ -1,17 +1,22 @@
 // The groups the Rings view is drawn in, for one arrangement. Pure and deterministic.
+import { KINDS, KIND_NAMES, type Kind } from "../topics/types";
 import type { MapPayload } from "./types";
 
-export type Arrange = "folder" | "links" | "time";
+export type Arrange = "folder" | "category" | "topic" | "links" | "time";
 export const ARRANGES: [Arrange, string][] = [
   ["folder", "Folder"],
+  ["category", "Category"],
+  ["topic", "Topic"],
   ["links", "Links"],
   ["time", "Time"],
 ];
-/** The dock's heading for the groups of an arrangement. */
+/** The filter bar's label for the groups of an arrangement. */
 export const GROUP_HEADING: Record<Arrange, string> = {
   folder: "Folders",
   links: "Clusters",
   time: "Months",
+  category: "Categories",
+  topic: "Topics",
 };
 export type Grouping = {
   names: string[]; // group names in drawing order
@@ -38,7 +43,7 @@ const MONTHS = [
   "December",
 ];
 
-type Input = Pick<MapPayload, "nodes" | "links">;
+type Input = Pick<MapPayload, "nodes" | "links" | "topics">;
 
 /** Raw group key per node plus the order the keys are drawn in, before the cap. */
 type Raw = { key: string[]; order: string[] };
@@ -58,13 +63,106 @@ function folder(p: Input): Raw {
   return { key, order: bySize(key) };
 }
 
+const NO_TOPIC = "No topic";
+
+type Strong = NonNullable<MapPayload["topics"]>[number];
+
+/**
+ * Each node's strongest topic: the first of its ids the payload lists, else null. With `kind`,
+ * the first of that kind.
+ */
+function strongest(p: Input, kind: Kind | null = null): (Strong | null)[] {
+  const byId = new Map<string, Strong>();
+  for (const t of p.topics ?? []) byId.set(t.id, t);
+  return p.nodes.map((n) => {
+    // A locked note and a file have no topics, whatever the payload carries.
+    if (n.locked || n.kind !== "note") return null;
+    for (const id of n.topics ?? []) {
+      const t = byId.get(id);
+      if (t && (kind === null || t.kind === kind)) return t;
+    }
+    return null;
+  });
+}
+
+/** One group per kind in kind order, then No topic. Never folded: nine groups at most. */
+function category(p: Input): Grouping {
+  const top = strongest(p);
+  const used = new Set<Kind>();
+  for (const t of top) if (t) used.add(t.kind);
+  const names: string[] = [];
+  const at = new Map<Kind | null, number>();
+  for (const k of KINDS) {
+    if (!used.has(k)) continue;
+    at.set(k, names.length);
+    names.push(KIND_NAMES[k]);
+  }
+  if (top.some((t) => t === null)) {
+    at.set(null, names.length);
+    names.push(NO_TOPIC);
+  }
+  return { names, of: top.map((t) => at.get(t ? t.kind : null)!) };
+}
+
+function topic(p: Input, kind: Kind | null): Raw {
+  const top = strongest(p, kind);
+  // A name held by two kinds that both appear carries its kind name.
+  const kinds = new Map<string, Set<Kind>>();
+  for (const t of top) {
+    if (!t) continue;
+    const set = kinds.get(t.name);
+    if (set) set.add(t.kind);
+    else kinds.set(t.name, new Set([t.kind]));
+  }
+  const key = top.map((t) =>
+    !t
+      ? NO_TOPIC
+      : kinds.get(t.name)!.size > 1
+        ? `${t.name} (${KIND_NAMES[t.kind]})`
+        : t.name,
+  );
+  return { key, order: bySize(key) };
+}
+
+/**
+ * The topic groups: the largest topics, folded past the cap, and No topic last. No topic is
+ * never folded and takes one of the places, so the other groups share `max - 1` of them. With
+ * `kind` each note goes by its strongest topic of that kind, and the fold is named for the kind.
+ */
+function topicGroups(p: Input, max: number, kind: Kind | null): Grouping {
+  const raw = topic(p, kind);
+  const named = raw.key.flatMap((k, i) => (k === NO_TOPIC ? [] : [i]));
+  const hasNone = named.length < raw.key.length;
+  const g = cap(
+    {
+      key: named.map((i) => raw.key[i]!),
+      order: raw.order.filter((k) => k !== NO_TOPIC),
+    },
+    hasNone ? max - 1 : max,
+    kind ? `Other ${KIND_NAMES[kind].toLowerCase()}` : "Other topics",
+    "More topics",
+  );
+  if (!hasNone) return { names: g.names, of: raw.key.map((_, i) => g.of[i]!) };
+  const none = g.names.length;
+  const of = raw.key.map(() => none);
+  named.forEach((at, j) => (of[at] = g.of[j]!));
+  return { names: [...g.names, NO_TOPIC], of };
+}
+
 const RECENT = "Last 2 weeks";
 const EARLIER = "Earlier";
+
+/** When an item was written; its last change when the payload has no usable created date. */
+function written(n: Input["nodes"][number]): number {
+  const t =
+    typeof n.created_at === "string" ? Date.parse(n.created_at) : Number.NaN;
+  return Number.isNaN(t) ? Date.parse(n.updated_at) : t;
+}
 
 function time(p: Input, now: number): Raw {
   // Month rank is year * 12 + month, so a bigger rank is newer.
   const rank = new Map<string, number>();
-  const stamp = p.nodes.map((n) => Date.parse(n.updated_at));
+  const stamp = p.nodes.map(written);
   const key = p.nodes.map((_, i) => {
     const t = stamp[i]!;
     if (Number.isNaN(t)) return "";
@@ -88,6 +186,8 @@ function time(p: Input, now: number): Raw {
 
 const HUBS = "Hub notes";
 const SMALL = "Small clusters";
+/** Notes whose every link goes to a hub: linked, but in no cluster. */
+const HUB_LEAVES = "Linked to hubs";
 const UNLINKED = "Unlinked";
 
 function links(p: Input): Raw {
@@ -148,7 +248,10 @@ function links(p: Input): Raw {
   }
 
   const key: string[] = new Array<string>(n).fill(UNLINKED);
-  for (let i = 0; i < n; i++) if (hub[i]) key[i] = HUBS;
+  for (let i = 0; i < n; i++) {
+    if (hub[i]) key[i] = HUBS;
+    else if (degree[i]! > 0 && soft[i]!.length === 0) key[i] = HUB_LEAVES;
+  }
 
   // Real clusters get names in size order, then member index.
   const real = [...clusters.values()]
@@ -158,7 +261,7 @@ function links(p: Input): Raw {
     if (m.length < MIN_CLUSTER) for (const i of m) key[i] = SMALL;
   }
 
-  const used = new Set<string>([HUBS, SMALL, UNLINKED]);
+  const used = new Set<string>([HUBS, SMALL, HUB_LEAVES, UNLINKED]);
   let unnamed = 0;
   for (const m of real) {
     let best = -1;
@@ -198,13 +301,55 @@ function cap(raw: Raw, max: number, fold: string, foldAlt: string): Grouping {
   return { names, of: raw.key.map((k) => at.get(k) ?? keep - 1) };
 }
 
+/**
+ * The kinds the readable notes have a topic of, in kind order, each with how many notes hold
+ * one. A note with a customer and a vendor counts under both.
+ */
+export function topicKinds(p: Input): { kind: Kind; notes: number }[] {
+  const byId = new Map<string, Kind>();
+  for (const t of p.topics ?? []) byId.set(t.id, t.kind);
+  const count = new Map<Kind, number>();
+  for (const n of p.nodes) {
+    if (n.locked || n.kind !== "note") continue;
+    const seen = new Set<Kind>();
+    for (const id of n.topics ?? []) {
+      const k = byId.get(id);
+      if (k) seen.add(k);
+    }
+    for (const k of seen) count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  return KINDS.flatMap((kind) => {
+    const notes = count.get(kind) ?? 0;
+    return notes > 0 ? [{ kind, notes }] : [];
+  });
+}
+
+/**
+ * The payload narrowed to the notes that hold a topic of `kind`, and the links between them.
+ * Nodes keep their order and are the same objects.
+ */
+export function ofKind<P extends Input>(p: P, kind: Kind): P {
+  const top = strongest(p, kind);
+  const nodes = p.nodes.filter((_, i) => top[i] !== null);
+  const ids = new Set(nodes.map((n) => n.id));
+  return {
+    ...p,
+    nodes,
+    links: p.links.filter((l) => ids.has(l.from) && ids.has(l.to)),
+  };
+}
+
 export function grouping(
   p: Input,
   arrange: Arrange,
   now: number,
   max = 12,
+  /** Group by Topic only: the one kind whose topics are the groups; null for every kind. */
+  kind: Kind | null = null,
 ): Grouping {
   if (p.nodes.length === 0) return { names: [], of: [] };
+  if (arrange === "category") return category(p);
+  if (arrange === "topic") return topicGroups(p, max, kind);
   if (arrange === "time") return cap(time(p, now), max, EARLIER, EARLIER);
   if (arrange === "links") return cap(links(p), max, "Other", "Other clusters");
   return cap(folder(p), max, "Other", "Other topics");

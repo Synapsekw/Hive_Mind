@@ -3,9 +3,13 @@
 import type {
   Agent,
   AgentStatus,
+  Deletion,
   InviteReason,
+  Requested,
   Sent,
   TrustTier,
+  Workspace,
+  WorkspaceDeleted,
 } from "./types";
 
 const TIERS: Record<TrustTier, string> = {
@@ -98,3 +102,91 @@ export function envLine(token: string): string {
 
 export const MCP_COMMAND: string =
   "claude mcp add --scope user hive -- node --env-file=<path to Hive_Mind>/.env <path to Hive_Mind>/mcp/dist/index.js";
+
+// ---- Workspaces ----
+
+export const WORKSPACES_TITLE: string = "Workspaces";
+export const WORKSPACES_NOTE: string =
+  "Where your notes live. Deleting a workspace erases its notes here for good; files on your computer are not touched.";
+export const DELETE_WORKSPACE: string = "Delete";
+export const KEEP_WORKSPACE: string = "Keep";
+export const WORKSPACE_ASIDE: string = "This cannot be undone.";
+/** Under the only workspace a person has, in place of Delete. */
+export const ONLY_WORKSPACE: string = "Your only workspace";
+
+/** How many notes a workspace holds; nothing when that is not known. */
+export function workspaceNotes(w: Workspace): string | null {
+  if (w.notes === null) return null;
+  return w.notes === 0 ? "No notes" : many(w.notes, "note");
+}
+
+/** The question before a workspace is deleted. */
+export function workspaceQuestion(w: Workspace): string {
+  if (w.notes === null || w.notes === 0) return `Delete ${w.name}?`;
+  return `Delete ${w.name} and its ${many(w.notes, "note")}?`;
+}
+
+/** What is announced once a workspace is gone. */
+export function workspaceDeleted(name: string): string {
+  return `${name} deleted.`;
+}
+
+const WORKSPACE_FAILURES: Record<
+  (WorkspaceDeleted & { ok: false })["reason"],
+  string
+> = {
+  last: "You need at least one workspace.",
+  agents: "Revoke this workspace's agents first.",
+  files: "Delete this workspace's files in the Gallery first.",
+  failed: "That didn't work. Try again.",
+};
+
+/** Why the workspace was not deleted. */
+export function workspaceFailure(
+  r: (WorkspaceDeleted & { ok: false })["reason"],
+): string {
+  return WORKSPACE_FAILURES[r] ?? WORKSPACE_FAILURES.failed;
+}
+
+// ---- Delete this hive (owners only) ----
+
+export const DELETE_TITLE: string = "Delete this hive";
+export const DELETE_HIVE: string = "Delete hive";
+export const DELETE_FIELD: string = "Type the hive's name to confirm";
+/** What happens after Delete hive, said before it is pressed. */
+export const DELETE_HELP: string =
+  "For 7 days the hive can only be read, and you can cancel. Then it is erased for good.";
+/** In place of the counts when they could not be read. */
+export const DELETE_UNCOUNTED: string =
+  "Deleting this hive erases every member's notes and files.";
+/** The section's sentence while the hive is being deleted, before and after the date. */
+export const DELETED_ON: string = "This hive will be deleted on";
+export const CLOSING_HELP: string =
+  "Until then it can only be read. Cancelling brings it back as it was.";
+export const CANCEL_DELETION: string = "Cancel deletion";
+
+function many(n: number, one: string): string {
+  return `${n} ${n === 1 ? one : `${one}s`}`;
+}
+
+/** What deleting the hive erases, in one sentence. */
+export function deletionCounts(d: Deletion): string {
+  return `Deleting this hive erases ${many(d.notes, "note")} and ${many(d.files, "file")} of ${many(d.members, "member")}.`;
+}
+
+/** Why Delete hive cannot be pressed yet. */
+export function deleteHint(hiveName: string): string {
+  return `Delete hive can be pressed once you have typed "${hiveName}" exactly.`;
+}
+
+const DELETE_FAILURES: Record<(Requested & { ok: false })["reason"], string> = {
+  name: "That is not this hive's name.",
+  failed: "That didn't work. Try again.",
+};
+
+/** Why the hive was not marked for deletion. */
+export function deleteFailure(
+  r: (Requested & { ok: false })["reason"],
+): string {
+  return DELETE_FAILURES[r] ?? DELETE_FAILURES.failed;
+}

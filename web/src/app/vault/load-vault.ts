@@ -2,12 +2,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   FolderRule,
   NoteLink,
+  OpenAnswer,
   Tab,
   VaultData,
   VaultNote,
+  VaultTopic,
   Visibility,
 } from "../../vault/types";
-import { ownHive } from "../own-hive";
+import { compareRanked, type Ranked } from "../../topics/order";
+import { KINDS, type Kind } from "../../topics/types";
+import { ownHive, sessionUserId } from "../own-hive";
+import { counting, paged } from "./connect";
 import { isUuid } from "./validate";
 
 export type VaultLoad =
@@ -17,13 +22,20 @@ type Db = Pick<SupabaseClient, "from" | "rpc" | "auth">;
 type Row = Record<string, unknown>;
 type Res = { data: unknown; error: { code?: string; message: string } | null };
 
-/** The note index: metadata and the database's own answer on sharing. Never the body. */
+/**
+ * A note row's metadata and the database's own answer on sharing, from per-row computed
+ * columns: the shared tab and the opened note. Never the body. A workspace's index comes from
+ * `vault_index` instead, with the same columns and `topics` in place of `note_entities`.
+ */
 export const NOTE_COLUMNS =
   "id,workspace_id,member_id,path,title,updated_at,written_by_agent,visibility,shared_with," +
   "quarantined,effective:note_visibility,effective_with:note_shared_with," +
-  "rule_folder:note_rule_folder,access:note_access";
+  "rule_folder:note_rule_folder,access:note_access," +
+  "note_entities(entity_id,confidence,detached_at)";
 
 const INDEX_CAP = 2000;
+/** The most rows the hosted API answers in one request. */
+const PAGE = 1000;
 const SHARED_CAP = 500;
 const BODY_CAP = 200_000;
 const LINKS_CAP = 50;
@@ -36,10 +48,49 @@ const ids = (v: unknown): string[] =>
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /**
+ * The ids of a note's attached topics, strongest first: rows not detached. The rows are
+ * `note_entities` (`{entity_id, confidence, detached_at}`) or `vault_index`'s `topics`
+ * (`{entity_id, confidence}`, attached only), read alike. With the hive's
+ * topics given, in the order the map uses (`compareRanked`); without them, by confidence
+ * descending, ties in the order the database answered. Anything that is not a pair of an id and
+ * a number is skipped.
+ */
+function topicsOf(v: unknown, known?: Map<string, VaultTopic>): string[] {
+  if (!Array.isArray(v)) return [];
+  const kept: { id: string; confidence: number }[] = [];
+  for (const r of v) {
+    if (typeof r !== "object" || r === null) continue;
+    const { entity_id, confidence, detached_at } = r as Row;
+    if (typeof entity_id !== "string" || typeof confidence !== "number")
+      continue;
+    if (detached_at !== null && detached_at !== undefined) continue;
+    kept.push({ id: entity_id, confidence });
+  }
+  if (!known)
+    return kept.sort((a, b) => b.confidence - a.confidence).map((k) => k.id);
+  const ranked = (k: { id: string; confidence: number }): Ranked => {
+    const t = known.get(k.id);
+    return {
+      id: k.id,
+      confidence: k.confidence,
+      kind: t?.kind ?? null,
+      name: t?.name ?? null,
+    };
+  };
+  return kept
+    .sort((a, b) => compareRanked(ranked(a), ranked(b)))
+    .map((k) => k.id);
+}
+
+/**
  * A note row as the vault shows it. The computed columns are null for a note the caller cannot
  * read; they read as private, shared with nobody, and (on a colleague's note) opened by a link.
  */
-export function toNote(r: Row, me: string): VaultNote {
+export function toNote(
+  r: Row,
+  me: string,
+  known?: Map<string, VaultTopic>,
+): VaultNote {
   const member_id = text(r.member_id);
   const access =
     r.access === "own" || r.access === "shared" || r.access === "link"
@@ -62,6 +113,7 @@ export function toNote(r: Row, me: string): VaultNote {
     effective_with: ids(r.effective_with),
     rule_folder: typeof r.rule_folder === "string" ? r.rule_folder : null,
     access,
+    topics: topicsOf(r.topics ?? r.note_entities, known),
   };
 }
 
@@ -107,6 +159,159 @@ async function noteLinks(db: Db, noteId: string): Promise<NoteLink[]> {
     .slice(0, LINKS_CAP);
 }
 
+/** A note as it is opened: its row with the body, when one came back, and its links. */
+export type OpenRead = { row: Row | undefined; links: NoteLink[] };
+
+const NOTHING: OpenRead = { row: undefined, links: [] };
+
+/**
+ * One note with its body and its accepted links, read in parallel under row-level security.
+ * "error" when the note's read fails (only the code and message are logged); a note the
+ * caller cannot see comes back with no row.
+ */
+export async function readOpenNote(
+  db: Db,
+  noteId: string,
+): Promise<OpenRead | "error"> {
+  const [opened, links] = await Promise.all([
+    db
+      .from("notes")
+      .select(`${NOTE_COLUMNS},body`)
+      .eq("id", noteId)
+      .limit(1) as unknown as Promise<Res>,
+    noteLinks(db, noteId),
+  ]);
+  if (failed("note query", opened)) return "error";
+  return { row: rows(opened)[0], links };
+}
+
+/** What the preview shows for a read note: missing, or the note with its body cut at `BODY_CAP`. */
+export function toOpen(
+  read: OpenRead,
+  me: string,
+  known?: Map<string, VaultTopic>,
+): VaultData["open"] {
+  const r = read.row;
+  if (!r) return { missing: true };
+  const body = text(r.body);
+  return {
+    note: toNote(r, me, known),
+    body: body.length > BODY_CAP ? body.slice(0, BODY_CAP) : body,
+    cut: body.length > BODY_CAP,
+    links: read.links,
+  };
+}
+
+/** The most topics one note's topic read asks for. */
+const NOTE_TOPICS_CAP = 200;
+
+/**
+ * Only the topics a note is attached to, for ranking them as the vault does. Without them (a
+ * failed read, logged by code and message) the note's topics are ranked by confidence.
+ */
+async function noteTopics(
+  db: Db,
+  r: Row,
+): Promise<Map<string, VaultTopic> | undefined> {
+  const wanted = topicsOf(r.note_entities).slice(0, NOTE_TOPICS_CAP);
+  if (wanted.length === 0) return undefined;
+  let res: Res;
+  try {
+    res = (await db
+      .from("entities")
+      .select("id, type, canonical_name")
+      .in("id", wanted)
+      .limit(NOTE_TOPICS_CAP)) as Res;
+  } catch (e) {
+    console.error("note topics failed", e instanceof Error ? e.name : "");
+    return undefined;
+  }
+  if (failed("note topics", res)) return undefined;
+  const known = new Map<string, VaultTopic>();
+  for (const t of rows(res)) {
+    if (typeof t.id !== "string" || typeof t.canonical_name !== "string")
+      continue;
+    if (typeof t.type !== "string" || !KIND_ORDER.has(t.type)) continue;
+    known.set(t.id, { id: t.id, kind: t.type as Kind, name: t.canonical_name });
+  }
+  return known;
+}
+
+/**
+ * One note for the preview, without reading the hive's index again: the person's member id
+ * (from their own hive), the note with its body and links, then only that note's topics. An id
+ * that is not a uuid is missing and reads nothing. Row-level security decides what comes back.
+ */
+export async function openNoteIn(db: Db, id: unknown): Promise<OpenAnswer> {
+  if (!isUuid(id)) return { ok: true, open: { missing: true } };
+  const [hive, read] = await Promise.all([ownHive(db), readOpenNote(db, id)]);
+  if (hive === "error" || hive === null || read === "error")
+    return { ok: false };
+  if (!read.row) return { ok: true, open: { missing: true } };
+  const known = await noteTopics(db, read.row);
+  return { ok: true, open: toOpen(read, hive.memberId, known) };
+}
+
+/** Kinds in the order the vault lists them. */
+const KIND_ORDER = new Map<string, number>(KINDS.map((k, i) => [k, i]));
+
+/**
+ * The hive's topics, by kind order then name. The vault still opens without them when this read
+ * fails: only the error's code is logged (by the paging), never a name.
+ */
+async function hiveTopics(db: Db, hiveId: string): Promise<VaultTopic[]> {
+  let read: Row[] | null;
+  try {
+    read = await paged("topics query", "too many topics", (from, to, counted) =>
+      db
+        .from("entities")
+        .select("id, type, canonical_name", counting(counted))
+        .eq("hive_id", hiveId)
+        .order("id")
+        .range(from, to),
+    );
+  } catch (e) {
+    console.error("topics query failed", e instanceof Error ? e.name : "");
+    return [];
+  }
+  if (read === null) return [];
+  const out: VaultTopic[] = [];
+  for (const r of read) {
+    if (typeof r.id !== "string" || typeof r.canonical_name !== "string")
+      continue;
+    if (typeof r.type !== "string" || !KIND_ORDER.has(r.type)) continue;
+    out.push({ id: r.id, kind: r.type as Kind, name: r.canonical_name });
+  }
+  return out.sort(
+    (a, b) =>
+      KIND_ORDER.get(a.kind)! - KIND_ORDER.get(b.kind)! ||
+      (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+  );
+}
+
+/**
+ * A workspace's note index from `vault_index` (the caller's own workspace in one pass), in
+ * ranges of `PAGE` rows by path, until a range comes back short or
+ * empty or `INDEX_CAP + 1` rows are in hand (one more than is shown, so a cut is known): the
+ * hosted API answers at most 1,000 rows per request, however many are asked for. The first
+ * range that fails is the answer.
+ */
+async function workspaceIndex(db: Db, workspaceId: string): Promise<Res> {
+  const all: unknown[] = [];
+  for (let from = 0; all.length < INDEX_CAP + 1; from = all.length) {
+    const to = Math.min(from + PAGE - 1, INDEX_CAP);
+    const res = (await db
+      .rpc("vault_index", { p_workspace: workspaceId })
+      .order("path")
+      .range(from, to)) as Res;
+    if (res.error) return res;
+    const got = Array.isArray(res.data) ? res.data : [];
+    all.push(...got);
+    if (got.length < to - from + 1) break;
+  }
+  return { data: all, error: null };
+}
+
 /**
  * Everything `/vault` shows, in this order: the caller's own hive; then its members, the
  * caller's workspaces in it, the caller's user, the `?note=` body and that note's links in
@@ -124,7 +329,7 @@ export async function loadVault(
   const noteId = query.note === undefined ? null : query.note;
   const wantNote = noteId !== null && isUuid(noteId);
 
-  const [members, workspaces, user, opened, links] = await Promise.all([
+  const [members, workspaces, user, opened, topics] = await Promise.all([
     db
       .from("members")
       .select("id, display_name, user_id")
@@ -135,21 +340,15 @@ export async function loadVault(
       .select("id, name")
       .eq("hive_id", hiveId)
       .order("created_at", { ascending: true }) as unknown as Promise<Res>,
-    db.auth.getUser(),
-    wantNote
-      ? (db
-          .from("notes")
-          .select(`${NOTE_COLUMNS},body`)
-          .eq("id", noteId)
-          .limit(1) as unknown as Promise<Res>)
-      : Promise.resolve(null),
-    wantNote ? noteLinks(db, noteId) : Promise.resolve([]),
+    sessionUserId(db),
+    wantNote ? readOpenNote(db, noteId) : Promise.resolve(null),
+    hiveTopics(db, hiveId),
   ]);
   if (failed("members query", members)) return { state: "error" };
   if (failed("workspaces query", workspaces)) return { state: "error" };
-  if (opened && failed("note query", opened)) return { state: "error" };
+  if (opened === "error") return { state: "error" };
 
-  const userId = user.data.user?.id;
+  const userId = user;
   if (!userId) return { state: "error" };
   const memberRows = rows(members);
   const me = memberRows.find((m) => m.user_id === userId);
@@ -160,20 +359,9 @@ export async function loadVault(
     name: text(w.name),
   }));
 
-  let open: VaultData["open"] = null;
-  if (noteId !== null) {
-    const r = opened ? rows(opened)[0] : undefined;
-    if (!r) open = { missing: true };
-    else {
-      const body = text(r.body);
-      open = {
-        note: toNote(r, meId),
-        body: body.length > BODY_CAP ? body.slice(0, BODY_CAP) : body,
-        cut: body.length > BODY_CAP,
-        links,
-      };
-    }
-  }
+  const known = new Map(topics.map((t) => [t.id, t]));
+  const open: VaultData["open"] =
+    noteId === null ? null : toOpen(opened ?? NOTHING, meId, known);
 
   // The open note decides the tab: a colleague's opens "Shared with me", one's own opens its
   // workspace. Otherwise `?tab=shared`, else `?ws=` when it is one of the caller's, else the first.
@@ -200,12 +388,7 @@ export async function loadVault(
         .select("path, visibility, shared_with")
         .eq("workspace_id", tab.id)
         .order("path") as unknown as Promise<Res>,
-      db
-        .from("notes")
-        .select(NOTE_COLUMNS)
-        .eq("workspace_id", tab.id)
-        .order("path")
-        .limit(INDEX_CAP + 1) as unknown as Promise<Res>,
+      workspaceIndex(db, tab.id),
     ]);
     if (failed("folders query", f)) return { state: "error" };
     folders = rows(f).map((r) => ({
@@ -239,9 +422,10 @@ export async function loadVault(
       workspaces: spaces,
       tab,
       folders,
-      notes: all.slice(0, cap).map((r) => toNote(r, meId)),
+      notes: all.slice(0, cap).map((r) => toNote(r, meId, known)),
       truncated: all.length > cap,
       open,
+      topics,
     },
   };
 }

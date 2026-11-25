@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  addTopicIn,
   deleteNoteIn,
+  detachTopicIn,
   previewIn,
   releaseIn,
   saveFolderIn,
@@ -110,7 +112,12 @@ describe("saveNoteIn", () => {
     expect(t.calls.map((c) => c.table)).toEqual(["own", "members", "notes"]);
     expect(t.from.mock.calls[0]).toEqual(["members"]);
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", "u-me"]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
@@ -519,5 +526,254 @@ describe("toPreview", () => {
       }),
     ).toBeNull();
     expect(toPreview(null)).toBeNull();
+  });
+});
+
+/** A stand-in whose queries answer from a list, in the order they are sent. */
+function topicStub(
+  answers: Res[],
+  user: { id: string } | null = { id: "u-me" },
+) {
+  const calls: Call[] = [];
+  const from = vi.fn((table: string) => {
+    const call: Call = { table, ops: [] };
+    const at = calls.push(call) - 1;
+    const chain: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "is", "update", "insert"])
+      chain[m] = (...a: unknown[]) => {
+        call.ops.push([m, a]);
+        return chain;
+      };
+    chain.then = (res: (r: Res) => unknown, rej: (e: unknown) => unknown) =>
+      Promise.resolve(answers[at] ?? ok([])).then(res, rej);
+    return chain;
+  });
+  const rpc = vi.fn(async () => ok(null));
+  const auth = {
+    getUser: vi.fn(async () => ({ data: { user }, error: null })),
+  };
+  return { db: { from, rpc, auth } as never, calls, from, rpc, auth };
+}
+
+const TOPIC = "00000000-0000-4000-8000-0000000d0001";
+const hostile: unknown[] = [
+  "nope",
+  "1 or 1=1",
+  `${NOTE}&detached_at=is.null`,
+  `${NOTE},entity_id.neq.x`,
+  "",
+  42,
+  null,
+  undefined,
+  [NOTE],
+];
+
+describe("detachTopicIn", () => {
+  it("sets detached_at on the attached pair, as the person, and asks for the note back", async () => {
+    const t = topicStub([ok([{ note_id: NOTE }])]);
+    expect(await detachTopicIn(t.db, NOTE, TOPIC)).toEqual({ ok: true });
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]!.table).toBe("note_entities");
+    const ops = t.calls[0]!.ops;
+    expect(ops).toHaveLength(5);
+    const [name, [patch]] = ops[0]!;
+    expect(name).toBe("update");
+    const set = patch as { detached_at: string };
+    expect(Object.keys(set)).toEqual(["detached_at"]);
+    expect(new Date(set.detached_at).toISOString()).toBe(set.detached_at);
+    expect(ops.slice(1)).toEqual([
+      ["eq", ["note_id", NOTE]],
+      ["eq", ["entity_id", TOPIC]],
+      ["is", ["detached_at", null]],
+      ["select", ["note_id"]],
+    ]);
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses a hostile argument before any query or session check", async () => {
+    for (const bad of hostile) {
+      for (const [n, e] of [
+        [bad, TOPIC],
+        [NOTE, bad],
+      ]) {
+        const t = topicStub([]);
+        expect(await detachTopicIn(t.db, n, e)).toEqual({ ok: false });
+        expect(t.from).not.toHaveBeenCalled();
+        expect(t.auth.getUser).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it("is not ok without a session, and sends no query", async () => {
+    const t = topicStub([], null);
+    expect(await detachTopicIn(t.db, NOTE, TOPIC)).toEqual({ ok: false });
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it("is not ok when no row came back, or more than one", async () => {
+    for (const data of [[], null, [{ note_id: NOTE }, { note_id: NOTE }]])
+      expect(
+        await detachTopicIn(topicStub([ok(data)]).db, NOTE, TOPIC),
+      ).toEqual({ ok: false });
+  });
+
+  it("is not ok when the database refuses, logging only code and message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = topicStub([
+      {
+        data: [{ note_id: NOTE }],
+        error: { message: "refused", code: "42501", details: "Secret" },
+      },
+    ]);
+    expect(await detachTopicIn(t.db, NOTE, TOPIC)).toEqual({ ok: false });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith("detachTopic failed", "42501", "refused");
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    spy.mockRestore();
+  });
+});
+
+describe("addTopicIn", () => {
+  const pair = (n: number, detached: string | null = null) => ({
+    entity_id: `00000000-0000-4000-8000-0000000d${String(n).padStart(4, "0")}`,
+    detached_at: detached,
+  });
+  const attached = (n: number) =>
+    Array.from({ length: n }, (_, i) => pair(100 + i));
+
+  it("is ok at once when the pair is already attached", async () => {
+    const t = topicStub([ok([...attached(2), { ...pair(1) }])]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({ ok: true });
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0]).toEqual({
+      table: "note_entities",
+      ops: [
+        ["select", ["entity_id, detached_at"]],
+        ["eq", ["note_id", NOTE]],
+      ],
+    });
+  });
+
+  it("answers full when the note holds five attached topics, and writes nothing", async () => {
+    const t = topicStub([ok(attached(5))]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({
+      ok: false,
+      reason: "full",
+    });
+    expect(t.calls).toHaveLength(1);
+  });
+
+  it("does not count a detached pair as one of the five", async () => {
+    const t = topicStub([
+      ok([...attached(4), pair(9, "2026-11-20T00:00:00Z")]),
+      ok([]),
+    ]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({ ok: true });
+  });
+
+  it("clears detached_at on a detached pair, and asks for the note back", async () => {
+    const t = topicStub([
+      ok([...attached(1), { entity_id: TOPIC, detached_at: "2026-11-20" }]),
+      ok([{ note_id: NOTE }]),
+    ]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({ ok: true });
+    expect(t.calls).toHaveLength(2);
+    expect(t.calls[1]).toEqual({
+      table: "note_entities",
+      ops: [
+        ["update", [{ detached_at: null }]],
+        ["eq", ["note_id", NOTE]],
+        ["eq", ["entity_id", TOPIC]],
+        ["select", ["note_id"]],
+      ],
+    });
+  });
+
+  it("is not ok when clearing matched no row", async () => {
+    const t = topicStub([
+      ok([{ entity_id: TOPIC, detached_at: "2026-11-20" }]),
+      ok([]),
+    ]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+  });
+
+  it("inserts a new pair with confidence 1", async () => {
+    const t = topicStub([ok(attached(2)), ok(null)]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({ ok: true });
+    expect(t.calls[1]).toEqual({
+      table: "note_entities",
+      ops: [["insert", [{ note_id: NOTE, entity_id: TOPIC, confidence: 1 }]]],
+    });
+  });
+
+  it("answers a duplicate on insert (a race) as ok", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = topicStub([
+      ok([]),
+      { data: null, error: { message: "duplicate", code: "23505" } },
+    ]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({ ok: true });
+    spy.mockRestore();
+  });
+
+  it("answers failed when the insert is refused, logging only code and message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = topicStub([
+      ok([]),
+      {
+        data: null,
+        error: { message: "refused", code: "42501", details: "Secret" },
+      },
+    ]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith("addTopic failed", "42501", "refused");
+    expect(JSON.stringify(spy.mock.calls)).not.toContain("Secret");
+    spy.mockRestore();
+  });
+
+  it("answers failed when the pairs cannot be read", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = topicStub([
+      { data: null, error: { message: "boom", code: "XX000" } },
+    ]);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(t.calls).toHaveLength(1);
+    spy.mockRestore();
+  });
+
+  it("refuses a hostile argument before any query or session check", async () => {
+    for (const bad of hostile) {
+      for (const [n, e] of [
+        [bad, TOPIC],
+        [NOTE, bad],
+      ]) {
+        const t = topicStub([]);
+        expect(await addTopicIn(t.db, n, e)).toEqual({
+          ok: false,
+          reason: "failed",
+        });
+        expect(t.from).not.toHaveBeenCalled();
+        expect(t.auth.getUser).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it("is not ok without a session, and sends no query", async () => {
+    const t = topicStub([], null);
+    expect(await addTopicIn(t.db, NOTE, TOPIC)).toEqual({
+      ok: false,
+      reason: "failed",
+    });
+    expect(t.from).not.toHaveBeenCalled();
   });
 });

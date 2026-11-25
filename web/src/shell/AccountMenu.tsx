@@ -14,6 +14,7 @@ import {
 } from "react";
 import { AppearancePanel, useCurrentTheme } from "./Appearance";
 import { useAccount } from "./AccountContext";
+import { useFold } from "./FoldProvider";
 import s from "./shell.module.css";
 
 const CHEVRON = (
@@ -41,6 +42,7 @@ export function AccountMenu() {
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const id = useId();
+  const folded = useFold().fold.rail === "shut";
 
   const close = (refocus: boolean) => {
     setOpen(false);
@@ -81,7 +83,6 @@ export function AccountMenu() {
           aria-label="Account"
           data-popover=""
           className={s.menu}
-          data-scope="reset"
         >
           <button
             type="button"
@@ -121,6 +122,7 @@ export function AccountMenu() {
         aria-expanded={open}
         aria-controls={open ? `${id}-popover` : undefined}
         aria-label={account ? `Account, ${account.name}` : "Account"}
+        title={folded ? (account?.name ?? "Account") : undefined}
         onClick={() => (open ? close(false) : setOpen(true))}
       >
         {account ? (
@@ -136,9 +138,25 @@ export function AccountMenu() {
             </span>
           </>
         ) : (
-          <span aria-hidden="true" className={s.accountName}>
-            Account
-          </span>
+          <>
+            <span aria-hidden="true" className={`${s.avatar} ${s.avatarBlank}`}>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+              >
+                <circle cx="8" cy="5.5" r="2.5" />
+                <path d="M3 13.5c.8-2.4 2.7-3.5 5-3.5s4.2 1.1 5 3.5" />
+              </svg>
+            </span>
+            <span aria-hidden="true" className={s.accountName}>
+              Account
+            </span>
+          </>
         )}
         {CHEVRON}
       </button>

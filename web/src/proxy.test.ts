@@ -10,11 +10,26 @@ import { proxy } from "./proxy";
 
 const ORIGIN = "http://localhost:3000";
 
-/** The auth server answers `user` for whoever asks. */
+/** The calls the proxy may make on its client, for the tests that look at them. */
+const auth = {
+  getClaims: vi.fn(),
+  getUser: vi.fn(),
+};
+
+/**
+ * The session's token, verified locally, names `user` (null: no session, or one that did not
+ * verify). The auth server is never to be asked: `getUser` throws.
+ */
 function session(user: { id: string } | null) {
-  mocks.createServerClient.mockReturnValue({
-    auth: { getUser: vi.fn(async () => ({ data: { user } })) },
+  auth.getClaims.mockImplementation(async () =>
+    user
+      ? { data: { claims: { sub: user.id } }, error: null }
+      : { data: null, error: null },
+  );
+  auth.getUser.mockImplementation(async () => {
+    throw new Error("the proxy must not call the auth server");
   });
+  mocks.createServerClient.mockReturnValue({ auth });
 }
 
 const visit = (path: string, headers: Record<string, string> = {}) =>
@@ -220,5 +235,36 @@ describe("proxy: everything else is as before", () => {
     expect(to(await visit("/login?next=%2F%2Fevil.example"))).toBe(
       `${ORIGIN}/`,
     );
+  });
+});
+
+describe("proxy: the session is verified locally", () => {
+  it("lets a signed-in person through with no call to the auth server", async () => {
+    session({ id: "u1" });
+    expect(passed(await visit("/vault"))).toBe(true);
+    expect(auth.getClaims).toHaveBeenCalledTimes(1);
+    expect(auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it("sends a visitor whose token is missing or does not verify to sign in", async () => {
+    session(null);
+    expect(to(await visit("/vault"))).toBe(`${ORIGIN}/login`);
+    // An expired or forged token: the library answers an error and no claims.
+    auth.getClaims.mockImplementation(async () => ({
+      data: null,
+      error: new Error("JWT expired"),
+    }));
+    expect(to(await visit("/vault"))).toBe(`${ORIGIN}/login`);
+    expect(auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it("returns a signed-in person from the sign-in page to where it was asked to", async () => {
+    session({ id: "u1" });
+    expect(to(await visit("/login?next=%2Fvault"))).toBe(`${ORIGIN}/vault`);
+  });
+
+  it("lets a visitor with no session open an emailed Join link", async () => {
+    session(null);
+    expect(passed(await visit("/join?token_hash=x"))).toBe(true);
   });
 });

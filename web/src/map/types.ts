@@ -1,6 +1,8 @@
 // The `map_graph` payload (see docs/superpowers/plans/2026-11-22-web-map.md, "The payload
 // contract") and the drawing model the map is built from.
 
+import type { Kind } from "../topics/types";
+
 export type MapPayload = {
   members: { id: string; display_name: string; is_me: boolean }[];
   agents: {
@@ -13,6 +15,8 @@ export type MapPayload = {
   }[];
   nodes: MapNode[];
   links: { from: string; to: string; tier: number; score: number }[];
+  /** The hive's topics. Absent from an older database: the map then has no topic groupings. */
+  topics?: { id: string; name: string; kind: Kind }[];
   truncated: boolean;
 };
 
@@ -22,6 +26,8 @@ export type MapNode = {
   topic: string;
   member_id: string;
   updated_at: string;
+  /** When it was written. Absent from an older database: the map then uses `updated_at`. */
+  created_at?: string | null;
   locked: boolean;
   // null on a locked node:
   title: string | null;
@@ -32,6 +38,8 @@ export type MapNode = {
   agent_id: string | null;
   // only on a readable file:
   note_id: string | null;
+  /** Topic ids, strongest first, at most five; [] for a file or a locked note. Absent from an older database. */
+  topics?: string[];
 };
 
 export type View = "rings" | "timeline" | "orbit";
@@ -48,7 +56,12 @@ export type ModelNode = {
   title: string; // "Private note" / "Private file" when locked
   path: string | null;
   updatedAt: number; // epoch ms; 0 for root and hubs
+  createdAt: number; // epoch ms; `updatedAt` when the payload has no usable created date
   byAgent: boolean;
+  /** The note's or file's own folder, as the payload names it, whatever the grouping. Absent on root, hubs and agents. */
+  folder?: string;
+  /** A readable note's topics, strongest first. Absent when it has none. */
+  held?: { name: string; kind: Kind }[];
   nb: number[]; // neighbours
 };
 
@@ -57,14 +70,16 @@ export type MapModel = {
   members: { id: string; name: string; isMe: boolean }[];
   nodes: ModelNode[];
   edges: [number, number][]; // structural edges and real links
-  linkCount: number; // real links only
   truncated: boolean;
 };
 
 export type Filter = {
-  topic: number | null;
-  kind: NodeKind | null;
-  member: string | null;
+  /** Group indices; empty means all. Any within a list, all across lists and the search. */
+  topics: number[];
+  /** Node kinds; empty means all. */
+  kinds: NodeKind[];
+  /** Member ids; empty means all. */
+  members: string[];
   q: string;
   sel: number | null;
   /**
@@ -79,3 +94,6 @@ export type Activity = {
   perMember: { id: string; name: string; count: number }[]; // most first
   days: { day: number; member: string; count: number }[]; // agent writes, last 14 days
 };
+
+/** Agent-written notes and files per Timeline column and member, by created date. */
+export type AgentColumn = { column: number; member: string; count: number };

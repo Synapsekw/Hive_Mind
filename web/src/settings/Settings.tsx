@@ -5,18 +5,39 @@
 // calls `actions` and the database answers. What is listed always comes from `data`, so a
 // refresh from the server is what changes it. The forms, the revoke question, the invitation
 // notice and the token dialog are client state only; one form or question is open at a time.
+// The owner also gets "Delete this hive" at the end: what it would erase, and Delete hive once
+// the hive's name is typed; while the hive is being deleted, when it goes and Cancel deletion.
 // A new agent's token is held in this component's state from the moment `createAgent`
 // answers until Done, is drawn only by `TokenDialog`, and is written nowhere else. Because it
 // cannot be fetched again, the page is inert from Create until Done, leaving asks first, and
 // Back stays here while the dialog is open.
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { DeletionDate } from "../shell/ClosingBanner";
 import { Shell } from "../shell/Shell";
 import { shortDate } from "../vault/format";
 import { TokenDialog } from "./TokenDialog";
+import { Topics } from "./Topics";
 import {
+  CANCEL_DELETION,
+  CLOSING_HELP,
+  DELETED_ON,
+  DELETE_FIELD,
+  DELETE_HELP,
+  DELETE_HIVE,
+  DELETE_TITLE,
+  DELETE_UNCOUNTED,
+  DELETE_WORKSPACE,
   INVITATIONS_NOTE,
   INVITE_HELP,
+  KEEP_WORKSPACE,
+  ONLY_WORKSPACE,
+  WORKSPACES_NOTE,
+  WORKSPACES_TITLE,
+  WORKSPACE_ASIDE,
+  deleteFailure,
+  deleteHint,
+  deletionCounts,
   inviteFailure,
   inviteNotice,
   sendFailure,
@@ -25,11 +46,16 @@ import {
   statusText,
   tierHelp,
   tierText,
+  workspaceDeleted,
+  workspaceFailure,
+  workspaceNotes,
+  workspaceQuestion,
 } from "./text";
 import {
   PROVIDERS,
   type Agent,
   type Created,
+  type Deletion,
   type Invitation,
   type Invited,
   type NewAgent,
@@ -88,11 +114,17 @@ export function Settings({
   now,
   actions,
   inbox,
+  deletion = null,
+  closing = null,
 }: {
   data: SettingsData;
   now: number;
   actions: SettingsActions;
   inbox: number | undefined;
+  /** What deleting the hive would erase; null when it is not known. Shown to the owner only. */
+  deletion?: Deletion | null;
+  /** When the hive will be erased, while it is being deleted. */
+  closing?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState<Open | null>(null);
@@ -487,6 +519,23 @@ export function Settings({
                 </div>
               )}
             </section>
+            <Workspaces
+              workspaces={data.workspaces}
+              closing={closing !== null}
+              deleteWorkspace={actions.deleteWorkspace}
+              onSay={setSaid}
+              onDeleted={() => router.refresh()}
+            />
+            {data.isOwner && (
+              <Topics
+                topics={data.topics}
+                workspaces={data.workspaces}
+                actions={actions}
+                closing={closing !== null}
+                onSay={setSaid}
+                onChanged={() => router.refresh()}
+              />
+            )}
             <section aria-labelledby="settings-members" className={s.section}>
               <div className={s.sectionHead}>
                 <div className={s.headText}>
@@ -564,6 +613,15 @@ export function Settings({
                   ))}
                 </ul>
               </section>
+            )}
+            {data.isOwner && (
+              <DeleteHive
+                hiveName={data.hiveName}
+                deletion={deletion}
+                closing={closing}
+                actions={actions}
+                onSay={setSaid}
+              />
             )}
           </div>
           <p aria-live="polite" className={s.srOnly}>
@@ -680,6 +738,191 @@ function AgentRow({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * The person's own workspaces, each with the number of its notes and Delete, asked once before
+ * it happens. The only workspace a person has cannot go, and nothing can while the hive is
+ * being deleted, so neither shows Delete. A deleted workspace leaves the list at once and the
+ * page is read again, so the agents that went with it leave too. The database decides whether
+ * the person may; this only asks.
+ */
+function Workspaces({
+  workspaces,
+  closing,
+  deleteWorkspace,
+  onSay,
+  onDeleted,
+}: {
+  workspaces: Workspace[];
+  closing: boolean;
+  deleteWorkspace: SettingsActions["deleteWorkspace"];
+  onSay: (text: string) => void;
+  onDeleted: () => void;
+}) {
+  const [asking, setAsking] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  // The workspace whose delete was refused, with the sentence that says why.
+  const [refused, setRefused] = useState<{ id: string; text: string } | null>(
+    null,
+  );
+  // The same as `busy`, readable at once by a second press that arrives before the render.
+  const running = useRef(false);
+  const list = useRef<HTMLUListElement>(null);
+  // Where the focus goes after the next render: a row's button, or the row itself.
+  const target = useRef<{ id: string; pick?: string } | null>(null);
+  const shown = workspaces.filter((w) => !gone.has(w.id));
+  const only = shown.length === 1;
+
+  useEffect(() => {
+    const want = target.current;
+    if (!want) return;
+    target.current = null;
+    const row = [
+      ...(list.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []),
+    ].find((el) => el.dataset.row === want.id);
+    const to = want.pick
+      ? (row?.querySelector<HTMLElement>(`[data-pick="${want.pick}"]`) ?? row)
+      : row;
+    (to ?? list.current)?.focus();
+  });
+
+  function ask(id: string) {
+    if (running.current) return;
+    target.current = { id, pick: "keep" };
+    setRefused(null);
+    setAsking(id);
+  }
+
+  function keep(id: string) {
+    if (running.current) return;
+    target.current = { id, pick: "delete" };
+    setAsking(null);
+  }
+
+  async function remove(w: Workspace) {
+    if (running.current) return;
+    running.current = true;
+    setBusy(w.id);
+    setRefused(null);
+    onSay("");
+    let answer: Awaited<ReturnType<typeof deleteWorkspace>>;
+    try {
+      answer = await deleteWorkspace(w.id);
+    } catch {
+      answer = { ok: false, reason: "failed" };
+    }
+    running.current = false;
+    setBusy(null);
+    setAsking(null);
+    if (answer.ok === true) {
+      setGone((set) => new Set(set).add(w.id));
+      onSay(workspaceDeleted(w.name));
+      onDeleted();
+      return;
+    }
+    const text = workspaceFailure(answer.reason);
+    target.current = { id: w.id, pick: "delete" };
+    setRefused({ id: w.id, text });
+    onSay(text);
+  }
+
+  return (
+    <section aria-labelledby="settings-workspaces" className={s.section}>
+      <div className={s.sectionHead}>
+        <div className={s.headText}>
+          <h2 className={s.label}>
+            <span id="settings-workspaces">{WORKSPACES_TITLE}</span>
+            <span className={s.count}>{shown.length}</span>
+          </h2>
+          <p className={s.note}>{WORKSPACES_NOTE}</p>
+        </div>
+      </div>
+      <ul
+        ref={list}
+        role="list"
+        tabIndex={-1}
+        aria-label={WORKSPACES_TITLE}
+        className={s.rows}
+      >
+        {shown.map((w) => {
+          const notes = workspaceNotes(w);
+          const isAsking = asking === w.id;
+          const off = busy === w.id || undefined;
+          return (
+            <li
+              key={w.id}
+              data-row={w.id}
+              tabIndex={-1}
+              className={s.item}
+              aria-busy={off}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && isAsking) keep(w.id);
+              }}
+            >
+              <div className={s.text}>
+                <p className={s.what}>
+                  <span className={s.name}>{w.name}</span>
+                </p>
+                <p className={s.meta}>
+                  {notes && <span>{notes}</span>}
+                  {only && <span>{ONLY_WORKSPACE}</span>}
+                </p>
+              </div>
+              {!only && !closing && (
+                <div className={s.side}>
+                  <div
+                    role="group"
+                    aria-label={`${DELETE_WORKSPACE} ${w.name}`}
+                    className={s.actions}
+                  >
+                    {isAsking ? (
+                      <>
+                        <p className={s.ask}>{workspaceQuestion(w)}</p>
+                        <button
+                          type="button"
+                          data-pick="delete"
+                          className={s.confirm}
+                          aria-disabled={off}
+                          onClick={() => void remove(w)}
+                        >
+                          {DELETE_WORKSPACE}
+                        </button>
+                        <button
+                          type="button"
+                          data-pick="keep"
+                          className={s.secondary}
+                          aria-disabled={off}
+                          onClick={() => keep(w.id)}
+                        >
+                          {KEEP_WORKSPACE}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        data-pick="delete"
+                        className={s.secondary}
+                        aria-label={`${DELETE_WORKSPACE} ${w.name}`}
+                        onClick={() => ask(w.id)}
+                      >
+                        {DELETE_WORKSPACE}
+                      </button>
+                    )}
+                  </div>
+                  {isAsking && <p className={s.aside}>{WORKSPACE_ASIDE}</p>}
+                  {refused?.id === w.id && (
+                    <p className={s.refused}>{refused.text}</p>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -1069,5 +1312,161 @@ function InviteForm({
         {problem && <p className={s.refused}>{problem}</p>}
       </div>
     </form>
+  );
+}
+
+/**
+ * The owner's last section. Not being deleted: what deleting erases, a field for the hive's
+ * name and Delete hive, which works only once the name is typed exactly. Being deleted: when
+ * the hive goes, and Cancel deletion. Either way a success loads the page afresh, so the
+ * banner, the rail and this section all show the hive as it now is. The database decides
+ * whether the person may; this only asks.
+ */
+function DeleteHive({
+  hiveName,
+  deletion,
+  closing,
+  actions,
+  onSay,
+}: {
+  hiveName: string;
+  deletion: Deletion | null;
+  closing: string | null;
+  actions: Pick<SettingsActions, "requestHiveDeletion" | "cancelHiveDeletion">;
+  onSay: (text: string) => void;
+}) {
+  const id = useId();
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  // The same as `busy`, readable at once by a second press that arrives before the render.
+  const running = useRef(false);
+  const field = useRef<HTMLInputElement>(null);
+  const matches = typed === hiveName;
+
+  function refuse(text: string) {
+    running.current = false;
+    setBusy(false);
+    setProblem(text);
+    onSay(text);
+  }
+
+  function begin() {
+    running.current = true;
+    setBusy(true);
+    setProblem(null);
+    onSay("");
+  }
+
+  async function remove() {
+    if (running.current || !matches) return;
+    begin();
+    let answer: Awaited<ReturnType<typeof actions.requestHiveDeletion>>;
+    try {
+      answer = await actions.requestHiveDeletion(typed);
+    } catch {
+      answer = { ok: false, reason: "failed" };
+    }
+    // Stays busy while the page loads afresh.
+    if (answer.ok) return window.location.reload();
+    refuse(deleteFailure(answer.reason));
+    field.current?.focus();
+  }
+
+  async function cancel() {
+    if (running.current) return;
+    begin();
+    let ok = false;
+    try {
+      ok = (await actions.cancelHiveDeletion()).ok;
+    } catch {
+      ok = false;
+    }
+    if (ok) return window.location.reload();
+    refuse(FAILED);
+  }
+
+  const off = busy || undefined;
+  return (
+    <section aria-labelledby="settings-delete" className={s.section}>
+      <div className={s.sectionHead}>
+        <div className={s.headText}>
+          <h2 className={s.label}>
+            <span id="settings-delete">{DELETE_TITLE}</span>
+          </h2>
+          {closing ? (
+            <p className={s.note}>
+              {DELETED_ON} <DeletionDate iso={closing} />. {CLOSING_HELP}
+            </p>
+          ) : (
+            <p className={s.note}>
+              {deletion ? deletionCounts(deletion) : DELETE_UNCOUNTED}{" "}
+              {DELETE_HELP}
+            </p>
+          )}
+        </div>
+      </div>
+      {closing ? (
+        <div className={s.formFoot} aria-busy={off}>
+          <button
+            type="button"
+            className={s.secondary}
+            aria-disabled={off}
+            onClick={() => void cancel()}
+          >
+            {CANCEL_DELETION}
+          </button>
+          {problem && <p className={s.refused}>{problem}</p>}
+        </div>
+      ) : (
+        <form
+          aria-label={DELETE_TITLE}
+          className={s.form}
+          noValidate
+          aria-busy={off}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void remove();
+          }}
+        >
+          <div className={s.field}>
+            <label htmlFor={`${id}-name`} className={s.fieldLabel}>
+              {DELETE_FIELD}
+            </label>
+            <input
+              ref={field}
+              id={`${id}-name`}
+              name="hive-name"
+              type="text"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              className={s.input}
+              value={typed}
+              readOnly={busy}
+              aria-describedby={`${id}-hint`}
+              onChange={(e) => {
+                setTyped(e.currentTarget.value);
+                setProblem(null);
+              }}
+            />
+          </div>
+          <p id={`${id}-hint`} className={s.hint}>
+            {deleteHint(hiveName)}
+          </p>
+          <div className={s.formFoot}>
+            <button
+              type="submit"
+              className={s.confirm}
+              aria-disabled={!matches || busy || undefined}
+              aria-describedby={matches ? undefined : `${id}-hint`}
+            >
+              {DELETE_HIVE}
+            </button>
+            {problem && <p className={s.refused}>{problem}</p>}
+          </div>
+        </form>
+      )}
+    </section>
   );
 }

@@ -11,7 +11,11 @@ export type TreeNode = {
 };
 
 export type Scope =
-  { kind: "all" } | { kind: "folder"; path: string } | { kind: "held" };
+  | { kind: "all" }
+  | { kind: "folder"; path: string }
+  | { kind: "held" }
+  | { kind: "topic"; id: string }
+  | { kind: "untopiced" };
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -56,6 +60,13 @@ export function buildTree(notes: VaultNote[], folders: FolderRule[]): TreeNode {
   return root;
 }
 
+/** A folder is listed when it holds a note, or when it or a folder under it has a rule. */
+export function isShown(node: TreeNode): boolean {
+  if (node.count > 0) return true;
+  if (node.rule && node.rule.visibility !== null) return true;
+  return node.children.some(isShown);
+}
+
 /** Notes in a scope whose title or path contains `filter`, sorted by path. */
 export function notesIn(
   notes: VaultNote[],
@@ -67,6 +78,8 @@ export function notesIn(
     .filter((n) => {
       if (scope.kind === "held" && !n.quarantined) return false;
       if (scope.kind === "folder" && !isBelow(n.path, scope.path)) return false;
+      if (scope.kind === "topic" && !n.topics.includes(scope.id)) return false;
+      if (scope.kind === "untopiced" && n.topics.length > 0) return false;
       return (
         q === "" ||
         n.title.toLowerCase().includes(q) ||

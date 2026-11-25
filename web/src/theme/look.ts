@@ -1,52 +1,42 @@
 import data from "./themes.json";
 
-export type Mode = "dark" | "light";
-export type Reach = "subtle" | "tinted" | "vivid";
-export type DotMode = "theme" | "classic";
-export type Look = { theme: string; mode: Mode; reach: Reach; dots: DotMode };
+export type Scheme = "dark" | "light";
+/** The look is the theme alone; each theme is dark or light by itself. */
+export type Look = { theme: string };
 
-export const THEMES: readonly { id: string; label: string }[] = data.themes.map(
-  (t) => ({
+export const THEMES: readonly { id: string; label: string; scheme: Scheme }[] =
+  data.themes.map((t) => ({
     id: t.id,
     label: t.label,
-  }),
-);
-export const MODES: readonly Mode[] = ["dark", "light"];
-export const REACHES: readonly Reach[] = ["subtle", "tinted", "vivid"];
-export const DOT_MODES: readonly DotMode[] = ["theme", "classic"];
-export const DEFAULT_LOOK: Look = {
-  theme: data.default as string,
-  mode: "dark",
-  reach: "tinted",
-  dots: "theme",
-};
+    scheme: t.scheme as Scheme,
+  }));
+export const DEFAULT_LOOK: Look = { theme: data.default as string };
 export const LOOK_COOKIE = "hive-look";
 
 const THEME_IDS: readonly string[] = THEMES.map((t) => t.id);
 
-function pick<T extends string>(
-  allowed: readonly T[],
-  value: string | undefined,
-  fallback: T,
-): T {
-  return value !== undefined && (allowed as readonly string[]).includes(value)
-    ? (value as T)
-    : fallback;
-}
-
-/** Reads `<theme>.<mode>.<reach>.<dots>`; each part outside the allowed values falls back. */
+/**
+ * Reads the theme id. A value from before the eight themes (`<theme>.<mode>.<reach>.<dots>`)
+ * is read by its first part; anything that is not a theme falls back to the default.
+ */
 export function parseLook(value: string | undefined): Look {
-  // A real value is at most a few dozen characters; anything long is junk.
-  const parts =
-    typeof value === "string" && value.length <= 100 ? value.split(".") : [];
+  // A real value is a few characters; anything long is junk.
+  const first =
+    typeof value === "string" && value.length <= 100
+      ? value.split(".")[0]
+      : undefined;
   return {
-    theme: pick(THEME_IDS, parts[0], DEFAULT_LOOK.theme),
-    mode: pick(MODES, parts[1], DEFAULT_LOOK.mode),
-    reach: pick(REACHES, parts[2], DEFAULT_LOOK.reach),
-    dots: pick(DOT_MODES, parts[3], DEFAULT_LOOK.dots),
+    theme:
+      first !== undefined && THEME_IDS.includes(first)
+        ? first
+        : DEFAULT_LOOK.theme,
   };
 }
 
 export function formatLook(look: Look): string {
-  return `${look.theme}.${look.mode}.${look.reach}.${look.dots}`;
+  return look.theme;
+}
+
+export function schemeOf(theme: string): Scheme {
+  return THEMES.find((t) => t.id === theme)?.scheme ?? "dark";
 }

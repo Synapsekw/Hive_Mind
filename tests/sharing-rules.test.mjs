@@ -59,12 +59,15 @@ before(async () => {
 // A hive makes at most 20 invitations in 24 hours (invite_member), and this
 // file makes more than that in the one hive. Before each test the invitations
 // made so far are moved two days back, so every test starts with the whole
-// allowance; the limit itself has a test of its own.
+// allowance; the limit itself has a test of its own. A hive that is being
+// deleted is left alone: nothing in it can be written, by this either, and
+// nobody can invite into it.
 beforeEach(async () => {
   await db.exec("reset role");
   await db.exec(
     `update public.invitations set created_at = created_at - interval '2 days'
-      where created_at > now() - interval '1 day'`,
+      where created_at > now() - interval '1 day'
+        and hive_id in (select id from public.hives where delete_after is null)`,
   );
 });
 
@@ -527,6 +530,7 @@ const addFile = (who, name, file, note = null) =>
 const STUB_KEYS = [
   "agent_id",
   "by_agent",
+  "created_at",
   "id",
   "kind",
   "locked",
@@ -535,6 +539,7 @@ const STUB_KEYS = [
   "path",
   "title",
   "topic",
+  "topics",
   "updated_at",
   "workspace_id",
 ];
@@ -1935,7 +1940,8 @@ test("moving a note, renaming or deleting a rule folder is audited", async () =>
   await as(person("dani"), `delete from public.folders where id = $1`, [plain]);
   assert.deepEqual(await auditSince(mark), []);
 
-  // Deleting a workspace takes its folders and notes with it, unaudited.
+  // Deleting a workspace takes its folders and notes with it: the folders
+  // leave no row of their own, only the workspace's one.
   const gone = (
     await as(
       person("dani"),
@@ -1951,7 +1957,10 @@ test("moving a note, renaming or deleting a rule folder is audited", async () =>
     [gone],
   );
   assert.equal(deleted.length, 1);
-  assert.deepEqual(await auditSince(mark), []);
+  assert.deepEqual(
+    (await auditSince(mark)).map((r) => [r.action, r.detail]),
+    [["workspace.deleted", { notes: 0, folders: 1 }]],
+  );
 
   const text = JSON.stringify(await auditSince(0));
   for (const s of ["ad/plain", "ad/shared/x.md", "ad x", "ad/ren/y.md"])
@@ -4895,12 +4904,8 @@ test("deleting a workspace, a member, an account or a hive still works", async (
   const one = await inSpace("dn/one.md", "dn space one");
   const two = await inSpace("dn/two.md", "dn space two");
   await propose(person("dani"), one, dn.sara);
-  const spaceFile = filePath("dani", "dn-space.pdf", space);
-  await upload(person("dani"), spaceFile);
-  await fileRow(person("dani"), "dani", spaceFile, {
-    note: two,
-    workspace: space,
-  });
+  // No file in it: a workspace that holds files is not deleted through the
+  // API (see "a workspace with an agent in use, or with files").
   let mark = await lastAudit();
   assert.deepEqual(
     await as(
@@ -5315,11 +5320,32 @@ test("an app pass reads and writes nothing", async () => {
   const nothing = (r, what) =>
     assert.ok(r.error || r.rows.length === 0, `an app pass could ${what}`);
 
+  // The server's own tables: no API role has any right on them, so there is
+  // no policy to look for. Every statement fails for the person, the pass
+  // and a visitor alike, before row-level security is asked.
+  const serverOnly = ["deleted_hives"];
   for (const { s, t, rowsecurity } of tables) {
     const name = `${s}.${t}`;
     // The rule itself: a restrictive policy for every command, so a table
     // added later without one fails here.
     assert.equal(rowsecurity, true, `${name} has no row-level security`);
+    if (s === "public" && serverOnly.includes(t)) {
+      for (const who of [kai, pass, null])
+        for (const sql of [
+          `select count(*) from ${name}`,
+          `update ${name} set name = name returning 1`,
+          `delete from ${name} returning 1`,
+          `insert into ${name} default values returning 1`,
+        ]) {
+          const r = await trial(who, sql);
+          assert.match(
+            r.error?.message ?? "(answered)",
+            /permission denied/,
+            `${sql} as ${who ? "a signed-in caller" : "a visitor"}`,
+          );
+        }
+      continue;
+    }
     const policy = (
       await db.query(
         `select permissive, cmd, roles::text[] as roles, qual, with_check
@@ -5453,6 +5479,12 @@ test("every function refuses an app pass except connector_login", async () => {
   // real answer.
   const row = JSON.stringify(ca.noteRow);
   const asRow = `jsonb_populate_record(null::public.notes, $1::jsonb)`;
+  const closingHive = (
+    await as(kai, `select public.create_hive('CA closing', 'Kai') as id`)
+  )[0].id;
+  await as(kai, `select public.request_hive_deletion($1, 'CA closing')`, [
+    closingHive,
+  ]);
   const calls = {
     my_member_ids: [`select id from public.my_member_ids() as id`],
     my_hive_ids: [`select id from public.my_hive_ids() as id`],
@@ -5510,7 +5542,26 @@ test("every function refuses an app pass except connector_login", async () => {
     ],
     unlink: [`select public.unlink($1)`, [ca.ownLink], true],
     note_links: [`select id from public.note_links($1)`, [ca.ownNote]],
+    vault_index: [`select id from public.vault_index($1)`, [ws.kai]],
     connect_app: [`select public.connect_app($1, $2)`, [apps.a, ws.kai], true],
+    can_delete_file: [`select public.can_delete_file($1)`, [ca.filePath]],
+    hive_deletion_preview: [
+      `select * from public.hive_deletion_preview($1)`,
+      [ca.hive],
+      true,
+    ],
+    request_hive_deletion: [
+      `select public.request_hive_deletion($1, 'CA hive')`,
+      [ca.hive],
+      true,
+    ],
+    // Cancelling needs a hive that is being deleted: one of kai's own, made
+    // for this and taken away again at the end of the test.
+    cancel_hive_deletion: [
+      `select public.cancel_hive_deletion($1)`,
+      [closingHive],
+      true,
+    ],
   };
 
   const known = [...pure, ...byToken, ...forApps, ...Object.keys(calls)];
@@ -5579,6 +5630,9 @@ test("every function refuses an app pass except connector_login", async () => {
   const login = await trial(pass, `select * from public.connector_login()`);
   assert.equal(login.error, undefined, login.error?.message);
   assert.equal(login.rows.length, 1);
+  await asDbOwner(null, `delete from public.hives where id = $1`, [
+    closingHive,
+  ]);
 });
 
 test("a person connects an app to their own workspace", async () => {
@@ -6604,4 +6658,4786 @@ test("only a signed-in person starts a hive: no agent, no app pass, no visitor",
   // A signed-in token with nobody behind it.
   await assert.rejects(as({ role: "authenticated" }, call), NOT_A_PERSON);
   assert.equal(await count(), before);
+});
+
+// ---------------------------------------------------------------------------
+// Deleting a hive (20261124091833_hive_deletion.sql). The owner marks it; for
+// 7 days it can be read and not written, and the owner can cancel; then the
+// server erases it and keeps a record.
+// ---------------------------------------------------------------------------
+
+const FROZEN = /^error: this hive is being deleted$/;
+const HIVE_NOT_FOUND = /^error: hive not found$/;
+const OWNER_ONLY = /^error: only the owner can delete a hive$/;
+const PERSON_ONLY = /^error: only a person can delete a hive$/;
+const WRONG_NAME = /^error: that is not the name of this hive$/;
+const NOT_CLOSING = /^error: this hive is not being deleted$/;
+const NOT_DUE = /^error: this hive is not due$/;
+const DENIED = /permission denied/;
+// Seven days as the database counts them, whatever its time zone.
+const weekApart = async (h) =>
+  (
+    await db.query(
+      `select delete_after = closing_at + interval '7 days' as week
+         from public.hives where id = $1`,
+      [h],
+    )
+  ).rows[0].week;
+
+// As the server: the service role, which row-level security does not bind.
+const asService = async (sql, params = []) => {
+  await db.exec("reset role");
+  await db.query(`select set_config('request.jwt.claims', $1, false)`, [
+    JSON.stringify({ role: "service_role" }),
+  ]);
+  await db.exec("set role service_role");
+  try {
+    return (await db.query(sql, params)).rows;
+  } finally {
+    await db.exec("reset role");
+  }
+};
+const preview = (who, h) =>
+  as(who, `select * from public.hive_deletion_preview($1)`, [h]).then(
+    (r) => r[0],
+  );
+const requestDeletion = (who, h, name) =>
+  as(who, `select public.request_hive_deletion($1, $2) as at`, [h, name]).then(
+    (r) => r[0].at,
+  );
+const cancelDeletion = (who, h) =>
+  as(who, `select public.cancel_hive_deletion($1)`, [h]);
+const closingState = async (h) =>
+  (
+    await db.query(
+      `select name, closing_at, delete_after, closing_by from public.hives where id = $1`,
+      [h],
+    )
+  ).rows[0];
+const ALREADY_ERASING = /^error: this hive is already being erased$/;
+const STORED_REMAIN = /^error: stored objects remain$/;
+const purgingAt = async (h) =>
+  (await db.query(`select purging_at from public.hives where id = $1`, [h]))
+    .rows[0].purging_at;
+const hiveAudits = async (since, h) =>
+  (await auditSince(since)).filter((r) => r.hive_id === h);
+
+// A hive of its own with an owner, a member and a row in every table that
+// holds hive data, so that "refused" and "erased" are never true by accident.
+let hdCount = 0;
+const hdHive = async () => {
+  const tag = `hd${++hdCount}`;
+  const mail = (who) => `${tag}-${who}@example.com`;
+  const h = { tag, name: `Doomed ${tag}` };
+  for (const who of ["owner", "member", "invited", "spare"]) {
+    h[`${who}User`] = await addUser(mail(who));
+    h[who] = asUser(h[`${who}User`]);
+  }
+  h.id = await startHive(h.owner, h.name);
+  await addMember(h.id, h.memberUser, "Member");
+  for (const who of ["owner", "member"]) {
+    const row = (
+      await db.query(
+        `select m.id as member, w.id as space
+           from public.members m join public.workspaces w on w.member_id = m.id
+          where m.hive_id = $1 and m.user_id = $2`,
+        [h.id, h[`${who}User`]],
+      )
+    ).rows[0];
+    h[`${who}Member`] = row.member;
+    h[`${who}Space`] = row.space;
+  }
+  h.spareSpace = (
+    await as(
+      h.owner,
+      `insert into public.workspaces (hive_id, member_id, name)
+       values ($1, $2, 'Spare') returning id`,
+      [h.id, h.ownerMember],
+    )
+  )[0].id;
+  h.folder = (
+    await as(
+      h.owner,
+      `insert into public.folders (workspace_id, member_id, path, visibility)
+       values ($1, $2, 'shared', 'group') returning id`,
+      [h.ownerSpace, h.ownerMember],
+    )
+  )[0].id;
+  const note = (who, path, claims = h[who]) =>
+    as(
+      claims,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+       values ($1, $2, $3, $4, $5, 'hd body') returning id`,
+      [h.id, h[`${who}Member`], h[`${who}Space`], path, `${tag} ${path}`],
+    ).then((r) => r[0].id);
+  h.ownerNote = await note("owner", "shared/a.md");
+  h.ownerNote2 = await note("owner", "shared/b.md");
+  h.memberNote = await note("member", "a.md");
+  h.memberNote2 = await note("member", "b.md");
+
+  const agent = async (who, name, tier = "vendor") => {
+    const made = (
+      await as(
+        h[who],
+        `select * from public.create_agent($1, $2, 'other', $3)`,
+        [h[`${who}Space`], name, tier],
+      )
+    )[0];
+    const login = (
+      await as(null, `select * from public.agent_login($1)`, [made.token])
+    )[0];
+    return { id: made.agent_id, token: made.token, claims: identityOf(login) };
+  };
+  const ownerAgent = await agent("owner", "Owner agent");
+  h.ownerAgentId = ownerAgent.id;
+  h.ownerAgent = ownerAgent.claims;
+  const memberAgent = await agent("member", "Member agent");
+  h.memberAgentId = memberAgent.id;
+  h.memberToken = memberAgent.token;
+  h.memberAgent = memberAgent.claims;
+  h.heldAgent = (await agent("member", "Held agent", "self_hosted")).claims;
+  h.agentNote = await note("member", "agent/a.md", h.memberAgent);
+  h.heldNote = await note("member", "held/a.md", h.heldAgent);
+
+  const link = (who, from, to) =>
+    as(
+      who,
+      `insert into public.links (hive_id, from_note, to_note, tier, score)
+       values ($1, $2, $3, 3, 0.5) returning id`,
+      [h.id, from, to],
+    ).then((r) => r[0].id);
+  // Waiting for the owner; accepted at once (one owner); accepted by both.
+  h.link = await link(h.member, h.memberNote, h.ownerNote);
+  h.ownLink = await link(h.owner, h.ownerNote, h.ownerNote2);
+  h.acceptedLink = await link(h.member, h.memberNote2, h.ownerNote2);
+  assert.equal(await respond(h.owner, h.acceptedLink, true), "accepted");
+
+  h.filePath = `${h.ownerMember}/${h.ownerSpace}/outputs/${tag}/a.pdf`;
+  await upload(h.owner, h.filePath);
+  h.file = (
+    await as(
+      h.owner,
+      `insert into public.files (hive_id, member_id, workspace_id, note_id, storage_path, name)
+       values ($1, $2, $3, $4, $5, 'a file') returning id`,
+      [h.id, h.ownerMember, h.ownerSpace, h.ownerNote, h.filePath],
+    )
+  )[0].id;
+  h.memberFilePath = `${h.memberMember}/${h.memberSpace}/outputs/${tag}/m.pdf`;
+  await upload(h.member, h.memberFilePath);
+
+  h.invitation = await invite(h.owner, mail("invited"), "Invited", h.id);
+
+  // No person writes these tables yet; the rows are put there directly.
+  await db.exec("reset role");
+  const entity = async (name) =>
+    (
+      await db.query(
+        `insert into public.entities (hive_id, type, canonical_name)
+         values ($1, 'client', $2) returning id`,
+        [h.id, name],
+      )
+    ).rows[0].id;
+  h.entity = await entity(`${tag} Ltd`);
+  h.entity2 = await entity(`${tag} Other Ltd`);
+  await db.query(
+    `insert into public.note_entities (note_id, entity_id) values ($1, $2)`,
+    [h.ownerNote, h.entity],
+  );
+  await db.query(
+    `insert into public.synthesis_pages (entity_id, hive_id) values ($1, $2)`,
+    [h.entity, h.id],
+  );
+  h.notification = (
+    await db.query(
+      `insert into public.notifications (hive_id, member_id, kind)
+       values ($1, $2, 'test') returning id`,
+      [h.id, h.ownerMember],
+    )
+  ).rows[0].id;
+
+  h.client = await addClient(`App ${tag}`, CLAUDE_URI);
+  h.client2 = await addClient(`Other app ${tag}`, CLAUDE_URI);
+  h.appAgent = await connectApp(h.owner, h.client, h.ownerSpace);
+  await addConsent(h.ownerUser, h.client);
+  h.pass = { ...h.owner, client_id: h.client };
+  return h;
+};
+
+// Every row of a hive, read as the database owner. An agent's last-used stamp
+// is left out: signing in is allowed to move it.
+const HD_TABLES = {
+  members: `hive_id = $1`,
+  workspaces: `hive_id = $1`,
+  agents: `member_id in (select id from public.members where hive_id = $1)`,
+  folders: `workspace_id in (select id from public.workspaces where hive_id = $1)`,
+  notes: `hive_id = $1`,
+  note_versions: `note_id in (select id from public.notes where hive_id = $1)`,
+  files: `hive_id = $1`,
+  entities: `hive_id = $1`,
+  note_entities: `note_id in (select id from public.notes where hive_id = $1)`,
+  links: `hive_id = $1`,
+  synthesis_pages: `hive_id = $1`,
+  invitations: `hive_id = $1`,
+};
+// The tables that hold hive data and stay writable while a hive is closing,
+// and the record that lives outside every hive.
+const HD_OPEN = ["audit_log", "deleted_hives", "hives", "notifications"];
+const hdSnapshot = async (hiveId) => {
+  await db.exec("reset role");
+  const out = {};
+  for (const [table, where] of Object.entries(HD_TABLES))
+    out[table] = (
+      await db.query(
+        `select coalesce(jsonb_agg(r.j order by r.j::text), '[]'::jsonb) as rows
+           from (select to_jsonb(x) - 'last_used_at' - 'search' as j
+                   from public.${table} x where ${where}) r`,
+        [hiveId],
+      )
+    ).rows[0].rows;
+  out.stored = (
+    await db.query(
+      `select coalesce(jsonb_agg(o.name order by o.name), '[]'::jsonb) as names
+         from storage.objects o
+        where exists (select 1 from public.members m
+                       where m.hive_id = $1 and o.name like m.id::text || '/%')`,
+      [hiveId],
+    )
+  ).rows[0].names;
+  return out;
+};
+
+// Every way to write into a hive, as [label, who, sql, params, expect, role].
+// Each one succeeds on an open hive (run in a transaction that is rolled
+// back) and is refused on a closing one. `expect` says how it is refused:
+// "frozen" (the default) is the freeze's own message; "policy" is a stored
+// object the insert policy refuses; "nothing" is a statement that finds no row
+// it may touch. Role "none" is the database owner, whom row-level security
+// does not bind: the trigger must.
+const hdAttempts = (h) => {
+  const list = [];
+  const add = (label, who, sql, params = [], expect = "frozen", role) =>
+    list.push({ label, who, sql, params, expect, role });
+  const owner = (label, sql, params) =>
+    add(label, null, sql, params, "frozen", "none");
+
+  // The database owner, table by table: one insert, one update, one delete.
+  const direct = {
+    members: [
+      [
+        `insert into public.members (hive_id, user_id, display_name) values ($1, $2, 'New') returning 1`,
+        [h.id, h.spareUser],
+      ],
+      [
+        `update public.members set display_name = 'Renamed' where id = $1 returning 1`,
+        [h.memberMember],
+      ],
+      [
+        `delete from public.members where id = $1 returning 1`,
+        [h.memberMember],
+      ],
+    ],
+    workspaces: [
+      [
+        `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'New') returning 1`,
+        [h.id, h.ownerMember],
+      ],
+      [
+        `update public.workspaces set name = 'Renamed' where id = $1 returning 1`,
+        [h.memberSpace],
+      ],
+      [
+        `delete from public.workspaces where id = $1 returning 1`,
+        [h.memberSpace],
+      ],
+    ],
+    agents: [
+      [
+        `insert into public.agents (member_id, workspace_id, name, provider, token_hash)
+         values ($1, $2, 'New', 'other', $3) returning 1`,
+        [h.ownerMember, h.ownerSpace, `${h.tag}-hash`],
+      ],
+      [
+        `update public.agents set name = 'Renamed' where id = $1 returning 1`,
+        [h.ownerAgentId],
+      ],
+      [`delete from public.agents where id = $1 returning 1`, [h.ownerAgentId]],
+    ],
+    folders: [
+      [
+        `insert into public.folders (workspace_id, member_id, path) values ($1, $2, 'new') returning 1`,
+        [h.ownerSpace, h.ownerMember],
+      ],
+      [
+        `update public.folders set path = 'renamed' where id = $1 returning 1`,
+        [h.folder],
+      ],
+      [`delete from public.folders where id = $1 returning 1`, [h.folder]],
+    ],
+    notes: [
+      [
+        `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+         values ($1, $2, $3, 'new.md', 'new') returning 1`,
+        [h.id, h.ownerMember, h.ownerSpace],
+      ],
+      [
+        `update public.notes set body = 'changed' where id = $1 returning 1`,
+        [h.ownerNote],
+      ],
+      [`delete from public.notes where id = $1 returning 1`, [h.ownerNote]],
+    ],
+    note_versions: [
+      [
+        `insert into public.note_versions (note_id, version, title, body, frontmatter)
+         values ($1, 99, 't', 'b', '{}') returning 1`,
+        [h.ownerNote],
+      ],
+      [
+        `update public.note_versions set body = 'changed' where note_id = $1 returning 1`,
+        [h.ownerNote],
+      ],
+      [
+        `delete from public.note_versions where note_id = $1 returning 1`,
+        [h.ownerNote],
+      ],
+    ],
+    files: [
+      [
+        `insert into public.files (hive_id, member_id, workspace_id, storage_path, name)
+         values ($1, $2, $3, $4, 'f') returning 1`,
+        [
+          h.id,
+          h.ownerMember,
+          h.ownerSpace,
+          `${h.ownerMember}/${h.ownerSpace}/outputs/new.pdf`,
+        ],
+      ],
+      [
+        `update public.files set name = 'renamed' where id = $1 returning 1`,
+        [h.file],
+      ],
+      [`delete from public.files where id = $1 returning 1`, [h.file]],
+    ],
+    entities: [
+      [
+        `insert into public.entities (hive_id, type, canonical_name) values ($1, 'client', 'New Ltd') returning 1`,
+        [h.id],
+      ],
+      [
+        `update public.entities set canonical_name = 'Renamed' where id = $1 returning 1`,
+        [h.entity],
+      ],
+      [`delete from public.entities where id = $1 returning 1`, [h.entity]],
+    ],
+    note_entities: [
+      [
+        `insert into public.note_entities (note_id, entity_id) values ($1, $2) returning 1`,
+        [h.memberNote, h.entity],
+      ],
+      [
+        `update public.note_entities set confidence = 0.5 where note_id = $1 returning 1`,
+        [h.ownerNote],
+      ],
+      [
+        `delete from public.note_entities where note_id = $1 returning 1`,
+        [h.ownerNote],
+      ],
+    ],
+    links: [
+      [
+        `insert into public.links (hive_id, from_note, to_note, tier, score)
+         values ($1, $2, $3, 3, 0.5) returning 1`,
+        [h.id, h.ownerNote, h.memberNote2],
+      ],
+      [`update public.links set tier = 1 where id = $1 returning 1`, [h.link]],
+      [`delete from public.links where id = $1 returning 1`, [h.link]],
+    ],
+    synthesis_pages: [
+      [
+        `insert into public.synthesis_pages (entity_id, hive_id) values ($1, $2) returning 1`,
+        [h.entity2, h.id],
+      ],
+      [
+        `update public.synthesis_pages set body = 'changed' where entity_id = $1 returning 1`,
+        [h.entity],
+      ],
+      [
+        `delete from public.synthesis_pages where entity_id = $1 returning 1`,
+        [h.entity],
+      ],
+    ],
+    invitations: [
+      [
+        `insert into public.invitations (hive_id, email, display_name) values ($1, $2, 'New') returning 1`,
+        [h.id, `${h.tag}-direct@example.com`],
+      ],
+      [
+        `update public.invitations set display_name = 'Renamed' where id = $1 returning 1`,
+        [h.invitation],
+      ],
+      [
+        `delete from public.invitations where id = $1 returning 1`,
+        [h.invitation],
+      ],
+    ],
+  };
+  for (const [table, three] of Object.entries(direct))
+    three.forEach(([sql, params], i) =>
+      owner(
+        `${table} ${["insert", "update", "delete"][i]}, directly`,
+        sql,
+        params,
+      ),
+    );
+
+  // People and agents, through the API.
+  const newNote = `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+    values ($1, $2, $3, $4, 'new') returning 1`;
+  const newLink = `insert into public.links (hive_id, from_note, to_note, tier, score)
+    values ($1, $2, $3, 3, 0.5) returning 1`;
+  const newFolder = `insert into public.folders (workspace_id, member_id, path, visibility)
+    values ($1, $2, $3, $4) returning 1`;
+  const newFile = `insert into public.files (hive_id, member_id, workspace_id, storage_path, name)
+    values ($1, $2, $3, $4, 'f') returning 1`;
+  const newObject = `insert into storage.objects (bucket_id, name) values ('files', $1) returning 1`;
+  const ownerPath = (file) =>
+    `${h.ownerMember}/${h.ownerSpace}/outputs/${file}`;
+  const memberPath = (file) =>
+    `${h.memberMember}/${h.memberSpace}/outputs/${file}`;
+
+  add("the owner writes a note", h.owner, newNote, [
+    h.id,
+    h.ownerMember,
+    h.ownerSpace,
+    "o.md",
+  ]);
+  add(
+    "the owner edits a note",
+    h.owner,
+    `update public.notes set body = 'changed' where id = $1 returning 1`,
+    [h.ownerNote],
+  );
+  add(
+    "the owner shares a note",
+    h.owner,
+    `update public.notes set visibility = 'members', shared_with = $2 where id = $1 returning 1`,
+    [h.ownerNote2, [h.memberMember]],
+  );
+  add(
+    "the owner moves a note",
+    h.owner,
+    `update public.notes set path = 'moved/a.md' where id = $1 returning 1`,
+    [h.ownerNote],
+  );
+  add(
+    "the owner deletes a note",
+    h.owner,
+    `delete from public.notes where id = $1 returning 1`,
+    [h.ownerNote2],
+  );
+  add("the owner makes a folder rule", h.owner, newFolder, [
+    h.ownerSpace,
+    h.ownerMember,
+    "fresh",
+    "group",
+  ]);
+  add(
+    "the owner changes a folder rule",
+    h.owner,
+    `update public.folders set visibility = 'private' where id = $1 returning 1`,
+    [h.folder],
+  );
+  add(
+    "the owner deletes a folder",
+    h.owner,
+    `delete from public.folders where id = $1 returning 1`,
+    [h.folder],
+  );
+  add(
+    "the owner makes a workspace",
+    h.owner,
+    `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'More') returning 1`,
+    [h.id, h.ownerMember],
+  );
+  add(
+    "the owner deletes a workspace",
+    h.owner,
+    `delete from public.workspaces where id = $1 returning 1`,
+    [h.spareSpace],
+  );
+  add("the owner proposes a link", h.owner, newLink, [
+    h.id,
+    h.ownerNote,
+    h.memberNote2,
+  ]);
+  add("the owner records a file", h.owner, newFile, [
+    h.id,
+    h.ownerMember,
+    h.ownerSpace,
+    ownerPath("o.pdf"),
+  ]);
+  add(
+    "the owner removes a file's record",
+    h.owner,
+    `delete from public.files where id = $1 returning 1`,
+    [h.file],
+  );
+  add(
+    "the owner renames themself",
+    h.owner,
+    `update public.members set display_name = 'Renamed' where id = $1 returning 1`,
+    [h.ownerMember],
+  );
+  add(
+    "the owner changes their default",
+    h.owner,
+    `update public.members set default_visibility = 'group' where id = $1 returning 1`,
+    [h.ownerMember],
+  );
+  add(
+    "the owner adds an entity",
+    h.owner,
+    `insert into public.entities (hive_id, type, canonical_name) values ($1, 'client', 'More Ltd') returning 1`,
+    [h.id],
+  );
+  add(
+    "the owner renames an entity",
+    h.owner,
+    `update public.entities set canonical_name = 'Renamed' where id = $1 returning 1`,
+    [h.entity],
+  );
+  add(
+    "the owner deletes an entity",
+    h.owner,
+    `delete from public.entities where id = $1 returning 1`,
+    [h.entity],
+  );
+  add(
+    "the owner tags a note",
+    h.owner,
+    `insert into public.note_entities (note_id, entity_id) values ($1, $2) returning 1`,
+    [h.ownerNote2, h.entity],
+  );
+  add(
+    "the owner untags a note",
+    h.owner,
+    `delete from public.note_entities where note_id = $1 returning 1`,
+    [h.ownerNote],
+  );
+  add(
+    "the owner stores an object",
+    h.owner,
+    newObject,
+    [ownerPath("o.pdf")],
+    "policy",
+  );
+  add(
+    "the owner removes a stored object",
+    h.owner,
+    `delete from storage.objects where name = $1 returning 1`,
+    [h.filePath],
+    "nothing",
+  );
+
+  add("a member writes a note", h.member, newNote, [
+    h.id,
+    h.memberMember,
+    h.memberSpace,
+    "m.md",
+  ]);
+  add(
+    "a member edits a note",
+    h.member,
+    `update public.notes set title = 'changed' where id = $1 returning 1`,
+    [h.memberNote],
+  );
+  add(
+    "a member deletes a note",
+    h.member,
+    `delete from public.notes where id = $1 returning 1`,
+    [h.memberNote],
+  );
+  add(
+    "a member releases a held note",
+    h.member,
+    `update public.notes set quarantined = false where id = $1 returning 1`,
+    [h.heldNote],
+  );
+  add("a member makes a folder", h.member, newFolder, [
+    h.memberSpace,
+    h.memberMember,
+    "fresh",
+    null,
+  ]);
+  add(
+    "a member renames themself",
+    h.member,
+    `update public.members set display_name = 'Renamed' where id = $1 returning 1`,
+    [h.memberMember],
+  );
+  add("a member proposes a link", h.member, newLink, [
+    h.id,
+    h.memberNote,
+    h.ownerNote2,
+  ]);
+  add("a member records a file", h.member, newFile, [
+    h.id,
+    h.memberMember,
+    h.memberSpace,
+    memberPath("m2.pdf"),
+  ]);
+  add(
+    "a member stores an object",
+    h.member,
+    newObject,
+    [memberPath("m2.pdf")],
+    "policy",
+  );
+  add(
+    "a member removes a stored object",
+    h.member,
+    `delete from storage.objects where name = $1 returning 1`,
+    [h.memberFilePath],
+    "nothing",
+  );
+
+  add("an agent writes a note", h.memberAgent, newNote, [
+    h.id,
+    h.memberMember,
+    h.memberSpace,
+    "agent/new.md",
+  ]);
+  add(
+    "an agent edits a note",
+    h.memberAgent,
+    `update public.notes set body = 'changed' where id = $1 returning 1`,
+    [h.agentNote],
+  );
+  add("an agent proposes a link", h.memberAgent, newLink, [
+    h.id,
+    h.agentNote,
+    h.ownerNote,
+  ]);
+  add("an agent makes a folder", h.memberAgent, newFolder, [
+    h.memberSpace,
+    h.memberMember,
+    "agent-made",
+    null,
+  ]);
+  add("an agent records a file", h.memberAgent, newFile, [
+    h.id,
+    h.memberMember,
+    h.memberSpace,
+    memberPath("agent.pdf"),
+  ]);
+  add(
+    "an agent stores an object",
+    h.memberAgent,
+    newObject,
+    [memberPath("agent.pdf")],
+    "policy",
+  );
+  add("a self-hosted agent writes a note", h.heldAgent, newNote, [
+    h.id,
+    h.memberMember,
+    h.memberSpace,
+    "held/new.md",
+  ]);
+
+  // The functions that write as the database owner.
+  add("invite_member", h.owner, `select public.invite_member($1, $2, 'New')`, [
+    h.id,
+    `${h.tag}-new@example.com`,
+  ]);
+  add("invitation_to_email", h.owner, `select public.invitation_to_email($1)`, [
+    h.invitation,
+  ]);
+  add("revoke_invitation", h.owner, `select public.revoke_invitation($1)`, [
+    h.invitation,
+  ]);
+  add("accept_invitation", h.invited, `select public.accept_invitation($1)`, [
+    h.invitation,
+  ]);
+  add(
+    "respond_to_link, accepting",
+    h.owner,
+    `select public.respond_to_link($1, true)`,
+    [h.link],
+  );
+  add(
+    "respond_to_link, declining",
+    h.owner,
+    `select public.respond_to_link($1, false)`,
+    [h.link],
+  );
+  add("unlink, two owners", h.member, `select public.unlink($1)`, [
+    h.acceptedLink,
+  ]);
+  add("unlink, one owner", h.owner, `select public.unlink($1)`, [h.ownLink]);
+  add(
+    "create_agent, the owner",
+    h.owner,
+    `select * from public.create_agent($1, 'New', 'other')`,
+    [h.ownerSpace],
+  );
+  add(
+    "create_agent, a member",
+    h.member,
+    `select * from public.create_agent($1, 'New', 'other')`,
+    [h.memberSpace],
+  );
+  // revoke_agent is not here: an agent can be cut off in a closing hive (see
+  // "a hive that is being deleted can still be read").
+  add("connect_app, a new app", h.owner, `select public.connect_app($1, $2)`, [
+    h.client2,
+    h.ownerSpace,
+  ]);
+  add(
+    "connect_app, the same app again",
+    h.owner,
+    `select public.connect_app($1, $2)`,
+    [h.client, h.spareSpace],
+  );
+  return { list, tables: Object.keys(direct) };
+};
+const hdTry = (a) => trial(a.who, a.sql, a.params, a.role);
+
+test("the freeze is on every table that holds hive data", async () => {
+  const rows = (
+    await db.query(
+      `select c.relname as name,
+              exists (select 1 from pg_trigger g join pg_proc p on p.oid = g.tgfoid
+                       where g.tgrelid = c.oid and not g.tgisinternal
+                         and p.proname = 'hive_frozen'
+                         and p.pronamespace = 'public'::regnamespace
+                         and g.tgenabled = 'O'
+                         -- for each row, before, insert and delete and update
+                         and g.tgtype & 1 = 1 and g.tgtype & 2 = 2
+                         and g.tgtype & 28 = 28) as frozen
+         from pg_class c
+        where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'
+        order by 1`,
+    )
+  ).rows;
+  // A table added later must either get the trigger or be named in HD_OPEN.
+  assert.deepEqual(
+    rows.filter((r) => !r.frozen).map((r) => r.name),
+    HD_OPEN,
+  );
+  assert.deepEqual(
+    rows.filter((r) => r.frozen).map((r) => r.name),
+    Object.keys(HD_TABLES).sort(),
+  );
+
+  const acl = (
+    await db.query(
+      `select p.proname as name, p.prosecdef as definer, p.proconfig as config,
+              has_function_privilege('anon', p.oid, 'execute') as anon,
+              has_function_privilege('public', p.oid, 'execute') as everyone,
+              has_function_privilege('authenticated', p.oid, 'execute') as signed_in,
+              has_function_privilege('service_role', p.oid, 'execute') as server
+         from pg_proc p
+        where p.pronamespace = 'public'::regnamespace
+          and p.proname in ('hive_frozen', 'hive_is_closing', 'hive_deletion_owner',
+                            'hive_deletion_preview', 'request_hive_deletion',
+                            'cancel_hive_deletion', 'hives_due_for_purge',
+                            'purge_hive', 'can_write_file', 'can_delete_file',
+                            'one_hive', 'begin_hive_purge', 'hive_object_paths')
+        order by 1`,
+    )
+  ).rows;
+  const who = (anon, everyone, signed_in, server) => ({
+    anon,
+    everyone,
+    signed_in,
+    server,
+  });
+  const people = who(false, false, true, true);
+  const expected = {
+    can_delete_file: people,
+    // Replaced, and its rights are as they were since file storage shipped:
+    // nobody took it from the public. It answers a visitor nothing (it rests
+    // on my_member_ids, which a visitor may not call).
+    can_write_file: who(true, true, true, true),
+    cancel_hive_deletion: people,
+    hive_deletion_preview: people,
+    request_hive_deletion: people,
+    // The database's own.
+    hive_deletion_owner: who(false, false, false, true),
+    hive_frozen: who(false, false, false, true),
+    one_hive: who(false, false, false, true),
+    begin_hive_purge: who(false, false, false, true),
+    hive_object_paths: who(false, false, false, true),
+    hive_is_closing: who(false, false, false, true),
+    // The server's.
+    hives_due_for_purge: who(false, false, false, true),
+    purge_hive: who(false, false, false, true),
+  };
+  assert.deepEqual(
+    acl.map((f) => f.name),
+    Object.keys(expected).sort(),
+  );
+  for (const f of acl) {
+    const { name, definer, config, ...rights } = f;
+    assert.deepEqual(rights, expected[name], name);
+    assert.equal(definer, true, name);
+    assert.deepEqual(config, ['search_path=""'], name);
+  }
+});
+
+test("only the owner, as a person, sees how much a hive holds, asks to delete it and cancels", async () => {
+  const h = await hdHive();
+  const other = await hdHive();
+  const stranger = asUser(await addUser(`${h.tag}-stranger@example.com`));
+  const before = await hdSnapshot(h.id);
+  const mark = await lastAudit();
+
+  assert.deepEqual(await preview(h.owner, h.id), {
+    members: 2,
+    notes: 6,
+    files: 1,
+  });
+  // Another hive's numbers are its own.
+  await as(
+    other.owner,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     values ($1, $2, $3, 'extra.md', 'extra')`,
+    [other.id, other.ownerMember, other.ownerSpace],
+  );
+  assert.deepEqual(await preview(other.owner, other.id), {
+    members: 2,
+    notes: 7,
+    files: 1,
+  });
+  assert.deepEqual(await preview(h.owner, h.id), {
+    members: 2,
+    notes: 6,
+    files: 1,
+  });
+
+  // Who is refused, and with what. A person who is not in the hive is told
+  // exactly what they would be told about a hive that does not exist.
+  const refused = [
+    ["a member", h.member, OWNER_ONLY],
+    ["a stranger", stranger, HIVE_NOT_FOUND],
+    ["another hive's owner", other.owner, HIVE_NOT_FOUND],
+    ["the owner's agent", h.ownerAgent, PERSON_ONLY],
+    ["a member's agent", h.memberAgent, PERSON_ONLY],
+    ["a self-hosted agent", h.heldAgent, PERSON_ONLY],
+    [
+      "a self-hosted claim",
+      { ...h.owner, trust_tier: "self_hosted" },
+      PERSON_ONLY,
+    ],
+    ["nobody signed in", { role: "authenticated" }, PERSON_ONLY],
+    ["the owner's app pass", h.pass, APP_REFUSED],
+    ["a pass of an unknown app", passOf(h.owner), APP_REFUSED],
+    ["a token for another audience", { ...h.owner, aud: "other" }, APP_REFUSED],
+    ["a visitor", null, DENIED],
+  ];
+  const everyoneRefused = async (when) => {
+    for (const [label, who, message] of refused) {
+      const what = `${label}, ${when}`;
+      await assert.rejects(preview(who, h.id), message, `preview: ${what}`);
+      await assert.rejects(
+        requestDeletion(who, h.id, h.name),
+        message,
+        `request: ${what}`,
+      );
+      await assert.rejects(
+        cancelDeletion(who, h.id),
+        message,
+        `cancel: ${what}`,
+      );
+    }
+  };
+  await everyoneRefused("on an open hive");
+  for (const call of [preview, cancelDeletion])
+    await assert.rejects(call(h.owner, NOBODY), HIVE_NOT_FOUND);
+  await assert.rejects(
+    requestDeletion(h.owner, NOBODY, h.name),
+    HIVE_NOT_FOUND,
+  );
+  // The owner of this hive is not the owner of that one.
+  await assert.rejects(
+    requestDeletion(h.owner, other.id, other.name),
+    HIVE_NOT_FOUND,
+  );
+  await assert.rejects(cancelDeletion(h.owner, h.id), NOT_CLOSING);
+
+  // The name must be the hive's own, typed exactly.
+  for (const name of [
+    "",
+    null,
+    "Doomed",
+    h.name.toLowerCase(),
+    `${h.name}x`,
+    other.name,
+  ])
+    await assert.rejects(requestDeletion(h.owner, h.id, name), WRONG_NAME);
+  const untouched = {
+    name: h.name,
+    closing_at: null,
+    delete_after: null,
+    closing_by: null,
+  };
+  assert.deepEqual(await closingState(h.id), untouched);
+  assert.deepEqual(await hiveAudits(mark, h.id), []);
+
+  // White space around the typed name does not count.
+  const at = await requestDeletion(
+    h.owner,
+    h.id,
+    `${ALL_SPACE}${h.name}${ALL_SPACE}`,
+  );
+  let state = await closingState(h.id);
+  assert.equal(at.getTime(), state.delete_after.getTime());
+  assert.equal(await weekApart(h.id), true);
+  assert.ok(Math.abs(state.closing_at - Date.now()) < 60_000);
+  assert.equal(state.closing_by, h.ownerUser);
+  let audits = await hiveAudits(mark, h.id);
+  assert.equal(audits.length, 1);
+  assert.deepEqual(
+    { ...audits[0], id: null, detail: null },
+    {
+      id: null,
+      hive_id: h.id,
+      member_id: h.ownerMember,
+      agent_id: null,
+      action: "hive.deletion_requested",
+      note_id: null,
+      detail: null,
+    },
+  );
+  assert.deepEqual(Object.keys(audits[0].detail), ["delete_after"]);
+  assert.equal(new Date(audits[0].detail.delete_after).getTime(), at.getTime());
+
+  // Asking again answers the same date, changes nothing and records nothing.
+  const again = await requestDeletion(h.owner, h.id, h.name);
+  assert.equal(again.getTime(), at.getTime());
+  assert.deepEqual(await closingState(h.id), state);
+  assert.equal((await hiveAudits(mark, h.id)).length, 1);
+  await assert.rejects(requestDeletion(h.owner, h.id, "wrong"), WRONG_NAME);
+
+  // The same people are refused while it is closing; nobody but the owner
+  // cancels, and the owner still reads the numbers.
+  await everyoneRefused("on a closing hive");
+  assert.deepEqual(await closingState(h.id), state);
+  assert.equal((await hiveAudits(mark, h.id)).length, 1);
+  assert.deepEqual(await preview(h.owner, h.id), {
+    members: 2,
+    notes: 6,
+    files: 1,
+  });
+  // Nobody sets or clears the dates by hand, not even the owner.
+  for (const who of [h.owner, h.member, h.memberAgent])
+    for (const sql of [
+      `update public.hives set delete_after = null, closing_at = null where id = $1 returning 1`,
+      `update public.hives set delete_after = now() where id = $1 returning 1`,
+      `delete from public.hives where id = $1 returning 1`,
+    ]) {
+      const r = await trial(who, sql, [h.id]);
+      assert.ok(r.error || r.rows.length === 0, sql);
+    }
+  assert.deepEqual(await closingState(h.id), state);
+  // Every member reads that the hive is closing, and when it goes.
+  for (const who of [h.owner, h.member, h.memberAgent]) {
+    const seen = await as(
+      who,
+      `select name, delete_after from public.hives where id = $1`,
+      [h.id],
+    );
+    assert.equal(seen[0].delete_after.getTime(), at.getTime());
+  }
+  assert.deepEqual(
+    await as(stranger, `select 1 from public.hives where id = $1`, [h.id]),
+    [],
+  );
+
+  await cancelDeletion(h.owner, h.id);
+  assert.deepEqual(await closingState(h.id), untouched);
+  audits = await hiveAudits(mark, h.id);
+  assert.deepEqual(
+    audits.map((a) => a.action),
+    ["hive.deletion_requested", "hive.deletion_cancelled"],
+  );
+  assert.equal(audits[1].member_id, h.ownerMember);
+  assert.equal(audits[1].agent_id, null);
+  assert.deepEqual(Object.keys(audits[1].detail), ["delete_after"]);
+  assert.equal(new Date(audits[1].detail.delete_after).getTime(), at.getTime());
+  await assert.rejects(cancelDeletion(h.owner, h.id), NOT_CLOSING);
+  assert.equal((await hiveAudits(mark, h.id)).length, 2);
+
+  // Asked again after a cancel, the seven days start again.
+  const second = await requestDeletion(h.owner, h.id, h.name);
+  state = await closingState(h.id);
+  assert.equal(second.getTime(), state.delete_after.getTime());
+  assert.equal(await weekApart(h.id), true);
+  assert.equal((await hiveAudits(mark, h.id)).length, 3);
+  await cancelDeletion(h.owner, h.id);
+
+  // None of it touched a row of the hive, and the other hive never closed.
+  assert.deepEqual(await hdSnapshot(h.id), before);
+  assert.equal((await closingState(other.id)).delete_after, null);
+});
+
+test("nothing is written into a hive that is being deleted, by anyone or by any function", async () => {
+  const h = await hdHive();
+  const { list, tables } = hdAttempts(h);
+  assert.deepEqual(tables.sort(), Object.keys(HD_TABLES).sort());
+
+  // On the open hive every attempt works, so none is refused below for a
+  // reason of its own.
+  const before = await hdSnapshot(h.id);
+  for (const table of Object.keys(HD_TABLES))
+    assert.ok(before[table].length > 0, `${table} is empty`);
+  for (const a of list) {
+    const r = await hdTry(a);
+    assert.equal(r.error, undefined, `${a.label}: ${r.error?.message}`);
+    assert.equal(r.rows.length, 1, a.label);
+  }
+  assert.deepEqual(await hdSnapshot(h.id), before);
+
+  await requestDeletion(h.owner, h.id, h.name);
+  const mark = await lastAudit();
+  for (const a of list) {
+    const r = await hdTry(a);
+    if (a.expect === "nothing") {
+      assert.equal(r.error, undefined, `${a.label}: ${r.error?.message}`);
+      assert.deepEqual(r.rows, [], a.label);
+    } else {
+      assert.match(
+        String(r.error ?? "(it worked)"),
+        a.expect === "policy" ? /row-level security/ : FROZEN,
+        a.label,
+      );
+    }
+  }
+  // The same again without the rollback, where a refusal has to hold alone.
+  await assert.rejects(
+    as(h.member, list.find((a) => a.label === "a member writes a note").sql, [
+      h.id,
+      h.memberMember,
+      h.memberSpace,
+      "m.md",
+    ]),
+    FROZEN,
+  );
+  await assert.rejects(accept(h.invited, h.invitation), FROZEN);
+  await assert.rejects(release(h.member, h.heldNote), FROZEN);
+  await assert.rejects(
+    upload(h.owner, `${h.ownerMember}/${h.ownerSpace}/x.pdf`),
+  );
+  assert.deepEqual(
+    await as(
+      h.owner,
+      `delete from storage.objects where name = $1 returning 1`,
+      [h.filePath],
+    ),
+    [],
+  );
+  assert.deepEqual(await hdSnapshot(h.id), before);
+  assert.deepEqual(await hiveAudits(mark, h.id), []);
+  assert.deepEqual(await membershipsOf(h.invitedUser), []);
+});
+
+test("a row cannot be moved into or out of a hive that is being deleted", async () => {
+  const h = await hdHive();
+  const o = await hdHive();
+  o.agentId = (
+    await as(
+      o.owner,
+      `select * from public.create_agent($1, 'Mover', 'other')`,
+      [o.ownerSpace],
+    )
+  )[0].agent_id;
+  const before = [await hdSnapshot(h.id), await hdSnapshot(o.id)];
+  await requestDeletion(h.owner, h.id, h.name);
+
+  const direct = (sql, params) => asDbOwner(null, `${sql} returning 1`, params);
+  const moves = [
+    // members
+    [
+      `update public.members set hive_id = $1 where id = $2`,
+      [o.id, h.memberMember],
+    ],
+    [
+      `update public.members set hive_id = $1 where id = $2`,
+      [h.id, o.memberMember],
+    ],
+    // workspaces: by the hive, and by the member alone
+    [
+      `update public.workspaces set hive_id = $1 where id = $2`,
+      [o.id, h.spareSpace],
+    ],
+    [
+      `update public.workspaces set hive_id = $1 where id = $2`,
+      [h.id, o.spareSpace],
+    ],
+    [
+      `update public.workspaces set member_id = $1 where id = $2`,
+      [h.ownerMember, o.spareSpace],
+    ],
+    [
+      `update public.workspaces set member_id = $1 where id = $2`,
+      [o.ownerMember, h.spareSpace],
+    ],
+    // agents
+    [
+      `update public.agents set member_id = $1, workspace_id = $2 where id = $3`,
+      [o.ownerMember, o.ownerSpace, h.ownerAgentId],
+    ],
+    [
+      `update public.agents set member_id = $1, workspace_id = $2 where id = $3`,
+      [h.ownerMember, h.ownerSpace, o.agentId],
+    ],
+    [
+      `update public.agents set workspace_id = $1 where id = $2`,
+      [h.ownerSpace, o.agentId],
+    ],
+    // files
+    [`update public.files set hive_id = $1 where id = $2`, [o.id, h.file]],
+    [`update public.files set hive_id = $1 where id = $2`, [h.id, o.file]],
+    [
+      `update public.files set workspace_id = $1 where id = $2`,
+      [h.ownerSpace, o.file],
+    ],
+    [
+      `update public.files set member_id = $1 where id = $2`,
+      [h.ownerMember, o.file],
+    ],
+    // entities, synthesis pages, invitations, links
+    [`update public.entities set hive_id = $1 where id = $2`, [o.id, h.entity]],
+    [
+      `update public.entities set hive_id = $1 where id = $2`,
+      [h.id, o.entity2],
+    ],
+    [
+      `update public.synthesis_pages set hive_id = $1 where entity_id = $2`,
+      [o.id, h.entity],
+    ],
+    [
+      `update public.synthesis_pages set hive_id = $1 where entity_id = $2`,
+      [h.id, o.entity],
+    ],
+    [
+      `update public.synthesis_pages set entity_id = $1 where entity_id = $2`,
+      [h.entity2, o.entity],
+    ],
+    [
+      `update public.invitations set hive_id = $1 where id = $2`,
+      [o.id, h.invitation],
+    ],
+    [
+      `update public.invitations set hive_id = $1 where id = $2`,
+      [h.id, o.invitation],
+    ],
+    [`update public.links set hive_id = $1 where id = $2`, [o.id, h.link]],
+    [`update public.links set hive_id = $1 where id = $2`, [h.id, o.link]],
+    [
+      `update public.links set to_note = $1 where id = $2`,
+      [h.ownerNote, o.link],
+    ],
+    // note versions and tags, which reach their hive through the note
+    [
+      `update public.note_versions set note_id = $1, version = 77 where note_id = $2`,
+      [o.ownerNote, h.ownerNote],
+    ],
+    [
+      `update public.note_versions set note_id = $1, version = 78 where note_id = $2`,
+      [h.ownerNote, o.ownerNote],
+    ],
+    [
+      `update public.note_entities set note_id = $1 where note_id = $2`,
+      [o.memberNote, h.ownerNote],
+    ],
+    [
+      `update public.note_entities set note_id = $1 where note_id = $2`,
+      [h.memberNote, o.ownerNote],
+    ],
+    [
+      `update public.note_entities set entity_id = $1 where note_id = $2`,
+      [h.entity2, o.ownerNote],
+    ],
+    // new rows that name the open hive but hang under the closing one
+    [
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Astray')`,
+      [o.id, h.ownerMember],
+    ],
+    [
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title) values ($1, $2, $3, 'astray.md', 'astray')`,
+      [o.id, h.ownerMember, h.ownerSpace],
+    ],
+    [
+      `insert into public.files (hive_id, member_id, workspace_id, storage_path, name) values ($1, $2, $3, $4, 'f')`,
+      [
+        o.id,
+        h.ownerMember,
+        h.ownerSpace,
+        `${h.ownerMember}/${h.ownerSpace}/astray.pdf`,
+      ],
+    ],
+    [
+      `insert into public.synthesis_pages (entity_id, hive_id) values ($1, $2)`,
+      [h.entity2, o.id],
+    ],
+    [
+      `insert into public.note_entities (note_id, entity_id) values ($1, $2)`,
+      [o.memberNote, h.entity],
+    ],
+  ];
+  for (const [sql, params] of moves)
+    await assert.rejects(direct(sql, params), FROZEN, sql);
+  // Notes and folders never move at all; their own triggers say so first or
+  // the freeze does, and either way nothing moves.
+  for (const [sql, params] of [
+    [`update public.notes set hive_id = $1 where id = $2`, [o.id, h.ownerNote]],
+    [
+      `update public.notes set member_id = $1, workspace_id = $2 where id = $3`,
+      [h.ownerMember, h.ownerSpace, o.ownerNote],
+    ],
+    [
+      `update public.folders set member_id = $1, workspace_id = $2 where id = $3`,
+      [h.ownerMember, h.ownerSpace, o.folder],
+    ],
+    [
+      `update public.folders set member_id = $1, workspace_id = $2 where id = $3`,
+      [o.ownerMember, o.ownerSpace, h.folder],
+    ],
+  ])
+    await assert.rejects(direct(sql, params), sql);
+
+  // A row that names no hive that exists is not let in by the freeze stepping
+  // aside: the foreign keys and the tables' own triggers still refuse it.
+  for (const [sql, params, why] of [
+    [
+      `insert into public.agents (member_id, workspace_id, name, provider, token_hash) values ($1, $1, 'x', 'other', 'hd-nowhere')`,
+      [NOBODY],
+      /foreign key/,
+    ],
+    [
+      `insert into public.note_versions (note_id, version, title, body, frontmatter) values ($1, 1, 't', 'b', '{}')`,
+      [NOBODY],
+      /foreign key/,
+    ],
+    [
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $1, 'x')`,
+      [NOBODY],
+      /foreign key/,
+    ],
+    [
+      `insert into public.members (hive_id, user_id, display_name) values ($1, $2, 'x')`,
+      [NOBODY, h.spareUser],
+      /foreign key/,
+    ],
+    [
+      `insert into public.invitations (hive_id, email, display_name) values ($1, 'x@example.com', 'x')`,
+      [NOBODY],
+      /foreign key/,
+    ],
+    [
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title) values ($1, $1, $1, 'x.md', 'x')`,
+      [NOBODY],
+      /workspace does not belong/,
+    ],
+    [
+      `insert into public.folders (workspace_id, member_id, path) values ($1, $1, 'x')`,
+      [NOBODY],
+      /workspace does not belong/,
+    ],
+    [
+      `insert into public.links (hive_id, from_note, to_note, tier, score) values ($1, $1, $2, 3, 0.5)`,
+      [NOBODY, h.ownerNote],
+      /both notes must exist/,
+    ],
+  ])
+    await assert.rejects(direct(sql, params), why, sql);
+
+  assert.deepEqual([await hdSnapshot(h.id), await hdSnapshot(o.id)], before);
+});
+
+test("a hive that is being deleted can still be read, and agents still sign in", async () => {
+  const h = await hdHive();
+  const second = await startHive(h.owner, `Second ${h.tag}`);
+  const secondSpace = (
+    await as(
+      h.owner,
+      `select w.id from public.workspaces w where w.hive_id = $1`,
+      [second],
+    )
+  )[0].id;
+  const secondMember = (
+    await as(h.owner, `select id from public.members where hive_id = $1`, [
+      second,
+    ])
+  )[0].id;
+
+  // Everything a person or an agent reads, before and after.
+  const reads = async () => {
+    const out = {};
+    for (const who of ["owner", "member", "memberAgent", "heldAgent"]) {
+      const c = h[who];
+      const q = (sql, params = [h.id]) => as(c, sql, params);
+      const seen = {
+        hive: (await q(`select name from public.hives where id = $1`)).length,
+        notes: await q(
+          `select id, title, body, version from public.notes where hive_id = $1 order by id`,
+        ),
+        versions: await q(
+          `select v.note_id, v.version from public.note_versions v
+             join public.notes n on n.id = v.note_id
+            where n.hive_id = $1 order by 1, 2`,
+        ),
+        search: await q(
+          `select id from public.search_notes('hd') order by id`,
+          [],
+        ),
+        folders: await q(
+          `select id, path, visibility from public.folders order by id`,
+          [],
+        ),
+        files: await q(
+          `select id, name from public.files where hive_id = $1 order by id`,
+        ),
+        stored: await q(
+          `select name from storage.objects where bucket_id = 'files' order by name`,
+          [],
+        ),
+        links: await q(
+          `select id, status from public.links where hive_id = $1 order by id`,
+        ),
+        members: await q(
+          `select id, display_name, role from public.members where hive_id = $1 order by id`,
+        ),
+        agents: await q(
+          `select id, name, revoked_at from public.agents order by id`,
+          [],
+        ),
+        entities: await q(
+          `select id from public.entities where hive_id = $1 order by id`,
+        ),
+      };
+      if (!c.agent_id)
+        Object.assign(seen, {
+          map: await map(c, h.id),
+          inbox: await inbox(c, h.id),
+          inboxCount: await inboxCount(c, h.id),
+          noteLinks: await noteLinks(c, h.ownerNote2),
+          invitations: await q(
+            `select id from public.invitations where hive_id = $1 order by id`,
+          ),
+          notifications: await q(
+            `select id from public.notifications where hive_id = $1 order by id`,
+          ),
+        });
+      out[who] = seen;
+    }
+    return out;
+  };
+  const before = await reads();
+  // Not empty: there is something to lose.
+  assert.equal(before.owner.notes.length, 3);
+  assert.equal(before.member.notes.length, 6);
+  assert.equal(before.memberAgent.notes.length, 6);
+  assert.equal(before.heldAgent.notes.length, 3);
+  assert.equal(before.owner.map.nodes.length, 6);
+  assert.equal(before.owner.inbox.links_total, 1);
+  assert.equal(before.member.inbox.held_total, 1);
+  assert.equal(before.owner.noteLinks.length, 2);
+  assert.equal(before.owner.files.length, 1);
+  assert.equal(before.owner.stored.length, 1);
+  assert.equal(before.owner.invitations.length, 1);
+  assert.equal(before.owner.search.length, 3);
+
+  const snapshot = await hdSnapshot(h.id);
+  await requestDeletion(h.owner, h.id, h.name);
+  assert.deepEqual(await reads(), before);
+  // The owner reads the audit log, where the request is.
+  const audits = await as(
+    h.owner,
+    `select action from public.audit_log where hive_id = $1 and action like 'hive.%' order by id`,
+    [h.id],
+  );
+  assert.deepEqual(
+    audits.map((a) => a.action),
+    ["hive.created", "hive.deletion_requested"],
+  );
+
+  // An agent signs in with its token: the last-used stamp moves and nothing
+  // else does.
+  await asDbOwner(
+    null,
+    `update public.agents set last_used_at = null where id = $1`,
+    [h.memberAgentId],
+  );
+  const login = (
+    await as(null, `select * from public.agent_login($1)`, [h.memberToken])
+  )[0];
+  assert.deepEqual(identityOf(login), h.memberAgent);
+  assert.equal(login.hive_id, h.id);
+  assert.ok((await agentRow(h.memberAgentId)).last_used_at);
+  assert.equal(
+    (await as(identityOf(login), `select id from public.notes`)).length,
+    6,
+  );
+  await assert.rejects(
+    as(
+      identityOf(login),
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'agent/late.md', 'late')`,
+      [h.id, h.memberMember, h.memberSpace],
+    ),
+    FROZEN,
+  );
+
+  // A connected app signs in: its stamp moves, and its trust tier still
+  // follows the app's registration.
+  let app = (await connectorLogin(h.pass))[0];
+  assert.equal(app.agent_id, h.appAgent);
+  assert.equal(app.hive_id, h.id);
+  assert.equal(app.trust_tier, "vendor");
+  assert.ok((await agentRow(h.appAgent)).last_used_at);
+  await asDbOwner(
+    null,
+    `update auth.oauth_clients set redirect_uris = 'https://elsewhere.example/cb' where id = $1`,
+    [h.client],
+  );
+  app = (await connectorLogin(h.pass))[0];
+  assert.equal(app.trust_tier, "self_hosted");
+  assert.equal((await agentRow(h.appAgent)).trust_tier, "self_hosted");
+  // The identity it signs in with still reads.
+  assert.equal(
+    (await as(identityOf(app), `select id from public.notes`)).length,
+    3,
+  );
+  await asDbOwner(
+    null,
+    `update auth.oauth_clients set redirect_uris = $2 where id = $1`,
+    [h.client, CLAUDE_URI],
+  );
+  app = (await connectorLogin(h.pass))[0];
+  assert.equal(app.trust_tier, "vendor");
+  assert.equal((await agentRow(h.appAgent)).trust_tier, "vendor");
+  assert.equal(
+    (await as(identityOf(app), `select id from public.notes`)).length,
+    3,
+  );
+
+  // Those two columns and nothing with them, and the tier only for an app:
+  // a token agent's tier is what it signs in with.
+  const direct = (sql, params) => asDbOwner(null, `${sql} returning 1`, params);
+  for (const [sql, params] of [
+    [
+      `update public.agents set last_used_at = now(), revoked_at = now() where id = $1`,
+      [h.memberAgentId],
+    ],
+    [
+      `update public.agents set last_used_at = now(), name = 'Renamed' where id = $1`,
+      [h.memberAgentId],
+    ],
+    [
+      `update public.agents set last_used_at = now(), expires_at = now() where id = $1`,
+      [h.appAgent],
+    ],
+    [
+      `update public.agents set trust_tier = 'self_hosted' where id = $1`,
+      [h.memberAgentId],
+    ],
+    [
+      `update public.agents set trust_tier = 'self_hosted', workspace_id = $2 where id = $1`,
+      [h.appAgent, h.spareSpace],
+    ],
+    [
+      `update public.agents set oauth_client_id = $2, token_hash = null where id = $1`,
+      [h.memberAgentId, h.client2],
+    ],
+  ])
+    await assert.rejects(direct(sql, params), FROZEN, sql);
+
+  // A notification can be marked read.
+  assert.deepEqual(
+    await as(
+      h.owner,
+      `update public.notifications set read_at = now() where id = $1 returning id`,
+      [h.notification],
+    ),
+    [{ id: h.notification }],
+  );
+  assert.deepEqual(await hdSnapshot(h.id), snapshot);
+
+  // The owner's other hive is as writable as ever.
+  await as(
+    h.owner,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     values ($1, $2, $3, 'alive.md', 'alive')`,
+    [second, secondMember, secondSpace],
+  );
+  await upload(h.owner, `${secondMember}/${secondSpace}/outputs/alive.pdf`);
+  await as(h.owner, `select * from public.create_agent($1, 'Alive', 'other')`, [
+    secondSpace,
+  ]);
+  assert.match(
+    await invite(h.owner, `${h.tag}-alive@example.com`, "Alive", second),
+    UUID,
+  );
+  assert.match(await connectApp(h.owner, h.client2, secondSpace), UUID);
+  assert.deepEqual(await hdSnapshot(h.id), snapshot);
+
+  // What changed in the closing hive: which agents are revoked, and nothing
+  // else on any row.
+  const sinceSnapshot = async () => {
+    const now = await hdSnapshot(h.id);
+    const plain = (s) => ({
+      ...s,
+      agents: s.agents.map((a) => ({ ...a, revoked_at: null })),
+    });
+    assert.deepEqual(plain(now), plain(snapshot));
+    return now.agents
+      .filter((a) => a.revoked_at)
+      .map((a) => a.id)
+      .sort();
+  };
+  assert.deepEqual(await sinceSnapshot(), []);
+
+  // A person has one live agent per app. Moving an app that is connected in
+  // the closing hive to another hive ends its agent there: that is a revoke,
+  // and a revoke passes. The app now answers for the other hive.
+  const moved = await connectApp(h.owner, h.client, secondSpace);
+  assert.match(moved, UUID);
+  assert.notEqual(moved, h.appAgent);
+  assert.deepEqual(await sinceSnapshot(), [h.appAgent]);
+  app = (await connectorLogin(h.pass))[0];
+  assert.equal(app.agent_id, moved);
+  assert.equal(app.hive_id, second);
+
+  // An agent can be cut off while its hive is closing: a token that leaked
+  // must not stay good for seven days. By the person it belongs to only.
+  const NOT_YOURS = /that agent is not yours/;
+  await assert.rejects(
+    as(h.member, `select public.revoke_agent($1)`, [h.ownerAgentId]),
+    NOT_YOURS,
+  );
+  await assert.rejects(
+    as(h.owner, `select public.revoke_agent($1)`, [h.memberAgentId]),
+    NOT_YOURS,
+  );
+  await assert.rejects(
+    as(h.memberAgent, `select public.revoke_agent($1)`, [h.memberAgentId]),
+    /agents cannot revoke agents/,
+  );
+  assert.deepEqual(await sinceSnapshot(), [h.appAgent]);
+  await as(h.owner, `select public.revoke_agent($1)`, [h.ownerAgentId]);
+  await as(h.member, `select public.revoke_agent($1)`, [h.memberAgentId]);
+  assert.deepEqual(
+    await sinceSnapshot(),
+    [h.appAgent, h.ownerAgentId, h.memberAgentId].sort(),
+  );
+  // It no longer signs in.
+  await assert.rejects(
+    as(null, `select * from public.agent_login($1)`, [h.memberToken]),
+    /unknown, expired or revoked token/,
+  );
+
+  // Once, from empty to set, and nothing with it. Not taken back, not
+  // stamped again, not together with another column.
+  const heldAgentId = h.heldAgent.agent_id;
+  const stamped = (await agentRow(h.memberAgentId)).revoked_at;
+  await assert.rejects(
+    as(h.member, `select public.revoke_agent($1)`, [h.memberAgentId]),
+    FROZEN,
+  );
+  for (const [sql, params] of [
+    [
+      `update public.agents set revoked_at = null where id = $1`,
+      [h.memberAgentId],
+    ],
+    [
+      `update public.agents set revoked_at = now() + interval '1 hour' where id = $1`,
+      [h.memberAgentId],
+    ],
+    [
+      `update public.agents set revoked_at = null, last_used_at = now() where id = $1`,
+      [h.appAgent],
+    ],
+    [
+      `update public.agents set revoked_at = now(), last_used_at = now() where id = $1`,
+      [heldAgentId],
+    ],
+    [
+      `update public.agents set revoked_at = now(), name = 'Renamed' where id = $1`,
+      [heldAgentId],
+    ],
+    [
+      `update public.agents set revoked_at = now(), expires_at = now() where id = $1`,
+      [heldAgentId],
+    ],
+    [
+      `update public.agents set revoked_at = now(), trust_tier = 'vendor' where id = $1`,
+      [heldAgentId],
+    ],
+    [
+      `update public.agents set revoked_at = now(), workspace_id = $2 where id = $1`,
+      [heldAgentId, h.spareSpace],
+    ],
+  ])
+    await assert.rejects(direct(sql, params), FROZEN, sql);
+  assert.equal(
+    (await agentRow(h.memberAgentId)).revoked_at.getTime(),
+    stamped.getTime(),
+  );
+  // Connecting the app again in the closing hive would lift the revoke.
+  await assert.rejects(connectApp(h.owner, h.client, h.ownerSpace), FROZEN);
+  assert.deepEqual(
+    await sinceSnapshot(),
+    [h.appAgent, h.ownerAgentId, h.memberAgentId].sort(),
+  );
+  // The agent that was left alone still signs in and reads.
+  assert.equal(
+    (await as(h.heldAgent, `select id from public.notes`)).length,
+    3,
+  );
+});
+
+test("cancelling lifts the freeze at once", async () => {
+  const h = await hdHive();
+  const before = await hdSnapshot(h.id);
+  await requestDeletion(h.owner, h.id, h.name);
+  const write = (who, member, space, path) =>
+    as(
+      who,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, $4, 'after') returning id`,
+      [h.id, member, space, path],
+    );
+  await assert.rejects(
+    write(h.owner, h.ownerMember, h.ownerSpace, "after.md"),
+    FROZEN,
+  );
+  await cancelDeletion(h.owner, h.id);
+  assert.deepEqual(await hdSnapshot(h.id), before);
+
+  assert.equal(
+    (await write(h.owner, h.ownerMember, h.ownerSpace, "after.md")).length,
+    1,
+  );
+  assert.equal(
+    (
+      await write(
+        h.memberAgent,
+        h.memberMember,
+        h.memberSpace,
+        "agent/after.md",
+      )
+    ).length,
+    1,
+  );
+  await as(h.member, `update public.notes set body = 'after' where id = $1`, [
+    h.memberNote,
+  ]);
+  await release(h.member, h.heldNote);
+  await upload(h.owner, `${h.ownerMember}/${h.ownerSpace}/outputs/after.pdf`);
+  assert.equal(
+    (
+      await as(
+        h.owner,
+        `delete from storage.objects where name = $1 returning 1`,
+        [h.filePath],
+      )
+    ).length,
+    1,
+  );
+  assert.equal(await respond(h.owner, h.link, true), "accepted");
+  assert.equal(await accept(h.invited, h.invitation), h.id);
+  await as(h.owner, `select public.revoke_agent($1)`, [h.ownerAgentId]);
+  assert.deepEqual(await preview(h.owner, h.id), {
+    members: 3,
+    notes: 8,
+    files: 1,
+  });
+});
+
+test("only the server erases a hive, only when its day has come, and keeps a record", async () => {
+  const h = await hdHive();
+  const o = await hdHive();
+  const second = await startHive(h.owner, `Second ${h.tag}`);
+  const others = async () => [
+    await hdSnapshot(o.id),
+    await hdSnapshot(second),
+    await hdSnapshot(hive),
+  ];
+  const due = async () =>
+    (await asService(`select id from public.hives_due_for_purge()`)).map(
+      (r) => r.id,
+    );
+
+  // Not for people, agents, apps or visitors.
+  for (const who of [h.owner, h.member, h.ownerAgent, h.pass, null])
+    for (const sql of [
+      `select public.begin_hive_purge($1)`,
+      `select public.purge_hive($1)`,
+      `select * from public.hive_object_paths($1, null, 10)`,
+      `select * from public.hives_due_for_purge() where $1::uuid is not null`,
+      `select * from public.deleted_hives where hive_id = $1`,
+      `insert into public.deleted_hives (hive_id, name, members, notes, files) values ($1, 'x', 0, 0, 0)`,
+      `delete from public.deleted_hives where hive_id <> $1`,
+    ])
+      await assert.rejects(as(who, sql, [h.id]), DENIED, sql);
+
+  // The server is refused too, until the day has come: it can neither begin
+  // nor take a step.
+  const begin = (id) => asService(`select public.begin_hive_purge($1)`, [id]);
+  const step = (id) =>
+    asService(`select public.purge_hive($1) as done`, [id]).then(
+      (r) => r[0].done,
+    );
+  const notYet = async (id, why) => {
+    await assert.rejects(begin(id), why);
+    await assert.rejects(step(id), why);
+  };
+  await notYet(NOBODY, HIVE_NOT_FOUND);
+  await notYet(h.id, NOT_DUE);
+  await requestDeletion(h.owner, h.id, h.name);
+  await notYet(h.id, NOT_DUE);
+  assert.ok(!(await due()).includes(h.id));
+  // One second short of the day.
+  await asDbOwner(
+    null,
+    `update public.hives set delete_after = now() + interval '1 second' where id = $1`,
+    [h.id],
+  );
+  await notYet(h.id, NOT_DUE);
+  assert.ok(!(await due()).includes(h.id));
+  assert.equal((await closingState(h.id)).delete_after === null, false);
+  assert.equal(await purgingAt(h.id), null);
+  // Cancelled in time, it is not due however old the request.
+  await requestDeletion(o.owner, o.id, o.name);
+  await asDbOwner(
+    null,
+    `update public.hives set closing_at = now() - interval '8 days',
+                             delete_after = now() - interval '1 day' where id = $1`,
+    [o.id],
+  );
+  assert.ok((await due()).includes(o.id));
+  await cancelDeletion(o.owner, o.id);
+  assert.ok(!(await due()).includes(o.id));
+  await notYet(o.id, NOT_DUE);
+
+  // The day comes.
+  await asDbOwner(
+    null,
+    `update public.hives set closing_at = now() - interval '7 days 1 hour',
+                             delete_after = now() - interval '1 hour' where id = $1`,
+    [h.id],
+  );
+  const state = await closingState(h.id);
+  const full = await hdSnapshot(h.id);
+  const ids = (table, key = "id") => full[table].map((r) => r[key]);
+  const kept = await others();
+  const erased = (
+    await db.query(`select count(*)::int as n from public.deleted_hives`)
+  ).rows[0].n;
+  assert.deepEqual(await due(), [h.id]);
+  // Still nobody else, now that it is due.
+  for (const who of [h.owner, h.member, null])
+    for (const call of ["begin_hive_purge", "purge_hive"])
+      await assert.rejects(
+        as(who, `select public.${call}($1)`, [h.id]),
+        DENIED,
+      );
+  // No step before the erase has begun, and until then the owner can still
+  // cancel (they do not: see "cancelling lifts the freeze").
+  await assert.rejects(step(h.id), NOT_DUE);
+  assert.deepEqual(await hdSnapshot(h.id), full);
+  assert.deepEqual(
+    await asService(`select * from public.deleted_hives where hive_id = $1`, [
+      h.id,
+    ]),
+    [],
+  );
+
+  // The point of no return: the record is written with what the hive holds
+  // now, and not yet with the day it was erased.
+  await begin(h.id);
+  const begun = await purgingAt(h.id);
+  assert.ok(Math.abs(begun - Date.now()) < 60_000);
+  const recordOf = async () =>
+    asService(`select * from public.deleted_hives where hive_id = $1`, [h.id]);
+  const atBegin = await recordOf();
+  assert.equal(atBegin.length, 1);
+  assert.deepEqual(
+    { ...atBegin[0], requested_at: null },
+    {
+      hive_id: h.id,
+      name: h.name,
+      requested_by: h.ownerUser,
+      requested_at: null,
+      purged_at: null,
+      members: 2,
+      notes: 6,
+      files: 1,
+    },
+  );
+  assert.deepEqual(await hdSnapshot(h.id), full);
+  // The owner can no longer cancel; asking again still answers the date.
+  const mark = await lastAudit();
+  await assert.rejects(cancelDeletion(h.owner, h.id), ALREADY_ERASING);
+  await assert.rejects(cancelDeletion(h.member, h.id), OWNER_ONLY);
+  assert.equal(
+    (await requestDeletion(h.owner, h.id, h.name)).getTime(),
+    state.delete_after.getTime(),
+  );
+  assert.deepEqual(await closingState(h.id), state);
+  assert.equal((await purgingAt(h.id)).getTime(), begun.getTime());
+  assert.deepEqual(await hiveAudits(mark, h.id), []);
+  // Everyone still reads, and nobody writes: not a person, not an agent, not
+  // an app, and deletes no more than anything else. Only the server's
+  // deletes pass, and only its deletes.
+  assert.equal((await as(h.member, `select id from public.notes`)).length, 6);
+  for (const [who, sql, params] of [
+    [
+      h.owner,
+      `delete from public.notes where id = $1 returning 1`,
+      [h.ownerNote],
+    ],
+    [
+      h.member,
+      `delete from public.notes where id = $1 returning 1`,
+      [h.memberNote],
+    ],
+    [
+      h.owner,
+      `delete from public.folders where id = $1 returning 1`,
+      [h.folder],
+    ],
+    [h.owner, `delete from public.files where id = $1 returning 1`, [h.file]],
+    [
+      h.owner,
+      `delete from public.workspaces where id = $1 returning 1`,
+      [h.spareSpace],
+    ],
+    [
+      h.owner,
+      `update public.notes set body = 'late' where id = $1 returning 1`,
+      [h.ownerNote],
+    ],
+    [
+      h.memberAgent,
+      `update public.notes set body = 'late' where id = $1 returning 1`,
+      [h.agentNote],
+    ],
+    [h.owner, `select public.unlink($1)`, [h.ownLink]],
+    [h.owner, `select public.revoke_invitation($1)`, [h.invitation]],
+    // A token that says it is the server's, in a session that is not.
+    [
+      { ...h.owner, role: "service_role" },
+      `delete from public.notes where id = $1 returning 1`,
+      [h.ownerNote],
+    ],
+  ])
+    await assert.rejects(as(who, sql, params), FROZEN, sql);
+  for (const [sql, params] of [
+    [`delete from public.notes where id = $1 returning 1`, [h.ownerNote]],
+    [`delete from public.members where id = $1 returning 1`, [h.memberMember]],
+  ])
+    await assert.rejects(asDbOwner(null, sql, params), FROZEN, sql);
+  for (const [sql, params] of [
+    [`update public.notes set body = 'late' where id = $1`, [h.ownerNote]],
+    [
+      `insert into public.entities (hive_id, type, canonical_name) values ($1, 'client', 'Late Ltd')`,
+      [h.id],
+    ],
+    [`update public.agents set name = 'Late' where id = $1`, [h.ownerAgentId]],
+    // Nor a delete of the server's own making: only a step of the erase.
+    [`delete from public.notes where id = $1`, [h.ownerNote]],
+    [`delete from public.folders where id = $1`, [h.folder]],
+    [`delete from public.members where id = $1`, [h.memberMember]],
+  ])
+    await assert.rejects(asService(sql, params), FROZEN, sql);
+  assert.deepEqual(await hdSnapshot(h.id), full);
+  // A hive that is closing and not being erased gives the server nothing.
+  await requestDeletion(o.owner, o.id, o.name);
+  await assert.rejects(
+    asService(`delete from public.notes where id = $1`, [o.ownerNote]),
+    FROZEN,
+  );
+  await cancelDeletion(o.owner, o.id);
+
+  // Beginning again moves the stamp and writes no second record.
+  await begin(h.id);
+  assert.ok((await purgingAt(h.id)) > begun);
+  assert.deepEqual(await recordOf(), atBegin);
+  assert.deepEqual(await due(), [h.id]);
+
+  // The hive's row is not deleted while a stored object is left under one of
+  // its members: the step that would finish stops, and says so. What it had
+  // already removed stays removed; the members and the hive stay.
+  assert.equal(await step(h.id), false);
+  const membersLeft = async () =>
+    (
+      await db.query(
+        `select count(*)::int as n from public.members where hive_id = $1`,
+        [h.id],
+      )
+    ).rows[0].n;
+  for (let i = 0; i < 2; i++) {
+    await assert.rejects(step(h.id), STORED_REMAIN);
+    assert.equal(await membersLeft(), 2);
+    assert.equal((await recordOf())[0].purged_at, null);
+    assert.equal((await as(h.member, `select id from public.hives`)).length, 1);
+  }
+  // One object left is enough.
+  await asService(`delete from storage.objects where name = $1`, [h.filePath]);
+  await assert.rejects(step(h.id), STORED_REMAIN);
+  assert.equal(await membersLeft(), 2);
+  await asService(`delete from storage.objects where name = $1`, [
+    h.memberFilePath,
+  ]);
+  assert.equal(await step(h.id), true);
+
+  // Nothing of the hive is left in any table.
+  const after = await hdSnapshot(h.id);
+  for (const table of Object.keys(HD_TABLES))
+    assert.deepEqual(after[table], [], table);
+  const left = async (table, column, values) =>
+    (
+      await db.query(
+        `select count(*)::int as n from public.${table} where ${column} = any ($1::uuid[])`,
+        [values],
+      )
+    ).rows[0].n;
+  for (const [table, column, values] of [
+    ["hives", "id", [h.id]],
+    ["members", "id", ids("members")],
+    ["workspaces", "id", ids("workspaces")],
+    ["agents", "id", ids("agents")],
+    ["folders", "id", ids("folders")],
+    ["notes", "id", ids("notes")],
+    ["note_versions", "note_id", ids("notes")],
+    ["files", "id", ids("files")],
+    ["entities", "id", ids("entities")],
+    ["note_entities", "note_id", ids("notes")],
+    ["links", "id", ids("links")],
+    ["synthesis_pages", "entity_id", ids("entities")],
+    ["invitations", "id", ids("invitations")],
+    ["notifications", "hive_id", [h.id]],
+    ["audit_log", "hive_id", [h.id]],
+  ]) {
+    assert.ok(values.length > 0, `${table}: nothing to erase`);
+    assert.equal(await left(table, column, values), 0, table);
+  }
+  // The people keep their accounts.
+  assert.equal(
+    (
+      await db.query(
+        `select count(*)::int as n from auth.users where id = any ($1::uuid[])`,
+        [[h.ownerUser, h.memberUser]],
+      )
+    ).rows[0].n,
+    2,
+  );
+
+  // The record: what it was, who asked and when, and how much it held.
+  const record = await asService(
+    `select * from public.deleted_hives where hive_id = $1`,
+    [h.id],
+  );
+  assert.equal(record.length, 1);
+  const { purged_at, requested_at, ...rest } = record[0];
+  assert.deepEqual(rest, {
+    hive_id: h.id,
+    name: h.name,
+    requested_by: h.ownerUser,
+    members: 2,
+    notes: 6,
+    files: 1,
+  });
+  assert.equal(requested_at.getTime(), state.closing_at.getTime());
+  assert.ok(Math.abs(purged_at - Date.now()) < 60_000);
+  assert.equal(
+    (await db.query(`select count(*)::int as n from public.deleted_hives`))
+      .rows[0].n,
+    erased + 1,
+  );
+
+  // Every other hive is whole, the owner's other one included.
+  assert.deepEqual(await others(), kept);
+  assert.deepEqual(await due(), []);
+  await notYet(h.id, HIVE_NOT_FOUND);
+  assert.deepEqual(
+    (await as(h.owner, `select id from public.hives`)).map((r) => r.id),
+    [second],
+  );
+  assert.equal((await as(h.member, `select id from public.hives`)).length, 0);
+  // The record cannot be reached through the API, by the person it names
+  // either.
+  const table = (
+    await db.query(
+      `select c.relrowsecurity as rls,
+              (select count(*)::int from pg_policy p where p.polrelid = c.oid) as policies,
+              has_table_privilege('anon', c.oid, 'select, insert, update, delete, truncate, references, trigger') as anon,
+              has_table_privilege('authenticated', c.oid, 'select, insert, update, delete, truncate, references, trigger') as signed_in
+         from pg_class c where c.oid = 'public.deleted_hives'::regclass`,
+    )
+  ).rows[0];
+  assert.deepEqual(table, {
+    rls: true,
+    policies: 0,
+    anon: false,
+    signed_in: false,
+  });
+  await assert.rejects(
+    as(h.owner, `select * from public.deleted_hives`),
+    DENIED,
+  );
+});
+
+test("the hives due to be erased are listed oldest first, 20 at a time", async () => {
+  await db.exec("reset role");
+  const make = async (name, after) =>
+    (
+      await db.query(
+        `insert into public.hives (name, closing_at, delete_after)
+         values ($1, now() + $2::interval - interval '7 days', now() + $2::interval)
+         returning id`,
+        [name, after],
+      )
+    ).rows[0].id;
+  const made = [];
+  try {
+    // Made out of order: 23 that are due, by 1 to 23 hours.
+    const hours = [...Array(23).keys()].map((i) => ((i * 7) % 23) + 1);
+    const dueIds = {};
+    for (const n of hours) {
+      dueIds[n] = await make(`Due ${n}`, `-${n} hours`);
+      made.push(dueIds[n]);
+    }
+    made.push(await make("Not yet", "1 hour"));
+    made.push(
+      (
+        await db.query(
+          `insert into public.hives (name) values ('Not closing') returning id`,
+        )
+      ).rows[0].id,
+    );
+    const listed = await asService(
+      `select * from public.hives_due_for_purge()`,
+    );
+    assert.deepEqual(Object.keys(listed[0]), ["id"]);
+    assert.deepEqual(
+      listed.map((r) => r.id),
+      [...Array(20).keys()].map((i) => dueIds[23 - i]),
+    );
+    const dueNow = async () =>
+      (await asService(`select * from public.hives_due_for_purge()`)).map(
+        (r) => r.id,
+      );
+    const begin = (id) => asService(`select public.begin_hive_purge($1)`, [id]);
+    // A hive whose erase was begun and not finished goes behind every hive
+    // that was never tried, so one that keeps failing does not hold the
+    // queue: the two oldest are tried, and the list starts at the third.
+    await begin(dueIds[23]);
+    await begin(dueIds[22]);
+    assert.deepEqual(
+      await dueNow(),
+      [...Array(20).keys()].map((i) => dueIds[21 - i]),
+    );
+    // Among the hives already tried, the one tried longest ago comes first.
+    await begin(dueIds[23]);
+    for (let n = 21; n >= 6; n--)
+      await db.query(`delete from public.hives where id = $1`, [dueIds[n]]);
+    assert.deepEqual(await dueNow(), [
+      ...[5, 4, 3, 2, 1].map((n) => dueIds[n]),
+      dueIds[22],
+      dueIds[23],
+    ]);
+    // Erasing one takes it off the list.
+    assert.deepEqual(
+      await asService(`select public.purge_hive($1) as done`, [dueIds[23]]),
+      [{ done: true }],
+    );
+    assert.deepEqual(await dueNow(), [
+      ...[5, 4, 3, 2, 1].map((n) => dueIds[n]),
+      dueIds[22],
+    ]);
+    const record = (
+      await db.query(`select * from public.deleted_hives where hive_id = $1`, [
+        dueIds[23],
+      ])
+    ).rows[0];
+    assert.equal(record.name, "Due 23");
+    assert.equal(record.requested_by, null);
+    assert.deepEqual([record.members, record.notes, record.files], [0, 0, 0]);
+  } finally {
+    await db.exec("reset role");
+    await db.query(`delete from public.hives where id = any ($1::uuid[])`, [
+      made,
+    ]);
+  }
+  assert.deepEqual(
+    await asService(`select * from public.hives_due_for_purge()`),
+    [],
+  );
+});
+
+// A closing hive whose day has come, as the database owner would see it.
+const hdMakeDue = (id) =>
+  asDbOwner(
+    null,
+    `update public.hives set closing_at = now() - interval '7 days 1 hour',
+                             delete_after = now() - interval '1 hour' where id = $1`,
+    [id],
+  );
+const hdBegin = (id) => asService(`select public.begin_hive_purge($1)`, [id]);
+const hdStep = (id) =>
+  asService(`select public.purge_hive($1) as done`, [id]).then(
+    (r) => r[0].done,
+  );
+const hdRecord = async (id) =>
+  (
+    await db.query(`select * from public.deleted_hives where hive_id = $1`, [
+      id,
+    ])
+  ).rows[0];
+
+// What the purge function does between the first step and the last: lists
+// the hive's stored objects and removes them, as the server.
+const hdRemoveObjects = async (id) => {
+  for (;;) {
+    const names = (
+      await asService(
+        `select * from public.hive_object_paths($1, null, 1000)`,
+        [id],
+      )
+    ).map((r) => r.name);
+    if (names.length === 0) return;
+    await asService(
+      `delete from storage.objects where bucket_id = 'files' and name = any ($1::text[])`,
+      [names],
+    );
+  }
+};
+// One statement in a transaction that is rolled back, with the erase's marker
+// set by hand, in a session of the given role ("none" is the database owner).
+// The API offers no way to do this; a session that can run SQL can.
+const withMarker = async (marker, role, sql, params = []) => {
+  await db.exec("reset role");
+  await db.exec("begin");
+  try {
+    await db.query(`select set_config('request.jwt.claims', '{}', true)`);
+    await db.query(`select set_config('hive.purging', $1, true)`, [marker]);
+    await db.exec(`set local role ${role}`);
+    return { rows: (await db.query(sql, params)).rows };
+  } catch (error) {
+    return { error };
+  } finally {
+    await db.exec("rollback");
+  }
+};
+
+test("a large hive is erased over several calls, each within a budget of rows", async () => {
+  const BUDGET = 2000;
+  const h = await hdHive();
+  const o = await hdHive();
+  // 1,200 notes with four versions each, 5,000 folders, 3,000 audit rows, 150
+  // workspaces and 60 notifications: what a member could pile up.
+  await asDbOwner(
+    null,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+     select $1, $2, $3, 'shared/bulk/' || i || '.md', 'bulk ' || i, 'bulk'
+       from generate_series(1, 1194) i`,
+    [h.id, h.ownerMember, h.ownerSpace],
+  );
+  for (const n of [2, 3, 4])
+    await asDbOwner(
+      null,
+      `update public.notes set body = 'bulk v' || $2 where hive_id = $1`,
+      [h.id, n],
+    );
+  await asDbOwner(
+    null,
+    `insert into public.folders (workspace_id, member_id, path)
+     select $1, $2, 'bulk/' || i from generate_series(1, 5000) i`,
+    [h.memberSpace, h.memberMember],
+  );
+  await asDbOwner(
+    null,
+    `insert into public.audit_log (hive_id, member_id, action)
+     select $1, $2, 'test.bulk' from generate_series(1, 3000) i`,
+    [h.id, h.memberMember],
+  );
+  // More than a member may have today (20261124110155_workspace_cap.sql):
+  // rows from before the limit, put there with its trigger switched off.
+  await db.exec(
+    `alter table public.workspaces disable trigger zzzz_workspace_cap`,
+  );
+  try {
+    await asDbOwner(
+      null,
+      `insert into public.workspaces (hive_id, member_id, name)
+       select $1, $2, 'bulk ' || i from generate_series(1, 150) i`,
+      [h.id, h.memberMember],
+    );
+  } finally {
+    await db.exec(
+      `alter table public.workspaces enable trigger zzzz_workspace_cap`,
+    );
+  }
+  await asDbOwner(
+    null,
+    `insert into public.notifications (hive_id, member_id, kind)
+     select $1, $2, 'test' from generate_series(1, 60) i`,
+    [h.id, h.memberMember],
+  );
+  // Every row of the hive, table by table.
+  const WHERE = {
+    ...HD_TABLES,
+    notifications: `hive_id = $1`,
+    audit_log: `hive_id = $1`,
+  };
+  const counts = async () => {
+    const out = {};
+    for (const [table, where] of Object.entries(WHERE))
+      out[table] = (
+        await db.query(
+          `select count(*)::int as n from public.${table} where ${where}`,
+          [h.id],
+        )
+      ).rows[0].n;
+    return out;
+  };
+  const total = (c) => Object.values(c).reduce((a, b) => a + b, 0);
+  const start = await counts();
+  assert.equal(start.notes, 1200);
+  assert.equal(start.note_versions, 4800);
+  assert.equal(start.folders, 5001);
+  assert.ok(start.audit_log >= 3000);
+  assert.equal(start.workspaces, 153);
+  for (const [table, n] of Object.entries(start))
+    assert.ok(n > 0, `${table} is empty`);
+
+  await requestDeletion(h.owner, h.id, h.name);
+  await hdMakeDue(h.id);
+  const other = await hdSnapshot(o.id);
+  await hdBegin(h.id);
+  const record = await hdRecord(h.id);
+  assert.deepEqual(
+    [record.members, record.notes, record.files, record.purged_at],
+    [2, 1200, 1, null],
+  );
+  await hdRemoveObjects(h.id);
+
+  // After each unfinished call: nothing left hanging, the people in it still
+  // read, nobody writes, the record is as it was, the other hive is whole.
+  const between = async (now) => {
+    for (const [table, column, parent] of [
+      ["note_versions", "note_id", "notes"],
+      ["note_entities", "note_id", "notes"],
+      ["note_entities", "entity_id", "entities"],
+      ["links", "from_note", "notes"],
+      ["links", "to_note", "notes"],
+      ["files", "note_id", "notes"],
+      ["notes", "folder_id", "folders"],
+      ["notes", "workspace_id", "workspaces"],
+      ["folders", "workspace_id", "workspaces"],
+      ["agents", "member_id", "members"],
+      ["workspaces", "member_id", "members"],
+    ])
+      assert.equal(
+        (
+          await db.query(
+            `select count(*)::int as n from public.${table} x
+              where x.${column} is not null
+                and not exists (select 1 from public.${parent} p where p.id = x.${column})`,
+          )
+        ).rows[0].n,
+        0,
+        `${table}.${column}`,
+      );
+    assert.deepEqual(await hdRecord(h.id), record);
+    assert.deepEqual(await hdSnapshot(o.id), other);
+    // The members go last, a few in a call; once one has gone nothing else
+    // of the hive is left for the others to read.
+    if (now.members < 2) {
+      for (const table of Object.keys(WHERE))
+        if (table !== "members") assert.equal(now[table], 0, table);
+      return;
+    }
+    const seen = new Set();
+    for (const who of [h.owner, h.member])
+      for (const r of await as(
+        who,
+        `select id from public.notes where hive_id = $1`,
+        [h.id],
+      ))
+        seen.add(r.id);
+    assert.equal(seen.size, now.notes);
+    assert.equal((await map(h.owner, h.id)).members.length, 2);
+    assert.equal(typeof (await inboxCount(h.owner, h.id)), "number");
+    assert.equal(
+      (await as(h.member, `select delete_after from public.hives`)).length,
+      1,
+    );
+    await assert.rejects(
+      as(
+        h.member,
+        `update public.members set display_name = 'Late' where id = $1 returning 1`,
+        [h.memberMember],
+      ),
+      FROZEN,
+    );
+    await assert.rejects(cancelDeletion(h.owner, h.id), ALREADY_ERASING);
+  };
+
+  let before = await counts();
+  let calls = 0;
+  let slowest = 0;
+  for (;;) {
+    assert.ok(++calls <= 40, "the erase does not end");
+    const began = performance.now();
+    const done = await hdStep(h.id);
+    slowest = Math.max(slowest, performance.now() - began);
+    const now = await counts();
+    const removed = total(before) - total(now);
+    assert.ok(removed <= BUDGET, `call ${calls} removed ${removed} rows`);
+    // No table grows, and none is touched before the ones under it are empty.
+    for (const table of Object.keys(WHERE))
+      assert.ok(now[table] <= before[table], `${table} grew`);
+    if (now.notes < before.notes)
+      for (const table of ["note_versions", "note_entities", "links", "files"])
+        assert.equal(now[table], 0, `notes before ${table}`);
+    if (now.folders < before.folders) assert.equal(now.notes, 0);
+    if (now.workspaces < before.workspaces)
+      for (const table of ["folders", "agents", "notes", "files"])
+        assert.equal(now[table], 0, `workspaces before ${table}`);
+    if (now.members < before.members)
+      for (const table of Object.keys(WHERE))
+        if (table !== "members")
+          assert.equal(now[table], 0, `members before ${table}`);
+    if (done) {
+      assert.equal(total(now), 0);
+      break;
+    }
+    assert.ok(removed > 0, `call ${calls} removed nothing`);
+    await between(now);
+    before = now;
+  }
+  // Too much for one call or two, and each call well inside the 8 seconds
+  // the API gives a statement.
+  assert.ok(calls >= 8, `${calls} calls`);
+  assert.ok(slowest < 8000, `the slowest call took ${Math.round(slowest)} ms`);
+  console.log(
+    `erased ${total(start)} rows in ${calls} calls, the slowest ${Math.round(slowest)} ms`,
+  );
+
+  assert.equal(
+    (await db.query(`select 1 from public.hives where id = $1`, [h.id])).rows
+      .length,
+    0,
+  );
+  const done = await hdRecord(h.id);
+  assert.ok(Math.abs(done.purged_at - Date.now()) < 60_000);
+  assert.deepEqual({ ...done, purged_at: null }, record);
+  assert.deepEqual(await hdSnapshot(o.id), other);
+  await assert.rejects(hdStep(h.id), HIVE_NOT_FOUND);
+});
+
+test("the server's deletes pass only inside a step of the erase, and only for that hive", async () => {
+  const a = await hdHive();
+  const b = await hdHive();
+  for (const h of [a, b]) {
+    await requestDeletion(h.owner, h.id, h.name);
+    await hdMakeDue(h.id);
+    await hdBegin(h.id);
+  }
+  const before = [await hdSnapshot(a.id), await hdSnapshot(b.id)];
+  const gone = `delete from public.notes where id = $1 returning 1`;
+  // The service role by itself, outside purge_hive: refused, on every table.
+  for (const [sql, params] of [
+    [gone, [a.ownerNote]],
+    [`delete from public.note_versions where note_id = $1`, [a.ownerNote]],
+    [`delete from public.folders where id = $1`, [a.folder]],
+    [`delete from public.files where id = $1`, [a.file]],
+    [`delete from public.agents where id = $1`, [a.ownerAgentId]],
+    [`delete from public.workspaces where id = $1`, [a.spareSpace]],
+    [`delete from public.members where id = $1`, [a.memberMember]],
+  ])
+    await assert.rejects(asService(sql, params), FROZEN, sql);
+  const refused = async (marker, role, sql, params) => {
+    const r = await withMarker(marker, role, sql, params);
+    assert.match(String(r.error ?? "(it worked)"), FROZEN, `${marker} ${role}`);
+  };
+  // The marker of one erase opens nothing in another hive's.
+  await refused(a.id, "service_role", gone, [b.ownerNote]);
+  await refused(b.id, "service_role", gone, [a.ownerNote]);
+  // Nor does a marker that names no hive, or a hive that is not being erased.
+  for (const marker of ["", "x", NOBODY, hive])
+    await refused(marker, "service_role", gone, [a.ownerNote]);
+  // The marker without the server's role opens nothing either.
+  await refused(a.id, "none", gone, [a.ownerNote]);
+  // Both together are what purge_hive has, and they open deletes only.
+  const inside = await withMarker(a.id, "service_role", gone, [a.ownerNote]);
+  assert.equal(inside.error, undefined, inside.error?.message);
+  assert.equal(inside.rows.length, 1);
+  await refused(
+    a.id,
+    "service_role",
+    `update public.notes set body = 'late' where id = $1`,
+    [a.ownerNote],
+  );
+  await refused(
+    a.id,
+    "service_role",
+    `insert into public.entities (hive_id, type, canonical_name) values ($1, 'client', 'Late Ltd')`,
+    [a.id],
+  );
+  assert.deepEqual([await hdSnapshot(a.id), await hdSnapshot(b.id)], before);
+
+  // Erasing a leaves b as it was, and the marker does not outlive the call.
+  await hdRemoveObjects(a.id);
+  assert.equal(await hdStep(a.id), true);
+  assert.deepEqual(await hdSnapshot(b.id), before[1]);
+  await assert.rejects(asService(gone, [b.ownerNote]), FROZEN);
+  const marker = (
+    await asService(`select current_setting('hive.purging', true) as m`)
+  )[0].m;
+  assert.ok([null, ""].includes(marker), `the marker is still ${marker}`);
+  await hdRemoveObjects(b.id);
+  assert.equal(await hdStep(b.id), true);
+});
+
+test("who wrote a note is the database's to say", async () => {
+  const h = await hdHive();
+  const o = await hdHive();
+  const wrote = async (id) =>
+    (
+      await db.query(
+        `select written_by_agent as agent, version from public.notes where id = $1`,
+        [id],
+      )
+    ).rows[0];
+  const set = (who, id, agent, more = "") =>
+    as(
+      who,
+      `update public.notes set written_by_agent = $2${more} where id = $1 returning 1`,
+      [id, agent],
+    );
+  const heldAgentId = h.heldAgent.agent_id;
+  assert.deepEqual(await wrote(h.agentNote), {
+    agent: h.memberAgentId,
+    version: 1,
+  });
+  assert.deepEqual(await wrote(h.memberNote), { agent: null, version: 1 });
+
+  // A person cannot put another agent's name on a note, take the name off,
+  // or put one on a note they wrote themself: without a change of content
+  // the column stays as it is. Not an agent of theirs, not a colleague's,
+  // not one of another hive.
+  for (const agent of [heldAgentId, h.ownerAgentId, o.ownerAgentId, null]) {
+    assert.equal((await set(h.member, h.agentNote, agent)).length, 1);
+    assert.equal((await wrote(h.agentNote)).agent, h.memberAgentId);
+  }
+  for (const agent of [h.memberAgentId, h.ownerAgentId, o.ownerAgentId]) {
+    assert.equal((await set(h.member, h.memberNote, agent)).length, 1);
+    assert.equal((await wrote(h.memberNote)).agent, null);
+  }
+  // Nor an agent, and nor the database owner by a plain update.
+  assert.equal(
+    (await set(h.memberAgent, h.memberNote2, heldAgentId)).length,
+    1,
+  );
+  assert.equal((await wrote(h.memberNote2)).agent, null);
+  await asDbOwner(
+    null,
+    `update public.notes set written_by_agent = $2 where id = $1`,
+    [h.memberNote, o.ownerAgentId],
+  );
+  assert.equal((await wrote(h.memberNote)).agent, null);
+  // The rest of such an update is applied as before.
+  await set(h.member, h.agentNote, null, `, visibility = 'group'`);
+  assert.equal((await wrote(h.agentNote)).agent, h.memberAgentId);
+  assert.equal(
+    (
+      await db.query(`select visibility from public.notes where id = $1`, [
+        h.agentNote,
+      ])
+    ).rows[0].visibility,
+    "group",
+  );
+  // A new note says who wrote it whatever the row claims.
+  const forged = (
+    await as(
+      h.member,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title, written_by_agent)
+       values ($1, $2, $3, 'forged.md', 'forged', $4) returning id`,
+      [h.id, h.memberMember, h.memberSpace, h.ownerAgentId],
+    )
+  )[0].id;
+  assert.equal((await wrote(forged)).agent, null);
+
+  // What sets it, as before: a change of content, by whoever makes it.
+  await as(
+    h.memberAgent,
+    `update public.notes set body = 'agent' where id = $1`,
+    [h.memberNote],
+  );
+  assert.deepEqual(await wrote(h.memberNote), {
+    agent: h.memberAgentId,
+    version: 2,
+  });
+  await set(h.member, h.memberNote, heldAgentId, `, body = 'person'`);
+  assert.deepEqual(await wrote(h.memberNote), { agent: null, version: 3 });
+  // A held note released by its owner keeps the agent that wrote it.
+  await release(h.member, h.heldNote);
+  assert.equal((await wrote(h.heldNote)).agent, heldAgentId);
+  // And when an agent is deleted, the notes it wrote lose the name, as the
+  // foreign key says.
+  await asDbOwner(null, `delete from public.agents where id = $1`, [
+    heldAgentId,
+  ]);
+  assert.equal((await wrote(h.heldNote)).agent, null);
+  assert.equal((await wrote(h.agentNote)).agent, h.memberAgentId);
+});
+
+test("the server lists a hive's stored objects, a page at a time, only once its erase has begun", async () => {
+  const h = await hdHive();
+  const o = await hdHive();
+  const paths = (id, after, limit) =>
+    asService(`select * from public.hive_object_paths($1, $2, $3)`, [
+      id,
+      after,
+      limit,
+    ]).then((rows) => rows.map((r) => r.name));
+  // Put there as the database owner: objects with no files row, one outside
+  // any workspace, and names that only look like the hive's.
+  await db.exec("reset role");
+  await db.query(
+    `insert into storage.buckets (id, name) values ('other', 'other')
+     on conflict (id) do nothing`,
+  );
+  const put = (name, bucket = "files") =>
+    db.query(`insert into storage.objects (bucket_id, name) values ($1, $2)`, [
+      bucket,
+      name,
+    ]);
+  const mine = [
+    h.filePath,
+    h.memberFilePath,
+    `${h.ownerMember}/${h.ownerSpace}/outputs/z.pdf`,
+    `${h.ownerMember}/${h.ownerSpace}/Outputs/A.pdf`,
+    `${h.ownerMember}/${h.spareSpace}/outputs/s.pdf`,
+    `${h.memberMember}/loose.bin`,
+    `${h.memberMember}/~last`,
+  ];
+  for (const name of mine.slice(2)) await put(name);
+  const notMine = [
+    `${h.ownerMember}`,
+    `${h.ownerMember}0/after.pdf`,
+    `${h.ownerMember}./before.pdf`,
+    `x${h.ownerMember}/prefixed.pdf`,
+    `${h.id}/by-hive.pdf`,
+  ];
+  for (const name of notMine) await put(name);
+  await put(`${h.ownerMember}/${h.ownerSpace}/elsewhere.pdf`, "other");
+  // Bytewise order, as the function sorts.
+  const expected = [...mine].sort((a, b) =>
+    Buffer.compare(Buffer.from(a), Buffer.from(b)),
+  );
+
+  // Not before the erase has begun: an open hive, a closing one, a due one.
+  await assert.rejects(paths(NOBODY, null, 10), HIVE_NOT_FOUND);
+  await assert.rejects(paths(h.id, null, 10), NOT_DUE);
+  await requestDeletion(h.owner, h.id, h.name);
+  await assert.rejects(paths(h.id, null, 10), NOT_DUE);
+  await hdMakeDue(h.id);
+  await assert.rejects(paths(h.id, null, 10), NOT_DUE);
+  for (const who of [h.owner, h.member, h.memberAgent, h.pass, null])
+    await assert.rejects(
+      as(who, `select * from public.hive_object_paths($1, null, 10)`, [h.id]),
+      DENIED,
+    );
+
+  await hdBegin(h.id);
+  // Null or empty starts from the beginning; each row is a name and nothing
+  // else.
+  assert.deepEqual(await paths(h.id, null, 1000), expected);
+  assert.deepEqual(await paths(h.id, "", 1000), expected);
+  assert.deepEqual(
+    await asService(`select * from public.hive_object_paths($1, null, 1)`, [
+      h.id,
+    ]),
+    [{ name: expected[0] }],
+  );
+  // Byte by byte: a capital letter sorts before a small one.
+  assert.ok(
+    expected.indexOf(`${h.ownerMember}/${h.ownerSpace}/Outputs/A.pdf`) <
+      expected.indexOf(h.filePath),
+  );
+  // Page by page, each one starting after the last name of the one before.
+  const paged = [];
+  let after = null;
+  for (;;) {
+    const page = await paths(h.id, after, 3);
+    assert.ok(page.length <= 3);
+    if (page.length === 0) break;
+    paged.push(...page);
+    after = page.at(-1);
+  }
+  assert.deepEqual(paged, expected);
+  assert.deepEqual(await paths(h.id, expected.at(-1), 10), []);
+  assert.deepEqual(await paths(h.id, expected[2], 2), expected.slice(3, 5));
+  // The limit is at least 1 and at most 1,000.
+  assert.deepEqual(await paths(h.id, null, 0), expected.slice(0, 1));
+  assert.deepEqual(await paths(h.id, null, -5), expected.slice(0, 1));
+  await db.query(
+    `insert into storage.objects (bucket_id, name)
+     select 'files', $1 || '/bulk/' || lpad(i::text, 4, '0') from generate_series(1, 1000) i`,
+    [h.memberMember],
+  );
+  assert.equal((await paths(h.id, null, 5000)).length, 1000);
+  assert.equal((await paths(h.id, null, 1000)).length, 1000);
+
+  // Another hive's objects are never in the list, and its own list is not
+  // given: its erase has not begun.
+  const all = [];
+  after = null;
+  for (;;) {
+    const page = await paths(h.id, after, 1000);
+    if (page.length === 0) break;
+    all.push(...page);
+    after = page.at(-1);
+  }
+  assert.equal(all.length, mine.length + 1000);
+  for (const name of [...notMine, o.filePath, o.memberFilePath])
+    assert.ok(!all.includes(name), name);
+  assert.ok(
+    all.every(
+      (name) =>
+        name.startsWith(`${h.ownerMember}/`) ||
+        name.startsWith(`${h.memberMember}/`),
+    ),
+  );
+  await assert.rejects(paths(o.id, null, 10), NOT_DUE);
+
+  // Listing removes nothing: the erase does not finish while they are there.
+  assert.equal(await hdStep(h.id), false);
+  await assert.rejects(hdStep(h.id), STORED_REMAIN);
+  assert.equal((await paths(h.id, null, 1000)).length, 1000);
+  // Removed the way the purge function does it, the list ends with the hive.
+  await hdRemoveObjects(h.id);
+  assert.deepEqual(await paths(h.id, null, 1000), []);
+  assert.equal(await hdStep(h.id), true);
+  await assert.rejects(paths(h.id, null, 10), HIVE_NOT_FOUND);
+  // The names that only looked like the hive's are still there.
+  assert.equal(
+    (
+      await db.query(
+        `select count(*)::int as n from storage.objects where name = any ($1::text[])`,
+        [[...notMine, o.filePath, o.memberFilePath]],
+      )
+    ).rows[0].n,
+    notMine.length + 2,
+  );
+});
+
+test("a row names one hive only, and a row left across two cannot stop an erase", async () => {
+  const v = await hdHive();
+  const t = await hdHive();
+  // One person in both hives: a member of v, and now of t.
+  const both = v.member;
+  const inT = await addMember(t.id, v.memberUser, "Both");
+  const spaceInT = (
+    await db.query(`select id from public.workspaces where member_id = $1`, [
+      inT,
+    ])
+  ).rows[0].id;
+  const noteInT = (
+    await as(
+      both,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'both.md', 'both') returning id`,
+      [t.id, inT, spaceInT],
+    )
+  )[0].id;
+  const folderInV = (
+    await as(
+      both,
+      `insert into public.folders (workspace_id, member_id, path)
+       values ($1, $2, 'mine') returning id`,
+      [v.memberSpace, v.memberMember],
+    )
+  )[0].id;
+  const folderInT = (
+    await as(
+      both,
+      `insert into public.folders (workspace_id, member_id, path)
+       values ($1, $2, 'mine') returning id`,
+      [spaceInT, inT],
+    )
+  )[0].id;
+  const before = [await hdSnapshot(v.id), await hdSnapshot(t.id)];
+
+  const SPACE = /^error: a workspace belongs to its member's hive$/;
+  const TAG = /^error: a note and an entity must be in the same hive$/;
+  const CONFIRMED =
+    /^error: a tag is confirmed by a member of the note's hive$/;
+  const FOLDER = /^error: a note's folder must be in the note's own workspace$/;
+  const PAGE = /^error: a synthesis page belongs to its entity's hive$/;
+  const AGENT = /^error: workspace does not belong to this member$/;
+  // Through the API, as the person who is in both.
+  for (const [sql, params, why] of [
+    [
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Astride')`,
+      [v.id, inT],
+      SPACE,
+    ],
+    [
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Astride')`,
+      [t.id, v.memberMember],
+      SPACE,
+    ],
+    [
+      `insert into public.note_entities (note_id, entity_id) values ($1, $2)`,
+      [noteInT, v.entity],
+      TAG,
+    ],
+    [
+      `insert into public.note_entities (note_id, entity_id) values ($1, $2)`,
+      [v.memberNote, t.entity],
+      TAG,
+    ],
+    [
+      `insert into public.note_entities (note_id, entity_id, confirmed_by) values ($1, $2, $3)`,
+      [noteInT, t.entity, v.memberMember],
+      CONFIRMED,
+    ],
+    [
+      `update public.notes set folder_id = $2 where id = $1`,
+      [noteInT, folderInV],
+      FOLDER,
+    ],
+    [
+      `insert into public.notes (hive_id, member_id, workspace_id, folder_id, path, title) values ($1, $2, $3, $4, 'astride.md', 'astride')`,
+      [t.id, inT, spaceInT, folderInV],
+      FOLDER,
+    ],
+  ])
+    await assert.rejects(as(both, sql, params), why, sql);
+  // And for the database owner, whom no policy binds.
+  for (const [sql, params, why] of [
+    [
+      `update public.workspaces set hive_id = $1 where id = $2`,
+      [t.id, v.spareSpace],
+      SPACE,
+    ],
+    [
+      `update public.workspaces set member_id = $1 where id = $2`,
+      [inT, v.spareSpace],
+      SPACE,
+    ],
+    [
+      `update public.note_entities set entity_id = $1 where note_id = $2`,
+      [t.entity, v.ownerNote],
+      TAG,
+    ],
+    [
+      `update public.note_entities set note_id = $1 where note_id = $2`,
+      [noteInT, v.ownerNote],
+      TAG,
+    ],
+    [
+      `update public.note_entities set confirmed_by = $1 where note_id = $2`,
+      [inT, v.ownerNote],
+      CONFIRMED,
+    ],
+    [
+      `update public.synthesis_pages set hive_id = $1 where entity_id = $2`,
+      [t.id, v.entity],
+      PAGE,
+    ],
+    [
+      `insert into public.synthesis_pages (entity_id, hive_id) values ($1, $2)`,
+      [v.entity2, t.id],
+      PAGE,
+    ],
+    [
+      `update public.agents set workspace_id = $1 where id = $2`,
+      [v.ownerSpace, v.memberAgentId],
+      AGENT,
+    ],
+    [
+      `insert into public.agents (member_id, workspace_id, name, provider, token_hash) values ($1, $2, 'x', 'other', 'hd-astride')`,
+      [inT, v.memberSpace],
+      AGENT,
+    ],
+    [
+      `update public.notes set folder_id = $2 where id = $1`,
+      [v.memberNote, v.folder],
+      FOLDER,
+    ],
+  ])
+    await assert.rejects(asDbOwner(null, sql, params), why, sql);
+  // An entity stays in its hive, for the owner of two hives too: moving it
+  // would take its tags across.
+  const ENTITY = /^error: an entity stays in its hive$/;
+  const ownersOther = await startHive(v.owner, `Other ${v.tag}`);
+  const move = `update public.entities set hive_id = $1 where id = $2 returning 1`;
+  await assert.rejects(as(v.owner, move, [ownersOther, v.entity]), ENTITY);
+  await assert.rejects(as(v.owner, move, [ownersOther, v.entity2]), ENTITY);
+  await assert.rejects(asDbOwner(null, move, [t.id, v.entity]), ENTITY);
+  // Anything else about it is the owner's to change, as before.
+  assert.equal(
+    (
+      await as(
+        v.owner,
+        `update public.entities set canonical_name = 'Renamed', hive_id = $1 where id = $2 returning 1`,
+        [v.id, v.entity2],
+      )
+    ).length,
+    1,
+  );
+  await as(
+    v.owner,
+    `update public.entities set canonical_name = $1 where id = $2`,
+    [`${v.tag} Other Ltd`, v.entity2],
+  );
+  assert.deepEqual([await hdSnapshot(v.id), await hdSnapshot(t.id)], before);
+  // Rows of one hive are written as before.
+  await as(
+    both,
+    `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Second')`,
+    [t.id, inT],
+  );
+  await as(
+    both,
+    `insert into public.note_entities (note_id, entity_id, confirmed_by) values ($1, $2, $3)`,
+    [noteInT, t.entity, inT],
+  );
+  await as(both, `update public.notes set folder_id = $2 where id = $1`, [
+    noteInT,
+    folderInT,
+  ]);
+
+  // Rows from before the rule, put there with the check switched off: a
+  // workspace in v under a member of t with a note in it, a note of t tagged
+  // with an entity of v, a tag in t confirmed by a member of v, and a note of
+  // t in a folder of v.
+  const unchecked = async (table, sql, params) => {
+    await db.exec("reset role");
+    await db.exec(`alter table public.${table} disable trigger zzz_one_hive`);
+    try {
+      return (await db.query(sql, params)).rows;
+    } finally {
+      await db.exec(`alter table public.${table} enable trigger zzz_one_hive`);
+    }
+  };
+  const astride = (
+    await unchecked(
+      "workspaces",
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Astride') returning id`,
+      [v.id, inT],
+    )
+  )[0].id;
+  const astrideNote = (
+    await asDbOwner(
+      null,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+       values ($1, $2, $3, 'astride.md', 'astride') returning id, hive_id`,
+      [v.id, inT, astride],
+    )
+  )[0];
+  assert.equal(astrideNote.hive_id, v.id);
+  await unchecked(
+    "note_entities",
+    `insert into public.note_entities (note_id, entity_id) values ($1, $2)`,
+    [noteInT, v.entity2],
+  );
+  await unchecked(
+    "note_entities",
+    `update public.note_entities set confirmed_by = $1 where note_id = $2 and entity_id = $3`,
+    [v.ownerMember, noteInT, t.entity],
+  );
+  await unchecked(
+    "notes",
+    `update public.notes set folder_id = $1 where id = $2`,
+    [v.folder, noteInT],
+  );
+
+  // t is closing and stays so; v's day has come.
+  await requestDeletion(t.owner, t.id, t.name);
+  await requestDeletion(v.owner, v.id, v.name);
+  await hdMakeDue(v.id);
+  const tBefore = await hdSnapshot(t.id);
+  await hdBegin(v.id);
+  await hdRemoveObjects(v.id);
+  assert.equal(await hdStep(v.id), true);
+
+  // v is gone, with the rows that hung across.
+  const gone = await hdSnapshot(v.id);
+  for (const table of Object.keys(HD_TABLES))
+    assert.deepEqual(gone[table], [], table);
+  for (const [table, id] of [
+    ["hives", v.id],
+    ["workspaces", astride],
+    ["notes", astrideNote.id],
+  ])
+    assert.equal(
+      (
+        await db.query(
+          `select count(*)::int as n from public.${table} where id = $1`,
+          [id],
+        )
+      ).rows[0].n,
+      0,
+      table,
+    );
+  assert.ok((await hdRecord(v.id)).purged_at);
+  // t lost only what pointed into v: the tag with v's entity, and the two
+  // references the foreign keys emptied.
+  const tAfter = await hdSnapshot(t.id);
+  assert.deepEqual(tAfter, {
+    ...tBefore,
+    notes: tBefore.notes.map((n) =>
+      n.id === noteInT ? { ...n, folder_id: null } : n,
+    ),
+    note_entities: tBefore.note_entities
+      .filter((r) => r.entity_id !== v.entity2)
+      .map((r) => (r.note_id === noteInT ? { ...r, confirmed_by: null } : r)),
+  });
+  assert.equal(tBefore.note_entities.length, tAfter.note_entities.length + 1);
+
+  // And t is as frozen as it was: none of this lets a delete of its own
+  // through, not of a note, not of a member, and not of the account of a
+  // person who is in it.
+  await assert.rejects(
+    as(both, `delete from public.notes where id = $1 returning 1`, [noteInT]),
+    FROZEN,
+  );
+  for (const [sql, params] of [
+    [`delete from public.members where id = $1`, [inT]],
+    [`delete from auth.users where id = $1`, [v.memberUser]],
+    [`delete from auth.users where id = $1`, [t.memberUser]],
+    [`delete from public.workspaces where id = $1`, [spaceInT]],
+    [`delete from public.entities where id = $1`, [t.entity]],
+    [`update public.notes set folder_id = null where id = $1`, [noteInT]],
+    [`update public.files set note_id = null where id = $1`, [t.file]],
+    [
+      `update public.invitations set invited_by = null where id = $1`,
+      [t.invitation],
+    ],
+  ])
+    await assert.rejects(asDbOwner(null, sql, params), FROZEN, sql);
+  assert.deepEqual(await hdSnapshot(t.id), tAfter);
+  assert.equal(
+    (
+      await db.query(
+        `select count(*)::int as n from auth.users where id = any ($1::uuid[])`,
+        [[v.memberUser, t.memberUser]],
+      )
+    ).rows[0].n,
+    2,
+  );
+});
+
+test("nobody truncates a hive's tables through the API", async () => {
+  const h = await hdHive();
+  const before = await hdSnapshot(h.id);
+  for (const table of [...Object.keys(HD_TABLES), ...HD_OPEN]) {
+    const rights = (
+      await db.query(
+        `select has_table_privilege('anon', $1, 'truncate') as anon,
+                has_table_privilege('authenticated', $1, 'truncate') as signed_in`,
+        [`public.${table}`],
+      )
+    ).rows[0];
+    assert.deepEqual(rights, { anon: false, signed_in: false }, table);
+    for (const who of [h.owner, h.member, h.memberAgent, h.pass, null])
+      for (const sql of [
+        `truncate public.${table}`,
+        `truncate public.${table} cascade`,
+      ]) {
+        const r = await trial(who, sql);
+        assert.match(r.error?.message ?? "(it worked)", DENIED, sql);
+      }
+  }
+  assert.deepEqual(await hdSnapshot(h.id), before);
+});
+
+// ---------------------------------------------------------------------------
+// Workspaces: a name of 1 to 60 characters and at most 20 for one member
+// (20261124110155_workspace_cap.sql). The app makes a workspace when a person
+// imports a folder of notes.
+// ---------------------------------------------------------------------------
+const WS_NO_NAME = /a workspace needs a name/;
+const WS_LONG_NAME = /that workspace name is too long/;
+const WS_CAP = /you already have 20 workspaces/;
+const WS_POLICY = /row-level security/;
+// A person with a hive of their own: one member, one workspace ("Main").
+let wsPeople = 0;
+const wsPerson = async () => {
+  const who = await hivePerson();
+  const hiveId = await startHive(who, `Workspaces ${++wsPeople}`);
+  const [mine] = await membershipsOf(who.sub);
+  return { who, hive: hiveId, member: mine.id };
+};
+const addSpace = (p, name, who = p.who) =>
+  as(
+    who,
+    `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, $3) returning id, name`,
+    [p.hive, p.member, name],
+  ).then((r) => r[0]);
+const spacesOf = async (member) =>
+  (
+    await db.query(
+      `select name from public.workspaces where member_id = $1 order by name`,
+      [member],
+    )
+  ).rows.map((r) => r.name);
+const fillSpaces = async (p) => {
+  for (let n = 2; n <= 20; n++) await addSpace(p, `Space ${n}`);
+};
+const notTheLimit = (e) => {
+  assert.doesNotMatch(String(e), WS_CAP);
+  return true;
+};
+
+test("a workspace needs a name of 1 to 60 characters, stored trimmed", async () => {
+  const p = await wsPerson();
+  for (const name of ["", "   ", ALL_SPACE, null])
+    await assert.rejects(addSpace(p, name), WS_NO_NAME, JSON.stringify(name));
+  await assert.rejects(addSpace(p, "x".repeat(61)), WS_LONG_NAME);
+  // Counted in characters, after trimming.
+  const sixty = "é".repeat(60);
+  assert.equal((await addSpace(p, ` ${sixty}\t`)).name, sixty);
+  assert.equal(
+    (await addSpace(p, `${ALL_SPACE}Research notes${ALL_SPACE}`)).name,
+    "Research notes",
+  );
+  // Only white space is trimmed: a v at either end stays, and so does the
+  // white space inside.
+  assert.equal((await addSpace(p, "vault  v")).name, "vault  v");
+  assert.deepEqual(
+    await spacesOf(p.member),
+    ["Main", "Research notes", "vault  v", sixty].sort(),
+  );
+
+  // A name that differs only by the white space around it is the same name.
+  await assert.rejects(addSpace(p, " Research notes "), /unique|duplicate/);
+
+  // A new name is held to the same rules, whoever gives it. A person cannot
+  // rename a workspace at all: there is no update policy.
+  const rename = (to, from) =>
+    asDbOwner(
+      null,
+      `update public.workspaces set name = $1 where member_id = $2 and name = $3 returning name`,
+      [to, p.member, from],
+    );
+  assert.deepEqual(await rename("  Renamed ", "Research notes"), [
+    { name: "Renamed" },
+  ]);
+  await assert.rejects(rename(" \n ", "Renamed"), WS_NO_NAME);
+  await assert.rejects(rename("y".repeat(61), "Renamed"), WS_LONG_NAME);
+  assert.deepEqual(
+    await as(
+      p.who,
+      `update public.workspaces set name = 'Mine now' where member_id = $1 returning name`,
+      [p.member],
+    ),
+    [],
+  );
+  assert.deepEqual(
+    await spacesOf(p.member),
+    ["Main", "Renamed", "vault  v", sixty].sort(),
+  );
+});
+
+test("a member has at most 20 workspaces; other members are not affected", async () => {
+  const p = await wsPerson();
+  await fillSpaces(p);
+  assert.equal((await spacesOf(p.member)).length, 20);
+
+  await assert.rejects(addSpace(p, "One too many"), WS_CAP);
+  await assert.rejects(addSpace(p, "One too many"), WS_CAP);
+  // The trigger binds the database's owner as well.
+  await assert.rejects(
+    asDbOwner(
+      null,
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'One too many')`,
+      [p.hive, p.member],
+    ),
+    WS_CAP,
+  );
+  // A name that is wrong is said before the limit.
+  await assert.rejects(addSpace(p, " "), WS_NO_NAME);
+  await assert.rejects(addSpace(p, "x".repeat(61)), WS_LONG_NAME);
+  assert.equal((await spacesOf(p.member)).length, 20);
+
+  // Another member of the same hive still makes theirs.
+  const guest = await hivePerson();
+  const guestMember = await addMember(p.hive, guest.sub, "Guest");
+  const g = { who: guest, hive: p.hive, member: guestMember };
+  assert.equal((await addSpace(g, "Guest notes")).name, "Guest notes");
+  // And so does the same person as a member of another hive: the limit is a
+  // member's, not a person's.
+  const second = await startHive(p.who, `Workspaces ${wsPeople} again`);
+  const elsewhere = (await membershipsOf(p.who.sub)).find(
+    (m) => m.hive_id === second,
+  );
+  assert.deepEqual(elsewhere.workspaces, ["Main"]);
+  assert.equal(
+    (await addSpace({ ...p, hive: second, member: elsewhere.id }, "Second"))
+      .name,
+    "Second",
+  );
+
+  // A name can still change at the limit, and a deleted workspace makes room
+  // for one.
+  await asDbOwner(
+    null,
+    `update public.workspaces set name = 'Space two' where member_id = $1 and name = 'Space 2'`,
+    [p.member],
+  );
+  await as(
+    p.who,
+    `delete from public.workspaces where member_id = $1 and name = 'Space 3'`,
+    [p.member],
+  );
+  assert.equal((await addSpace(p, "Room again")).name, "Room again");
+  await assert.rejects(addSpace(p, "One too many"), WS_CAP);
+  const names = await spacesOf(p.member);
+  assert.equal(names.length, 20);
+  assert.ok(names.includes("Space two") && !names.includes("Space 3"));
+});
+
+test("nobody learns from the limit how many workspaces somebody else has", async () => {
+  const p = await wsPerson();
+  await fillSpaces(p);
+  const guest = await hivePerson();
+  await addMember(p.hive, guest.sub, "Guest");
+  const other = await wsPerson();
+  // A colleague and a stranger naming the member who is at the limit get the
+  // policy's answer, the one they get for a member who is not.
+  for (const who of [guest, other.who])
+    await assert.rejects(addSpace(p, "Not mine", who), WS_POLICY);
+  await assert.rejects(addSpace(other, "Not mine", guest), WS_POLICY);
+  // A visitor and a signed-in token with nobody behind it are not told either.
+  await assert.rejects(addSpace(p, "Not mine", null), notTheLimit);
+  await assert.rejects(
+    addSpace(p, "Not mine", { role: "authenticated" }),
+    notTheLimit,
+  );
+  assert.equal((await spacesOf(p.member)).length, 20);
+});
+
+test("an agent and an app pass still cannot make a workspace", async () => {
+  const count = async () =>
+    (await db.query(`select count(*)::int as n from public.workspaces`)).rows[0]
+      .n;
+  const before = await count();
+  const mine = { hive, member: members.sara };
+  for (const tier of ["vendor", "self_hosted"])
+    await assert.rejects(
+      addSpace(mine, "By an agent", await agentFor("sara", tier)),
+      WS_POLICY,
+    );
+  await assert.rejects(
+    addSpace(mine, "By an app", passOf(person("sara"))),
+    WS_POLICY,
+  );
+  await assert.rejects(
+    addSpace(mine, "By a visitor", null),
+    /row-level security|permission denied/,
+  );
+  assert.equal(await count(), before);
+  // The person themselves still can.
+  const made = await addSpace(mine, "By Sara", person("sara"));
+  assert.equal(made.name, "By Sara");
+  await as(person("sara"), `delete from public.workspaces where id = $1`, [
+    made.id,
+  ]);
+});
+
+test("a hive that is being deleted, and a workspace across two hives, answer as before", async () => {
+  const h = await hdHive();
+  const o = await hdHive();
+  const owner = { who: h.owner, hive: h.id, member: h.ownerMember };
+  // The owner has "Main" and "Spare": 18 more makes 20.
+  for (let n = 3; n <= 20; n++) await addSpace(owner, `Space ${n}`);
+  await assert.rejects(addSpace(owner, "One too many"), WS_CAP);
+
+  // Across two hives: the member's hive is not the row's. Said before the
+  // name and before the limit.
+  for (const name of ["Astride", "", "x".repeat(61)])
+    await assert.rejects(
+      asDbOwner(
+        null,
+        `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, $3)`,
+        [o.id, h.ownerMember, name],
+      ),
+      /a workspace belongs to its member's hive/,
+      JSON.stringify(name),
+    );
+
+  await requestDeletion(h.owner, h.id, h.name);
+  // Closing: the freeze answers, whatever the name and at the limit.
+  for (const name of ["One too many", "", "x".repeat(61)])
+    await assert.rejects(addSpace(owner, name), FROZEN, JSON.stringify(name));
+  await assert.rejects(
+    asDbOwner(null, `update public.workspaces set name = '' where id = $1`, [
+      h.spareSpace,
+    ]),
+    FROZEN,
+  );
+  await assert.rejects(
+    addSpace({ who: h.member, hive: h.id, member: h.memberMember }, "New"),
+    FROZEN,
+  );
+  assert.equal((await spacesOf(h.ownerMember)).length, 20);
+
+  // Cancelled: the workspace's own rules answer again.
+  await cancelDeletion(h.owner, h.id);
+  await assert.rejects(addSpace(owner, "One too many"), WS_CAP);
+  await assert.rejects(addSpace(owner, ""), WS_NO_NAME);
+});
+
+// ------------------------------------------------------------ a note's dates
+// created_at is when a note was written, updated_at when it last changed. Only
+// a person sets them (an import does, for a note written long ago); for an
+// agent or a connected app they are the real moment. notes_before_write
+// decides, so these tests read the stored row.
+
+const ND_WRITTEN = "2024-03-14T12:00:00.000Z";
+const ND_CHANGED = "2024-06-01T09:30:00.000Z";
+// No date a person sets is before this.
+const ND_FLOOR = "1990-01-01T00:00:00.000Z";
+const ndRow = async (id) => {
+  const r = (
+    await db.query(
+      `select created_at, updated_at, version, written_by_agent as agent
+         from public.notes where id = $1`,
+      [id],
+    )
+  ).rows[0];
+  return {
+    created: r.created_at.toISOString(),
+    updated: r.updated_at.toISOString(),
+    version: r.version,
+    agent: r.agent,
+  };
+};
+// Within a minute of this moment: the dates in these tests are months off.
+const ndIsNow = (iso) => Math.abs(Date.now() - Date.parse(iso)) < 60_000;
+const ndFromNow = (ms) => new Date(Date.now() + ms).toISOString();
+const ND_DAY = 86_400_000;
+// A note of `name`'s, written by `who` (or by the database's owner: `run`),
+// with the given columns beside the usual ones.
+const ndAdd = (who, name, path, cols = {}, run = as) => {
+  const keys = Object.keys(cols);
+  return run(
+    who,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, body${keys
+      .map((k) => `, ${k}`)
+      .join("")})
+     values ($1, $2, $3, $4, $5, 'body'${keys
+       .map((_, i) => `, $${i + 6}`)
+       .join("")}) returning id`,
+    [
+      hive,
+      members[name],
+      ws[name],
+      `nd/${path}`,
+      `nd ${path}`,
+      ...Object.values(cols),
+    ],
+  ).then((r) => r[0].id);
+};
+// `set` is the text after "set"; its parameters start at $2.
+const ndSet = (who, id, set, params = [], run = as) =>
+  run(who, `update public.notes set ${set} where id = $1 returning id`, [
+    id,
+    ...params,
+  ]);
+const ndVersions = async (id) =>
+  (
+    await db.query(
+      `select count(*)::int as n from public.note_versions where note_id = $1`,
+      [id],
+    )
+  ).rows[0].n;
+
+test("a person gives a note the dates it was written and last changed", async () => {
+  const id = await ndAdd(person("dani"), "dani", "kept.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  const row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.equal(row.updated, ND_CHANGED);
+  assert.equal(row.version, 1);
+
+  // Only the written date: the note last changed now.
+  const half = await ndRow(
+    await ndAdd(person("dani"), "dani", "written-only.md", {
+      created_at: ND_WRITTEN,
+    }),
+  );
+  assert.equal(half.created, ND_WRITTEN);
+  assert.ok(ndIsNow(half.updated));
+
+  // No date at all: both are now, as before.
+  const plain = await ndRow(await ndAdd(person("dani"), "dani", "plain.md"));
+  assert.ok(ndIsNow(plain.created));
+  assert.ok(ndIsNow(plain.updated));
+});
+
+test("a date in the future is cut back to now", async () => {
+  const id = await ndAdd(person("dani"), "dani", "future.md", {
+    created_at: ndFromNow(ND_DAY),
+    updated_at: ndFromNow(2 * ND_DAY),
+  });
+  let row = await ndRow(id);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.ok(ndIsNow(row.updated), row.updated);
+
+  // A past written date with a future change: only the change is cut back.
+  const mixed = await ndRow(
+    await ndAdd(person("dani"), "dani", "future-change.md", {
+      created_at: ND_WRITTEN,
+      updated_at: ndFromNow(ND_DAY),
+    }),
+  );
+  assert.equal(mixed.created, ND_WRITTEN);
+  assert.ok(ndIsNow(mixed.updated), mixed.updated);
+
+  // The same when the dates are changed afterwards.
+  await ndSet(person("dani"), id, "created_at = $2, updated_at = $2", [
+    ND_WRITTEN,
+  ]);
+  await ndSet(person("dani"), id, "created_at = $2, updated_at = $3", [
+    ndFromNow(ND_DAY),
+    ndFromNow(2 * ND_DAY),
+  ]);
+  row = await ndRow(id);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 1);
+});
+
+test("a note never changed before it was written", async () => {
+  const id = await ndAdd(person("dani"), "dani", "order.md", {
+    created_at: ND_CHANGED,
+    updated_at: ND_WRITTEN,
+  });
+  let row = await ndRow(id);
+  assert.equal(row.created, ND_CHANGED);
+  assert.equal(row.updated, ND_CHANGED);
+
+  // By an update of the change alone, and of the written date alone.
+  await ndSet(person("dani"), id, "updated_at = $2", [ND_WRITTEN]);
+  row = await ndRow(id);
+  assert.equal(row.created, ND_CHANGED);
+  assert.equal(row.updated, ND_CHANGED);
+  await ndSet(person("dani"), id, "created_at = $2, updated_at = $2", [
+    ND_WRITTEN,
+  ]);
+  await ndSet(person("dani"), id, "created_at = $2", [ND_CHANGED]);
+  row = await ndRow(id);
+  assert.equal(row.created, ND_CHANGED);
+  assert.equal(row.updated, ND_CHANGED);
+});
+
+test("an agent's and an app's dates are the real moment, whatever they send", async () => {
+  const sent = { created_at: ND_WRITTEN, updated_at: ND_CHANGED };
+  const check = async (id, what) => {
+    const row = await ndRow(id);
+    assert.ok(ndIsNow(row.created), `${what}: created ${row.created}`);
+    assert.ok(ndIsNow(row.updated), `${what}: updated ${row.updated}`);
+  };
+  const agent = await agentFor("dani");
+  await check(await ndAdd(agent, "dani", "by-agent.md", sent), "an agent");
+  const held = await agentFor("dani", "self_hosted");
+  await check(
+    await ndAdd(held, "dani", "by-held-agent.md", sent),
+    "a self-hosted agent",
+  );
+
+  // An app pass writes no note at all (notes_no_app).
+  const pass = passOf(person("dani"));
+  await assert.rejects(
+    ndAdd(pass, "dani", "by-app.md", sent),
+    /row-level security/,
+  );
+  // The rule is the trigger's own and does not lean on that policy: with
+  // row-level security out of the way the dates are still the real moment.
+  // The same for a self-hosted claim that names no agent.
+  await check(
+    await ndAdd(pass, "dani", "by-app-owner.md", sent, asDbOwner),
+    "an app pass",
+  );
+  await check(
+    await ndAdd(
+      { ...person("dani"), aud: "another-audience" },
+      "dani",
+      "by-audience.md",
+      sent,
+      asDbOwner,
+    ),
+    "a token for another audience",
+  );
+  await check(
+    await ndAdd(
+      selfHosted("dani"),
+      "dani",
+      "by-self-hosted.md",
+      sent,
+      asDbOwner,
+    ),
+    "a self-hosted claim",
+  );
+  await asDbOwner(null, `select 1`);
+});
+
+test("a person corrects only the dates: no new version, the same writer", async () => {
+  const agent = await agentFor("dani");
+  const id = await ndAdd(agent, "dani", "corrected.md");
+  const before = await ndRow(id);
+  assert.equal(before.agent, agent.agent_id);
+
+  const done = await ndSet(
+    person("dani"),
+    id,
+    "created_at = $2, updated_at = $3",
+    [ND_WRITTEN, ND_CHANGED],
+  );
+  assert.equal(done.length, 1);
+  assert.deepEqual(await ndRow(id), {
+    created: ND_WRITTEN,
+    updated: ND_CHANGED,
+    version: 1,
+    agent: agent.agent_id,
+  });
+  assert.equal(await ndVersions(id), 1);
+
+  // Nobody else's note: a colleague's update reaches no row.
+  await as(
+    person("dani"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [id],
+  );
+  const other = await ndSet(person("ahmed"), id, "created_at = $2", [
+    "2020-01-01T00:00:00.000Z",
+  ]);
+  assert.equal(other.length, 0);
+  assert.equal((await ndRow(id)).created, ND_WRITTEN);
+});
+
+test("an agent or an app cannot change when a note was written", async () => {
+  const agent = await agentFor("dani");
+  const id = await ndAdd(person("dani"), "dani", "fixed.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  const kept = {
+    created: ND_WRITTEN,
+    updated: ND_CHANGED,
+    version: 1,
+    agent: null,
+  };
+  const other = "2020-01-01T00:00:00.000Z";
+  const pass = passOf(person("dani"));
+
+  // Unchanged content: both dates keep their old values.
+  for (const set of [
+    "created_at = $2",
+    "updated_at = $2",
+    "created_at = $2, updated_at = $2",
+    "created_at = $2, body = body",
+  ]) {
+    assert.equal((await ndSet(agent, id, set, [other])).length, 1, set);
+    assert.deepEqual(await ndRow(id), kept, set);
+    await ndSet(pass, id, set, [other], asDbOwner);
+    assert.deepEqual(await ndRow(id), kept, `an app pass: ${set}`);
+    await ndSet(selfHosted("dani"), id, set, [other], asDbOwner);
+    assert.deepEqual(await ndRow(id), kept, `a self-hosted claim: ${set}`);
+  }
+  // Through the API an app pass reaches no row.
+  assert.equal((await ndSet(pass, id, "created_at = $2", [other])).length, 0);
+  assert.deepEqual(await ndRow(id), kept);
+
+  // With a change of content: the written date still stays, the change is
+  // now, whatever was sent.
+  await ndSet(
+    agent,
+    id,
+    "body = 'by the agent', created_at = $2, updated_at = $2",
+    [other],
+  );
+  const row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 2);
+  assert.equal(row.agent, agent.agent_id);
+  await asDbOwner(null, `select 1`);
+});
+
+test("a person's date is never before 1990", async () => {
+  const tooOld = "1975-01-01T00:00:00.000Z";
+  const id = await ndAdd(person("dani"), "dani", "too-old.md", {
+    created_at: tooOld,
+    updated_at: tooOld,
+  });
+  let row = await ndRow(id);
+  assert.equal(row.created, ND_FLOOR);
+  assert.equal(row.updated, ND_FLOOR);
+
+  // The same when the dates are changed afterwards, one at a time.
+  const later = await ndAdd(person("dani"), "dani", "too-old-later.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  await ndSet(person("dani"), later, "created_at = $2", [tooOld]);
+  row = await ndRow(later);
+  assert.equal(row.created, ND_FLOOR);
+  assert.equal(row.updated, ND_CHANGED);
+  await ndSet(person("dani"), later, "updated_at = $2", [tooOld]);
+  row = await ndRow(later);
+  assert.equal(row.created, ND_FLOOR);
+  assert.equal(row.updated, ND_FLOOR);
+  assert.equal(row.version, 1);
+
+  // And when they come with a change of content.
+  const edited = await ndAdd(person("dani"), "dani", "too-old-edited.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  await ndSet(
+    person("dani"),
+    edited,
+    "body = 'edited', created_at = $2, updated_at = $2",
+    [tooOld],
+  );
+  row = await ndRow(edited);
+  assert.equal(row.created, ND_FLOOR);
+  assert.equal(row.updated, ND_FLOOR);
+  assert.equal(row.version, 2);
+
+  // The first moment allowed is kept as it is.
+  const first = await ndRow(
+    await ndAdd(person("dani"), "dani", "first-day.md", {
+      created_at: ND_FLOOR,
+      updated_at: ND_FLOOR,
+    }),
+  );
+  assert.equal(first.created, ND_FLOOR);
+  assert.equal(first.updated, ND_FLOOR);
+});
+
+test("an agent's change of content is stamped now, whatever date is sent", async () => {
+  const agent = await agentFor("dani");
+  const id = await ndAdd(person("dani"), "dani", "edited-by-agent.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  const sent = "2024-07-01T00:00:00.000Z";
+  const check = async (version, by, what) => {
+    const row = await ndRow(id);
+    assert.equal(row.created, ND_WRITTEN, what);
+    assert.ok(ndIsNow(row.updated), `${what}: ${row.updated}`);
+    assert.equal(row.version, version, what);
+    assert.equal(row.agent, by, what);
+  };
+  const back = () =>
+    asDbOwner(null, `update public.notes set updated_at = $2 where id = $1`, [
+      id,
+      ND_CHANGED,
+    ]);
+
+  await ndSet(agent, id, "body = 'one', updated_at = $2", [sent]);
+  await check(2, agent.agent_id, "an agent, a past date");
+  await back();
+  await ndSet(agent, id, "body = 'two', updated_at = $2", [ndFromNow(ND_DAY)]);
+  await check(3, agent.agent_id, "an agent, a future date");
+  await back();
+  await ndSet(agent, id, "body = 'three'");
+  await check(4, agent.agent_id, "an agent, no date");
+
+  // The same for an app pass, a self-hosted claim and the server with no
+  // person behind the call, with row-level security out of the way.
+  await back();
+  await ndSet(
+    passOf(person("dani")),
+    id,
+    "body = 'four', updated_at = $2",
+    [sent],
+    asDbOwner,
+  );
+  await check(5, null, "an app pass");
+  await back();
+  await ndSet(
+    selfHosted("dani"),
+    id,
+    "body = 'five', updated_at = $2",
+    [sent],
+    asDbOwner,
+  );
+  await check(6, null, "a self-hosted claim");
+  await back();
+  await ndSet(null, id, "body = 'six', updated_at = $2", [sent], asDbOwner);
+  await check(7, null, "the server");
+  await asDbOwner(null, `select 1`);
+});
+
+test("a person's change of content is stamped now, or with the past date they send", async () => {
+  const id = await ndAdd(person("dani"), "dani", "edited.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  const sent = "2024-07-01T00:00:00.000Z";
+
+  // No date sent: now.
+  await ndSet(person("dani"), id, "body = 'edited'");
+  let row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 2);
+  assert.equal(await ndVersions(id), 2);
+
+  // A date other than the old one: it is kept. The change is still a new
+  // version, and the person is its writer.
+  await ndSet(person("dani"), id, "body = 'from a file', updated_at = $2", [
+    sent,
+  ]);
+  row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.equal(row.updated, sent);
+  assert.equal(row.version, 3);
+  assert.equal(row.agent, null);
+  assert.equal(await ndVersions(id), 3);
+
+  // The old date sent again, or null: now.
+  await ndSet(person("dani"), id, "body = 'same date', updated_at = $2", [
+    sent,
+  ]);
+  row = await ndRow(id);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 4);
+  await ndSet(person("dani"), id, "updated_at = $2", [sent]);
+  await ndSet(person("dani"), id, "body = 'no date', updated_at = null");
+  row = await ndRow(id);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 5);
+
+  // A future one is cut back to now.
+  await ndSet(person("dani"), id, "updated_at = $2", [sent]);
+  await ndSet(person("dani"), id, "body = 'future', updated_at = $2", [
+    ndFromNow(ND_DAY),
+  ]);
+  row = await ndRow(id);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 6);
+
+  // One before the note was written is raised to the written date, the new
+  // one when both are sent.
+  await ndSet(person("dani"), id, "body = 'too early', updated_at = $2", [
+    "2024-01-01T00:00:00.000Z",
+  ]);
+  row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.equal(row.updated, ND_WRITTEN);
+  await ndSet(
+    person("dani"),
+    id,
+    "body = 'both', created_at = $2, updated_at = $3",
+    [ND_CHANGED, "2024-05-01T00:00:00.000Z"],
+  );
+  row = await ndRow(id);
+  assert.equal(row.created, ND_CHANGED);
+  assert.equal(row.updated, ND_CHANGED);
+  assert.equal(row.version, 8);
+
+  // A person may send the written date alone with the new text; a future one
+  // is cut back as ever.
+  await ndSet(person("dani"), id, "body = 'again', created_at = $2", [
+    ND_WRITTEN,
+  ]);
+  row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.equal(row.version, 9);
+  await ndSet(person("dani"), id, "title = 'a third', created_at = $2", [
+    ndFromNow(ND_DAY),
+  ]);
+  row = await ndRow(id);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.ok(ndIsNow(row.updated), row.updated);
+  assert.ok(row.updated >= row.created);
+  assert.equal(row.version, 10);
+});
+
+test("importing an edited file again finds it unchanged", async () => {
+  // The import sends the new text and the file's last-modified time in one
+  // update. The stored date is then the file's, so the next run sees no
+  // difference.
+  const id = await ndAdd(person("dani"), "dani", "imported.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_WRITTEN,
+  });
+  await ndSet(person("dani"), id, "body = 'edited file', updated_at = $2", [
+    ND_CHANGED,
+  ]);
+  const row = await ndRow(id);
+  assert.equal(row.created, ND_WRITTEN);
+  assert.equal(row.updated, ND_CHANGED);
+  assert.equal(row.version, 2);
+});
+
+// A file has one date, created_at, and the map shows it. Nobody sets it
+// through the API: files_keep_date makes it the real moment.
+const ndFile = (who, name, file, made, run = as) =>
+  run(
+    who,
+    `insert into public.files (hive_id, member_id, workspace_id, storage_path, name, created_at)
+     values ($1, $2, $3, $4, $5, $6) returning id`,
+    [hive, members[name], ws[name], filePath(name, file), file, made],
+  ).then((r) => r[0].id);
+const ndFileMade = async (id) =>
+  (
+    await db.query(`select created_at from public.files where id = $1`, [id])
+  ).rows[0].created_at.toISOString();
+
+test("nobody sets a file's date through the API", async () => {
+  const old = "2013-01-01T00:00:00.000Z";
+  const agent = await agentFor("dani");
+  const callers = [
+    ["a person", person("dani"), as],
+    ["an agent", agent, as],
+    ["an app pass", passOf(person("dani")), asDbOwner],
+    [
+      "a token for another audience",
+      { ...person("dani"), aud: "another-audience" },
+      asDbOwner,
+    ],
+  ];
+  const ids = {};
+  for (const [what, who, run] of callers) {
+    const file = `nd-dated-${what.replaceAll(" ", "-")}.pdf`;
+    for (const sent of [old, ndFromNow(ND_DAY)]) {
+      const id = await ndFile(
+        who,
+        "dani",
+        `${sent.slice(0, 4)}-${file}`,
+        sent,
+        run,
+      );
+      const made = await ndFileMade(id);
+      assert.ok(ndIsNow(made), `${what}, sent ${sent}: ${made}`);
+      ids[what] = id;
+    }
+  }
+  // Through the API an app pass writes no file at all (files_no_app).
+  await assert.rejects(
+    ndFile(passOf(person("dani")), "dani", "nd-dated-by-app.pdf", old),
+    /row-level security/,
+  );
+
+  // An update cannot change it. Through the API no update reaches a file
+  // (there is no update policy); with row-level security out of the way the
+  // date still keeps its old value.
+  const id = ids["a person"];
+  const made = await ndFileMade(id);
+  const set = `update public.files set created_at = $2 where id = $1 returning id`;
+  for (const who of [person("dani"), agent]) {
+    assert.equal((await as(who, set, [id, old])).length, 0);
+    assert.equal(await ndFileMade(id), made);
+  }
+  for (const [what, who] of [
+    ...callers.map(([w, c]) => [w, c]),
+    ["a self-hosted claim", selfHosted("dani")],
+  ]) {
+    for (const sent of [old, ndFromNow(ND_DAY)]) {
+      assert.equal((await asDbOwner(who, set, [id, sent])).length, 1, what);
+      assert.equal(await ndFileMade(id), made, `${what}, sent ${sent}`);
+    }
+    await asDbOwner(
+      who,
+      `update public.files set name = 'renamed', created_at = null where id = $1`,
+      [id],
+    );
+    assert.equal(await ndFileMade(id), made, `${what}, null`);
+  }
+
+  // The server with no person behind the call is not checked, as for notes.
+  const served = await ndFile(
+    null,
+    "dani",
+    "nd-dated-server.pdf",
+    old,
+    asDbOwner,
+  );
+  assert.equal(await ndFileMade(served), old);
+  await asDbOwner(null, set, [served, ND_WRITTEN]);
+  assert.equal(await ndFileMade(served), ND_WRITTEN);
+  await asDbOwner(null, `select 1`);
+});
+
+test("an update that sends no date changes no date", async () => {
+  const id = await ndAdd(person("dani"), "dani", "shared-later.md", {
+    created_at: ND_WRITTEN,
+    updated_at: ND_CHANGED,
+  });
+  await ndSet(person("dani"), id, "visibility = 'group'");
+  await ndSet(person("dani"), id, "path = 'nd/moved.md'");
+  assert.deepEqual(await ndRow(id), {
+    created: ND_WRITTEN,
+    updated: ND_CHANGED,
+    version: 1,
+    agent: null,
+  });
+
+  // The server, with no person behind the call (the database's owner, the
+  // service key), is not checked: it writes the dates it sends, as before.
+  const old = "2000-01-01T00:00:00.000Z";
+  const served = await ndAdd(
+    null,
+    "dani",
+    "by-server.md",
+    { updated_at: old },
+    asDbOwner,
+  );
+  let row = await ndRow(served);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.equal(row.updated, old);
+  // A person sharing that note sends no date, so none changes.
+  await ndSet(person("dani"), served, "visibility = 'group'");
+  row = await ndRow(served);
+  assert.ok(ndIsNow(row.created), row.created);
+  assert.equal(row.updated, old);
+  await asDbOwner(null, `select 1`);
+});
+
+test("the map gives each note and file the date it was made", async () => {
+  const note = await ndAdd(person("dani"), "dani", "on-the-map.md", {
+    created_at: ND_WRITTEN,
+  });
+  const file = await addFile(person("dani"), "dani", "nd-on-the-map.pdf", note);
+  const fileMade = (
+    await db.query(`select created_at from public.files where id = $1`, [file])
+  ).rows[0].created_at.toISOString();
+  const iso = (v) => new Date(Date.parse(v)).toISOString();
+
+  // The owner, and a colleague for whom both are locked.
+  for (const who of ["dani", "ahmed"]) {
+    const m = await map(person(who));
+    const n = nodeOf(m, note);
+    assert.equal(n.locked, who === "ahmed", who);
+    assert.equal(iso(n.created_at), ND_WRITTEN, who);
+    assert.ok(ndIsNow(n.updated_at), who);
+    const f = nodeOf(m, file);
+    assert.equal(f.locked, who === "ahmed", who);
+    assert.equal(iso(f.created_at), fileMade, who);
+    assert.equal(iso(f.updated_at), fileMade, who);
+  }
+  // Every item carries it, and the order is still by last change.
+  const m = await map(person("dani"));
+  for (const n of m.nodes) assert.ok(n.created_at, n.id);
+  const times = m.nodes.map((n) => Date.parse(n.updated_at));
+  for (let i = 1; i < times.length; i++) assert.ok(times[i - 1] >= times[i]);
+});
+
+// ---------------------------------------------------------------- deleting a workspace
+// 20261124160731_workspace_delete.sql. Who may delete a workspace is the
+// workspaces_delete policy's answer, as before; these cover what the delete
+// must not break and the record it leaves.
+
+const WS_LAST = /^error: you need at least one workspace$/;
+const WS_AGENT = /^error: this workspace still has an agent in use$/;
+const WS_FILES = /^error: this workspace still holds files$/;
+
+const dropSpace = (who, id) =>
+  as(who, `delete from public.workspaces where id = $1 returning id`, [id]);
+const spaceThere = async (id) =>
+  (await db.query(`select 1 from public.workspaces where id = $1`, [id])).rows
+    .length === 1;
+const noteIn = async (p, space, path) =>
+  (
+    await as(
+      p.who,
+      `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+       values ($1, $2, $3, $4, $4, 'text') returning id`,
+      [p.hive, p.member, space, path],
+    )
+  )[0].id;
+const notesIn = async (space) =>
+  (
+    await db.query(
+      `select count(*)::int as n from public.notes where workspace_id = $1`,
+      [space],
+    )
+  ).rows[0].n;
+const spaceAudits = async (since) =>
+  (await auditSince(since)).filter((r) => r.action === "workspace.deleted");
+
+test("a person deletes a workspace of their own, with its folders, notes and links", async () => {
+  const p = await wsPerson();
+  const [main] = await as(
+    p.who,
+    `select id from public.workspaces where member_id = $1`,
+    [p.member],
+  );
+  const old = await addSpace(p, "Old import");
+  await as(
+    p.who,
+    `insert into public.folders (workspace_id, member_id, path) values ($1, $2, 'a')`,
+    [old.id, p.member],
+  );
+  const kept = await noteIn(p, main.id, "kept.md");
+  const one = await noteIn(p, old.id, "a/one.md");
+  const two = await noteIn(p, old.id, "a/two.md");
+  await as(
+    p.who,
+    `insert into public.links (hive_id, from_note, to_note, tier, score)
+     values ($1, $2, $3, 2, 0.8), ($1, $2, $4, 2, 0.8)`,
+    [p.hive, one, two, kept],
+  );
+  const mark = await lastAudit();
+
+  assert.deepEqual(await dropSpace(p.who, old.id), [{ id: old.id }]);
+
+  assert.equal(await spaceThere(old.id), false);
+  assert.equal(await notesIn(old.id), 0);
+  assert.equal(await notesIn(main.id), 1);
+  const left = await db.query(
+    `select
+       (select count(*)::int from public.folders where workspace_id = $1) as folders,
+       (select count(*)::int from public.links where from_note = $2 or to_note = $2
+                                                  or from_note = $3 or to_note = $3) as links,
+       (select count(*)::int from public.note_versions where note_id in ($2, $3)) as versions`,
+    [old.id, one, two],
+  );
+  assert.deepEqual(left.rows[0], { folders: 0, links: 0, versions: 0 });
+  assert.deepEqual(await spacesOf(p.member), ["Main"]);
+
+  // One row for the workspace, with counts and nothing that names it.
+  const rows = await spaceAudits(mark);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hive_id, p.hive);
+  assert.equal(rows[0].member_id, p.member);
+  assert.equal(rows[0].agent_id, null);
+  assert.equal(rows[0].note_id, null);
+  assert.deepEqual(rows[0].detail, { notes: 2, folders: 1 });
+  // Each note still leaves its own row.
+  assert.equal(
+    (await auditSince(mark)).filter((r) => r.action === "note.deleted").length,
+    2,
+  );
+});
+
+test("a member keeps at least one workspace", async () => {
+  const p = await wsPerson();
+  const [main] = await as(
+    p.who,
+    `select id from public.workspaces where member_id = $1`,
+    [p.member],
+  );
+  const mark = await lastAudit();
+  await assert.rejects(dropSpace(p.who, main.id), WS_LAST);
+  assert.equal(await spaceThere(main.id), true);
+  assert.deepEqual(await spaceAudits(mark), []);
+
+  // "Main" is a workspace like any other: with a second one, it may go.
+  const other = await addSpace(p, "Second");
+  assert.deepEqual(await dropSpace(p.who, main.id), [{ id: main.id }]);
+  await assert.rejects(dropSpace(p.who, other.id), WS_LAST);
+  assert.deepEqual(await spacesOf(p.member), ["Second"]);
+
+  // Both of two in one statement: neither goes.
+  const third = await addSpace(p, "Third");
+  await assert.rejects(
+    as(p.who, `delete from public.workspaces where member_id = $1`, [p.member]),
+    WS_LAST,
+  );
+  assert.deepEqual(await spacesOf(p.member), ["Second", "Third"]);
+  assert.equal(await spaceThere(third.id), true);
+});
+
+test("a workspace with an agent in use, or with files, is not deleted", async () => {
+  const p = await wsPerson();
+  const space = await addSpace(p, "Busy");
+  const made = (
+    await as(
+      p.who,
+      `select * from public.create_agent($1, 'Busy agent', 'other', 'vendor')`,
+      [space.id],
+    )
+  )[0];
+  await assert.rejects(dropSpace(p.who, space.id), WS_AGENT);
+  assert.equal(await spaceThere(space.id), true);
+
+  await as(p.who, `select public.revoke_agent($1)`, [made.agent_id]);
+  const path = `${p.member}/${space.id}/report.pdf`;
+  const [file] = await as(
+    p.who,
+    `insert into public.files (hive_id, member_id, workspace_id, storage_path, name)
+     values ($1, $2, $3, $4, 'a file') returning id`,
+    [p.hive, p.member, space.id, path],
+  );
+  await assert.rejects(dropSpace(p.who, space.id), WS_FILES);
+  assert.equal(await spaceThere(space.id), true);
+
+  await as(p.who, `delete from public.files where id = $1`, [file.id]);
+  // A revoked agent does not hold the workspace: it goes with it.
+  assert.deepEqual(await dropSpace(p.who, space.id), [{ id: space.id }]);
+  assert.equal(
+    (
+      await db.query(`select 1 from public.agents where id = $1`, [
+        made.agent_id,
+      ])
+    ).rows.length,
+    0,
+  );
+});
+
+test("only its owner, as a person, deletes a workspace", async () => {
+  const made = await addSpace(
+    { hive, member: members.sara },
+    "Sara's second",
+    person("sara"),
+  );
+  const mark = await lastAudit();
+  // Somebody else's workspace is not theirs to see: no row, no refusal that
+  // says anything about it.
+  for (const who of [person("dani"), person("ahmed"), person("outsider")])
+    assert.deepEqual(await dropSpace(who, made.id), []);
+  for (const tier of ["vendor", "self_hosted"])
+    assert.deepEqual(
+      await dropSpace(await agentFor("sara", tier), made.id),
+      [],
+    );
+  assert.deepEqual(await dropSpace(passOf(person("sara")), made.id), []);
+  // A visitor is refused outright or finds no row, by the grants.
+  const visitor = await dropSpace(null, made.id).catch((e) => e);
+  assert.ok(
+    Array.isArray(visitor)
+      ? visitor.length === 0
+      : /row-level security|permission denied/.test(String(visitor)),
+  );
+  assert.equal(await spaceThere(made.id), true);
+  assert.deepEqual(await spaceAudits(mark), []);
+
+  assert.deepEqual(await dropSpace(person("sara"), made.id), [{ id: made.id }]);
+});
+
+test("a workspace in a hive that is being deleted stays", async () => {
+  const p = await wsPerson();
+  const space = await addSpace(p, "Frozen");
+  const name = (
+    await db.query(`select name from public.hives where id = $1`, [p.hive])
+  ).rows[0].name;
+  await as(p.who, `select public.request_hive_deletion($1, $2)`, [
+    p.hive,
+    name,
+  ]);
+  await assert.rejects(dropSpace(p.who, space.id), FROZEN);
+  assert.equal(await spaceThere(space.id), true);
+});
+
+test("the last workspace still goes with its member, and the database's owner is not held", async () => {
+  const p = await wsPerson();
+  const mark = await lastAudit();
+  // The database's owner, outside the API: the rules are the app's, not its.
+  const extra = await addSpace(p, "Extra");
+  await as(
+    p.who,
+    `select * from public.create_agent($1, 'Extra agent', 'other', 'vendor')`,
+    [extra.id],
+  );
+  await asDbOwner(null, `delete from public.workspaces where id = $1`, [
+    extra.id,
+  ]);
+  assert.equal(await spaceThere(extra.id), false);
+
+  await asDbOwner(null, `delete from public.members where id = $1`, [p.member]);
+  assert.deepEqual(await spacesOf(p.member), []);
+  // Nobody was signed in: no record.
+  assert.deepEqual(await spaceAudits(mark), []);
+});
+
+// ---------------------------------------------------------------- topics
+// <stamp>_topics.sql. A topic is a row of public.entities; a note is attached
+// to it by a row of public.note_entities.
+
+const TP_POLICY = /row-level security/;
+const addTopic = (who, hiveId, kind, name, aliases = []) =>
+  as(
+    who,
+    `insert into public.entities (hive_id, type, canonical_name, aliases)
+     values ($1, $2, $3, $4) returning id, canonical_name, aliases`,
+    [hiveId, kind, name, aliases],
+  ).then((r) => r[0]);
+const tpNote = (name, path) =>
+  as(
+    person(name),
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+     values ($1, $2, $3, $4, $4, 'text') returning id`,
+    [hive, members[name], ws[name], path],
+  ).then((r) => r[0].id);
+const attachTopic = (who, note, topic, confidence = 0.9) =>
+  as(
+    who,
+    `insert into public.note_entities (note_id, entity_id, confidence)
+     values ($1, $2, $3) returning note_id`,
+    [note, topic, confidence],
+  );
+const detachTopic = (who, note, topic, at = "2026-11-24T12:00:00Z") =>
+  as(
+    who,
+    `update public.note_entities set detached_at = $3
+      where note_id = $1 and entity_id = $2 returning note_id`,
+    [note, topic, at],
+  );
+const pairsOf = (who, note) =>
+  as(
+    who,
+    `select entity_id, detached_at is not null as detached
+       from public.note_entities where note_id = $1`,
+    [note],
+  );
+// Refused outright or answered with no row, by the grants and the policies.
+const nothingDone = async (run) => {
+  const out = await run.catch((e) => e);
+  assert.ok(
+    Array.isArray(out)
+      ? out.length === 0
+      : /row-level security|permission denied/.test(String(out)),
+    String(out),
+  );
+};
+
+test("only the hive's owner, as a person, makes a topic; a vendor and a subject are kinds", async () => {
+  const vendor = await addTopic(
+    person("dani"),
+    hive,
+    "vendor",
+    "tp Terra Drone",
+  );
+  const subject = await addTopic(
+    person("dani"),
+    hive,
+    "subject",
+    "tp Flare inspection",
+  );
+  assert.ok(vendor.id && subject.id);
+
+  await assert.rejects(
+    addTopic(person("ahmed"), hive, "vendor", "tp By Ahmed"),
+    TP_POLICY,
+  );
+  await assert.rejects(
+    addTopic(await agentFor("dani"), hive, "vendor", "tp By an agent"),
+    TP_POLICY,
+  );
+  await assert.rejects(
+    addTopic(passOf(person("dani")), hive, "vendor", "tp By an app"),
+    TP_POLICY,
+  );
+
+  // Every member of the hive reads the list; nobody outside it does.
+  const seen = async (who) =>
+    (
+      await as(who, `select id from public.entities where id = any($1)`, [
+        [vendor.id, subject.id],
+      ])
+    ).length;
+  assert.equal(await seen(person("ahmed")), 2);
+  assert.equal(await seen(person("outsider")), 0);
+});
+
+test("a topic's name and aliases are trimmed and bounded", async () => {
+  const dani = person("dani");
+  for (const name of ["", "   ", null])
+    await assert.rejects(
+      addTopic(dani, hive, "client", name),
+      /a topic needs a name/,
+    );
+  await assert.rejects(
+    addTopic(dani, hive, "client", "x".repeat(81)),
+    /that topic name is too long/,
+  );
+  const made = await addTopic(dani, hive, "client", "  tp Zain \t", [
+    " ZainTech ",
+    "",
+    "ZainTech",
+    "Zain KSA",
+  ]);
+  assert.equal(made.canonical_name, "tp Zain");
+  assert.deepEqual(made.aliases, ["ZainTech", "Zain KSA"]);
+
+  await assert.rejects(
+    addTopic(dani, hive, "client", "tp Long alias", ["y".repeat(81)]),
+    /that topic alias is too long/,
+  );
+  await assert.rejects(
+    addTopic(
+      dani,
+      hive,
+      "client",
+      "tp Many aliases",
+      Array.from({ length: 21 }, (_, i) => `alias ${i}`),
+    ),
+    /a topic has at most 20 aliases/,
+  );
+  // The same name of the same kind, once trimmed, is the same topic.
+  await assert.rejects(
+    addTopic(dani, hive, "client", " tp Zain "),
+    /unique|duplicate/,
+  );
+});
+
+test("a hive has at most 2000 topics, and nobody outside learns how many it has", async () => {
+  const who = await hivePerson();
+  const full = await startHive(who, `Topics cap ${Date.now()}`);
+  await asDbOwner(
+    null,
+    `insert into public.entities (hive_id, type, canonical_name)
+     select $1, 'subject', 'cap ' || g from generate_series(1, 2000) g`,
+    [full],
+  );
+  await assert.rejects(
+    addTopic(who, full, "subject", "One too many"),
+    /this hive already has 2000 topics/,
+  );
+  // The trigger binds the database's owner as well.
+  await assert.rejects(
+    asDbOwner(
+      null,
+      `insert into public.entities (hive_id, type, canonical_name) values ($1, 'subject', 'Also too many')`,
+      [full],
+    ),
+    /this hive already has 2000 topics/,
+  );
+  // Somebody who does not own the hive gets the policy's answer, not the count.
+  const stranger = await addTopic(
+    person("ahmed"),
+    full,
+    "subject",
+    "Probe",
+  ).catch((e) => e);
+  assert.match(String(stranger), TP_POLICY);
+  assert.doesNotMatch(String(stranger), /2000/);
+});
+
+test("a person attaches their own notes; a colleague reads a note's topics only with the note", async () => {
+  const topic = await addTopic(
+    person("dani"),
+    hive,
+    "client",
+    "tp Attach client",
+  );
+  const note = await tpNote("ahmed", "tp/attach.md");
+
+  await assert.rejects(attachTopic(person("dani"), note, topic.id), TP_POLICY);
+  assert.equal((await attachTopic(person("ahmed"), note, topic.id)).length, 1);
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+
+  // The note is private: Sara reads neither it nor what it is attached to.
+  assert.deepEqual(await pairsOf(person("sara"), note), []);
+  // Shared with the hive's group, the way the sharing tests above this one do it. If this
+  // statement is refused, copy the share from "every sharing change leaves one audit row".
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [note],
+  );
+  assert.deepEqual(await pairsOf(person("sara"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+});
+
+test("only the note's owner, as a person, detaches and re-attaches; nothing else of the pair changes", async () => {
+  const topic = await addTopic(
+    person("dani"),
+    hive,
+    "client",
+    "tp Detach client",
+  );
+  const note = await tpNote("ahmed", "tp/detach.md");
+  await attachTopic(person("ahmed"), note, topic.id);
+  // Shared with the group, so the others read the pair: what stops them is the
+  // update policy's ownership check, not the select policy.
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [note],
+  );
+  assert.deepEqual(await pairsOf(person("sara"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+
+  await nothingDone(detachTopic(person("dani"), note, topic.id));
+  await nothingDone(detachTopic(person("sara"), note, topic.id));
+  await nothingDone(detachTopic(await agentFor("ahmed"), note, topic.id));
+  await nothingDone(detachTopic(passOf(person("ahmed")), note, topic.id));
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+
+  assert.equal((await detachTopic(person("ahmed"), note, topic.id)).length, 1);
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: true },
+  ]);
+  // A detached pair is still a pair: a second insert cannot bring it back.
+  await assert.rejects(
+    attachTopic(person("ahmed"), note, topic.id),
+    /unique|duplicate/,
+  );
+  // Only detached_at may be written.
+  await assert.rejects(
+    as(
+      person("ahmed"),
+      `update public.note_entities set confidence = 0.1 where note_id = $1 and entity_id = $2`,
+      [note, topic.id],
+    ),
+    /permission denied/,
+  );
+  // Clearing it attaches the note again.
+  assert.equal(
+    (await detachTopic(person("ahmed"), note, topic.id, null)).length,
+    1,
+  );
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: false },
+  ]);
+});
+
+test("a note and its topic are in one hive, and a hive that is being deleted takes neither", async () => {
+  const other = (
+    await db.query(
+      `select h.id from public.hives h join public.members m on m.hive_id = h.id
+        where m.user_id = $1 and h.name = 'Other hive'`,
+      [users.outsider],
+    )
+  ).rows[0].id;
+  const foreign = await addTopic(
+    person("outsider"),
+    other,
+    "client",
+    "tp Foreign",
+  );
+  const note = await tpNote("dani", "tp/one-hive.md");
+  await assert.rejects(attachTopic(person("dani"), note, foreign.id));
+
+  const who = await hivePerson();
+  const name = `Topics frozen ${Date.now()}`;
+  const closing = await startHive(who, name);
+  const kept = await addTopic(who, closing, "client", "Before closing");
+  await as(who, `select public.request_hive_deletion($1, $2)`, [closing, name]);
+  await assert.rejects(
+    addTopic(who, closing, "client", "After closing"),
+    FROZEN,
+  );
+  await assert.rejects(
+    as(who, `delete from public.entities where id = $1 returning id`, [
+      kept.id,
+    ]),
+    FROZEN,
+  );
+});
+
+test("an agent never removes a note from a topic: only the note's owner, as a person, deletes a pair", async () => {
+  const topic = await addTopic(
+    person("dani"),
+    hive,
+    "client",
+    "tp Delete client",
+  );
+  const note = await tpNote("ahmed", "tp/delete.md");
+  await attachTopic(person("ahmed"), note, topic.id);
+  // Shared with the group, so a colleague reads the pair: the delete policy is what stops them.
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [note],
+  );
+  // The owner said no: the pair is detached, and it has to stay to say so.
+  await detachTopic(person("ahmed"), note, topic.id);
+  const removeTopic = (who) =>
+    as(
+      who,
+      `delete from public.note_entities where note_id = $1 and entity_id = $2 returning note_id`,
+      [note, topic.id],
+    );
+
+  await nothingDone(removeTopic(await agentFor("ahmed")));
+  await nothingDone(removeTopic(passOf(person("ahmed"))));
+  await nothingDone(removeTopic(person("sara")));
+  await nothingDone(removeTopic(person("dani")));
+  assert.deepEqual(await pairsOf(person("ahmed"), note), [
+    { entity_id: topic.id, detached: true },
+  ]);
+
+  assert.equal((await removeTopic(person("ahmed"))).length, 1);
+  assert.deepEqual(await pairsOf(person("ahmed"), note), []);
+});
+
+// ---------------------------------------------------------------- topics on the map
+// <stamp>_topics_view.sql. Two more kinds, and map_graph carries each
+// readable note's topics and the hive's topic list.
+
+const TV_KINDS = [
+  "client",
+  "partner",
+  "project",
+  "vendor",
+  "product",
+  "solution",
+  "person",
+  "subject",
+];
+
+test("a partner and a solution are kinds, and they order as the app does", async () => {
+  const partner = await addTopic(person("dani"), hive, "partner", "tv Partner");
+  const solution = await addTopic(
+    person("dani"),
+    hive,
+    "solution",
+    "tv Solution",
+  );
+  assert.ok(partner.id && solution.id);
+
+  const ranks = (
+    await db.query(
+      `select k, public.topic_rank(k::public.entity_type) as r
+         from unnest($1::text[]) with ordinality as t(k, i) order by i`,
+      [TV_KINDS],
+    )
+  ).rows.map((r) => r.r);
+  assert.deepEqual(ranks, [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test("the map gives a readable note its topics, strongest first, at most five, and none that were detached", async () => {
+  const dani = person("dani");
+  const note = await tpNote("dani", "tv/seven.md");
+  const mk = (kind, name) => addTopic(dani, hive, kind, name);
+  const top = await mk("subject", "tv Zeta top");
+  const vendor = await mk("vendor", "tv Same conf vendor");
+  const partner = await mk("partner", "tv Same conf partner");
+  const alpha = await mk("client", "tv Alpha");
+  const beta = await mk("client", "tv Beta");
+  const cut = await mk("project", "tv Sixth");
+  const gone = await mk("product", "tv Detached");
+  await attachTopic(dani, note, top.id, 0.95);
+  await attachTopic(dani, note, vendor.id, 0.8);
+  await attachTopic(dani, note, partner.id, 0.8);
+  await attachTopic(dani, note, beta.id, 0.7);
+  await attachTopic(dani, note, alpha.id, 0.7);
+  await attachTopic(dani, note, cut.id, 0.5);
+  await attachTopic(dani, note, gone.id, 0.99);
+  await detachTopic(dani, note, gone.id);
+
+  assert.deepEqual(nodeOf(await map(dani), note).topics, [
+    top.id,
+    partner.id,
+    vendor.id,
+    alpha.id,
+    beta.id,
+  ]);
+});
+
+test("the map gives a note the viewer cannot read no topic", async () => {
+  const topic = await addTopic(person("dani"), hive, "client", "tv Private");
+  const note = await tpNote("ahmed", "tv/private.md");
+  await attachTopic(person("ahmed"), note, topic.id);
+
+  const locked = nodeOf(await map(person("dani")), note);
+  assert.equal(locked.locked, true);
+  assert.deepEqual(locked.topics, []);
+  assert.deepEqual(nodeOf(await map(person("ahmed")), note).topics, [topic.id]);
+
+  await as(
+    person("ahmed"),
+    `update public.notes set visibility = 'group' where id = $1`,
+    [note],
+  );
+  const seen = nodeOf(await map(person("sara")), note);
+  assert.equal(seen.locked, false);
+  assert.deepEqual(seen.topics, [topic.id]);
+});
+
+test("the map lists the hive's topics by kind, then name, and nobody else's", async () => {
+  const other = (
+    await as(
+      person("outsider"),
+      `select hive_id from public.members where user_id = $1`,
+      [users.outsider],
+    )
+  )[0].hive_id;
+  const theirs = await addTopic(
+    person("outsider"),
+    other,
+    "client",
+    "tv Outsider only",
+  );
+
+  const expected = (
+    await db.query(
+      `select id, canonical_name as name, type::text as kind
+         from public.entities where hive_id = $1
+        order by public.topic_rank(type), canonical_name, id`,
+      [hive],
+    )
+  ).rows;
+  assert.ok(expected.length > 5);
+  const got = (await map(person("dani"))).topics;
+  assert.deepEqual(got, expected);
+  assert.ok(!JSON.stringify(got).includes(theirs.id));
+  const theirMap = (await map(person("outsider"), other)).topics.map(
+    (t) => t.id,
+  );
+  assert.ok(theirMap.includes(theirs.id));
+  for (const t of got) assert.ok(!theirMap.includes(t.id), t.id);
+});
+
+test("a file's node carries no topic", async () => {
+  const note = await tpNote("dani", "tv/with-file.md");
+  await addFile(person("dani"), "dani", "tv-with-file.pdf", note);
+  const m = await map(person("dani"));
+  const files = m.nodes.filter((n) => n.kind === "file");
+  assert.ok(files.length > 0);
+  for (const f of files) assert.deepEqual(f.topics, [], f.id);
+  for (const n of m.nodes) assert.ok(Array.isArray(n.topics), n.id);
+});
+
+test("an agent and an app pass are still refused the map", async () => {
+  await assert.rejects(map(await agentFor("dani")), /map_graph is for people/);
+  await assert.rejects(
+    map(await agentFor("ahmed", "self_hosted")),
+    /map_graph is for people/,
+  );
+  await assert.rejects(
+    map(passOf(person("dani"))),
+    /an app pass cannot do this/,
+  );
+  await assert.rejects(map(person("outsider")), /not a member of this hive/);
+});
+
+// ------------------------------------------------------------ vault_index
+// The vault's note index for one of the caller's own workspaces in one call:
+// the same answers as the per-row columns the vault used to ask for
+// (note_visibility, note_shared_with, note_rule_folder, note_access and the
+// note's attached topics), and nothing at all for anyone who is not that
+// workspace's owner signed in as a person.
+
+// What the vault read before vault_index, column for column: the computed
+// columns on each note row and the note's attached topics, by entity id.
+const indexByColumns = (who, workspace) =>
+  as(
+    who,
+    `select n.id, n.workspace_id, n.member_id, n.path, n.title, n.updated_at,
+            n.written_by_agent, n.visibility, n.shared_with, n.quarantined,
+            public.note_visibility(n) as effective,
+            public.note_shared_with(n) as effective_with,
+            public.note_rule_folder(n) as rule_folder,
+            public.note_access(n) as access,
+            coalesce((select jsonb_agg(jsonb_build_object(
+                        'entity_id', e.entity_id, 'confidence', e.confidence)
+                        order by e.entity_id)
+                        from public.note_entities e
+                       where e.note_id = n.id and e.detached_at is null),
+                     '[]'::jsonb) as topics
+       from public.notes n
+      where n.workspace_id = $1
+      order by n.path`,
+    [workspace],
+  );
+const vaultIndex = (who, workspace) =>
+  as(who, `select * from public.vault_index($1)`, [workspace]);
+const byId = (rows) =>
+  [...rows]
+    .map((r) => ({
+      ...r,
+      topics: [...r.topics].sort((a, b) =>
+        a.entity_id < b.entity_id ? -1 : a.entity_id > b.entity_id ? 1 : 0,
+      ),
+    }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+let vi;
+const viFixture = async () => {
+  if (vi) return vi;
+  const owner = asUser(await addUser("vi-owner@example.com"));
+  const hiveId = (
+    await as(owner, `select public.create_hive('VI hive', 'Vi') as id`)
+  )[0].id;
+  const colleagueUser = await addUser("vi-colleague@example.com");
+  const colleague = asUser(colleagueUser);
+  const colleagueMember = await addMember(hiveId, colleagueUser, "Col");
+  const me = (
+    await as(owner, `select id from public.members where hive_id = $1`, [
+      hiveId,
+    ])
+  ).find(Boolean).id;
+  const workspace = (
+    await as(owner, `select id from public.workspaces where member_id = $1`, [
+      me,
+    ])
+  )[0].id;
+  // The owner's default: a note with no setting and no rule is the group's.
+  await as(
+    owner,
+    `update public.members set default_visibility = 'group' where id = $1`,
+    [me],
+  );
+  await as(
+    owner,
+    `insert into public.folders (workspace_id, member_id, path, visibility, shared_with)
+     values ($1, $2, 'x', 'members', $3), ($1, $2, 'x/y', 'group', '{}')`,
+    [workspace, me, [colleagueMember]],
+  );
+  const note = async (path, visibility = null, shared = []) =>
+    (
+      await as(
+        owner,
+        `insert into public.notes (hive_id, member_id, workspace_id, path, title, body, visibility, shared_with)
+         values ($1, $2, $3, $4, $4, 'text', $5, $6) returning id`,
+        [hiveId, me, workspace, path, visibility, shared],
+      )
+    )[0].id;
+  const a = await note("a.md");
+  const b = await note("x/b.md");
+  const c = await note("x/y/c.md");
+  const d = await note("z/d.md");
+  const kept = await note("x/kept.md", "private");
+  const named = await note("z/named.md", "members", [colleagueMember]);
+  // Held for review: still the owner's, still in the index.
+  await db.exec("reset role");
+  await db.query(`update public.notes set quarantined = true where id = $1`, [
+    d,
+  ]);
+  // Written by the owner's agent.
+  const made = (
+    await as(
+      owner,
+      `select * from public.create_agent($1, 'VI agent', 'other', 'vendor')`,
+      [workspace],
+    )
+  )[0];
+  const login = (
+    await as(null, `select * from public.agent_login($1)`, [made.token])
+  )[0];
+  const agent = {
+    sub: login.user_id,
+    role: "authenticated",
+    agent_id: login.agent_id,
+    workspace_id: login.workspace_id,
+    trust_tier: login.trust_tier,
+  };
+  await as(
+    agent,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+     values ($1, $2, $3, 'x/y/by-agent.md', 'by agent', 'text')`,
+    [hiveId, me, workspace],
+  );
+  // Two topics on one note, one of them detached.
+  const t1 = await addTopic(owner, hiveId, "client", "vi Client");
+  const t2 = await addTopic(owner, hiveId, "client", "vi Other");
+  await attachTopic(owner, b, t1.id, 0.8);
+  await attachTopic(owner, b, t2.id, 0.4);
+  await attachTopic(owner, c, t2.id, 0.7);
+  await detachTopic(owner, c, t2.id);
+  vi = {
+    owner,
+    colleague,
+    hiveId,
+    me,
+    workspace,
+    agent,
+    notes: { a, b, c, d, kept, named },
+    topics: { t1: t1.id, t2: t2.id },
+  };
+  return vi;
+};
+
+test("vault_index answers the owner's workspace exactly as the per-row columns do", async () => {
+  const f = await viFixture();
+  const got = await vaultIndex(f.owner, f.workspace);
+  const want = await indexByColumns(f.owner, f.workspace);
+  assert.equal(got.length, 7);
+  assert.deepEqual(byId(got), byId(want));
+  // Ordered by path.
+  assert.deepEqual(
+    got.map((r) => r.path),
+    want.map((r) => r.path),
+  );
+  // The fixture covers each answer the columns give.
+  const at = Object.fromEntries(got.map((r) => [r.path, r]));
+  assert.equal(at["a.md"].effective, "group");
+  assert.equal(at["a.md"].rule_folder, null);
+  assert.equal(at["x/b.md"].effective, "members");
+  assert.equal(at["x/b.md"].rule_folder, "x");
+  assert.equal(at["x/y/c.md"].effective, "group");
+  assert.equal(at["x/y/c.md"].rule_folder, "x/y");
+  assert.equal(at["x/kept.md"].effective, "private");
+  assert.equal(at["x/kept.md"].rule_folder, "x");
+  assert.deepEqual(at["x/kept.md"].effective_with, []);
+  assert.equal(at["z/named.md"].effective, "members");
+  assert.equal(at["z/d.md"].quarantined, true);
+  assert.ok(at["x/y/by-agent.md"].written_by_agent);
+  for (const r of got) assert.equal(r.access, "own");
+  // Attached topics only: the detached pair is left out, and none is [].
+  assert.deepEqual(
+    byId([at["x/b.md"]])[0].topics,
+    [
+      { entity_id: f.topics.t1, confidence: 0.8 },
+      { entity_id: f.topics.t2, confidence: 0.4 },
+    ].sort((a, b) => (a.entity_id < b.entity_id ? -1 : 1)),
+  );
+  assert.deepEqual(at["x/y/c.md"].topics, []);
+  assert.deepEqual(at["a.md"].topics, []);
+});
+
+test("vault_index matches the per-row columns on a long-used workspace too", async () => {
+  // Dani's workspace holds what every test above wrote into it: links,
+  // folder rules, files, held notes, topics.
+  const got = await vaultIndex(person("dani"), ws.dani);
+  assert.ok(got.length > 10);
+  assert.deepEqual(
+    byId(got),
+    byId(await indexByColumns(person("dani"), ws.dani)),
+  );
+});
+
+test("vault_index answers nobody but the workspace's owner, as a person", async () => {
+  const f = await viFixture();
+  // A colleague in the same hive, with the owner's workspace id.
+  assert.deepEqual(await vaultIndex(f.colleague, f.workspace), []);
+  // Someone in another hive, and a workspace id nobody has.
+  assert.deepEqual(await vaultIndex(person("outsider"), f.workspace), []);
+  assert.deepEqual(
+    await vaultIndex(f.owner, "6f1d1c3e-0000-4000-8000-000000000001"),
+    [],
+  );
+  // The owner's own workspace id, from Dani in another hive.
+  assert.deepEqual(await vaultIndex(person("dani"), f.workspace), []);
+  // The owner's agent, with its token for this very workspace.
+  assert.deepEqual(await vaultIndex(f.agent, f.workspace), []);
+  // A self-hosted claim on the owner's own session.
+  assert.deepEqual(
+    await vaultIndex({ ...f.owner, trust_tier: "self_hosted" }, f.workspace),
+    [],
+  );
+  // A connected app's pass, approved by the owner.
+  const client = await addClient("VI app", "https://vi.example.com/cb");
+  await addConsent(f.owner.sub, client);
+  assert.deepEqual(
+    await vaultIndex({ ...f.owner, client_id: client }, f.workspace),
+    [],
+  );
+  assert.deepEqual(await vaultIndex(passOf(f.owner), f.workspace), []);
+  // A token made for another audience.
+  assert.deepEqual(
+    await vaultIndex({ ...f.owner, aud: "elsewhere" }, f.workspace),
+    [],
+  );
+  // The public cannot call it at all.
+  await assert.rejects(vaultIndex(null, f.workspace), /permission denied/);
 });

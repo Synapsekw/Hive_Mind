@@ -9,7 +9,7 @@ import type {
   GalleryFile,
   GalleryPage,
 } from "../../gallery/types";
-import { ownHive } from "../own-hive";
+import { ownHive, sessionUserId } from "../own-hive";
 
 export type GalleryLoad =
   | { state: "ok"; data: GalleryData }
@@ -172,7 +172,7 @@ async function page(db: Db, cursor: Cursor | null): Promise<GalleryLoad> {
       .from("members")
       .select("id, display_name, user_id")
       .eq("hive_id", hiveId) as unknown as Promise<Res>,
-    db.auth.getUser(),
+    sessionUserId(db),
     index
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
@@ -181,7 +181,7 @@ async function page(db: Db, cursor: Cursor | null): Promise<GalleryLoad> {
   if (failed("members query", members)) return { state: "error" };
   if (failed("files query", files)) return { state: "error" };
 
-  const userId = user.data.user?.id;
+  const userId = user;
   if (!userId) return { state: "error" };
   const memberRows = rows(members);
   const mine = new Set(

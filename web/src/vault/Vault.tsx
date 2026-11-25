@@ -1,27 +1,67 @@
 "use client";
 
 // The vault screen. The only state holder: the chosen folder, the open folders and the filter,
-// all client state that survives choosing a note. The tab and the open note come from the URL;
-// writes go through `actions`, and the database decides whether they are allowed.
+// all client state that survives choosing a note. The tab comes from the URL. The open note
+// comes from the URL on a load; a click on a note asks the server for that note alone
+// (`actions.openNote`) and puts it in the address, so the list is not read again. Writes go
+// through `actions`, and the database decides whether they are allowed.
 import { usePathname, useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type CSSProperties,
   type MouseEvent,
 } from "react";
+import type { ImportActions } from "../import/types";
 import { Shell } from "../shell/Shell";
+import { AddNotes, type AddNotesKey } from "./AddNotes";
+import { Connect } from "./Connect";
+import { CONNECT, CONNECT_LINE } from "./connectText";
+import { Attach } from "./Attach";
+import { ATTACH, ATTACH_LINE } from "./attachText";
 import { Folders } from "./Folders";
+import { Import } from "./Import";
+import { IMPORT, IMPORT_LINE } from "./importText";
+import { PanelDialog } from "./PanelDialog";
 import { folderMark } from "./marks";
 import { NoteList } from "./NoteList";
+import { noteOfClick, openFrom, reduceOpen } from "./openNote";
+import { Summary } from "./Summary";
+import { overview, sharedOverview } from "./overview";
 import { Preview } from "./Preview";
-import { DELETE_FAILED, DELETED, UNLINK_FAILED } from "./sentences";
+import { ScopePicker } from "./ScopePicker";
+import { useNarrow } from "./useNarrow";
+import {
+  DELETE_FAILED,
+  DELETED,
+  LINK_COPIED,
+  LINK_NOT_COPIED,
+  UNLINK_FAILED,
+} from "./sentences";
 import { ShareControl } from "./ShareControl";
 import { Tabs } from "./Tabs";
+import { TopicList } from "./TopicList";
+import {
+  ALL_NOTES,
+  added,
+  BY_FOLDERS,
+  BY_TOPICS,
+  NO_TOPIC,
+  removed,
+  SWITCH,
+} from "./topicText";
+import { topicTree } from "./topicTree";
 import { buildTree, notesIn, type Scope, type TreeNode } from "./tree";
-import type { VaultActions, VaultData, VaultNote } from "./types";
+import type {
+  OpenAnswer,
+  TopicChange,
+  VaultActions,
+  VaultData,
+  VaultNote,
+} from "./types";
 import s from "./vault.module.css";
 
 const ancestors = (path: string) => {
@@ -45,6 +85,10 @@ type Local = {
   scope: Scope;
   opened: Set<string>;
   q: string;
+  /** The left column: the folder tree or the topic list. */
+  by: "folders" | "topics";
+  /** The kinds open in the topic list. */
+  kinds: Set<string>;
 };
 
 function fresh(data: VaultData, tab: string): Local {
@@ -54,6 +98,8 @@ function fresh(data: VaultData, tab: string): Local {
     scope: { kind: "all" },
     opened: new Set(open ? ancestors(open.path) : []),
     q: "",
+    by: "folders",
+    kinds: new Set(),
   };
 }
 
@@ -61,11 +107,14 @@ export function Vault({
   data: served,
   now,
   actions,
+  importer,
   inbox,
 }: {
   data: VaultData;
   now: number;
   actions: VaultActions;
+  /** Importing a folder of notes. Without it the vault offers no import. */
+  importer?: ImportActions;
   /** How much waits in the inbox, for the rail. */
   inbox?: number;
 }) {
@@ -80,34 +129,117 @@ export function Vault({
   const [said, setSaid] = useState<{ text: string; failed: boolean } | null>(
     null,
   );
-  // The note this screen shows or is on its way to: the one last served, or the one the person
-  // last asked for. The address is not asked; it changes only once a note has arrived.
-  const servedOpen =
-    served.open && "note" in served.open ? served.open.note.id : null;
-  const wanted = useRef<string | null>(servedOpen);
-  // A note that arrives is the one shown. A note that stops being served is not the person
-  // going elsewhere: it may be the very note a delete has just removed.
+  // The open note, held here: the one served, or the one the person last asked for.
+  const [opening, dispatch] = useReducer(reduceOpen, served.open, openFrom);
+  // A new server render (a load, a tab, a re-read after a change) brings its own open note; it
+  // is taken unless the person has since asked for another.
+  const [seenOpen, setSeenOpen] = useState(served.open);
+  if (seenOpen !== served.open) {
+    setSeenOpen(served.open);
+    dispatch({ type: "served", open: served.open });
+  }
+  // The note this screen shows or is on its way to, readable at once by the click that comes
+  // before the next render and by a delete that finishes after it.
+  const wanted = useRef<string | null>(opening.wanted);
   useEffect(() => {
-    if (servedOpen) wanted.current = servedOpen;
-  }, [servedOpen]);
+    wanted.current = opening.wanted;
+  }, [opening.wanted]);
+  // The id of the latest request for a note.
+  const seq = useRef(0);
+  // The note the preview shows now.
+  const shownId =
+    opening.open && "note" in opening.open ? opening.open.note.id : null;
   // Deletes on their way, by note: a second request for the same note joins the first.
   const deleting = useRef(new Map<string, Promise<boolean>>());
+  // The panel in the dialog over the vault: the import, connecting wiki links, attaching topics,
+  // or none; never two. While one is at work it cannot be closed, and the dialog covers the bar,
+  // so no other can be opened.
+  const [panel, setPanel] = useState<"import" | "connect" | "attach" | null>(
+    null,
+  );
+  const [panelBusy, setPanelBusy] = useState(false);
+  // The workspace the connect and attach panels were opened on: they keep it, whatever tab is
+  // opened meanwhile.
+  const [connectIn, setConnectIn] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  // The Add notes button, where the focus goes back to when a panel closes.
+  const addRef = useRef<HTMLButtonElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
+  const importing = panel === "import";
+  const connecting = panel === "connect" && connectIn !== null;
+  const attaching = panel === "attach" && connectIn !== null;
+  function closePanel() {
+    setPanel(null);
+    // Add notes is not there on "Shared with me", reached while a run was in flight: the
+    // filter is, so the focus never falls to the page.
+    (addRef.current ?? filterRef.current)?.focus();
+  }
   const main = useRef<HTMLElement>(null);
+  const narrow = useNarrow(main);
+  const [picking, setPicking] = useState(false);
+  // The popover belongs to the narrow card: wide again, it is closed for good.
+  useEffect(() => {
+    if (!narrow) setPicking(false);
+  }, [narrow]);
   // Where the focus goes once a deleted note has left the page.
   const target = useRef<{ row: HTMLElement | null } | null>(null);
 
-  // A press on a link to this screen says which note is wanted next, before it arrives.
-  function follow(e: MouseEvent<HTMLElement>) {
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
-      return;
-    const link = (e.target as Element).closest<HTMLAnchorElement>("a[href]");
-    if (!link || link.target === "_blank") return;
-    const to = new URL(link.href, window.location.href);
-    if (to.origin !== window.location.origin || to.pathname !== base) return;
-    const id = to.searchParams.get("note");
-    if (id && id !== wanted.current) setSaid(null);
+  /**
+   * Opens a note without reloading the page: the preview keeps what it shows until the note
+   * arrives, and only the latest request's answer is shown. `href`, when given, is pushed as
+   * the new address. A note of another tab than the one on screen is then read again by the
+   * server, which picks its tab, as a load of its address would.
+   */
+  async function openNote(id: string | null, href: string | null) {
+    const at = ++seq.current;
+    if (id !== wanted.current) setSaid(null);
     wanted.current = id;
+    dispatch({ type: "request", id, seq: at });
+    if (href !== null && href !== window.location.href)
+      window.history.pushState(null, "", href);
+    if (id === null) return;
+    let result: OpenAnswer;
+    try {
+      result = await actions.openNote(id);
+    } catch {
+      result = { ok: false };
+    }
+    dispatch({ type: "answer", seq: at, result });
+    if (at !== seq.current || !result.ok || !result.open) return;
+    if (!("note" in result.open)) return;
+    const n = result.open.note;
+    const tab = n.member_id === served.me ? n.workspace_id : "shared";
+    const shownTab = served.tab.kind === "shared" ? "shared" : served.tab.id;
+    if (tab !== shownTab) router.refresh();
   }
+
+  // A plain click on a link to a note of this screen (a row, a linked note) opens it here.
+  // Any other click (a modifier, another button, a new tab) is the browser's.
+  function follow(e: MouseEvent<HTMLElement>) {
+    const link = (e.target as Element).closest<HTMLAnchorElement>("a[href]");
+    if (!link) return;
+    const id = noteOfClick(e, link, window.location);
+    if (id === null) return;
+    e.preventDefault();
+    if (id === shownId && !opening.pending) return;
+    void openNote(id, link.href);
+  }
+
+  // Back and forward: the note the address names, without adding an entry.
+  const onPop = useRef<() => void>(() => {});
+  onPop.current = () => {
+    if (window.location.pathname !== base) return;
+    const id = new URLSearchParams(window.location.search).get("note");
+    if (id === shownId && !opening.pending) return;
+    void openNote(id, null);
+  };
+  useEffect(() => {
+    const pop = () => onPop.current();
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, []);
 
   function dismiss() {
     // The button leaves the page: the focus goes to the open note's row, else as after a delete.
@@ -120,19 +252,23 @@ export function Vault({
     setSaid(null);
   }
 
+  // Kept apart from the open note, so opening one does not make the list anew.
+  const notes = useMemo(
+    () =>
+      gone.size === 0
+        ? served.notes
+        : served.notes.filter((n) => !gone.has(n.id)),
+    [served.notes, gone],
+  );
   const data = useMemo<VaultData>(() => {
-    if (gone.size === 0 && unlinked.size === 0) return served;
-    let open = served.open;
-    if (open && "note" in open)
+    let open = opening.open;
+    if (open && "note" in open && (gone.size > 0 || unlinked.size > 0))
       open = gone.has(open.note.id)
         ? null
         : { ...open, links: open.links.filter((l) => !unlinked.has(l.id)) };
-    return {
-      ...served,
-      notes: served.notes.filter((n) => !gone.has(n.id)),
-      open,
-    };
-  }, [served, gone, unlinked]);
+    if (notes === served.notes && open === served.open) return served;
+    return { ...served, notes, open };
+  }, [served, notes, opening.open, gone, unlinked]);
 
   // Runs after every render, once the deleted note's row is out of the page.
   useEffect(() => {
@@ -195,6 +331,7 @@ export function Vault({
         // now names that tab itself; else a bare link to the note would fall back to the first
         // workspace.
         wanted.current = null;
+        dispatch({ type: "request", id: null, seq: ++seq.current });
         const q = new URLSearchParams(window.location.search);
         q.delete("note");
         if (shown.kind === "shared") {
@@ -248,27 +385,98 @@ export function Vault({
     return true;
   }
 
+  // Takes a topic off a note. The database decides whether the caller may; the page is read again
+  // once, and only when it worked. A refusal is said beside the chips, not here.
+  async function removeTopic(
+    noteId: string,
+    topicId: string,
+  ): Promise<boolean> {
+    setSaid(null);
+    let ok = false;
+    try {
+      ok = (await actions.detachTopic(noteId, topicId)).ok === true;
+    } catch {
+      ok = false;
+    }
+    if (!ok) return false;
+    const name = served.topics.find((t) => t.id === topicId)?.name ?? "";
+    setSaid({ text: removed(name), failed: false });
+    router.refresh();
+    return true;
+  }
+
+  async function addTopic(
+    noteId: string,
+    topicId: string,
+  ): Promise<TopicChange> {
+    setSaid(null);
+    let change: TopicChange = { ok: false, reason: "failed" };
+    try {
+      change = await actions.addTopic(noteId, topicId);
+    } catch {
+      change = { ok: false, reason: "failed" };
+    }
+    if (!change.ok) return change;
+    const name = served.topics.find((t) => t.id === topicId)?.name ?? "";
+    setSaid({ text: added(name), failed: false });
+    router.refresh();
+    return change;
+  }
+
   const tabKey = data.tab.kind === "shared" ? "shared" : data.tab.id;
   const [local, setLocal] = useState<Local>(() => fresh(data, tabKey));
   // A new tab starts from "All notes" with nothing filtered.
-  if (local.tab !== tabKey) setLocal(fresh(data, tabKey));
+  if (local.tab !== tabKey) {
+    setLocal(fresh(data, tabKey));
+    // The connect and attach panels belong to the workspace they were opened on. A run goes on
+    // to its counts.
+    if ((panel === "connect" || panel === "attach") && !panelBusy)
+      setPanel(null);
+  }
 
   const shared = data.tab.kind === "shared";
   const wsId = data.tab.kind === "workspace" ? data.tab.id : null;
+  // A workspace tab is always one of the person's own.
+  const ownWorkspace = wsId
+    ? (data.workspaces.find((w) => w.id === wsId) ?? null)
+    : null;
   const tree = useMemo(
     () => buildTree(data.notes, data.folders),
     [data.notes, data.folders],
   );
   const held = data.notes.filter((n) => n.quarantined).length;
+  const byTopic = useMemo(
+    () => topicTree(data.notes, data.topics),
+    [data.notes, data.topics],
+  );
 
-  // Drop a chosen folder or "Held" that the refreshed data no longer has.
+  // Drop a chosen folder, "Held" or topic that the refreshed data no longer has.
   let scope = local.scope;
   const folderNode = scope.kind === "folder" ? find(tree, scope.path) : null;
+  const topicNow = scope.kind === "topic" ? scope.id : null;
   if (
     (scope.kind === "folder" && !folderNode) ||
-    (scope.kind === "held" && held === 0)
+    (scope.kind === "held" && held === 0) ||
+    (scope.kind === "topic" &&
+      !byTopic.kinds.some((k) => k.topics.some((x) => x.id === topicNow))) ||
+    (scope.kind === "untopiced" && byTopic.none === 0)
   )
     scope = { kind: "all" };
+
+  const summary = useMemo(
+    () =>
+      shared
+        ? { kind: "shared" as const, data: sharedOverview(data.notes) }
+        : {
+            kind: "workspace" as const,
+            data: overview(data.notes, tree, now),
+          },
+    [data.notes, tree, now, shared],
+  );
+  const wsName =
+    ownWorkspace?.name ??
+    data.workspaces.find((w) => w.id === wsId)?.name ??
+    "";
 
   const listed = notesIn(data.notes, scope, local.q);
   const groups = shared ? byOwner(listed, data) : null;
@@ -300,13 +508,100 @@ export function Vault({
   let title = shared ? "Shared with me" : "All notes";
   if (scope.kind === "held") title = "Held";
   if (scope.kind === "folder") title = scope.path;
+  if (scope.kind === "untopiced") title = NO_TOPIC;
+  if (scope.kind === "topic")
+    title = data.topics.find((x) => x.id === scope.id)?.name ?? ALL_NOTES;
+
+  const scopeList = (
+    <>
+      <div role="group" aria-label={SWITCH} className={`${s.tabs} ${s.switch}`}>
+        {(
+          [
+            ["folders", BY_FOLDERS],
+            ["topics", BY_TOPICS],
+          ] as const
+        ).map(([by, label]) => (
+          <button
+            key={by}
+            type="button"
+            className={s.tab}
+            aria-pressed={local.by === by}
+            onClick={() =>
+              setLocal((l) =>
+                l.by === by ? l : { ...l, by, scope: { kind: "all" } },
+              )
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {local.by === "topics" ? (
+        <TopicList
+          tree={byTopic}
+          total={data.notes.length}
+          hiveEmpty={data.topics.length === 0}
+          scope={scope}
+          opened={local.kinds}
+          onScope={(next) => {
+            setPicking(false);
+            setLocal((l) => ({ ...l, scope: next }));
+          }}
+          onToggle={(kind) =>
+            setLocal((l) => {
+              const kinds = new Set(l.kinds);
+              if (kinds.has(kind)) kinds.delete(kind);
+              else kinds.add(kind);
+              return { ...l, kinds };
+            })
+          }
+        />
+      ) : (
+        <Folders
+          root={tree}
+          scope={scope}
+          opened={local.opened}
+          held={held}
+          members={data.members}
+          onScope={(next) => {
+            setPicking(false);
+            setLocal((l) => {
+              const opened = new Set(l.opened);
+              if (next.kind === "folder") opened.add(next.path);
+              return { ...l, scope: next, opened };
+            });
+          }}
+          onToggle={(path) =>
+            setLocal((l) => {
+              const opened = new Set(l.opened);
+              if (opened.has(path)) opened.delete(path);
+              else opened.add(path);
+              return { ...l, opened };
+            })
+          }
+        />
+      )}
+    </>
+  );
 
   const header = (
     <div className={s.listHead}>
       <div className={s.listTitleRow}>
-        <h2 className={s.listTitle} title={title}>
-          {title}
-        </h2>
+        {narrow && !shared ? (
+          <h2 className={s.listTitlePick}>
+            <ScopePicker
+              title={title}
+              open={picking && narrow}
+              onOpenChange={setPicking}
+            >
+              {scopeList}
+            </ScopePicker>
+          </h2>
+        ) : (
+          <h2 className={s.listTitle} title={title}>
+            {title}
+          </h2>
+        )}
         <span className={s.listCount}>{count(listed.length)}</span>
       </div>
       {scope.kind === "folder" && folderNode && wsId && (
@@ -352,6 +647,7 @@ export function Vault({
           <label className={s.filter}>
             <span className={s.srOnly}>Filter notes</span>
             <input
+              ref={filterRef}
               type="search"
               className={s.search}
               placeholder="Filter by title or path"
@@ -362,6 +658,24 @@ export function Vault({
               }}
             />
           </label>
+          {importer && !shared && (
+            <AddNotes
+              buttonRef={addRef}
+              items={[
+                { key: "import", name: IMPORT, line: IMPORT_LINE },
+                ...(ownWorkspace
+                  ? ([
+                      { key: "connect", name: CONNECT, line: CONNECT_LINE },
+                      { key: "attach", name: ATTACH, line: ATTACH_LINE },
+                    ] as const)
+                  : []),
+              ]}
+              onChoose={(key: AddNotesKey) => {
+                if (key !== "import") setConnectIn(ownWorkspace);
+                setPanel(key);
+              }}
+            />
+          )}
         </div>
         {/* How the last delete or unlink went. The status element is always here, so it is announced. */}
         <div
@@ -382,31 +696,44 @@ export function Vault({
             </button>
           )}
         </div>
-        <div className={s.cols} data-shared={shared || undefined}>
-          {!shared && (
-            <Folders
-              root={tree}
-              scope={scope}
-              opened={local.opened}
-              held={held}
-              members={data.members}
-              onScope={(next) =>
-                setLocal((l) => {
-                  const opened = new Set(l.opened);
-                  if (next.kind === "folder") opened.add(next.path);
-                  return { ...l, scope: next, opened };
-                })
-              }
-              onToggle={(path) =>
-                setLocal((l) => {
-                  const opened = new Set(l.opened);
-                  if (opened.has(path)) opened.delete(path);
-                  else opened.add(path);
-                  return { ...l, opened };
-                })
-              }
+        {importer && importing && (
+          <PanelDialog label={IMPORT} busy={panelBusy} onClose={closePanel}>
+            <Import
+              workspaces={data.workspaces}
+              current={wsId}
+              actions={importer}
+              hrefWorkspace={hrefWorkspace}
+              onClose={closePanel}
+              onBusy={setPanelBusy}
             />
-          )}
+          </PanelDialog>
+        )}
+        {importer && connecting && connectIn && (
+          <PanelDialog label={CONNECT} busy={panelBusy} onClose={closePanel}>
+            <Connect
+              workspace={connectIn}
+              connect={importer.connect}
+              onClose={closePanel}
+              onBusy={setPanelBusy}
+            />
+          </PanelDialog>
+        )}
+        {importer && attaching && connectIn && (
+          <PanelDialog label={ATTACH} busy={panelBusy} onClose={closePanel}>
+            <Attach
+              workspace={connectIn}
+              attach={importer.attach}
+              onClose={closePanel}
+              onBusy={setPanelBusy}
+            />
+          </PanelDialog>
+        )}
+        <div
+          className={s.cols}
+          data-shared={shared || undefined}
+          data-narrow={(narrow && !shared) || undefined}
+        >
+          {!shared && !narrow && <div className={s.folders}>{scopeList}</div>}
           <NoteList
             header={header}
             notes={listed}
@@ -415,16 +742,53 @@ export function Vault({
             hrefFor={hrefFor}
             now={now}
             members={data.members}
+            topics={data.topics}
             empty={empty}
             more={more}
           />
           <Preview
             data={data}
+            pending={opening.pending}
+            failed={opening.failed}
             onSave={actions.saveNote}
             onRelease={actions.release}
             onDelete={deleteNote}
             onUnlink={unlink}
+            onRemoveTopic={removeTopic}
+            onAddTopic={addTopic}
             hrefNote={hrefNote}
+            idle={
+              summary.kind === "shared" ? (
+                <Summary
+                  kind="shared"
+                  data={summary.data}
+                  hrefFor={hrefFor}
+                  now={now}
+                />
+              ) : (
+                <Summary
+                  kind="workspace"
+                  name={wsName}
+                  data={summary.data}
+                  hrefFor={hrefFor}
+                  now={now}
+                  onReview={() => {
+                    setPicking(false);
+                    setLocal((l) => ({
+                      ...l,
+                      by: "folders",
+                      scope: { kind: "held" },
+                    }));
+                  }}
+                />
+              )
+            }
+            onCopied={(ok) =>
+              setSaid({
+                text: ok ? LINK_COPIED : LINK_NOT_COPIED,
+                failed: !ok,
+              })
+            }
           />
         </div>
       </main>

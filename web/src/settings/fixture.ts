@@ -5,9 +5,12 @@
 // reads the clock.
 import type {
   Agent,
+  Deletion,
   Invitation,
   Member,
+  NoteHead,
   SettingsData,
+  TopicRow,
   Workspace,
 } from "./types";
 
@@ -15,8 +18,8 @@ const MAIN = "00000000-0000-4000-8000-0000000000e1";
 const DRA = "00000000-0000-4000-8000-0000000000e2";
 
 const WORKSPACES: Workspace[] = [
-  { id: MAIN, name: "Main" },
-  { id: DRA, name: "DRA" },
+  { id: MAIN, name: "Main", notes: 128 },
+  { id: DRA, name: "DRA", notes: 25 },
 ];
 
 const AGENTS: Agent[] = [
@@ -80,13 +83,90 @@ const INVITATIONS: Invitation[] = [
   },
 ];
 
+const TOPICS: TopicRow[] = [
+  {
+    id: "00000000-0000-4000-8000-0000000000a1",
+    kind: "client",
+    name: "Zain",
+    notes: 198,
+  },
+  {
+    id: "00000000-0000-4000-8000-0000000000a2",
+    kind: "vendor",
+    name: "Terra Drone",
+    notes: 0,
+  },
+];
+
+/** With `many`: thirty vendors beside the two sample topics, so a kind starts folded. */
+const MANY_TOPICS: TopicRow[] = Array.from({ length: 30 }, (_, i) => ({
+  id: `00000000-0000-4000-8000-0000000b${String(i).padStart(4, "0")}`,
+  kind: "vendor" as const,
+  name: `Supplier ${i + 1}`,
+  notes: i,
+}));
+
+/**
+ * With `many`, forty vendors the hive does not have. Otherwise the heads the dev page's scan
+ * answers: one new customer, one known, a partner named like the
+ * saved customer, a solution, a tag on five notes.
+ */
+export function fixtureHeads(many = false): NoteHead[] {
+  if (many)
+    return Array.from({ length: 40 }, (_, i) => ({
+      path: `Knowledge/Vendors/Maker ${i + 1}.md`,
+      title: `Maker ${i + 1}`,
+      type: "vendor",
+      aliases: [],
+      tags: [],
+    }));
+  const tagged = Array.from({ length: 5 }, (_, i) => ({
+    path: `Sessions/s${i}.md`,
+    title: `Session ${i}`,
+    type: "session",
+    aliases: [],
+    tags: ["flare-stack"],
+  }));
+  return [
+    {
+      path: "Employers/Orbit/_Index.md",
+      title: "Orbit Aerospace",
+      type: "client-entity",
+      aliases: [],
+      tags: [],
+    },
+    {
+      path: "Employers/Zain/_Index.md",
+      title: "Zain",
+      type: "client-entity",
+      aliases: [],
+      tags: [],
+    },
+    {
+      path: "Employers/Zain/Partners/Zain.md",
+      title: "Zain",
+      type: "partner-entity",
+      aliases: [],
+      tags: [],
+    },
+    {
+      path: "Knowledge/Categories/Underwater ROVs.md",
+      title: "Underwater ROVs",
+      type: "category",
+      aliases: [],
+      tags: [],
+    },
+    ...tagged,
+  ];
+}
+
 /**
  * The sample settings, as the owner Danijel sees them. `member` is Ahmed's view: not the owner,
  * the "you" mark on Ahmed, and no invitations, which only the owner can read. `none` has no
  * agents yet.
  */
 export function fixtureSettings(
-  opts: { member?: boolean; none?: boolean } = {},
+  opts: { member?: boolean; none?: boolean; many?: boolean } = {},
 ): SettingsData {
   const me = opts.member ? AHMED : DANIJEL;
   return {
@@ -96,5 +176,16 @@ export function fixtureSettings(
     agents: opts.none ? [] : AGENTS.map((a) => ({ ...a })),
     members: MEMBERS.map((m) => ({ ...m, isMe: m.id === me })),
     invitations: opts.member ? [] : INVITATIONS.map((i) => ({ ...i })),
+    topics: opts.member
+      ? []
+      : [...TOPICS, ...(opts.many ? MANY_TOPICS : [])].map((x) => ({ ...x })),
   };
 }
+
+/** What deleting the sample hive would erase. */
+export function fixtureDeletion(): Deletion {
+  return { members: MEMBERS.length, notes: 128, files: 14 };
+}
+
+/** When the sample hive is erased, in the view where it is being deleted. */
+export const FIXTURE_DELETE_AFTER = "2026-11-30T12:00:00.000Z";

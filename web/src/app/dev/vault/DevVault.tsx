@@ -4,11 +4,35 @@
 // `window.__vaultCalls` (for the browser tests) and answers as the database would. A deleted
 // note or an ended link leaves this page's sample data until the page is loaded again; a
 // colleague's note that was read only through that link goes with it. With `fail`, every write
-// is refused and the folder count is unavailable; with `slow`, deleting and unlinking take over
+// is refused and the folder count is unavailable; with `slow`, deleting, unlinking and changing a note's topics take over
 // a second.
-import { useMemo, useState } from "react";
-import { fixturePreview } from "../../../vault/fixture";
-import type { VaultActions, VaultData } from "../../../vault/types";
+// The import's stand-ins keep what was imported in memory, per workspace, with each note's two
+// dates, so a second import answers "unchanged", and "updated" when only a date is another. `failbatch` refuses a batch by its number ("2"), or every batch ("all");
+// `taken` and `limit` refuse a new workspace with that reason; with `slow` a batch takes most
+// of a second.
+// Connecting wiki links answers from memory too: 90 notes, 40 a step, each step 7 links made, 2
+// already there and 1 pointing at no note. `failconnect` refuses a step by its number ("2"), or
+// every step ("all"); with `slow` a step takes as long as a batch.
+// Attaching topics answers the same way over the same 90 notes: each step's notes are 3 in 5
+// attached, 1 in 5 already attached and 1 in 5 with no topic (24, 8 and 8 of 40; 6, 2 and 2 of
+// 10), 12 topics in the hive. `failattach` works as `failconnect`;
+// `notopics` answers that the hive has none.
+import { useMemo, useRef, useState } from "react";
+import { fixturePreview, fixtureVault } from "../../../vault/fixture";
+import type { AttachResult } from "../../../topics/types";
+import type {
+  BatchResult,
+  ConnectResult,
+  ImportActions,
+  Outcome,
+} from "../../../import/types";
+import { MAX_TOPICS_PER_NOTE } from "../../../topics/types";
+import type {
+  OpenAnswer,
+  TopicChange,
+  VaultActions,
+  VaultData,
+} from "../../../vault/types";
 import { Vault } from "../../../vault/Vault";
 
 declare global {
@@ -19,6 +43,22 @@ declare global {
 
 /** How long `deleteNote` and `unlink` take with `slow`: long enough to press something meanwhile. */
 const SLOW_WAIT = 1200;
+
+/** How long an import batch takes with `slow`. */
+const SLOW_BATCH = 900;
+
+/** Connecting wiki links: every workspace answers as one of 90 notes, read 40 a step. */
+const CONNECT_NOTES = 90;
+const CONNECT_STEP = 40;
+
+export type ImportFlags = {
+  failbatch: string | null;
+  failconnect: string | null;
+  failattach: string | null;
+  notopics: boolean;
+  taken: boolean;
+  limit: boolean;
+};
 
 const wait = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -32,36 +72,82 @@ export function DevVault({
   now,
   fail,
   slow,
+  failOpen = false,
+  importFlags,
 }: {
   data: VaultData;
   now: number;
   fail: boolean;
   slow: boolean;
+  /** Opening a note is refused, as when the read fails. */
+  failOpen?: boolean;
+  importFlags: ImportFlags;
 }) {
+  // Workspaces made by an import here, and what each workspace was sent, by path.
+  const [madeWorkspaces, setMadeWorkspaces] = useState<
+    readonly { id: string; name: string }[]
+  >([]);
+  const imported = useRef(new Map<string, string>());
+  const batchNo = useRef(0);
+  const connectNo = useRef(0);
+  const attachNo = useRef(0);
   const [deleted, setDeleted] = useState<readonly string[]>([]);
   const [unlinked, setUnlinked] = useState<readonly string[]>([]);
+  // Each note's topics once changed here, by note id; a note not in it shows its sample's.
+  const [changed, setChanged] = useState<Readonly<Record<string, string[]>>>(
+    {},
+  );
+  // The note last opened through `openNote` on this sample, as the server would serve it on a
+  // re-read of the address; a new sample (a load, a tab) brings its own.
+  const [asked, setAsked] = useState<{
+    sample: VaultData;
+    open: VaultData["open"];
+  } | null>(null);
+  const baseOpen = asked?.sample === sample ? asked.open : sample.open;
+  // A note as this page shows it now: a deleted note is missing, and so is a colleague's note
+  // whose only link was ended.
+  const view = (
+    raw: VaultData["open"],
+  ): { open: VaultData["open"]; closed: string | null } => {
+    if (!raw || !("note" in raw)) return { open: raw, closed: null };
+    const links = raw.links.filter((l) => !unlinked.includes(l.id));
+    if (deleted.includes(raw.note.id))
+      return { open: { missing: true }, closed: null };
+    if (raw.note.access === "link" && links.length === 0)
+      return { open: { missing: true }, closed: raw.note.id };
+    return { open: { ...raw, links }, closed: null };
+  };
   // The sample data without the notes deleted and the links ended here; asking for a deleted
   // note finds nothing, and neither does a colleague's note whose only link was ended.
   const data = useMemo<VaultData>(() => {
-    if (deleted.length === 0 && unlinked.length === 0) return sample;
-    let open = sample.open;
-    let closed: string | null = null;
-    if (open && "note" in open) {
-      const links = open.links.filter((l) => !unlinked.includes(l.id));
-      if (deleted.includes(open.note.id)) open = { missing: true };
-      else if (open.note.access === "link" && links.length === 0) {
-        closed = open.note.id;
-        open = { missing: true };
-      } else open = { ...open, links };
-    }
+    if (
+      deleted.length === 0 &&
+      unlinked.length === 0 &&
+      madeWorkspaces.length === 0 &&
+      Object.keys(changed).length === 0
+    )
+      return baseOpen === sample.open ? sample : { ...sample, open: baseOpen };
+    const withTopics = <N extends { id: string; topics: string[] }>(n: N): N =>
+      changed[n.id] ? { ...n, topics: changed[n.id]! } : n;
+    const { open, closed } = view(baseOpen);
     return {
       ...sample,
-      notes: sample.notes.filter(
-        (n) => !deleted.includes(n.id) && n.id !== closed,
-      ),
+      workspaces: [...sample.workspaces, ...madeWorkspaces],
+      notes: sample.notes
+        .filter((n) => !deleted.includes(n.id) && n.id !== closed)
+        .map(withTopics),
       open,
     };
-  }, [sample, deleted, unlinked]);
+  }, [sample, baseOpen, deleted, unlinked, madeWorkspaces, changed]);
+  /** A note's topics as this page shows them now. */
+  const topicsNow = (noteId: string): string[] => {
+    if (changed[noteId]) return changed[noteId]!;
+    const open = baseOpen && "note" in baseOpen ? baseOpen.note : null;
+    const found =
+      sample.notes.find((n) => n.id === noteId) ??
+      (open?.id === noteId ? open : null);
+    return found ? found.topics : [];
+  };
   const answer = async () =>
     fail ? { ok: false as const } : { ok: true as const };
   const actions: VaultActions = {
@@ -89,10 +175,154 @@ export function DevVault({
       if (!fail) setUnlinked((ids) => [...ids, linkId]);
       return answer();
     },
+    detachTopic: async (noteId, topicId) => {
+      record("detachTopic", [noteId, topicId]);
+      if (slow) await wait(SLOW_WAIT);
+      // As the server: only a pair that is still attached is taken off.
+      const carried = topicsNow(noteId);
+      if (fail || !carried.includes(topicId)) return { ok: false };
+      setChanged((c) => ({
+        ...c,
+        [noteId]: carried.filter((t) => t !== topicId),
+      }));
+      return { ok: true };
+    },
+    addTopic: async (noteId, topicId): Promise<TopicChange> => {
+      record("addTopic", [noteId, topicId]);
+      if (slow) await wait(SLOW_WAIT);
+      if (fail) return { ok: false, reason: "failed" };
+      // As the database: a note that is not the person's own is refused.
+      const open = baseOpen && "note" in baseOpen ? baseOpen.note : null;
+      const found =
+        sample.notes.find((n) => n.id === noteId) ??
+        (open?.id === noteId ? open : null);
+      if (!found || found.member_id !== sample.me || found.access !== "own")
+        return { ok: false, reason: "failed" };
+      const carried = topicsNow(noteId);
+      if (carried.includes(topicId)) return { ok: true };
+      if (carried.length >= MAX_TOPICS_PER_NOTE)
+        return { ok: false, reason: "full" };
+      setChanged((c) => ({ ...c, [noteId]: [...carried, topicId] }));
+      return { ok: true };
+    },
+    openNote: async (noteId): Promise<OpenAnswer> => {
+      record("openNote", [noteId]);
+      if (failOpen) return { ok: false };
+      const raw = fixtureVault(now, { note: noteId }).open;
+      setAsked({ sample, open: raw });
+      return { ok: true, open: view(raw).open };
+    },
     preview: async (workspaceId, path) => {
       record("preview", [workspaceId, path]);
       return fail ? null : fixturePreview(data, path);
     },
   };
-  return <Vault data={data} now={now} actions={actions} />;
+  const importer: ImportActions = {
+    createWorkspace: async (name) => {
+      record("createWorkspace", [name]);
+      if (importFlags.taken) return { ok: false, reason: "taken" };
+      if (importFlags.limit) return { ok: false, reason: "limit" };
+      if (fail) return { ok: false, reason: "failed" };
+      const id = `imported-${madeWorkspaces.length + 1}`;
+      setMadeWorkspaces((list) => [...list, { id, name }]);
+      return { ok: true, id };
+    },
+    importBatch: async (workspaceId, notes): Promise<BatchResult> => {
+      record("importBatch", [workspaceId, notes]);
+      batchNo.current += 1;
+      const no = batchNo.current;
+      if (slow) await wait(SLOW_BATCH);
+      if (
+        importFlags.failbatch === "all" ||
+        importFlags.failbatch === String(no)
+      )
+        return { ok: false };
+      return {
+        ok: true,
+        outcomes: notes.map((n) => {
+          const key = `${workspaceId}\n${n.path}`;
+          // The dates count: the same note with another date answers "updated".
+          const sent = JSON.stringify([
+            n.title,
+            n.body,
+            n.frontmatter,
+            n.written_at ?? null,
+            n.modified_at ?? null,
+          ]);
+          const before = imported.current.get(key);
+          imported.current.set(key, sent);
+          const outcome: Outcome =
+            before === undefined
+              ? "created"
+              : before === sent
+                ? "unchanged"
+                : "updated";
+          return { path: n.path, outcome };
+        }),
+      };
+    },
+    connect: async (workspaceId, after): Promise<ConnectResult> => {
+      record("connect", [workspaceId, after]);
+      connectNo.current += 1;
+      const no = connectNo.current;
+      if (slow) await wait(SLOW_BATCH);
+      if (
+        importFlags.failconnect === "all" ||
+        importFlags.failconnect === String(no)
+      )
+        return { ok: false };
+      // The cursor is how many notes were read before this step.
+      const from = after === null ? 0 : Number(after);
+      if (!Number.isInteger(from) || from < 0) return { ok: false };
+      const scanned = Math.max(0, Math.min(CONNECT_STEP, CONNECT_NOTES - from));
+      const to = from + scanned;
+      return {
+        ok: true,
+        next: scanned === CONNECT_STEP ? String(to) : null,
+        total: CONNECT_NOTES,
+        scanned,
+        linked: scanned > 0 ? 7 : 0,
+        already: scanned > 0 ? 2 : 0,
+        missing: scanned > 0 ? 1 : 0,
+        failed: 0,
+      };
+    },
+    attach: async (workspaceId, after): Promise<AttachResult> => {
+      record("attach", [workspaceId, after]);
+      attachNo.current += 1;
+      const no = attachNo.current;
+      if (slow) await wait(SLOW_BATCH);
+      if (
+        importFlags.failattach === "all" ||
+        importFlags.failattach === String(no)
+      )
+        return { ok: false };
+      const empty = { attached: 0, already: 0, none: 0, failed: 0 };
+      if (importFlags.notopics)
+        return {
+          ok: true,
+          next: null,
+          total: 0,
+          scanned: 0,
+          ...empty,
+          topics: 0,
+        };
+      // The cursor is how many notes were read before this step.
+      const from = after === null ? 0 : Number(after);
+      if (!Number.isInteger(from) || from < 0) return { ok: false };
+      const scanned = Math.max(0, Math.min(CONNECT_STEP, CONNECT_NOTES - from));
+      return {
+        ok: true,
+        next: scanned === CONNECT_STEP ? String(from + scanned) : null,
+        total: CONNECT_NOTES,
+        scanned,
+        attached: (scanned * 3) / 5,
+        already: scanned / 5,
+        none: scanned / 5,
+        failed: 0,
+        topics: 12,
+      };
+    },
+  };
+  return <Vault data={data} now={now} actions={actions} importer={importer} />;
 }

@@ -1,14 +1,19 @@
 // The left rail, shared by the map, the vault, the gallery, the inbox and the settings: the mark,
-// the hive's name (the switcher between the person's hives, with New hive), the destinations (Map, Vault, Gallery, Inbox with the number waiting, Settings), the agents when
-// given (folded into one card) and the account menu (Appearance, Settings, sign out). It sits
-// straight on the wash, so it is the "chrome" scope (white text in light mode).
+// the hive's name (the switcher between the person's hives, with New hive), the fold button,
+// the destinations (Map, Vault, Gallery, Inbox with the number waiting, Settings), the agents
+// when given (folded into one card) and the account menu (Appearance, Settings, sign out). It
+// sits straight on the wash, so it is the "chrome" scope (white text in light mode). Folded
+// (html[data-rail="shut"], see FoldProvider) it is a 60 px strip of icons; every control keeps
+// its name, and the labels are only hidden from sight.
 "use client";
 
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Mark } from "../brand/Mark";
 import { badge } from "../inbox/text";
 import { AccountMenu } from "./AccountMenu";
 import { AgentsCard } from "./AgentsCard";
+import { useFold, useFoldSide } from "./FoldProvider";
 import { useHiveActions, type HiveActions } from "./HiveActions";
 import { HiveSwitcher } from "./HiveSwitcher";
 import s from "./shell.module.css";
@@ -116,6 +121,11 @@ export function Shell({
   hiveActions?: HiveActions;
 }) {
   const provided = useHiveActions();
+  const { fold, toggleRail } = useFold();
+  // Tells the provider a rail is on the page, so the `[` key has something to fold.
+  useFoldSide("rail");
+  const folded = fold.rail === "shut";
+  const railId = useId();
   const waiting = inbox ?? 0;
   const count = badge(waiting);
   const nav = useRef<HTMLElement>(null);
@@ -127,22 +137,45 @@ export function Shell({
   const now = nowProp ?? mounted;
 
   // One bar slides to the current row: its offset is measured, never guessed.
+  // Measured again whenever the list changes size (folding and unfolding change the rows'
+  // width, and a row that wrapped mid-fold would move the ones under it).
   useLayoutEffect(() => {
-    const row = nav.current?.querySelector<HTMLElement>(
-      '[aria-current="page"]',
-    );
-    setBarY(row ? row.offsetTop + (row.offsetHeight - 20) / 2 : null);
-  }, [current]);
+    const list = nav.current;
+    if (!list) return;
+    const measure = () => {
+      const row = list.querySelector<HTMLElement>('[aria-current="page"]');
+      setBarY(row ? row.offsetTop + (row.offsetHeight - 20) / 2 : null);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(list);
+    return () => watch.disconnect();
+  }, [current, folded]);
 
   return (
-    <aside
-      aria-label="Navigation"
-      data-scope="chrome"
-      className={`${s.rail} rise`}
-    >
+    <aside id={railId} aria-label="Navigation" className={`${s.rail} rise`}>
       <div className={s.brand}>
-        <span aria-hidden="true" className={s.mark} />
+        <Mark className={s.mark} />
         <HiveSwitcher actions={hiveActions ?? provided} />
+        <button
+          type="button"
+          className={`${s.fold} ${s.control}`}
+          aria-expanded={!folded}
+          aria-controls={railId}
+          aria-keyshortcuts="["
+          aria-label={folded ? "Unfold navigation" : "Fold navigation"}
+          title={folded ? "Unfold navigation ( [ )" : "Fold navigation ( [ )"}
+          onClick={toggleRail}
+        >
+          <svg aria-hidden="true" {...ICON}>
+            <rect x="2" y="2.5" width="12" height="11" rx="2" />
+            <path d="M6 2.5v11" />
+            <path
+              d={folded ? "m9 6.5 1.5 1.5L9 9.5" : "M10.5 6.5 9 8l1.5 1.5"}
+            />
+          </svg>
+        </button>
       </div>
       <nav ref={nav} aria-label="Main" className={s.links}>
         {barY !== null && (
@@ -157,6 +190,7 @@ export function Shell({
             key={d.key}
             href={d.href}
             aria-current={d.key === current ? "page" : undefined}
+            title={folded ? d.name : undefined}
             aria-label={
               d.key === "inbox" && count !== null
                 ? `Inbox, ${waiting} waiting`

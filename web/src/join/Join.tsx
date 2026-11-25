@@ -7,6 +7,7 @@
 // nothing else: never markup, never part of a link, never an attribute.
 import { useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
+import { Logo } from "../brand/Logo";
 import card from "../app/login/login.module.css";
 import s from "./join.module.css";
 import type { Joined, JoinView } from "./types";
@@ -66,8 +67,9 @@ export function Join({
     <main className={card.page} aria-label={TITLE}>
       <div className={card.panel}>
         <div className={card.brand}>
-          <span className={card.mark} aria-hidden="true" />
-          <h1 className={card.name}>Hive</h1>
+          <h1 className={card.name}>
+            <Logo />
+          </h1>
         </div>
         {view.kind === "continue" && (
           <form className={card.form} action={continueWithLink}>

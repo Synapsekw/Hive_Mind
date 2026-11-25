@@ -129,13 +129,19 @@ let saidNotThere = false;
 
 /**
  * How much waits, for the rail. Never throws and answers 0 on any failure: the count is an
- * extra on the map, the vault and the gallery, and must not be able to break them.
+ * extra on the map, the vault and the gallery, and must not be able to break them. `hiveId`,
+ * when the caller already holds the person's hive, is counted in without reading it again;
+ * the database still decides what the person may count.
  */
-export async function loadInboxCount(db: Db): Promise<number> {
+export async function loadInboxCount(db: Db, hiveId?: string): Promise<number> {
   try {
-    const hive = await ownHive(db);
-    if (hive === "error" || hive === null) return 0;
-    const res = (await db.rpc("inbox_count", { p_hive: hive.id })) as Res;
+    let id = hiveId;
+    if (id === undefined) {
+      const hive = await ownHive(db);
+      if (hive === "error" || hive === null) return 0;
+      id = hive.id;
+    }
+    const res = (await db.rpc("inbox_count", { p_hive: id })) as Res;
     if (res.error) {
       if (NOT_THERE.has(res.error.code ?? "")) {
         if (saidNotThere) return 0;

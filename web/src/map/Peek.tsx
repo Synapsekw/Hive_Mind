@@ -23,13 +23,38 @@ const KIND: Record<ModelNode["kind"], string> = {
   root: "Index",
 };
 
-/** When an item changed, as a sentence (`just now`, `2 h ago`); agents use agentShort. */
+/** When an item was written or changed, as a sentence (`just now`, `2 h ago`); agents use agentShort. */
 export function changed(t: number, now: number): string {
   const h = Math.floor((now - t) / HOUR);
   if (h < 1) return "just now";
   if (h < 24) return `${h} h ago`;
   const d = Math.floor(h / 24);
   return d === 1 ? "1 day ago" : `${d} days ago`;
+}
+
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** When an item was written: like `changed` for the last 30 days, the date (UTC) before that. */
+export function written(t: number, now: number): string {
+  if (now - t < 31 * 24 * HOUR) return changed(t, now);
+  const d = new Date(t);
+  const base = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  return d.getUTCFullYear() === new Date(now).getUTCFullYear()
+    ? base
+    : `${base} ${d.getUTCFullYear()}`;
 }
 
 /** Links to other items (the hub and index edges are structure, not links). */
@@ -93,6 +118,7 @@ export function Peek({
         ? [
             ["Topic", topic],
             ["By", owner ?? "Someone"],
+            ["Written", written(n.createdAt, now)],
             ["Changed", changed(n.updatedAt, now)],
             ["Links", String(links(model, n))],
           ]
@@ -103,7 +129,7 @@ export function Peek({
             ]
           : [["Groups", String(model.topics.length)]];
 
-  // In <body>: the map's glass panel (backdrop-filter) would otherwise anchor `fixed` to itself.
+  // In <body>: outside the map card, so `fixed` anchors to the window.
   return createPortal(
     <div
       ref={ref}

@@ -830,8 +830,8 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   expect((await scrolls()).inside).toBe(true);
   expect((await scrolls()).sideways).toBe(false);
 
-  // From the heading, Tab walks the card: Connect, each Revoke, Invite a member, then each
-  // invitation's Send again and Revoke.
+  // From the heading, Tab walks the card: Connect, each Revoke, each workspace's Delete, the
+  // topics' controls, Invite a member, then each invitation's Send again and Revoke.
   await main(page).getByRole("heading", { level: 1 }).focus();
   await page.keyboard.press("Tab");
   await expect(connect(page)).toBeFocused();
@@ -846,6 +846,30 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   await expect(revokeButton(agentRow(page, LOCAL.name))).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(revokeButton(agentRow(page, "Connected 18 Nov"))).toBeFocused();
+  for (const space of [MAIN, DRA]) {
+    await page.keyboard.press("Tab");
+    await expect(
+      main(page).getByRole("button", { name: `Delete ${space.name}` }),
+    ).toBeFocused();
+  }
+  // Then the Topics section: Find, and each topic's Delete (customers before vendors).
+  await page.keyboard.press("Tab");
+  await expect(
+    main(page).getByRole("button", { name: "Find topics in my notes" }),
+  ).toBeFocused();
+  for (const [kind, topic] of [
+    ["Customers", "Zain"],
+    ["Vendors", "Terra Drone"],
+  ]) {
+    await page.keyboard.press("Tab");
+    await expect(
+      main(page).getByRole("button", { name: new RegExp(`^${kind}`) }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+      main(page).getByRole("button", { name: `Delete ${topic}` }),
+    ).toBeFocused();
+  }
   await page.keyboard.press("Tab");
   await expect(inviteButton(page)).toBeFocused();
   await expect(inviteButton(page)).toBeInViewport();
@@ -1126,4 +1150,607 @@ test("a slow create that is refused gives the page back, with the focus in the f
   await expect(form.getByLabel("Name", { exact: true })).toHaveValue(
     "Desk agent",
   );
+});
+
+// ---- Delete this hive ----
+
+const DELETE_AFTER = "2026-11-30T12:00:00.000Z";
+const NOT_THE_NAME = "That is not this hive's name.";
+const deleteSection = (page: Page) => section(page, "Delete this hive");
+const deleteForm = (page: Page) =>
+  main(page).getByRole("form", { name: "Delete this hive" });
+const deleteField = (page: Page) =>
+  deleteForm(page).getByLabel("Type the hive's name to confirm");
+const deleteButton = (page: Page) =>
+  deleteForm(page).getByRole("button", { name: "Delete hive" });
+const banner = (page: Page) => page.locator("[data-closing]");
+const deletionCalls = (page: Page) =>
+  page.evaluate(
+    () =>
+      JSON.parse(
+        sessionStorage.getItem("__hiveDeletionCalls") ?? "[]",
+      ) as Call[],
+  );
+/** The day as this browser writes it for the person. */
+const localDay = (page: Page, iso: string) =>
+  page.evaluate(
+    (v) =>
+      new Date(v).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }),
+    iso,
+  );
+
+test("the owner's last section says what deleting erases; a member has no such section", async ({
+  page,
+}) => {
+  await open(page);
+  const part = deleteSection(page);
+  await expect(part).toContainText(
+    "Deleting this hive erases 128 notes and 14 files of 3 members.",
+  );
+  await expect(part).toContainText("For 7 days the hive can only be read");
+  // The last section of the card.
+  expect(
+    await main(page).locator("section").last().getAttribute("aria-labelledby"),
+  ).toBe("settings-delete");
+  await expect(banner(page)).toHaveCount(0);
+
+  await open(page, "?member=1", false);
+  await expect(deleteSection(page)).toHaveCount(0);
+  await expect(deleteForm(page)).toHaveCount(0);
+  // A member's own workspaces still offer Delete; the hive's deletion does not show.
+  await expect(main(page)).not.toContainText("Delete this hive");
+  await expect(main(page)).not.toContainText("Delete hive");
+});
+
+test("Delete hive does nothing until the hive's name is typed exactly, and says why", async ({
+  page,
+}) => {
+  await open(page);
+  const button = deleteButton(page);
+  const field = deleteField(page);
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAccessibleDescription(
+    'Delete hive can be pressed once you have typed "Synapse" exactly.',
+  );
+  await expect(field).toHaveAccessibleDescription(
+    'Delete hive can be pressed once you have typed "Synapse" exactly.',
+  );
+  for (const wrong of ["synapse", "Synapse ", "Synaps", " Synapse"]) {
+    await field.fill(wrong);
+    await expect(button).toBeDisabled();
+    await button.click({ force: true });
+    await field.press("Enter");
+  }
+  expect(await deletionCalls(page)).toEqual([]);
+  await field.fill("Synapse");
+  await expect(button).toBeEnabled();
+  await expect(button).not.toHaveAttribute("aria-describedby", /.+/);
+  // The button stays in the keyboard's path while it does nothing.
+  await field.fill("x");
+  await field.press("Tab");
+  await expect(button).toBeFocused();
+});
+
+test("a refused deletion says why, keeps what was typed and puts the focus back in the field", async ({
+  page,
+}) => {
+  await open(page, "?notname=1");
+  await deleteField(page).fill("Synapse");
+  await deleteButton(page).click();
+  await expect(deleteForm(page).getByText(NOT_THE_NAME)).toBeVisible();
+  await expect(live(page)).toHaveText(NOT_THE_NAME);
+  await expect(deleteField(page)).toHaveValue("Synapse");
+  await expect(deleteField(page)).toBeFocused();
+  expect(await deletionCalls(page)).toEqual([
+    { name: "requestHiveDeletion", args: ["Synapse"] },
+  ]);
+  // Typing again takes the line away.
+  await deleteField(page).fill("Synapse!");
+  await expect(deleteForm(page).getByText(NOT_THE_NAME)).toHaveCount(0);
+
+  await open(page, "?fail=1", false);
+  await deleteField(page).fill("Synapse");
+  await deleteField(page).press("Enter");
+  await expect(deleteForm(page).getByText(FAILED)).toBeVisible();
+  await expect(live(page)).toHaveText(FAILED);
+  await expect(deleteSection(page)).not.toContainText("will be deleted on");
+});
+
+test("Delete hive asks once and loads the page afresh: the banner and Cancel deletion are there; cancelling brings the form back", async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(() => {
+    (window as unknown as { __before?: boolean }).__before = true;
+  });
+  await deleteField(page).fill("Synapse");
+  await deleteButton(page).dblclick();
+  const part = deleteSection(page);
+  await expect(part).toContainText("This hive will be deleted on");
+  // A full load: nothing set on the old window is left.
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __before?: boolean }).__before,
+    ),
+  ).toBeUndefined();
+  expect(await deletionCalls(page)).toEqual([
+    { name: "requestHiveDeletion", args: ["Synapse"] },
+  ]);
+  await expect(deleteForm(page)).toHaveCount(0);
+  await expect(banner(page)).toBeVisible();
+
+  await part.getByRole("button", { name: "Cancel deletion" }).click();
+  await expect(deleteField(page)).toBeVisible();
+  await expect(deleteField(page)).toHaveValue("");
+  await expect(banner(page)).toHaveCount(0);
+  expect(await deletionCalls(page)).toEqual([
+    { name: "requestHiveDeletion", args: ["Synapse"] },
+    { name: "cancelHiveDeletion", args: [] },
+  ]);
+});
+
+test("while the hive is being deleted the section says when it goes, in the person's own date, and offers Cancel deletion", async ({
+  page,
+}) => {
+  await open(page, "?closing=1");
+  const part = deleteSection(page);
+  const day = await localDay(page, DELETE_AFTER);
+  const when = part.locator("time");
+  await expect(when).toHaveAttribute("datetime", DELETE_AFTER);
+  await expect(when).toHaveText(day);
+  await expect(part).toContainText(`This hive will be deleted on ${day}.`);
+  await expect(part).toContainText("Until then it can only be read.");
+  await expect(part).not.toContainText("128 notes");
+  await expect(deleteForm(page)).toHaveCount(0);
+  await expect(
+    part.getByRole("button", { name: "Cancel deletion" }),
+  ).toBeVisible();
+  // The banner says the same day, above the rail and the card.
+  await expect(banner(page).getByRole("status")).toHaveText(
+    `This hive will be deleted on ${day}. Nothing new can be saved.`,
+  );
+});
+
+test("a refused Cancel deletion says so and the hive stays as it was", async ({
+  page,
+}) => {
+  await open(page, "?closing=1&fail=1");
+  const part = deleteSection(page);
+  const cancel = part.getByRole("button", { name: "Cancel deletion" });
+  await cancel.click();
+  await expect(part.getByText(FAILED)).toBeVisible();
+  await expect(live(page)).toHaveText(FAILED);
+  await expect(part).toContainText("This hive will be deleted on");
+  await expect(cancel).toBeEnabled();
+  expect(await deletionCalls(page)).toEqual([
+    { name: "cancelHiveDeletion", args: [] },
+  ]);
+});
+
+test("a member of a hive that is being deleted sees the banner, with nothing to press, and no section", async ({
+  page,
+}) => {
+  await open(page, "?closing=1&member=1");
+  await expect(banner(page).getByRole("status")).toContainText(
+    "Nothing new can be saved.",
+  );
+  await expect(banner(page).getByRole("button")).toHaveCount(0);
+  await expect(deleteSection(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Cancel deletion" }),
+  ).toHaveCount(0);
+});
+
+test("the server and the browser draw the date the same way first: no hydration error", async ({
+  page,
+}) => {
+  const problems: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") problems.push(m.text());
+  });
+  page.on("pageerror", (e) => problems.push(e.message));
+  await open(page, "?closing=1");
+  await expect(deleteSection(page).locator("time")).toHaveText(
+    await localDay(page, DELETE_AFTER),
+  );
+  expect(problems.filter((p) => /hydrat|did not match/i.test(p))).toEqual([]);
+  // What the server sent is the fixed form.
+  const html = await (await page.request.get("/dev/settings?closing=1")).text();
+  expect(html).toContain("30 November 2026");
+});
+
+test("with the banner, at 1100 x 560 the page still does not scroll and the card ends inside the window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 560 });
+  await open(page, "?closing=1");
+  await expect(banner(page)).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const root = document.scrollingElement!;
+        const panel = document.querySelector("main")!.getBoundingClientRect();
+        const strip = document
+          .querySelector("[data-closing]")!
+          .getBoundingClientRect();
+        const rail = document
+          .querySelector('aside[aria-label="Navigation"]')!
+          .getBoundingClientRect();
+        return {
+          pageScrolls:
+            root.scrollHeight > window.innerHeight ||
+            root.scrollWidth > window.innerWidth,
+          inside: panel.bottom <= window.innerHeight,
+          bannerOnTop: strip.top === 0 && strip.bottom <= rail.top + 0.5,
+          clearOfCard: strip.bottom <= panel.top,
+        };
+      }),
+    )
+    .toEqual({
+      pageScrolls: false,
+      inside: true,
+      bannerOnTop: true,
+      clearOfCard: true,
+    });
+  // The section at the end of the card can still be reached inside it.
+  const cancel = deleteSection(page).getByRole("button", {
+    name: "Cancel deletion",
+  });
+  await cancel.scrollIntoViewIfNeeded();
+  await expect(cancel).toBeInViewport();
+  expect(
+    await page.evaluate(
+      () => document.scrollingElement!.scrollHeight > window.innerHeight,
+    ),
+  ).toBe(false);
+});
+
+test("at 390 px the banner and the delete section stay inside the window and cover nothing", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, "?closing=1");
+  const strip = (await banner(page).boundingBox())!;
+  const rail = (await page
+    .getByRole("complementary", { name: "Navigation" })
+    .boundingBox())!;
+  const card = (await main(page).boundingBox())!;
+  expect(strip.x).toBeGreaterThanOrEqual(0);
+  expect(strip.x + strip.width).toBeLessThanOrEqual(390);
+  expect(strip.y + strip.height).toBeLessThanOrEqual(rail.y + 0.5);
+  expect(strip.y + strip.height).toBeLessThanOrEqual(card.y);
+  const press = banner(page).getByRole("button", { name: "Cancel deletion" });
+  const b = (await press.boundingBox())!;
+  expect(b.x + b.width).toBeLessThanOrEqual(390);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+
+  await open(page, "", false);
+  await deleteField(page).scrollIntoViewIfNeeded();
+  for (const part of [deleteField(page), deleteButton(page)]) {
+    const box = (await part.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+});
+
+const workspaceRow = (page: Page, name: string) =>
+  rows(page, "Workspaces").filter({ hasText: name });
+const deleteSpace = (row: Locator) =>
+  row.getByRole("button", { name: /^Delete/ });
+
+test("Workspaces: Delete asks first with the note count; an agent in use refuses it; once revoked the workspace goes", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(rows(page, "Workspaces")).toHaveCount(2);
+  const dra = workspaceRow(page, DRA.name);
+  await expect(dra).toContainText("25 notes");
+  await expect(section(page, "Workspaces")).toContainText(
+    "files on your computer are not touched",
+  );
+
+  // Asked first; Keep and Escape change nothing.
+  await deleteSpace(dra).click();
+  await expect(dra).toContainText("Delete DRA and its 25 notes?");
+  await expect(dra).toContainText("This cannot be undone.");
+  await expect(dra.getByRole("button", { name: "Keep" })).toBeFocused();
+  await dra.getByRole("button", { name: "Keep" }).click();
+  await expect(dra).not.toContainText("Delete DRA and its 25 notes?");
+  await deleteSpace(dra).click();
+  await page.keyboard.press("Escape");
+  await expect(dra).not.toContainText("This cannot be undone.");
+  expect(await calls(page)).toEqual([]);
+
+  // Its agent is still in use: refused, and the row says what to do.
+  await deleteSpace(dra).click();
+  await dra.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(dra).toContainText("Revoke this workspace's agents first.");
+  await expect(rows(page, "Workspaces")).toHaveCount(2);
+
+  const local = agentRow(page, LOCAL.name);
+  await revokeButton(local).click();
+  await page.waitForTimeout(600);
+  await local.getByRole("button", { name: "Revoke", exact: true }).click();
+  await expect(local).toContainText("Revoked");
+
+  await deleteSpace(dra).click();
+  await dra.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(rows(page, "Workspaces")).toHaveCount(1);
+  await expect(live(page)).toHaveText("DRA deleted.");
+  expect(
+    (await calls(page)).filter((c) => c.name === "deleteWorkspace"),
+  ).toEqual([
+    { name: "deleteWorkspace", args: [DRA.id] },
+    { name: "deleteWorkspace", args: [DRA.id] },
+  ]);
+  // The one that is left cannot go.
+  const last = workspaceRow(page, MAIN.name);
+  await expect(last).toContainText("Your only workspace");
+  await expect(deleteSpace(last)).toHaveCount(0);
+});
+
+test("a failed workspace delete keeps the row and says so; a hive that is being deleted offers no Delete", async ({
+  page,
+}) => {
+  await open(page, "?fail=1");
+  const dra = workspaceRow(page, DRA.name);
+  await deleteSpace(dra).click();
+  await dra.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(dra).toContainText(FAILED);
+  await expect(rows(page, "Workspaces")).toHaveCount(2);
+
+  await open(page, "?closing=1", false);
+  await expect(rows(page, "Workspaces")).toHaveCount(2);
+  await expect(deleteSpace(workspaceRow(page, DRA.name))).toHaveCount(0);
+});
+
+// ---- Topics ----
+
+const topics = (page: Page) => section(page, "Topics");
+const findTopics = (page: Page) =>
+  topics(page).getByRole("button", { name: "Find topics in my notes" });
+
+test("Topics: the owner finds candidates, new ones only, with subjects unticked; Save adds the ticked ones", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(topics(page)).toContainText("Zain");
+  await expect(topics(page)).toContainText("198 notes");
+  await expect(topics(page)).toContainText("No notes yet");
+
+  await findTopics(page).click();
+  const found = topics(page).getByRole("form", {
+    name: "Topics found in your notes",
+  });
+  await expect(
+    found.getByRole("heading", { name: "Topics found in your notes" }),
+  ).toBeFocused();
+  // Zain is there already: only Orbit and the tag are offered.
+  const orbit = found.getByRole("checkbox", { name: "Customers: Orbit" });
+  const flare = found.getByRole("checkbox", { name: "Subjects: flare-stack" });
+  const rovs = found.getByRole("checkbox", {
+    name: "Solutions: Underwater ROVs",
+  });
+  await expect(orbit).toBeChecked();
+  await expect(rovs).toBeChecked();
+  await expect(flare).not.toBeChecked();
+  await expect(
+    found.getByRole("checkbox", { name: "Customers: Zain" }),
+  ).toHaveCount(0);
+  await expect(found).toContainText("tag on 5 notes");
+  // A partner named like the saved customer is offered, unticked, and says where it is.
+  const zainPartner = found.getByRole("checkbox", {
+    name: "Partners: Zain, already under Customers",
+  });
+  await expect(zainPartner).toBeVisible();
+  await expect(zainPartner).not.toBeChecked();
+  await expect(
+    found.getByRole("listitem").filter({ hasText: "already under Customers" }),
+  ).toHaveCount(1);
+  // What is saved with a topic is shown, and so is who will see it.
+  await expect(found.getByText("also: Orbit Aerospace")).toBeVisible();
+  await expect(
+    found.getByText(
+      "Every member of the hive can see a topic's name and its other names.",
+    ),
+  ).toBeVisible();
+
+  await found.getByRole("button", { name: "Save topics" }).click();
+  await expect(found).toHaveCount(0);
+  await expect(live(page)).toHaveText(
+    "2 topics saved. Now open the vault and press Attach topics.",
+  );
+  // Seen as well as announced, and the focus is on Find, not lost with the form.
+  await expect(
+    topics(page).getByText(
+      "2 topics saved. Now open the vault and press Attach topics.",
+    ),
+  ).toBeVisible();
+  await expect(findTopics(page)).toBeFocused();
+  await expect(
+    topics(page).getByRole("heading", { name: /^Customers/ }),
+  ).toBeVisible();
+  await expect(
+    topics(page).getByRole("list", { name: "Customers" }),
+  ).toContainText("Orbit");
+  const saves = (await calls(page)).filter((c) => c.name === "saveTopics");
+  expect(saves).toEqual([
+    {
+      name: "saveTopics",
+      args: [
+        [
+          { kind: "client", name: "Orbit", aliases: ["Orbit Aerospace"] },
+          { kind: "solution", name: "Underwater ROVs", aliases: [] },
+        ],
+      ],
+    },
+  ]);
+  // Both of the owner's workspaces were read, from the start.
+  expect(
+    (await calls(page))
+      .filter((c) => c.name === "scanTopics")
+      .map((c) => c.args),
+  ).toEqual([
+    [MAIN.id, null],
+    [DRA.id, null],
+  ]);
+});
+
+test("Topics: Delete asks first and says the notes stay; a failed read or save says so", async ({
+  page,
+}) => {
+  await open(page);
+  const row = topics(page)
+    .getByRole("listitem")
+    .filter({ hasText: "Terra Drone" });
+  await row.getByRole("button", { name: "Delete Terra Drone" }).click();
+  await expect(row).toContainText("Delete the topic Terra Drone?");
+  await expect(row).toContainText(
+    "Notes stay. They are no longer under this topic.",
+  );
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(row).toHaveCount(0);
+  await expect(live(page)).toHaveText("Terra Drone deleted.");
+  await expect(topics(page).getByText("Terra Drone deleted.")).toBeVisible();
+
+  await open(page, "?fail=1");
+  await findTopics(page).click();
+  await expect(topics(page)).toContainText(
+    "Your notes could not be read. Try again.",
+  );
+});
+
+test("Topics: a long kind starts folded, opens into a box that scrolls on its own, and Save stays in view", async ({
+  page,
+}) => {
+  await open(page, "?many=1");
+  // Thirty-one vendors: folded, so none of them is drawn; the one customer is.
+  const vendors = topics(page).getByRole("button", { name: /^Vendors/ });
+  await expect(vendors).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    topics(page).getByText("Supplier 7", { exact: true }),
+  ).toHaveCount(0);
+  await expect(topics(page).getByText("Zain", { exact: true })).toBeVisible();
+  await vendors.click();
+  await expect(vendors).toHaveAttribute("aria-expanded", "true");
+  const list = topics(page).getByRole("list", { name: "Vendors" });
+  await expect(list.getByRole("listitem")).toHaveCount(31);
+  const box = await list.evaluate((el) => ({
+    height: el.clientHeight,
+    inner: el.scrollHeight,
+  }));
+  expect(box.height).toBeLessThanOrEqual(270);
+  expect(box.inner).toBeGreaterThan(box.height);
+  // Delete still asks in the row.
+  await list
+    .getByRole("button", { name: "Delete Supplier 3", exact: true })
+    .click();
+  await expect(list).toContainText("Delete the topic Supplier 3?");
+  await list.getByRole("button", { name: "Keep" }).click();
+  await vendors.click();
+
+  await findTopics(page).click();
+  const found = topics(page).getByRole("form", {
+    name: "Topics found in your notes",
+  });
+  const group = found.getByRole("group", { name: /^Vendors/ });
+  const toggle = group.getByRole("button", { name: /^Vendors/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(group).toContainText("40 of 40 ticked");
+  await expect(found.getByRole("checkbox")).toHaveCount(0);
+  // Save is on screen without scrolling, and says how many it will save.
+  const save = found.getByRole("button", { name: "Save topics" });
+  await expect(save).toBeInViewport();
+  await expect(found).toContainText("40 of 40 ticked");
+
+  await group.getByRole("button", { name: "Untick all Vendors" }).click();
+  await expect(group).toContainText("0 of 40 ticked");
+  await expect(save).toHaveAttribute("aria-disabled", "true");
+  await toggle.click();
+  await expect(found.getByRole("checkbox")).toHaveCount(40);
+  await found
+    .getByRole("checkbox", { name: "Vendors: Maker 9", exact: true })
+    .check();
+  await group
+    .getByRole("button", { name: "Tick all Vendors", exact: true })
+    .click();
+  await found
+    .getByRole("checkbox", { name: "Vendors: Maker 2", exact: true })
+    .uncheck();
+  await expect(group).toContainText("39 of 40 ticked");
+  await expect(save).toBeInViewport();
+  await save.click();
+  await expect(
+    topics(page).getByText(
+      "39 topics saved. Now open the vault and press Attach topics.",
+    ),
+  ).toBeVisible();
+  const saves = (await calls(page)).filter((c) => c.name === "saveTopics");
+  const names = saves.flatMap((c) =>
+    (c.args[0] as { name: string }[]).map((p) => p.name),
+  );
+  expect(names).toHaveLength(39);
+  expect(names).not.toContain("Maker 2");
+});
+
+test("Topics: a member who is not the owner has no such section", async ({
+  page,
+}) => {
+  await open(page, "?member=1");
+  await expect(topics(page)).toHaveCount(0);
+});
+
+test("Topics: Cancel closes the candidates and puts the focus on Find; with nothing new, Find says so where it can be seen", async ({
+  page,
+}) => {
+  await open(page);
+  await findTopics(page).click();
+  const found = topics(page).getByRole("form", {
+    name: "Topics found in your notes",
+  });
+  await found.getByRole("button", { name: "Cancel" }).click();
+  await expect(found).toHaveCount(0);
+  await expect(findTopics(page)).toBeFocused();
+  expect((await calls(page)).filter((c) => c.name === "saveTopics")).toEqual(
+    [],
+  );
+
+  // Tick the subject too and save both: the hive then has everything the notes name.
+  await findTopics(page).click();
+  await found.getByRole("checkbox", { name: "Subjects: flare-stack" }).check();
+  await found
+    .getByRole("checkbox", { name: /^Partners: Zain, already under/ })
+    .check();
+  await found.getByRole("button", { name: "Save topics" }).click();
+  await expect(
+    topics(page).getByText(
+      "4 topics saved. Now open the vault and press Attach topics.",
+    ),
+  ).toBeVisible();
+  await expect(findTopics(page)).toBeFocused();
+
+  await findTopics(page).click();
+  const nothing = topics(page).getByText(
+    "Nothing new found. Every topic your notes name is already here.",
+  );
+  await expect(nothing).toBeVisible();
+  await expect(found).toHaveCount(0);
+  await expect(live(page)).toHaveText(
+    "Nothing new found. Every topic your notes name is already here.",
+  );
+  // The earlier message has given way to this one.
+  await expect(topics(page).getByText(/topics saved\./)).toHaveCount(0);
 });

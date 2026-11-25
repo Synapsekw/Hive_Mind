@@ -3,7 +3,7 @@ import { setLook } from "./look";
 
 test.use({ viewport: { width: 1366, height: 768 } });
 
-const LOOKS = [undefined, "aurora.light.vivid.classic"] as const;
+const LOOKS = [undefined, "paper"] as const;
 
 const radius = (page: Page, selector: string) =>
   page
@@ -29,7 +29,9 @@ for (const look of LOOKS) {
   }) => {
     if (look) await setLook(context, look);
     await page.goto("/login", { waitUntil: "networkidle" });
-    await expect(page.getByRole("heading", { name: "Hive" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Hive Mind", exact: true }),
+    ).toBeVisible();
     expect(await noScroll(page)).toBe(true);
     expect(await radius(page, 'input[type="email"]')).toBe("8px");
     expect(await radius(page, 'button[type="submit"]')).toBe("8px");

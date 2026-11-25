@@ -20,7 +20,8 @@ type Err = { message: string; code?: string; details?: string };
 type Res = { data: unknown; error: Err | null };
 type Call = { table: string; ops: [string, unknown[]][] };
 /** `own` is the read of the person's own oldest membership, which is also from `members`. */
-type Table = "own" | "members" | "workspaces" | "agents" | "invitations";
+type Table =
+  "own" | "members" | "workspaces" | "agents" | "invitations" | "entities";
 
 const ok = (data: unknown): Res => ({ data, error: null });
 const err = (message: string, code?: string): Res => ({
@@ -75,8 +76,8 @@ const MEMBERS = [
   }),
 ];
 const WORKSPACES = [
-  { id: W1, name: "Main" },
-  { id: W2, name: "DRA" },
+  { id: W1, name: "Main", notes: [{ count: 128 }] },
+  { id: W2, name: "DRA", notes: [{ count: 0 }] },
 ];
 const AGENTS = [
   agent(),
@@ -112,11 +113,23 @@ const INVITATIONS = [
 const tokenOf = (sub: string) =>
   `h.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.s`;
 
-const OWN = { id: M_DANI, hive_id: HIVE, hive: { name: "Synapse" } };
+/** The person's own membership, as the one read answers it: they own the hive. */
+const OWN = {
+  id: M_DANI,
+  hive_id: HIVE,
+  display_name: "Danijel",
+  role: "owner",
+  hive: { name: "Synapse" },
+};
+const PREVIEW = [{ members: 2, notes: 41, files: 6 }];
 
 /** A stand-in client: every `from(table)` chain is recorded and answers that table's result. */
 function stub(
-  opts: Partial<Record<Table, Res>> & { user?: { id: string } | null } = {},
+  opts: Partial<Record<Table, Res>> & {
+    user?: { id: string } | null;
+    /** What `hive_deletion_preview` answers, or a function that throws. */
+    preview?: Res | (() => never);
+  } = {},
 ) {
   const calls: Call[] = [];
   const answers: Record<Table, Res> = {
@@ -125,6 +138,7 @@ function stub(
     workspaces: opts.workspaces ?? ok(WORKSPACES),
     agents: opts.agents ?? ok(AGENTS),
     invitations: opts.invitations ?? ok(INVITATIONS),
+    entities: opts.entities ?? ok([]),
   };
   const from = vi.fn((table: Table) => {
     const call: Call = { table, ops: [] };
@@ -144,13 +158,19 @@ function stub(
   });
   const user = opts.user === undefined ? { id: U_DANI } : opts.user;
   const auth = {
-    getUser: vi.fn(async () => ({ data: { user }, error: null })),
+    getUser: vi.fn(async (): Promise<never> => {
+      throw new Error("a loader must not call the auth server");
+    }),
     getSession: vi.fn(async () => ({
       data: { session: user ? { access_token: tokenOf(user.id) } : null },
       error: null,
     })),
   };
-  const rpc = vi.fn();
+  const rpc = vi.fn(async (_name: string, _args?: unknown) =>
+    typeof opts.preview === "function"
+      ? opts.preview()
+      : (opts.preview ?? ok(PREVIEW)),
+  );
   const of = (table: Table) => calls.find((c) => c.table === table);
   return { db: { from, auth, rpc } as never, calls, from, auth, rpc, of };
 }
@@ -225,6 +245,14 @@ describe("loadSettings", () => {
     },
   );
 
+  it("answers error when the topics read fails, logging code and message only", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({ entities: err("denied", "42501") });
+    expect(await loadSettings(t.db, NOW)).toEqual({ state: "error" });
+    expect(log).toHaveBeenCalledWith("topics query failed", "42501", "denied");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+
   it("answers error without a session", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const t = stub({ user: null });
@@ -236,12 +264,14 @@ describe("loadSettings", () => {
     expect(await loadSettings(t.db, NOW)).toEqual({
       state: "ok",
       hiveId: HIVE,
+      deletion: { members: 2, notes: 41, files: 6 },
+      closing: null,
       data: {
         hiveName: "Synapse",
         isOwner: true,
         workspaces: [
-          { id: W1, name: "Main" },
-          { id: W2, name: "DRA" },
+          { id: W1, name: "Main", notes: 128 },
+          { id: W2, name: "DRA", notes: 0 },
         ],
         agents: [
           {
@@ -295,6 +325,7 @@ describe("loadSettings", () => {
             expiresAt: "2026-12-04T09:00:00+00:00",
           },
         ],
+        topics: [],
       },
     });
   });
@@ -352,7 +383,11 @@ describe("loadSettings", () => {
     expect(Object.keys(out.data.members[0]!).sort()).toEqual(
       ["id", "isMe", "name", "role"].sort(),
     );
-    expect(Object.keys(out.data.workspaces[0]!).sort()).toEqual(["id", "name"]);
+    expect(Object.keys(out.data.workspaces[0]!).sort()).toEqual([
+      "id",
+      "name",
+      "notes",
+    ]);
     expect(Object.keys(out.data.agents[0]!).sort()).toEqual(
       [
         "createdAt",
@@ -375,19 +410,31 @@ describe("loadSettings", () => {
     const t = stub();
     await loadSettings(t.db, NOW);
     expect(t.calls.map((c) => c.table).sort()).toEqual(
-      ["agents", "invitations", "members", "own", "workspaces"].sort(),
+      [
+        "agents",
+        "entities",
+        "invitations",
+        "members",
+        "own",
+        "workspaces",
+      ].sort(),
     );
     expect(t.calls[0]!.table).toBe("own");
     expect(t.from.mock.calls[0]).toEqual(["members"]);
     expect(t.calls[0]!.ops).toEqual([
-      ["select", ["id, hive_id, hive:hives!hive_id(name)"]],
+      [
+        "select",
+        [
+          "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+        ],
+      ],
       ["eq", ["user_id", U_DANI]],
       ["order", ["created_at", { ascending: true }]],
       ["order", ["id", { ascending: true }]],
       ["limit", [50]],
     ]);
-    // One call to the auth server, as before.
-    expect(t.auth.getUser).toHaveBeenCalledTimes(1);
+    // No call to the auth server: the user id is the one the session's token names.
+    expect(t.auth.getUser).not.toHaveBeenCalled();
 
     expect(args(t.of("members"), "select")).toEqual([
       "id, display_name, role, user_id",
@@ -398,13 +445,18 @@ describe("loadSettings", () => {
       { ascending: true },
     ]);
 
-    expect(args(t.of("workspaces"), "select")).toEqual(["id, name"]);
+    expect(args(t.of("workspaces"), "select")).toEqual([
+      "id, name, notes(count)",
+    ]);
     expect(args(t.of("workspaces"), "eq")).toEqual(["hive_id", HIVE]);
     expect(args(t.of("workspaces"), "order")).toEqual([
       "created_at",
       { ascending: true },
     ]);
-    expect(t.rpc).not.toHaveBeenCalled();
+    // The owner's preview, once.
+    expect(t.rpc.mock.calls).toEqual([
+      ["hive_deletion_preview", { p_hive: HIVE }],
+    ]);
   });
 
   it("asks for at most 200 agents, newest first, and never for the hash", async () => {
@@ -442,6 +494,67 @@ describe("loadSettings", () => {
       ["created_at", { ascending: false }],
     ]);
     expect(args(inv, "limit")).toEqual([100]);
+  });
+
+  it("reads the hive's topics for the owner with their note counts, and none for a member", async () => {
+    const t = stub({
+      entities: ok([
+        {
+          id: "t1",
+          type: "client",
+          canonical_name: "Zain",
+          note_entities: [{ count: 12 }],
+        },
+        {
+          id: "t2",
+          type: "weird",
+          canonical_name: "Dropped",
+          note_entities: [],
+        },
+      ]),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await loadSettings(t.db, NOW);
+    // A row whose kind is unknown makes the whole answer unreadable, as for the other lists.
+    expect(out.state).toBe("error");
+    const good = stub({
+      entities: ok([
+        {
+          id: "t1",
+          type: "client",
+          canonical_name: "Zain",
+          note_entities: [{ count: 12 }],
+        },
+      ]),
+    });
+    const loaded = await loadSettings(good.db, NOW);
+    if (loaded.state !== "ok") throw new Error("expected ok");
+    expect(loaded.data.topics).toEqual([
+      { id: "t1", kind: "client", name: "Zain", notes: 12 },
+    ]);
+    const read = good.of("entities");
+    expect(args(read, "select")).toEqual([
+      "id, type, canonical_name, note_entities(count)",
+    ]);
+    expect(args(read, "eq")).toEqual(["hive_id", HIVE]);
+    expect(args(read, "limit")).toEqual([2000]);
+    // A member is not asked at all.
+    const member = stub({
+      own: ok([{ ...OWN, id: M_AHMED, role: "member" }]),
+      user: { id: U_AHMED },
+      entities: ok([
+        {
+          id: "t1",
+          type: "client",
+          canonical_name: "Zain",
+          note_entities: [],
+        },
+      ]),
+    });
+    const seen = await loadSettings(member.db, NOW);
+    if (seen.state !== "ok") throw new Error("expected ok");
+    expect(seen.data.topics).toEqual([]);
+    expect(member.of("entities")).toBeUndefined();
   });
 
   it("answers no invitations when the database returns none", async () => {
@@ -573,4 +686,155 @@ describe("loadSettings and other hives", () => {
     expect(out.data.agents.every((a) => a.workspaceId === W1)).toBe(true);
     expect(out.data.agents.some((a) => a.id === A2)).toBe(false);
   });
+});
+
+describe("loadSettings and deleting the hive", () => {
+  const AS_MEMBER = {
+    ...OWN,
+    id: M_AHMED,
+    display_name: "Ahmed",
+    role: "member",
+  };
+
+  it("asks an owner's preview in the same batch as the four lists, not after them", async () => {
+    const order: string[] = [];
+    const t = stub();
+    t.rpc.mockImplementation(async () => {
+      order.push("preview asked");
+      await new Promise((r) => setTimeout(r, 5));
+      order.push("preview answered");
+      return ok(PREVIEW);
+    });
+    const from = t.from.getMockImplementation()!;
+    t.from.mockImplementation((table) => {
+      const chain = from(table) as { then: (...a: unknown[]) => unknown };
+      const then = chain.then;
+      chain.then = (...a: unknown[]) => {
+        order.push(`${table} awaited`);
+        return then(...a);
+      };
+      return chain;
+    });
+    const out = await loadSettings(t.db, NOW);
+    expect(out.state === "ok" && out.deletion).toEqual({
+      members: 2,
+      notes: 41,
+      files: 6,
+    });
+    // Every list was already asked for when the preview's answer came.
+    const answered = order.indexOf("preview answered");
+    for (const table of ["workspaces", "agents", "invitations"])
+      expect(order.indexOf(`${table} awaited`)).toBeLessThan(answered);
+    expect(order.indexOf("preview asked")).toBeLessThan(answered);
+    expect(t.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask for a person who is not an owner, and answers no counts", async () => {
+    const t = stub({ own: ok([AS_MEMBER]), user: { id: U_AHMED } });
+    const out = await loadSettings(t.db, NOW);
+    if (out.state !== "ok") throw new Error("not ok");
+    expect(out.deletion).toBeNull();
+    expect(out.data.isOwner).toBe(false);
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it("reads the person's role with the same one read of their membership", async () => {
+    const t = stub();
+    await loadSettings(t.db, NOW);
+    expect(t.calls.filter((c) => c.table === "own")).toHaveLength(1);
+    expect(args(t.of("own"), "select")).toEqual([
+      "id, hive_id, display_name, role, hive:hives!hive_id(name, delete_after)",
+    ]);
+  });
+
+  it("survives a refused preview: the page loads without counts, logging code and message only", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      preview: err("only the owner can delete a hive", "P0001"),
+    });
+    const out = await loadSettings(t.db, NOW);
+    if (out.state !== "ok") throw new Error("not ok");
+    expect(out.deletion).toBeNull();
+    expect(out.data.members).toHaveLength(2);
+    expect(log).toHaveBeenCalledWith(
+      "hive deletion preview failed",
+      "P0001",
+      "only the owner can delete a hive",
+    );
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+
+  it("survives a preview that throws", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      preview: () => {
+        throw new Error("network: secret payload");
+      },
+    });
+    const out = await loadSettings(t.db, NOW);
+    expect(out.state === "ok" && out.deletion).toBeNull();
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret payload");
+  });
+
+  it.each([
+    ["nothing", null],
+    ["no row", []],
+    ["a word", "many"],
+    ["a count that is text", [{ members: "2", notes: 41, files: 6 }]],
+    ["a negative count", [{ members: 2, notes: -1, files: 6 }]],
+    ["a fraction", [{ members: 2, notes: 1.5, files: 6 }]],
+    ["a missing count", [{ members: 2, notes: 41 }]],
+  ])("answers no counts when the preview answers %s", async (_n, data) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await loadSettings(stub({ preview: ok(data) }).db, NOW);
+    expect(out.state === "ok" && out.deletion).toBeNull();
+  });
+
+  it("accepts the one row on its own, and names only the three counts", async () => {
+    const out = await loadSettings(
+      stub({ preview: ok({ members: 1, notes: 0, files: 0, name: "Synapse" }) })
+        .db,
+      NOW,
+    );
+    expect(out.state === "ok" && out.deletion).toEqual({
+      members: 1,
+      notes: 0,
+      files: 0,
+    });
+  });
+
+  it("carries the date a hive that is being deleted goes, for an owner and for a member", async () => {
+    const AFTER = "2026-12-01T09:00:00+00:00";
+    const hive = { name: "Synapse", delete_after: AFTER };
+    const owner = await loadSettings(
+      stub({ own: ok([{ ...OWN, hive }]) }).db,
+      NOW,
+    );
+    expect(owner.state === "ok" && owner.closing).toBe(AFTER);
+    const member = await loadSettings(
+      stub({ own: ok([{ ...AS_MEMBER, hive }]), user: { id: U_AHMED } }).db,
+      NOW,
+    );
+    expect(member.state === "ok" && member.closing).toBe(AFTER);
+    expect(member.state === "ok" && member.deletion).toBeNull();
+  });
+
+  it.each([
+    ["no count beside it", undefined],
+    ["a count that is not a list", { count: 3 }],
+    ["an empty list", []],
+    ["a count that is text", [{ count: "3" }]],
+    ["a count below zero", [{ count: -1 }]],
+    ["a count that is not whole", [{ count: 1.5 }]],
+  ])(
+    "keeps a workspace whose notes have %s, with the number unknown",
+    async (_name, notes) => {
+      const t = stub({ workspaces: ok([{ id: W1, name: "Main", notes }]) });
+      const out = await loadSettings(t.db, NOW);
+      if (out.state !== "ok") throw new Error("expected ok");
+      expect(out.data.workspaces).toEqual([
+        { id: W1, name: "Main", notes: null },
+      ]);
+    },
+  );
 });

@@ -1,7 +1,7 @@
-/* The vault screen in Keystone glass, in the map's grammar (map.module.css): the rail
-   (web/src/shell/) on the wash, then one frosted card holding the tabs, the filter and the three
+/* The vault screen, in the map's grammar (map.module.css): the rail
+   (web/src/shell/) on the page colour, then one card holding the tabs, the filter and the three
    columns, split by hairlines. The sharing control and the release box open inside the card as
-   reset popovers (data-scope="reset"). Colours are tokens only (themes.generated.css). */
+   popovers. Colours are tokens only (themes.generated.css). */
 
 .root {
   min-height: 100vh;
@@ -20,6 +20,7 @@
 
 .root button:focus-visible,
 .root input:focus-visible,
+.root select:focus-visible,
 .root a:focus-visible {
   outline: 2px solid var(--acc);
   outline-offset: 2px;
@@ -38,6 +39,8 @@
 /* ---- The card ---- */
 
 .panel {
+  /* The anchor of the dimmed layer a panel's dialog opens over. */
+  position: relative;
   flex: 999 1 620px;
   min-width: 0;
   margin: 8px 8px 8px 4px;
@@ -45,8 +48,6 @@
   border: 1px solid var(--edge-card);
   border-radius: 20px;
   background: var(--glow), var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
   box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
@@ -89,7 +90,7 @@
 }
 
 .tab[aria-current="page"] {
-  color: var(--fg);
+  color: var(--active-fg);
   font-weight: 500;
 }
 
@@ -97,15 +98,33 @@
   border-radius: 7px;
 }
 
-.filter {
-  flex: 0 1 260px;
-  min-width: 0;
-  display: flex;
-  transition: flex-basis 0.4s var(--ease);
+/* The folder/topic switch: the tabs' look on two buttons (no sliding pill), the chosen one
+   marked by aria-pressed. It fills the folder column. */
+.switch {
+  margin-bottom: 10px;
 }
 
-.filter:focus-within {
-  flex-basis: 320px;
+.switch .tab {
+  flex: 1 1 0;
+  justify-content: center;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.tab[aria-pressed="true"] {
+  background: var(--sel);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* The filter takes the room the tabs and Add notes leave. */
+.filter {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
 }
 
 .search {
@@ -298,6 +317,16 @@
   min-width: 0;
 }
 
+.folderMark {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.heldName {
+  color: var(--acc);
+}
+
 .markText {
   min-width: 0;
   overflow: hidden;
@@ -387,20 +416,43 @@
   font-weight: 500;
 }
 
+.rowTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rowTop .rowTitle {
+  flex: 1;
+}
+
 .rowMeta {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--muted);
 }
 
 .rowMark {
-  margin-left: auto;
-  min-width: 0;
-  display: flex;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
   color: var(--fg2);
+}
+
+.rowTopic {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg2);
+  font-size: 11.5px;
+  line-height: 16px;
 }
 
 /* Held, Agent, Opened by a link: small hairline tags. */
@@ -449,6 +501,69 @@
 
 .preview > .empty {
   padding: 6px 0;
+}
+
+/* The summary when no note is open. */
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 74ch;
+}
+
+.overviewTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.overviewLine {
+  margin: 0;
+  color: var(--fg);
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+  margin: 0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+}
+
+.statNumber {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.statWord {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.overviewLabel {
+  margin: 0;
+  font-weight: 400;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Another note is on its way: the one shown fades, late enough that a quick answer never
+   flickers. */
+.preview[data-pending] > :not([data-opening]) {
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease) 150ms;
 }
 
 .article {
@@ -554,8 +669,6 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
   color: var(--fg);
 }
 
@@ -766,6 +879,271 @@
   margin-top: 0;
 }
 
+/* A note's topics: chips that wrap, and the Add control beside its button. Layout only. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.chipName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.chipKind {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* A colleague's chip has no ×: even padding. */
+.chip:not(:has(button)) {
+  padding-right: 10px;
+}
+
+/* ---- The open note's meta line and action row ----
+   One mono line (path · changed · who), then one row that wraps: the sharing control's button,
+   the topic chips and + Topic, and ⋯ pushed to the end. The sharing panel, when open, and a
+   refusal take a full line under the row. */
+.meta {
+  margin: 0 0 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.actionRow {
+  align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.actionRow[hidden] {
+  display: none;
+}
+
+.actionRow > .share {
+  display: contents;
+}
+
+.actionRow .control {
+  order: 1;
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.noteTopics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.noteTopics > .refused {
+  flex: 1 0 100%;
+}
+
+.head > .release:not(.wide) {
+  margin: 14px 0;
+}
+
+.chipRemove {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.chipRemove:hover,
+.chipRemove:focus-visible {
+  border-color: var(--line);
+  color: var(--fg);
+}
+
+/* + Topic and ⋯: quiet hairline buttons, each the anchor of its popover. */
+.pickRoot,
+.noteMenu {
+  position: relative;
+}
+
+.noteMenu {
+  margin-left: auto;
+}
+
+.addTopic,
+.moreButton {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px dashed var(--line-hi);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.24s var(--ease),
+    background 0.18s var(--ease);
+}
+
+.moreButton {
+  min-width: 32px;
+  border-style: solid;
+  border-color: transparent;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.addTopic:hover,
+.addTopic:focus-visible,
+.addTopic[aria-expanded="true"],
+.moreButton:hover,
+.moreButton:focus-visible,
+.moreButton[aria-expanded="true"] {
+  border-color: var(--line-hi);
+  color: var(--fg);
+}
+
+.addTopic[aria-expanded="true"],
+.moreButton[aria-expanded="true"] {
+  background: var(--fill);
+}
+
+/* The popovers: the map's menu surface. The picker opens under + Topic at its left edge, the
+   note menu under ⋯ at its right edge. */
+.pickPop,
+.menuPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 4;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+}
+
+.pickPop {
+  left: 0;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.pickPop > .search {
+  flex: none;
+  margin-bottom: 4px;
+  font-family: inherit;
+}
+
+/* In a narrow pane + Topic may sit near the right edge: the picker opens under the row's start
+   instead, so it stays inside the window. */
+@media (max-width: 600px) {
+  .actionRow {
+    position: relative;
+  }
+
+  .pickRoot {
+    position: static;
+  }
+}
+
+.menuPop {
+  right: 0;
+  width: max-content;
+  min-width: 160px;
+}
+
+.pickGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pickKind {
+  margin: 6px 0 2px;
+  padding: 0 8px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pickNone {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  flex: none;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.menuItem[aria-disabled="true"] {
+  color: var(--quiet);
+  cursor: default;
+}
+
 /* Delete before it has asked: words only, no edge and no fill until it is pointed at. */
 .quiet {
   grid-column: 2;
@@ -832,8 +1210,6 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
 }
 
 .saidText {
@@ -853,6 +1229,14 @@
 /* A row brought into view by the focus stays clear of that line. */
 .row {
   scroll-margin-top: 64px;
+}
+
+/* A list of up to 2,000 notes: rows out of view are not laid out or painted. The size stands
+   for a row's content as measured (title and meta line, 41px; 57px with the padding), and is
+   replaced by the real one once a row has been drawn. */
+.noteNav .row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 41px;
 }
 
 /* ---- Markdown ---- */
@@ -995,22 +1379,6 @@
   color: var(--muted);
 }
 
-/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
-
-@supports not (
-  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
-) {
-  .panel {
-    background: var(--glow), var(--bg);
-  }
-
-  .control,
-  .release,
-  .said {
-    background: var(--surface);
-  }
-}
-
 /* ---- Side by side from 1100 x 560 ----
    The page is exactly one window tall and each column scrolls on its own. Narrower or very
    short windows stack the columns and let the page scroll. */
@@ -1034,7 +1402,8 @@
     padding-top: 0;
   }
 
-  .cols[data-shared] {
+  .cols[data-shared],
+  .cols[data-narrow] {
     grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
   }
 
@@ -1055,7 +1424,8 @@
     border-right: 1px solid var(--line);
   }
 
-  .cols[data-shared] .notes {
+  .cols[data-shared] .notes,
+  .cols[data-narrow] .notes {
     padding-left: 0;
   }
 
@@ -1066,7 +1436,8 @@
 
 @media (min-width: 1100px) and (min-height: 560px) {
   .root {
-    height: 100dvh;
+    /* Less the banner of a hive that is being deleted, when there is one. */
+    height: calc(100dvh - var(--closing-banner, 0px));
     min-height: 0;
     flex-wrap: nowrap;
     overflow: hidden;
@@ -1094,9 +1465,8 @@
   }
 
   /* The list header stays put and only the list under it scrolls, so no row ever passes
-     beneath the header and it needs no ground of its own on the glass. (A blurred veil does
-     not work here: inside the card's own backdrop-filter the nested blur has nothing to blur,
-     and a solid ground shows as a band on the light card.) */
+     beneath the header and it needs no ground of its own on the card. (A solid ground
+     shows as a band on the light card.) */
   .notes {
     display: flex;
     flex-direction: column;
@@ -1114,7 +1484,8 @@
     border-bottom: 1px solid var(--line);
   }
 
-  .cols[data-shared] .notes > .listHead {
+  .cols[data-shared] .notes > .listHead,
+  .cols[data-narrow] .notes > .listHead {
     margin-left: 0;
     padding-left: 12px;
   }
@@ -1146,6 +1517,7 @@
   }
 
   .caret,
+  .addCaret,
   .tab,
   .search,
   .folder,
@@ -1165,6 +1537,7 @@
    overridden. */
 @media (forced-colors: active) {
   .tab[aria-current="page"],
+  .tab[aria-pressed="true"],
   .folder[aria-pressed="true"],
   .row[aria-current="page"],
   .option:has(input:checked) {
@@ -1192,4 +1565,257 @@
   margin: 0;
   opacity: 0;
   cursor: pointer;
+}
+
+/* ---- Add notes, and the panels' dialog ----
+   Add notes sits at the bar's right end; its menu opens under it at its right edge. Each item
+   is a name with one line under it. The Import, Connect and Attach panels open in a dialog near
+   the top of the card, over the card dimmed; the dialog scrolls inside itself when tall. */
+.addNotes {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+}
+
+.addButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 14px;
+}
+
+.addButton[aria-expanded="true"] {
+  border-color: var(--line-hi);
+  background: var(--fill);
+}
+
+.addCaret {
+  flex: none;
+  width: 8px;
+  height: 5px;
+  background: var(--muted);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transition: transform 0.18s var(--ease);
+}
+
+.addCaret[data-open] {
+  transform: rotate(180deg);
+}
+
+.addPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 4;
+  box-sizing: border-box;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+}
+
+.addItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.addItem:hover,
+.addItem:focus-visible {
+  background: var(--fill);
+}
+
+.addName {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.addLine {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.dim {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 80px;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+.dialog {
+  box-sizing: border-box;
+  width: 560px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100dvh - 120px);
+  overflow-y: auto;
+  border: 1px solid var(--line-hi);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.dialog:focus {
+  outline: none;
+}
+
+/* In the dialog the panel is its content: no box of its own, and the dialog does the scrolling. */
+.dialog > .importPanel {
+  margin: 0;
+  padding: 18px 20px 20px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  max-height: none;
+  overflow: visible;
+}
+
+/* ---- Import a folder ----
+   The panel is a reset popover, like the delete question. Outside a dialog it scrolls inside
+   itself when its lists are long. */
+
+.importPanel {
+  flex: none;
+  margin-top: 0;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.importPanel .quiet {
+  margin-left: auto;
+}
+
+.importPanel .groupName {
+  padding: 0;
+}
+
+.importPanel .options {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+/* A label over its field. */
+.importField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.importField > .search {
+  flex: none;
+  font-family: inherit;
+}
+
+.importPaths {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.importProgress {
+  width: 100%;
+  max-width: 360px;
+  height: 6px;
+  accent-color: var(--acc);
+}
+
+/* A link drawn as a button. */
+.importLink {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+/* ---- Narrow card: the folder column folded into the list title ---- */
+
+.listTitlePick {
+  margin: 0;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 32px;
+}
+
+/* The popover is placed from the card (the panel is positioned), not from this column, so its
+   height can be a share of the card's. */
+.cols[data-narrow] .notes {
+  position: static;
+}
+
+.scopePicker {
+  min-width: 0;
+}
+
+.scopeButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.scopeButton:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.scopeTitle {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scopePop {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  width: 300px;
+  max-width: calc(100% - 16px);
+  max-height: 70%;
+  margin-top: 6px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+  scrollbar-width: thin;
 }

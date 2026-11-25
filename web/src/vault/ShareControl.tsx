@@ -8,7 +8,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Mark } from "./marks";
 import { Glyph, markText } from "./MarkTag";
-import { folderSentence, noteSentence } from "./sentences";
+import {
+  folderSentence,
+  folderSharing,
+  noteSentence,
+  NO_FOLDER_RULE,
+  NONE_OPTION,
+} from "./sentences";
 import type {
   Choice,
   Result,
@@ -80,7 +86,7 @@ export function ShareControl(props: Props) {
   if (props.subject === "note" && props.ruleFolder)
     options.push({ key: "folder", label: "Same as folder" });
   if (props.subject === "folder")
-    options.push({ key: "none", label: "No rule" });
+    options.push({ key: "none", label: NONE_OPTION });
 
   useEffect(() => {
     if (!open) return;
@@ -195,7 +201,15 @@ export function ShareControl(props: Props) {
     props.subject === "note"
       ? "Who can read this note"
       : `Who can read ${props.path}`;
-  const shown = props.mark ? markText(props.mark) : "No rule";
+  const isFolder = props.subject === "folder";
+  const state = props.mark
+    ? markText(props.mark)
+    : isFolder
+      ? NO_FOLDER_RULE
+      : "No rule";
+  // A folder's button says what it is; a note's pill shows the state, named by its label.
+  const shown = isFolder ? folderSharing(state) : state;
+  const name = isFolder ? shown : `Sharing: ${state}`;
 
   return (
     <div className={s.share}>
@@ -205,7 +219,7 @@ export function ShareControl(props: Props) {
         className={s.pill}
         aria-expanded={open}
         aria-controls={open ? groupId : undefined}
-        aria-label={`${props.subject === "note" ? "Sharing" : "Folder sharing"}: ${shown}`}
+        aria-label={name}
         onClick={() => (open ? close() : start())}
       >
         {props.mark && <Glyph kind={props.mark.kind} />}
@@ -222,7 +236,6 @@ export function ShareControl(props: Props) {
           id={groupId}
           role="group"
           aria-label={label}
-          data-scope="reset"
           className={s.control}
           onKeyDown={(e) => {
             if (e.key === "Escape") {

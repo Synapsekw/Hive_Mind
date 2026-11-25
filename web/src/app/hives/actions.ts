@@ -1,6 +1,7 @@
 "use server";
 
-// The hive switcher's writes, as server actions. Both are public HTTP endpoints: each acts as
+// The writes on a hive as a whole, as server actions: switching, starting one, asking for its
+// deletion and cancelling that. All are public HTTP endpoints: each acts as
 // the person behind the session cookie (never a service key), checks its arguments in
 // `write.ts` before any query, and lets the database decide. No session, no Supabase
 // configuration or an unexpected failure answers `{ ok: false }`.
@@ -9,9 +10,16 @@
 // own hives the screens show. The page reloads afterwards.
 import { cookies } from "next/headers";
 import { createServerSupabase } from "../../lib/supabase/server";
-import { createHiveIn, switchHiveIn, type Created } from "./write";
+import {
+  cancelHiveDeletionIn,
+  createHiveIn,
+  requestHiveDeletionIn,
+  switchHiveIn,
+  type Created,
+  type Requested,
+} from "./write";
 
-export type { Created } from "./write";
+export type { Created, Requested } from "./write";
 
 export async function switchHive(hiveId: string): Promise<{ ok: boolean }> {
   try {
@@ -46,5 +54,39 @@ export async function createHive(
       e instanceof Error ? e.name : "",
     );
     return { ok: false, reason: "failed" };
+  }
+}
+
+/** The database decides whether the person owns the hive and whether the name is its name. */
+export async function requestHiveDeletion(
+  hiveId: string,
+  typedName: string,
+): Promise<Requested> {
+  try {
+    return await requestHiveDeletionIn(
+      await createServerSupabase(),
+      hiveId,
+      typedName,
+    );
+  } catch (e) {
+    console.error(
+      "request hive deletion action failed",
+      e instanceof Error ? e.name : "",
+    );
+    return { ok: false, reason: "failed" };
+  }
+}
+
+export async function cancelHiveDeletion(
+  hiveId: string,
+): Promise<{ ok: boolean }> {
+  try {
+    return await cancelHiveDeletionIn(await createServerSupabase(), hiveId);
+  } catch (e) {
+    console.error(
+      "cancel hive deletion action failed",
+      e instanceof Error ? e.name : "",
+    );
+    return { ok: false };
   }
 }

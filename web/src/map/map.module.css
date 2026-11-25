@@ -1,5 +1,5 @@
-/* The map screen in Keystone glass, after docs/ui/map.dc.html: the map on one frosted card, the
-   details on a second glass slab (data-scope="chrome"), the rail (web/src/shell/) on the wash.
+/* The map screen, after docs/ui/map.dc.html: the map on one card, the
+   details on a second slab, the rail (web/src/shell/) on the page colour.
    Colours are tokens only (themes.generated.css), read with var(). */
 
 .root {
@@ -43,28 +43,24 @@
   padding: 16px 20px;
   border: 1px solid var(--edge-card);
   border-radius: 20px;
-  background: var(--glow), var(--glass);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
+  background: var(--card-tint), var(--glass);
   box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+/* The top bar. A container, so it wraps by the card's own width: on a narrow card the filter
+   takes a second row and Today stays at the first row's end. Kept above the stage, which its
+   popovers open over. */
 .bar {
+  position: relative;
+  z-index: 3;
+  container: map-bar / inline-size;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
-}
-
-.stats {
-  flex: 1 1 160px;
-  margin: 0;
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 /* The view switch: one segmented control, a 10 px hairline track with 7 px segments. */
@@ -76,18 +72,97 @@
   border-radius: 10px;
 }
 
-.arrange {
+/* Group by: a button and a small menu under it. */
+.groupMenu {
+  position: relative;
+}
+
+.groupButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.groupButton:hover,
+.groupButton[aria-expanded="true"] {
+  background: var(--fill);
+}
+
+.groupLabel {
+  color: var(--muted);
+}
+
+.groupChevron {
+  opacity: 0.6;
+}
+
+.groupPop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: 4;
+  box-sizing: border-box;
+  min-width: 100%;
+  width: max-content;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+}
+
+.groupRow {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
 }
 
-.arrangeLabel {
+.groupRow:hover,
+.groupRow:focus-visible {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.groupRow[aria-checked="true"] {
+  color: var(--fg);
+}
+
+.groupCount {
+  margin-left: auto;
+  padding-left: 12px;
   font-family: var(--font-mono), monospace;
   font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--quiet);
+  color: var(--muted);
+}
+
+.groupTick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
 }
 
 .tab {
@@ -112,63 +187,8 @@
 
 /* The highlight is the sliding pill under the group (shell/SlidingPill.module.css). */
 .tab[aria-pressed="true"] {
-  color: var(--fg);
+  color: var(--active-fg);
   font-weight: 500;
-}
-
-/* min-width 0: the search box may narrow, so at 1366 px the bar stays one line and the stage
-   keeps the height. */
-.tools {
-  flex: 1 1 160px;
-  min-width: 0;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-}
-
-.toggle {
-  height: 36px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--muted);
-  font-size: 13px;
-  cursor: pointer;
-  transition:
-    background 0.18s var(--ease),
-    color 0.18s var(--ease);
-}
-
-.toggle:hover {
-  color: var(--fg);
-}
-
-.toggle[aria-pressed="true"] {
-  background: var(--fill);
-  color: var(--fg);
-}
-
-.search {
-  flex: 0 1 200px;
-  min-width: 0;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--fill);
-  color: var(--fg);
-  font-size: 13px;
-  transition: border-color 0.24s var(--ease);
-}
-
-.search:hover {
-  border-color: var(--line-hi);
-}
-
-.search::placeholder {
-  color: var(--muted);
 }
 
 /* ---- The stage: one canvas, fitted to the room the card has ---- */
@@ -228,7 +248,7 @@
   overflow: hidden;
 }
 
-/* The zoom control: a small glass bar in the stage's bottom-right corner. */
+/* The zoom control: a small bar in the stage's bottom-right corner. */
 .zoom {
   position: absolute;
   right: 12px;
@@ -240,9 +260,7 @@
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 11px;
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  background: var(--surface);
   color: var(--fg2);
   font-size: 12px;
 }
@@ -271,6 +289,39 @@
 .zoomFit:hover {
   background: var(--fill);
   color: var(--fg);
+}
+
+/* A fine rule between the zoom's own buttons and Labels / Legend. */
+.zoomRule {
+  align-self: center;
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--line);
+}
+
+/* The Labels switch reads as pressed when names are drawn. */
+.zoomFit[aria-pressed="true"],
+.zoomFit[aria-expanded="true"] {
+  color: var(--fg);
+}
+
+/* The legend opens upward from the control, its right edge on the control's. */
+.zoomLegend {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 4;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100cqw - 24px);
+  padding: 6px;
+  border: 1px solid var(--line-hi);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  color: var(--fg);
+  font-size: 12.5px;
 }
 
 .zoomValue {
@@ -338,7 +389,7 @@
     var(--ring);
 }
 
-/* ---- The peek card: glass next to the pointer, never in the way of it ---- */
+/* ---- The peek card: a solid card next to the pointer, never in the way of it ---- */
 
 .peek {
   position: fixed;
@@ -347,9 +398,7 @@
   padding: 10px 12px 11px;
   border: 1px solid var(--line-hi);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
-  -webkit-backdrop-filter: blur(24px);
-  backdrop-filter: blur(24px);
+  background: var(--surface);
   box-shadow: var(--lift);
   color: var(--fg);
   pointer-events: none;
@@ -422,228 +471,431 @@
   color: var(--fg2);
 }
 
-/* ---- The legend dock ---- */
+/* ---- The filter, in the top bar ---- */
 
-.dock {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 2;
-  max-width: calc(100% - 230px);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  -webkit-backdrop-filter: blur(24px);
-  backdrop-filter: blur(24px);
-  animation: dock-in 0.8s 0.5s var(--ease) both;
-}
-
-@keyframes dock-in {
-  from {
-    opacity: 0;
-    transform: translateY(14px);
-  }
-}
-
-.dockGroup {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.dockGroup:first-child {
-  flex: 1 1 auto;
+/* Search with the Filter button, the chips, the count and Clear all. It takes the room the bar
+   has left; the chips give way first. */
+.filterGroup {
+  position: relative;
+  flex: 1 1 520px;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
 }
 
-.dockLabel {
+/* One field: the mark, the input and the Filter button at its end. The popover opens under it. */
+.searchBox {
+  position: relative;
+  flex: 0 1 320px;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 4px 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--fill);
+  transition: border-color 0.24s var(--ease);
+}
+
+.searchBox:hover,
+.searchBox:focus-within {
+  border-color: var(--line-hi);
+}
+
+.searchIcon {
   flex: none;
-  margin-right: 6px;
+  color: var(--muted);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.searchInput::placeholder {
+  color: var(--muted);
+}
+
+/* The ring goes round the whole field, not the bare input inside it. */
+.root .searchInput:focus-visible {
+  outline: none;
+}
+
+.searchBox:has(.searchInput:focus-visible) {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.filterToggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.filterToggle:hover,
+.filterToggle[aria-expanded="true"] {
+  background: var(--fill-on);
+  color: var(--fg);
+}
+
+.filterChevron {
+  opacity: 0.6;
+}
+
+.filterBadge {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 9px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 17px;
+  text-align: center;
+}
+
+/* The popover, under the search field and right-aligned to it (left-aligned when the card has
+   no room to its left). Three columns side by side, each scrolling by itself; its height is capped
+   from the stage's as it opens. Stacked, the columns run down and the popover scrolls as one. */
+.filterPop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 4;
+  width: 600px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid var(--line-hi);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+}
+
+.filterPop[data-side="left"] {
+  left: 0;
+  right: auto;
+}
+
+.filterCols {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) max-content minmax(150px, 1.2fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.filterCol {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.filterCol + .filterCol {
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+
+.filterPop[data-stack] {
+  display: block;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.filterPop[data-stack] .filterCols {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: none;
+}
+
+.filterPop[data-stack] .filterCol {
+  overflow: visible;
+}
+
+.filterPop[data-stack] .filterCol + .filterCol {
+  padding: 4px 0 0;
+  border-left: 0;
+  border-top: 1px solid var(--line);
+}
+
+.filterPopHead {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px 6px;
   font-family: var(--font-mono), monospace;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--quiet);
 }
 
-.dockRule {
-  flex: none;
-  width: 1px;
-  height: 20px;
-  background: var(--line);
-}
-
-.dockTopics {
+.filterRow {
   display: flex;
   align-items: center;
-  gap: 2px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.dockTopics::-webkit-scrollbar {
-  display: none;
-}
-
-.dockTopics[data-over] {
-  -webkit-mask-image: linear-gradient(90deg, var(--fg) 85%, transparent);
-  mask-image: linear-gradient(90deg, var(--fg) 85%, transparent);
-}
-
-.dockItem {
-  position: relative;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
   padding: 0 10px;
   border: 0;
   border-radius: 8px;
   background: none;
-  color: var(--fg2);
+  color: var(--muted);
   font-size: 12.5px;
-  white-space: nowrap;
+  text-align: left;
   cursor: pointer;
-  transition:
-    background 0.18s var(--ease),
-    color 0.18s var(--ease);
 }
 
-.dockItem:hover,
-.dockItem:focus-visible {
-  color: var(--fg);
+.filterRow:hover,
+.filterRow:focus-visible {
   background: var(--fill);
-}
-
-.dockItem[aria-pressed="true"] {
-  background: var(--fill-on);
   color: var(--fg);
 }
 
-.dockItem[data-quiet] {
-  color: var(--quiet);
+.root .filterRow:focus-visible {
+  outline-offset: -2px;
 }
 
-.dockSwatch {
+.filterRow[aria-checked="true"] {
+  color: var(--fg);
+}
+
+.filterBox {
   flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--c);
-  transition: box-shadow 0.25s var(--ease);
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--line-hi);
+  border-radius: 4px;
+  color: var(--on-brand);
 }
 
-.dockItem:hover .dockSwatch,
-.dockItem:focus-visible .dockSwatch,
-.dockItem[aria-pressed="true"] .dockSwatch {
-  box-shadow: 0 0 8px 1px var(--c);
+.filterRow[aria-checked="true"] .filterBox {
+  border-color: var(--brand);
+  background: var(--brand);
 }
 
-.dockCount {
+.filterRowName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filterRowCount {
   font-family: var(--font-mono), monospace;
   font-size: 11px;
   color: var(--quiet);
 }
 
-.dockIcon {
-  width: 30px;
-  padding: 0;
-  justify-content: center;
+.filterSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
 }
 
-.dockLegend {
-  cursor: default;
+.filterRow:hover .filterSwatch,
+.filterRow:focus-visible .filterSwatch,
+.filterRow[aria-checked="true"] .filterSwatch {
+  box-shadow: 0 0 8px 1px var(--c);
 }
 
-.dockLegend:hover {
-  background: none;
+/* A node's mark (.shape) at legend size: inside the list it keeps a slot of its own. */
+.filterMark {
+  margin: 0 1px;
 }
 
-.dockAvatar {
+.filterAvatar {
+  flex: none;
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
+  margin: 0 -3px;
   border-radius: 50%;
   background: var(--fill-on);
   color: var(--fg);
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 600;
 }
 
-.dockItem[data-quiet] .dockAvatar {
-  opacity: 0.45;
+/* The chips: as wide as they need, shrinking first (well before the search field) when the bar
+   runs out of room. */
+.filterChips {
+  flex: 0 1000 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
 }
 
-/* A small fixed label above an icon entry, shown on hover and keyboard focus. */
-.dockTip {
+/* Clipped to the filter, so its overflow never widens the page. */
+.filterMeasure {
   position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%) translateY(3px);
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--fg);
-  font-size: 11.5px;
+  left: 0;
+  top: 0;
+  max-width: 100%;
+  overflow: hidden;
+  display: flex;
+  gap: 5px;
+  visibility: hidden;
   pointer-events: none;
-  opacity: 0;
-  transition:
-    opacity 0.15s var(--ease),
-    transform 0.15s var(--ease);
 }
 
-.dockItem:hover .dockTip,
-.dockItem:focus-visible .dockTip {
-  opacity: 1;
-  transform: translateX(-50%);
-}
-
-.chipDot {
+.filterChip {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 4px 0 9px;
   box-sizing: border-box;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--c, var(--fg2));
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
+  border-radius: 8px;
+  background: var(--sel);
+  color: var(--fg);
+  white-space: nowrap;
 }
 
-.dockItem[data-quiet] .chipDot {
-  opacity: 0.35;
+/* In the row a chip may give up some of its name; the measuring copy keeps every chip whole. */
+/* Chips keep their width; only the last one shown may be cut short when room runs out. */
+.filterChips > .filterChip {
+  flex-shrink: 0;
 }
 
-.chipDot[data-kind="file"] {
-  border-radius: 0;
-  transform: rotate(45deg);
+.filterChips > .filterChip:last-child:not(.filterMore),
+.filterChips > .filterChip:has(+ .filterMore) {
+  flex-shrink: 1;
+  min-width: 0;
 }
 
-.chipDot[data-kind="hub"] {
-  border: 1.5px solid var(--fg2);
+.filterChips > .filterMore {
+  flex-shrink: 0;
+}
+
+.filterChipName {
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filterChipRemove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
   background: none;
+  color: var(--muted);
+  cursor: pointer;
 }
 
-.chipDot[data-kind="agent"] {
-  border: 1.5px solid var(--fg2);
-  background: radial-gradient(circle, var(--fg2) 0 1.5px, var(--bg) 2px);
+.filterChipRemove:hover {
+  background: var(--fill-on);
+  color: var(--fg);
 }
 
-.legendDot {
-  box-sizing: border-box;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 1.2px solid var(--muted);
+.filterMore {
+  padding: 0 9px;
+  color: var(--muted);
 }
 
-/* ---- The side panel: a second, lighter glass slab ---- */
+.filterCount {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filterClear {
+  flex: none;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filterClear:hover {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.legendList {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+.legendList li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  color: var(--muted);
+}
+
+.legendRamp {
+  flex: none;
+  width: 44px;
+  height: 7px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--brand),
+    color-mix(in srgb, var(--brand) 12%, transparent)
+  );
+}
+
+/* ---- The side panel: the card colour ---- */
 
 .details {
   flex: 1 1 280px;
@@ -654,8 +906,6 @@
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--glass2);
-  -webkit-backdrop-filter: blur(30px) saturate(1.5);
-  backdrop-filter: blur(30px) saturate(1.5);
   color: var(--fg);
   display: flex;
   flex-direction: column;
@@ -751,6 +1001,13 @@
 }
 
 .barRow {
+  width: calc(100% + 12px);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   display: grid;
   grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) auto;
   gap: 14px;
@@ -763,6 +1020,118 @@
 
 .barRow:hover {
   background: var(--fill);
+}
+
+.barRow[aria-pressed="true"] {
+  background: var(--fill-on);
+  box-shadow: inset 2px 0 0 var(--acc);
+}
+
+/* ---- Folding the panel ---- */
+
+.foldBtn {
+  align-self: flex-end;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -10px -6px -22px 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.foldBtn:hover {
+  background: var(--fill-on);
+  color: var(--fg);
+}
+
+.detailBody {
+  display: contents;
+}
+
+/* A narrow window stacks the page: nothing folds there, so there is no fold button. */
+@media not (min-width: 700px) {
+  .foldBtn {
+    display: none;
+  }
+}
+
+/* Shut: the panel is gone and the map takes its column. Set on <html> from the cookie (see
+   FoldProvider), so the first paint is already right. A narrow window stacks the page and
+   shows the panel always. */
+@media (min-width: 700px) {
+  :global(html[data-panel="shut"]) .details {
+    display: none;
+  }
+}
+
+/* The Today button, last in the top bar: a muted word and the count, and a dot when
+   something waits for the person. Hidden when the window is too narrow to fold. */
+.todayBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s var(--ease),
+    background 0.18s var(--ease);
+}
+
+.todayBtn:hover,
+.todayBtn[aria-expanded="true"] {
+  border-color: var(--line-hi);
+}
+
+.todayBtnWord {
+  color: var(--muted);
+}
+
+.todayBtnDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--acc);
+}
+
+@media not (min-width: 700px) {
+  .todayBtn {
+    display: none;
+  }
+}
+
+/* A narrow card: the filter takes the bar's second row; Today stays at the first row's end.
+   After the rules it overrides. */
+@container map-bar (max-width: 1100px) {
+  .filterGroup {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .todayBtn {
+    margin-left: auto;
+  }
+}
+
+/* A phone-width card: the count and Clear all wrap under the search field rather than run off. */
+@container map-bar (max-width: 560px) {
+  .filterGroup {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
 }
 
 .track {
@@ -794,6 +1163,21 @@
 
 .fill[data-me] {
   background: var(--grad);
+}
+
+/* Played once and the panel folded: unfolding shows them drawn, not drawing again. */
+.today[data-played] .sparkLine,
+.today[data-played] .sparkArea,
+.today[data-played] .fill {
+  animation: none;
+}
+
+.today[data-played] .sparkLine {
+  stroke-dashoffset: 0;
+}
+
+.today[data-played] .sparkArea {
+  opacity: 1;
 }
 
 .count {
@@ -981,25 +1365,6 @@
   align-self: flex-start;
 }
 
-/* ---- Without backdrop-filter the glass would show the wash straight through ---- */
-
-@supports not (
-  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
-) {
-  .panel {
-    background: var(--glow), var(--bg);
-  }
-
-  .details {
-    background: var(--panel-solid);
-  }
-
-  .zoom,
-  .peek {
-    background: var(--surface);
-  }
-}
-
 /* ---- Fit the screen ----
    When the three columns sit side by side, the page is exactly one screen
    tall: the map scales to the room the card has, and the side panel scrolls on
@@ -1008,7 +1373,8 @@
 
 @media (min-width: 1100px) and (min-height: 560px) {
   .root {
-    height: 100dvh;
+    /* Less the banner of a hive that is being deleted, when there is one. */
+    height: calc(100dvh - var(--closing-banner, 0px));
     min-height: 0;
     flex-wrap: nowrap;
     overflow: hidden;
@@ -1033,7 +1399,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dock,
   .sparkLine,
   .sparkArea,
   .fill {
@@ -1049,9 +1414,9 @@
   }
 
   .tab,
-  .toggle,
-  .search,
-  .dockItem,
+  .groupButton,
+  .searchBox,
+  .filterToggle,
   .zoomButton,
   .zoomFit,
   .clear,

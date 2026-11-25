@@ -1,9 +1,19 @@
 // The right rail: today's activity until something is selected, then what it is, who wrote
 // it and what it connects to. Every title is rendered as a text node.
 import Link from "next/link";
-import { useEffect, useId, useState, type CSSProperties } from "react";
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { Preview } from "./MapCanvas";
 import type { Activity, MapModel, ModelNode } from "./types";
+import { KIND_NAMES } from "../topics/types";
+import { foldWide, useFold, useFoldSide } from "../shell/FoldProvider";
 import { Shape } from "./Shape";
 import { daySeries, sparkPath } from "./sparkline";
 import { reducedMotion } from "./useCamera";
@@ -59,14 +69,28 @@ function Today({
   model,
   act,
   inbox,
+  members,
+  onMembers,
   onPreview,
+  folded,
 }: {
   model: MapModel;
   act: Activity;
   inbox: number;
+  members: string[];
+  onMembers: (ids: string[]) => void;
   onPreview: (p: Preview | null) => void;
+  folded: boolean;
 }) {
   const shown = useCountUp(act.today);
+  // Folding hides this with display: none, and showing it again would replay the sparkline and
+  // bar animations. Once they have been seen and the panel folds, they stay drawn.
+  const seen = useRef(false);
+  const [played, setPlayed] = useState(false);
+  useEffect(() => {
+    if (!folded) seen.current = true;
+    else if (seen.current) setPlayed(true);
+  }, [folded]);
   const grad = useId();
   const series = daySeries(act);
   const total = series.reduce((a, b) => a + b, 0);
@@ -74,7 +98,7 @@ function Today({
   const max = Math.max(1, ...act.perMember.map((m) => m.count));
   const me = new Set(model.members.filter((m) => m.isMe).map((m) => m.id));
   return (
-    <section className={s.today}>
+    <section className={s.today} data-played={played || undefined}>
       <div>
         <p className={s.eyebrow}>Today</p>
         {act.today === 0 ? (
@@ -135,11 +159,22 @@ function Today({
         <p className={s.eyebrow}>By person</p>
         <div className={s.bars}>
           {act.perMember.map((m, i) => (
-            <div
+            <button
               key={m.id}
+              type="button"
               className={s.barRow}
+              aria-pressed={members.includes(m.id)}
+              onClick={() =>
+                onMembers(
+                  members.includes(m.id)
+                    ? members.filter((id) => id !== m.id)
+                    : [...members, m.id],
+                )
+              }
               onPointerEnter={() => onPreview({ member: m.id })}
               onPointerLeave={() => onPreview(null)}
+              onFocus={() => onPreview({ member: m.id })}
+              onBlur={() => onPreview(null)}
             >
               <span>{m.name}</span>
               <span aria-hidden="true" className={s.track}>
@@ -155,7 +190,7 @@ function Today({
                 />
               </span>
               <span className={s.count}>{m.count}</span>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -183,12 +218,13 @@ function Facts({
   owner: string;
   now: number;
 }) {
-  const topic = model.topics[n.topic]?.name ?? "";
+  const folder = n.folder ?? "";
   if (n.locked)
     return (
       <p className={s.meta}>
-        {topic}. {owner} has not shared this, so you see where it sits but not
-        what it says.
+        {folder ? `${folder}. ` : ""}
+        {owner} has not shared this, so you see where it sits but not what it
+        says.
       </p>
     );
   return (
@@ -200,10 +236,25 @@ function Facts({
             <dd title={n.path}>{n.path}</dd>
           </>
         )}
-        <dt>Topic</dt>
-        <dd>{topic}</dd>
+        <dt>Folder</dt>
+        <dd>{folder}</dd>
+        {n.held && (
+          <>
+            <dt>Topics</dt>
+            <dd>
+              {n.held.map((t, i) => (
+                <Fragment key={i}>
+                  {i > 0 && ", "}
+                  {t.name} <span className={s.meta}>{KIND_NAMES[t.kind]}</span>
+                </Fragment>
+              ))}
+            </dd>
+          </>
+        )}
         <dt>Owner</dt>
         <dd>{owner}</dd>
+        <dt>Written</dt>
+        <dd>{date(n.createdAt, now)}</dd>
         <dt>Changed</dt>
         <dd>{date(n.updatedAt, now)}</dd>
       </dl>
@@ -322,6 +373,8 @@ export function DetailRail({
   agentInfo,
   now,
   inbox = 0,
+  members,
+  onMembers,
   onPick,
   onHot,
   onPreview,
@@ -333,30 +386,85 @@ export function DetailRail({
   agentInfo: Map<string, { status: string; selfHosted: boolean }>;
   now: number;
   inbox?: number;
+  members: string[];
+  onMembers: (ids: string[]) => void;
   onPick: (i: number) => void;
   onHot: (i: number | null) => void;
   onPreview: (p: Preview | null) => void;
   onClear: () => void;
 }) {
+  const { fold, togglePanel } = useFold();
+  // Tells the provider a panel is on the page, so the `]` key has something to fold.
+  useFoldSide("panel");
+  const folded = fold.panel === "shut";
+  const asideRef = useRef<HTMLElement>(null);
+  // Shutting hides the panel: a By person row pointed at or focused there ends its preview, and
+  // focus inside it moves to the Today button rather than being lost. Before paint, while the
+  // focused element is still the active element.
+  useLayoutEffect(() => {
+    // Under 700 px the panel is always shown and nothing folds, so there is nothing to end.
+    if (!folded || !foldWide()) return;
+    onPreview(null);
+    const active = document.activeElement;
+    if (active && asideRef.current?.contains(active))
+      document.querySelector<HTMLElement>("[data-today]")?.focus();
+  }, [folded, onPreview]);
   const n = sel !== null ? model.nodes[sel] : undefined;
   const info = n?.kind === "agent" && n.id ? agentInfo.get(n.id) : undefined;
   return (
-    <aside aria-label="Details" data-scope="chrome" className={s.details}>
-      <div key={sel ?? "today"} className="rise">
-        {n ? (
-          <Selected
-            model={model}
-            n={n}
-            status={info?.status ?? ""}
-            selfHosted={info?.selfHosted ?? false}
-            now={now}
-            onPick={onPick}
-            onHot={onHot}
-            onClear={onClear}
-          />
-        ) : (
-          <Today model={model} act={act} inbox={inbox} onPreview={onPreview} />
-        )}
+    <aside
+      ref={asideRef}
+      id="hv-details"
+      aria-label="Details"
+      className={s.details}
+    >
+      <button
+        type="button"
+        className={s.foldBtn}
+        aria-keyshortcuts="]"
+        aria-label="Close details"
+        title="Close details ( ] )"
+        onClick={togglePanel}
+      >
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m4 4 8 8M12 4l-8 8" />
+        </svg>
+      </button>
+      <div className={s.detailBody}>
+        <div key={sel ?? "today"} className="rise">
+          {n ? (
+            <Selected
+              model={model}
+              n={n}
+              status={info?.status ?? ""}
+              selfHosted={info?.selfHosted ?? false}
+              now={now}
+              onPick={onPick}
+              onHot={onHot}
+              onClear={onClear}
+            />
+          ) : (
+            <Today
+              model={model}
+              act={act}
+              inbox={inbox}
+              members={members}
+              onMembers={onMembers}
+              onPreview={onPreview}
+              folded={folded}
+            />
+          )}
+        </div>
       </div>
     </aside>
   );

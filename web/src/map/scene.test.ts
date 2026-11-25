@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fixturePayload } from "./fixture";
 import { activity, buildModel } from "./graph";
 import { freshLevel } from "./freshness";
-import { layout, ringsLayout } from "./layouts";
+import { layout, ringsLayout, timelineScale } from "./layouts";
 import { buildScene, guideLabels } from "./scene";
 
 const NOW = Date.UTC(2026, 10, 23, 14, 0);
@@ -54,7 +54,7 @@ describe("buildScene", () => {
           ? freshLevel(n.updatedAt, NOW)
           : 0,
       );
-    // The fixture spans 20 days: both ends of the scale are there.
+    // The fixture spans 13 days: the freshest level and a faded one are both there.
     expect(s.fresh.includes(7)).toBe(true);
     expect(s.fresh.includes(4)).toBe(true);
   });
@@ -98,6 +98,108 @@ describe("buildScene", () => {
     });
     expect(t.guideLabels).toHaveLength(3 + 14);
     expect(t.guideLabels[t.guideLabels.length - 1]!.text).toBe("Today");
+    // Days look as they did: the month on the first column, bare dates after it.
+    expect(t.guideLabels.slice(3).map((g) => g.text)).toEqual([
+      "10 Nov",
+      "11",
+      "12",
+      "13",
+      "14",
+      "15",
+      "16",
+      "17",
+      "18",
+      "19",
+      "20",
+      "21",
+      "22",
+      "Today",
+    ]);
+    expect(t.guideLabels.slice(3).map((g) => [g.x, g.y, g.align])).toEqual(
+      Array.from({ length: 14 }, (_, c) => [250 + c * 51 + 22, 410, "centre"]),
+    );
+    expect(t.guideLabels[2]!.text).toBe("Notes and files by date written");
+  });
+  it("labels the Timeline on the scale its notes were laid out on", () => {
+    const old = buildModel(fixturePayload(NOW, { old: true }));
+    const scale = timelineScale(old, NOW);
+    expect(scale.unit).toBe("quarter");
+    const s = buildScene(
+      old,
+      "timeline",
+      layout("timeline", old, NOW, scale),
+      activity(old, NOW),
+      NOW,
+      null,
+      scale,
+    );
+    const texts = s.guideLabels.map((g) => g.text);
+    expect(texts[0]).toBe("Agent writes by quarter");
+    expect(texts.slice(3)).toEqual([
+      "Q3 2023",
+      "Q4 2023",
+      "Q1 2024",
+      "Q2 2024",
+      "Q3 2024",
+      "Q4 2024",
+      "Q1 2025",
+      "Q2 2025",
+      "Q3 2025",
+      "Q4 2025",
+      "Q1 2026",
+      "Q2 2026",
+      "Q3 2026",
+      "Q4 2026",
+    ]);
+    expect(texts).not.toContain("Today");
+    // Without a scale it works out the same one.
+    expect(
+      buildScene(old, "timeline", layout("timeline", old, NOW), act, NOW)
+        .guideLabels,
+    ).toEqual(s.guideLabels);
+    expect(
+      guideLabels("timeline", NOW, { unit: "week", now: NOW })[3]!.text,
+    ).toBe("24 Aug");
+  });
+  it("draws an agent's tick under the column its note was written in", () => {
+    const m = buildModel({
+      members: [{ id: "m1", display_name: "Me", is_me: true }],
+      agents: [
+        {
+          id: "a1",
+          member_id: "m1",
+          provider: "Claude",
+          trust_tier: "vendor",
+          last_used_at: null,
+          name: null,
+        },
+      ],
+      nodes: [
+        {
+          id: "n1",
+          kind: "note",
+          topic: "A",
+          member_id: "m1",
+          updated_at: new Date(NOW - 60_000).toISOString(),
+          created_at: new Date(Date.UTC(2026, 7, 5)).toISOString(),
+          locked: false,
+          title: "n1",
+          path: "A/n1.md",
+          workspace_id: null,
+          by_agent: true,
+          agent_id: "a1",
+          note_id: null,
+        },
+      ],
+      links: [],
+      truncated: false,
+    });
+    const pos = layout("timeline", m, NOW);
+    const s = buildScene(m, "timeline", pos, activity(m, NOW), NOW);
+    // One note written in August, months as the scale: three columns before this month.
+    expect(s.guideLabels[0]!.text).toBe("Agent writes by month");
+    const agentY = pos[m.nodes.findIndex((n) => n.kind === "agent")]![1];
+    expect(s.ticks).toEqual([[250 + 10 * 51 + 8, agentY]]);
   });
   it("grows the fixture to the asked number of items, ids unique", () => {
     const big = fixturePayload(NOW, { items: 5000 });

@@ -3,9 +3,10 @@
 // not decided here (the renderer reads them from tokens), and the renderer builds its batched
 // Path2Ds from this once per scene.
 import { freshLevel } from "./freshness";
-import { DAYS } from "./graph";
-import { ringsLayout, type RingsLayout } from "./layouts";
-import type { Activity, MapModel, View } from "./types";
+import { agentColumns } from "./graph";
+import { ringsLayout, timelineScale, type RingsLayout } from "./layouts";
+import { COLUMNS, columnLabel, type Scale } from "./timescale";
+import type { Activity, AgentColumn, MapModel, View } from "./types";
 
 export type GuideLabel = {
   text: string;
@@ -37,21 +38,6 @@ const CX = 500;
 const CY = 380;
 const X0 = 250;
 const CW = 51;
-const DAY_MS = 86_400_000;
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
 
 /** Deterministic points for the core: one per item written in the last 24 hours (up to 200). */
 export function swarm(count: number): [number, number][] {
@@ -69,11 +55,14 @@ export function swarm(count: number): [number, number][] {
   return out;
 }
 
-/** Agent writes per day: one row per member, level with that member's first agent. */
+/**
+ * Agent writes per Timeline column (`agentColumns`): one row per member, level with that
+ * member's first agent.
+ */
 export function ticks(
   model: MapModel,
   pos: [number, number][],
-  act: Activity,
+  writes: AgentColumn[],
 ): [number, number][] {
   const rowY = new Map<string, number>();
   let next = 0;
@@ -84,46 +73,49 @@ export function ticks(
     next = Math.max(next, y);
   }
   const out: [number, number][] = [];
-  for (const { day, member, count } of act.days) {
+  for (const { column, member, count } of writes) {
     let y = rowY.get(member);
     if (y === undefined) {
       next = Math.min(300, next + 40);
       y = next;
       rowY.set(member, y);
     }
-    // Up to four dots sit apart; a busier day closes them into a bar.
+    // Up to four dots sit apart; a busier column closes them into a bar.
     const n = Math.min(count, 41);
     const step = n > 1 ? Math.min(10, 36 / (n - 1)) : 0;
-    for (let k = 0; k < n; k++) out.push([X0 + day * CW + 8 + k * step, y]);
+    for (let k = 0; k < n; k++) out.push([X0 + column * CW + 8 + k * step, y]);
   }
   return out;
 }
 
-function dayLabel(c: number, now: number): string {
-  if (c === DAYS - 1) return "Today";
-  const d = new Date((Math.floor(now / DAY_MS) - (DAYS - 1 - c)) * DAY_MS);
-  const day = d.getUTCDate();
-  return c === 0 || day === 1 ? `${day} ${MONTHS[d.getUTCMonth()]}` : `${day}`;
-}
-
 /**
- * Text on the guides: axis names and dates in Timeline. Rings has none (the group names sit
- * outside the circle and the legend names the agents).
+ * Text on the guides: axis names and the column labels of `scale` in Timeline (days when no
+ * scale is given). Rings has none (the group names sit outside the circle and the legend names
+ * the agents).
  */
-export function guideLabels(view: View, now: number): GuideLabel[] {
+export function guideLabels(
+  view: View,
+  now: number,
+  scale: Scale = { unit: "day", now },
+): GuideLabel[] {
   const out: GuideLabel[] = [];
   if (view === "timeline") {
-    out.push({ text: "Agent writes by day", x: 22, y: 30, align: "left" });
+    out.push({
+      text: `Agent writes by ${scale.unit}`,
+      x: 22,
+      y: 30,
+      align: "left",
+    });
     out.push({ text: "Topics", x: 46, y: 330, align: "left" });
     out.push({
-      text: "Notes and files by last change",
+      text: "Notes and files by date written",
       x: 22,
       y: 436,
       align: "left",
     });
-    for (let c = 0; c < DAYS; c++)
+    for (let c = 0; c < COLUMNS; c++)
       out.push({
-        text: dayLabel(c, now),
+        text: columnLabel(scale, c),
         x: X0 + c * CW + 22,
         y: 410,
         align: "centre",
@@ -139,6 +131,8 @@ export function buildScene(
   act: Activity,
   now: number,
   rings?: RingsLayout | null, // given in Rings
+  /** The scale the Timeline's positions were laid out on; worked out here when not given. */
+  scale?: Scale | null,
 ): Scene {
   // Rings is quiet at rest: only the spokes from the index to the hubs.
   const rest =
@@ -172,6 +166,7 @@ export function buildScene(
   const isTime = view === "timeline";
   // Rings without a layout from the caller works it out here.
   const r = view === "rings" ? (rings ?? ringsLayout(model)) : null;
+  const sc = isTime ? (scale ?? timelineScale(model, now)) : null;
   return {
     edges,
     rest,
@@ -182,11 +177,11 @@ export function buildScene(
       rings: r ? [r.hubR, r.firstR, r.agentR] : [],
       axis: isTime ? [X0, 964, 392] : null,
     },
-    guideLabels: guideLabels(view, now),
+    guideLabels: sc ? guideLabels(view, now, sc) : guideLabels(view, now),
     fresh,
     dotScale: r ? r.scale : 1,
     groupLabels: r ? r.labels : [],
     core: !isTime && act.today > 0 ? swarm(act.today) : [],
-    ticks: isTime ? ticks(model, pos, act) : [],
+    ticks: sc ? ticks(model, pos, agentColumns(model, sc)) : [],
   };
 }

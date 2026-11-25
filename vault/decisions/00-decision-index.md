@@ -29,7 +29,8 @@ an existing file.
 ## UI
 
 - **D07** [[2026-11-20-decision-07-brain-dashboard-is-the-map]] — one dot per note, six views; other layouts rejected
-- **D13** [[2026-11-22-decision-13-keystone-glass-look-with-themes]] — Keystone glass look, 17 themes, light mode, theme-driven dot colours
+- **D13** [[2026-11-22-decision-13-keystone-glass-look-with-themes]] — Keystone glass look, 17 themes, light mode, theme-driven dot colours (superseded by D16)
+- **D16** [[2026-11-24-decision-16-eight-hand-tuned-themes-replace-keystone-glass]] — eight hand-tuned themes on flat surfaces replace the generated set; no mode, reach or dot-colour switches
 
 ## Workflow
 
@@ -45,3 +46,4 @@ an existing file.
 - **G05** [[2026-11-22-gotcha-05-finish-task-cannot-remove-the-worktree-the-session-sits-in]] — resolved: the finish no longer fails at cleanup; an empty folder may remain
 - **G06** [[2026-11-22-gotcha-06-agent-sign-in-rests-on-the-legacy-jwt-secret]] — closed: agents sign in through the `agent-session` function; revoke the legacy JWT secret only once every machine runs a build from after that change
 - **G07** [[2026-11-23-gotcha-07-supabase-oauth-id-token-can-change-the-account]] — open: the ID token Supabase's OAuth server gives an app is accepted by its account endpoint and can set a new password; keep dynamic registration off or the OAuth server off until fixed
+- **G10** [[2026-11-24-gotcha-10-headless-chrome-hides-gpu-shadow-blur-cost]] — closed: headless Chrome draws canvas in software; blur cost shows only on a GPU, so batch blurred draws and measure with GPU rasterisation

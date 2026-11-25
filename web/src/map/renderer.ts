@@ -3,8 +3,8 @@
 // scene as batched Path2Ds; a frame is a few dozen fills and strokes. Colours
 // come from the theme's tokens (readPalette), never from literals; transparency is always
 // `globalAlpha`. Line widths and radii are divided by the scale, so they keep their screen size.
+import { css, parseColour } from "../theme/colour";
 import type { Cam } from "./camera";
-import { FRESH_ALPHA } from "./freshness";
 import { size } from "./nodeShape";
 import { orbitAlpha, type OrbitProjection } from "./orbit3d";
 import type { Scene } from "./scene";
@@ -23,6 +23,11 @@ export type FrameState = {
   labels: Set<number>;
   pulses: Pulse[];
   time: number; // performance.now() for animations
+  /**
+   * The decorative phase (breathing, the index's turn, the level-7 halos): advances only while
+   * the ambient motion is awake, so it freezes in place when the map goes idle. Defaults to time.
+   */
+  clock?: number;
   reducedMotion: boolean;
   /** The camera is moving (wheel, drag, glide): the resting layer is moved, not redrawn. */
   moving?: boolean;
@@ -59,12 +64,20 @@ export type Palette = {
   lineHi: string;
   edge: string;
   accent: string;
+  /** Rings: a note's colour by freshness level, 0 (oldest) to 7. */
+  fresh: string[];
+  /** The colour of the halo under a fresh note. */
+  glow: string;
+  /** A hub's colour in Rings. */
+  hub: string;
+  /** How a halo meets what is under it: added light in dark themes, painted in the light one. */
+  haloBlend: GlobalCompositeOperation;
 };
 
 const TAU = Math.PI * 2;
 const SQ2 = Math.SQRT2;
 const LABEL_MAX = 220;
-/** Opacity of the thin brand outline around a readable dot in Rings (times its dim). */
+/** Opacity of the thin outline, in the dot's own colour, around a readable dot in Rings (times its dim). */
 export const OUTLINE_ALPHA = 0.45;
 /** A locked dot's stroke in Rings, in screen px (other views keep 1.2). */
 const LOCKED_W = 1.6;
@@ -72,7 +85,7 @@ const LOCKED_W = 1.6;
 const MIN_DOT = 2.5;
 /** Dots smaller than this on screen get no outline (it would swallow the fill). */
 const OUTLINE_MIN = 4;
-/** Above this many dots at freshness levels 6 and 7 the glow is skipped (shadow blur is slow). */
+/** Above this many dots at freshness levels 6 and 7 the halos are skipped (too many to stamp per frame while dots move). */
 const GLOW_MAX = 400;
 
 /** The theme's colours, read once per theme change (getComputedStyle is not free). */
@@ -89,6 +102,11 @@ export function readPalette(el: Element): Palette {
     lineHi: v("--line-hi"),
     edge: v("--edge"),
     accent: v("--acc"),
+    fresh: Array.from({ length: 8 }, (_, i) => v(`--fresh-${i}`)),
+    // A missing token falls back to the accent: parseColour throws on an empty string.
+    glow: v("--glow-colour") || v("--acc"),
+    hub: v("--hub") || v("--acc"),
+    haloBlend: v("--halo-blend") === "source-over" ? "source-over" : "lighter",
   };
 }
 
@@ -98,7 +116,7 @@ type SceneCache = {
   edges: Path2D;
   litEdges: WeakMap<boolean[], Path2D>;
   filtered: WeakMap<boolean[], boolean>;
-  /** At most GLOW_MAX dots at freshness levels 6 and 7: the fresh ones may glow. */
+  /** At most GLOW_MAX dots at freshness levels 6 and 7: only then do the fresh ones get a halo. */
   glow: boolean;
   /** Per group: does any of its nodes stay lit (its name at full, else faint)? */
   groupOn: WeakMap<boolean[], boolean[]>;
@@ -286,7 +304,7 @@ type Frame = {
   T: number;
   filtered: boolean;
   busy: boolean;
-  near: Set<number>;
+  near: ReadonlySet<number>;
   motion: boolean;
   ambient: boolean;
   /** Labels past this x (in `pos` units) sit on the dot's left. */
@@ -308,6 +326,9 @@ const hueOf = (F: Frame, topic: number) =>
   F.pal.hue[F.model.topics[topic]?.hue ?? -1] ?? F.pal.fg2;
 const colourOf = (F: Frame, n: ModelNode) =>
   n.topic >= 0 ? hueOf(F, n.topic) : F.pal.fg2;
+/** A hub's colour: the theme's hub colour in Rings, its group's hue elsewhere. */
+const hubColour = (F: Frame, topic: number) =>
+  F.fresh ? F.pal.hub : hueOf(F, topic);
 const strong = (F: Frame, i: number) =>
   i === F.f.hot || i === F.f.focusRing || i === F.f.sel;
 const alphaOf = (F: Frame, i: number) =>
@@ -316,8 +337,10 @@ const alphaOf = (F: Frame, i: number) =>
     : !F.f.lit[i]
       ? 0.1
       : F.f.soft && !F.f.soft.has(i)
-        ? 0.32
+        ? SOFT_DIM
         : 1;
+/** The soft dim: what a hover or a preview does not point at. */
+const SOFT_DIM = 0.32;
 const theirs = (n: ModelNode) =>
   !n.mine && !n.locked && (n.kind === "note" || n.kind === "file");
 
@@ -351,6 +374,14 @@ function shapePath(path: Path2D, kind: Kind, x: number, y: number, r: number) {
     path.moveTo(x + r, y);
     path.arc(x, y, r, 0, TAU);
   }
+}
+
+/** The canvas is never drawn at more than this many device pixels per CSS pixel. */
+export const MAX_DPR = 2;
+
+/** The device pixel ratio the map draws at: the screen's, at most MAX_DPR. */
+export function canvasDpr(raw: number | undefined): number {
+  return Math.min(raw || 1, MAX_DPR);
 }
 
 export function drawFrame(
@@ -549,6 +580,8 @@ function drawOrbit(
         groupPaths(F, kind, list, 1),
         0,
         topic,
+        0,
+        kind === "hub" ? list : [],
       );
       list.length = 0;
     }
@@ -571,61 +604,66 @@ const depthOf = (F: Frame, i: number) => (F.depth ? (F.depth[i] ?? 1) : 1);
 
 // ---- The resting layer: guides, resting edges ----
 
-/** Draws the resting layer into `g`, whose transform is already set to the box. */
-function drawStatic(F: Frame, g: CanvasRenderingContext2D) {
+/** The guides (Rings' circles, the Timeline's axis): a few strokes, drawn every frame. */
+function drawGuides(F: Frame) {
+  const { ctx, scene, pal, px } = F;
+  if (!scene.guides.rings.length && !scene.guides.axis) return;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = px;
+  ctx.strokeStyle = pal.line;
+  ctx.beginPath();
+  for (const r of scene.guides.rings) {
+    ctx.moveTo(500 + r, 380);
+    ctx.arc(500, 380, r, 0, TAU);
+  }
+  const ax = scene.guides.axis;
+  if (ax) {
+    ctx.moveTo(ax[0], ax[2]);
+    ctx.lineTo(ax[1], ax[2]);
+  }
+  ctx.stroke();
+}
+
+/**
+ * Draws the resting edges into `g`, whose transform is already set to the box. With `lit` (a
+ * filter and nothing hot or selected) the faint edges and the lit ones are drawn at their own
+ * opacities; otherwise the edges are drawn at full opacity and the layer is stamped at 0.3, or
+ * 0.08 while something is hot, selected or filtered, so a hover never strokes them again.
+ */
+function drawStatic(F: Frame, g: CanvasRenderingContext2D, lit: boolean) {
   const { scene, c, pal, px, f } = F;
   g.lineCap = "round";
   g.lineJoin = "round";
-  g.globalAlpha = 1;
-  g.lineWidth = px;
-  g.strokeStyle = pal.line;
-  if (scene.guides.rings.length || scene.guides.axis) {
-    g.beginPath();
-    for (const r of scene.guides.rings) {
-      g.moveTo(500 + r, 380);
-      g.arc(500, 380, r, 0, TAU);
-    }
-    const ax = scene.guides.axis;
-    if (ax) {
-      g.moveTo(ax[0], ax[2]);
-      g.lineTo(ax[1], ax[2]);
-    }
-    g.stroke();
+  g.strokeStyle = pal.edge;
+  g.lineWidth = 0.6 * px;
+  g.globalAlpha = lit ? 0.08 : 1;
+  g.stroke(c.edges);
+  if (!lit) return;
+  // Cached per scene and filter, so it is built from the scene's own resting coordinates,
+  // never from the glide's: a path built mid-glide would stay where the dots were.
+  let p = c.litEdges.get(f.lit);
+  if (!p) {
+    p = new Path2D();
+    const e = scene.edges;
+    scene.rest.forEach(([u, v], k) => {
+      if (!f.lit[u] || !f.lit[v]) return;
+      p!.moveTo(e[k * 4]!, e[k * 4 + 1]!);
+      p!.lineTo(e[k * 4 + 2]!, e[k * 4 + 3]!);
+    });
+    c.litEdges.set(f.lit, p);
   }
-
-  // Edges: the timeline draws only the focused links.
-  if (f.view !== "timeline") {
-    g.strokeStyle = pal.edge;
-    g.lineWidth = 0.6 * px;
-    g.globalAlpha = F.busy ? 0.08 : 0.3;
-    g.stroke(c.edges);
-    if (F.filtered && f.sel === null && f.hot === null) {
-      // Cached per scene and filter, so it is built from the scene's own resting coordinates,
-      // never from the glide's: a path built mid-glide would stay where the dots were.
-      let p = c.litEdges.get(f.lit);
-      if (!p) {
-        p = new Path2D();
-        const e = scene.edges;
-        scene.rest.forEach(([u, v], k) => {
-          if (!f.lit[u] || !f.lit[v]) return;
-          p!.moveTo(e[k * 4]!, e[k * 4 + 1]!);
-          p!.lineTo(e[k * 4 + 2]!, e[k * 4 + 3]!);
-        });
-        c.litEdges.set(f.lit, p);
-      }
-      g.globalAlpha = 0.55;
-      g.lineWidth = 0.8 * px;
-      g.stroke(p);
-    }
-  }
+  g.globalAlpha = 0.55;
+  g.lineWidth = 0.8 * px;
+  g.stroke(p);
 }
 
 type Layer = {
   canvas: HTMLCanvasElement;
   scene: Scene | null;
   pal: Palette | null;
+  /** The filter the lit edges were drawn for; null when the layer holds the edges alone. */
   lit: boolean[] | null;
-  busy: boolean;
   dpr: number;
   ww: number;
   W: number;
@@ -645,7 +683,6 @@ function layerFor(ctx: CanvasRenderingContext2D): Layer {
       scene: null,
       pal: null,
       lit: null,
-      busy: false,
       dpr: 0,
       ww: 0,
       W: 0,
@@ -662,27 +699,33 @@ function layerFor(ctx: CanvasRenderingContext2D): Layer {
 }
 
 /** Up to half a viewport of overscan on each side, within this many layer pixels. */
-const LAYER_MAX_PX = 16_000_000;
+export const LAYER_MAX_PX = 6_000_000;
 
 /**
- * The resting layer is a bitmap, redrawn only when what it shows changes or once the camera has
- * been still for a moment. While the camera moves, the last bitmap moves and scales with it (one
- * drawImage instead of thousands of anti-aliased strokes); the overscan keeps a pan or a zoom-out
- * from showing blank edges.
+ * The guides, then the resting edges. The edges are a bitmap, redrawn only when what it shows
+ * changes or once the camera has been still for a moment. While the camera moves, the last
+ * bitmap moves and scales with it (one drawImage instead of thousands of anti-aliased strokes);
+ * the overscan keeps a pan or a zoom-out from showing blank edges. The timeline has no resting
+ * edges, only the guides.
  */
 function drawLayer(F: Frame) {
   const { ctx, dpr, f, scene, pal, s } = F;
+  const fade = f.layerAlpha ?? 1;
+  ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * f.cam.tx, dpr * f.cam.ty);
+  ctx.globalAlpha = fade;
+  drawGuides(F);
+  if (f.view === "timeline" || !scene.rest.length) return;
   const L = layerFor(ctx);
   const W = ctx.canvas.width;
   const H = ctx.canvas.height;
   const cam = f.cam;
-  // Hover changes `busy`, which only the resting edges show: the timeline has none.
-  const busy = f.view !== "timeline" && F.busy;
+  // The lit edges show only for a filter with nothing hot or selected; otherwise a hover or a
+  // selection changes only the opacity the layer is stamped at.
+  const lit = F.filtered && f.sel === null && f.hot === null ? f.lit : null;
   const same =
     L.scene === scene &&
     L.pal === pal &&
-    L.lit === f.lit &&
-    L.busy === busy &&
+    L.lit === lit &&
     L.W === W &&
     L.H === H &&
     L.dpr === dpr &&
@@ -710,13 +753,12 @@ function drawLayer(F: Frame) {
         dpr * cam.tx + ox,
         dpr * cam.ty + oy,
       );
-      drawStatic(F, g);
+      drawStatic(F, g, lit !== null);
     }
     Object.assign(L, {
       scene,
       pal,
-      lit: f.lit,
-      busy,
+      lit,
       dpr,
       ww: f.world.w,
       W,
@@ -737,7 +779,7 @@ function drawLayer(F: Frame) {
     dpr * cam.tx - (L.ox + dpr * L.tx) * r,
     dpr * cam.ty - (L.oy + dpr * L.ty) * r,
   );
-  ctx.globalAlpha = f.layerAlpha ?? 1;
+  ctx.globalAlpha = fade * (lit ? 1 : F.busy ? 0.08 : 0.3);
   ctx.drawImage(L.canvas, 0, 0);
 }
 
@@ -764,28 +806,44 @@ function drawFocusLinks(F: Frame) {
   }
 }
 
-/** Pulses: a 7%-long segment of light running along a link. */
+/**
+ * Pulses: a 7%-long segment of light running along a link. All pulses of one colour and kind
+ * are stroked as one path: a shadow blur is a full pass per draw call, and a hub fires 160 at
+ * once (one stroke each made a big hub's hover run at a few frames a second).
+ */
 function drawPulses(F: Frame) {
   const { ctx, f, px } = F;
-  for (const p of f.pulses) {
-    const k = (f.time - p.t0) / p.dur;
+  const paths = new Map<
+    string,
+    { p: Path2D; colour: string; ambient: boolean }
+  >();
+  for (const q of f.pulses) {
+    const k = (f.time - q.t0) / q.dur;
     if (k >= 1) continue;
-    if (p.ambient) F.ambient = true;
+    if (q.ambient) F.ambient = true;
     else F.motion = true;
     if (k < 0) continue;
-    const a = P(F, p.from);
-    const b = P(F, p.to);
+    const a = P(F, q.from);
+    const b = P(F, q.to);
     const k0 = Math.max(0, k - 0.035);
     const k1 = Math.min(1, k + 0.035);
-    ctx.globalAlpha = p.ambient ? 0.55 : 1;
-    ctx.strokeStyle = p.colour;
-    ctx.shadowColor = p.colour;
-    ctx.shadowBlur = p.ambient ? 4 : 6;
-    ctx.lineWidth = (p.ambient ? 1.4 : 2.2) * px;
-    ctx.beginPath();
-    ctx.moveTo(a[0] + (b[0] - a[0]) * k0, a[1] + (b[1] - a[1]) * k0);
-    ctx.lineTo(a[0] + (b[0] - a[0]) * k1, a[1] + (b[1] - a[1]) * k1);
-    ctx.stroke();
+    const key = `${q.ambient ? 1 : 0}${q.colour}`;
+    let g = paths.get(key);
+    if (!g)
+      paths.set(
+        key,
+        (g = { p: new Path2D(), colour: q.colour, ambient: !!q.ambient }),
+      );
+    g.p.moveTo(a[0] + (b[0] - a[0]) * k0, a[1] + (b[1] - a[1]) * k0);
+    g.p.lineTo(a[0] + (b[0] - a[0]) * k1, a[1] + (b[1] - a[1]) * k1);
+  }
+  for (const { p, colour, ambient } of paths.values()) {
+    ctx.globalAlpha = ambient ? 0.55 : 1;
+    ctx.strokeStyle = colour;
+    ctx.shadowColor = colour;
+    ctx.shadowBlur = ambient ? 4 : 6;
+    ctx.lineWidth = (ambient ? 1.4 : 2.2) * px;
+    ctx.stroke(p);
   }
   ctx.shadowBlur = 0;
 }
@@ -795,7 +853,9 @@ function drawCore(F: Frame) {
   const { ctx, scene, f, pal, px, still } = F;
   if (!scene.core.length || f.cam.k > 1.8) return;
   if (!still) F.ambient = true;
-  ctx.globalAlpha = still ? 0.8 : 0.8 + 0.2 * Math.sin((TAU * f.time) / 4000);
+  ctx.globalAlpha = still
+    ? 0.8
+    : 0.8 + 0.2 * Math.sin((TAU * (f.clock ?? f.time)) / 4000);
   ctx.fillStyle = pal.brand;
   ctx.beginPath();
   for (const [x, y] of scene.core) {
@@ -853,9 +913,75 @@ function groupPaths(
   return [at(rad)];
 }
 
+/** A hub's breathing glow, in device px of blur: its centre and its value when still. */
+const HUB_BLUR = 19;
+const HUB_BLUR_STILL = 14;
+const GLOW_STEP = 1.08;
+const glowSprites = new Map<string, { c: HTMLCanvasElement; pad: number }>();
+
+/**
+ * A hub's glow, drawn once per colour, outer radius and blur (device px, whole): the disc and
+ * its shadow blur on a small canvas, stamped with drawImage. A shadow blur on the map's canvas
+ * is a full blur pass per fill, every frame; the sprite is one copy.
+ */
+function glowSprite(colour: string, r: number, blur: number) {
+  const key = `${colour}|${r}|${blur}`;
+  const hit = glowSprites.get(key);
+  if (hit) return hit;
+  const pad = r + 2 * blur;
+  const c = document.createElement("canvas");
+  c.width = c.height = 2 * pad;
+  const g = c.getContext("2d");
+  if (g) {
+    g.fillStyle = colour;
+    g.shadowColor = colour;
+    g.shadowBlur = blur;
+    g.beginPath();
+    g.arc(pad, pad, r, 0, TAU);
+    g.fill();
+  }
+  // Hub sizes and colours per theme are few; a theme change or a long zoom starts afresh.
+  if (glowSprites.size > 64) glowSprites.clear();
+  const out = { c, pad };
+  glowSprites.set(key, out);
+  return out;
+}
+
+/** Stamps the glow under each hub in `hubs` (drawn at `scale`), `blur` device px wide. */
+function stampHubGlow(
+  F: Frame,
+  colour: string,
+  hubs: readonly number[],
+  scale: number,
+  blur: number,
+  a: number,
+) {
+  const { ctx, dpr, s, model } = F;
+  // One drawing unit in device px (the flat views draw in box units, Orbit in stage px).
+  const dev = dpr * s;
+  ctx.globalAlpha = Math.min(1, a);
+  for (const i of hubs) {
+    const n = model.nodes[i];
+    if (!n) continue;
+    // The outer ring's radius (groupPaths), in device px.
+    const rDev = ((diam(F, n) / 2) * scale * depthOf(F, i) + 1.5) * dpr;
+    // Radii in 8% steps, so a zoom reuses a handful of sprites instead of making one per frame;
+    // the sprite is stretched to the exact radius.
+    const rb = Math.max(
+      1,
+      Math.round(GLOW_STEP ** Math.round(Math.log(rDev) / Math.log(GLOW_STEP))),
+    );
+    const { c, pad } = glowSprite(colour, rb, blur);
+    const [x, y] = P(F, i);
+    const h = (pad * (rDev / rb)) / dev;
+    ctx.drawImage(c, x - h, y - h, 2 * h, 2 * h);
+  }
+}
+
 /**
  * Fills one group: hubs with their soft breathing glow, locked dots hollow. `outline` is the
- * opacity of a 1 px brand outline around readable dots (0: none).
+ * opacity of a 1 px outline, in the dot's own colour, around readable dots (0: none). `hubs`
+ * are the group's hub nodes (for their glow), drawn at `scale`.
  */
 function fillGroup(
   F: Frame,
@@ -866,19 +992,30 @@ function fillGroup(
   glow: number,
   topic: number,
   outline = 0,
+  hubs: readonly number[] = [],
+  scale = 1,
 ) {
   const { ctx, pal, px, still, f, T } = F;
   if (kind === "hub") {
     const [outer, mid, inner] = paths as [Path2D, Path2D, Path2D];
-    if (!still) F.ambient = true;
+    if (!still && !F.fresh) F.ambient = true;
     ctx.fillStyle = colour;
-    ctx.shadowColor = colour;
-    ctx.shadowBlur =
-      glow ||
-      (still ? 14 : 19 + 5 * Math.sin(TAU * (f.time / 5000 + topic / T)));
-    ctx.globalAlpha = 0.35 * alpha;
-    ctx.fill(outer);
-    ctx.shadowBlur = 0;
+    if (!F.fresh || glow) {
+      // Timeline and Orbit keep the soft breathing glow; so does a hub the pointer is on. The
+      // breathing swells its opacity (it once swelled the blur, 14 to 24 px).
+      const breath =
+        glow || still
+          ? 1
+          : 1 + 0.25 * Math.sin(TAU * ((f.clock ?? f.time) / 5000 + topic / T));
+      stampHubGlow(
+        F,
+        colour,
+        hubs,
+        scale,
+        glow || (still ? HUB_BLUR_STILL : HUB_BLUR),
+        0.35 * alpha * breath,
+      );
+    }
     ctx.globalAlpha = alpha;
     ctx.fill(outer);
     ctx.fillStyle = pal.bg;
@@ -906,7 +1043,7 @@ function fillGroup(
     ctx.shadowBlur = 0;
     if (outline > 0) {
       ctx.globalAlpha = outline;
-      ctx.strokeStyle = pal.brand;
+      ctx.strokeStyle = colour;
       ctx.lineWidth = px;
       ctx.stroke(p);
     }
@@ -914,32 +1051,95 @@ function fillGroup(
   ctx.shadowBlur = 0;
 }
 
-/** The glow of a freshness level: 8 px at level 6, 14 px breathing at level 7, else none. */
-function freshGlow(F: Frame, level: number): number {
-  if (!F.c.glow || level < 6) return 0;
-  if (level === 6) return 8;
-  if (F.still) return 14;
-  F.ambient = true;
-  return 14 + 4 * Math.sin((TAU * F.f.time) / 4000);
-}
-
 /** Outline opacity for a readable dot drawn `d` px wide on screen at dim `a`. */
 const outlineOf = (d: number, a: number) =>
   d >= OUTLINE_MIN ? OUTLINE_ALPHA * a : 0;
+
+/** The halo's fade: [fraction of the radius, share of the peak opacity]. */
+const HALO_STOPS: readonly (readonly [number, number])[] = [
+  [0, 1],
+  [0.4, 0.35],
+  [1, 0],
+];
+/** A halo is this many dot radii wide (radius, not diameter). */
+const HALO_REACH = 6.5;
+/** A hub's and the index's halo, in their own radii. */
+const HUB_REACH = 2.75;
+const ROOT_REACH = 3.8;
+const HALO_PX = 128;
+
+/**
+ * A halo's peak opacity by freshness level: none below 6, 0.3 at 6, 0.5 at 7, where it breathes
+ * between 0.42 and 0.58 every four seconds unless the map is still.
+ */
+export function haloAlpha(level: number, time: number, still: boolean): number {
+  if (level < 6) return 0;
+  if (level === 6) return 0.3;
+  if (still) return 0.5;
+  return 0.5 + 0.08 * Math.sin((TAU * time) / 4000);
+}
+
+const sprites = new Map<string, HTMLCanvasElement>();
+
+/** Paper paints its halos at 0.42 at the peak where the dark themes add light at 0.5. */
+const HALO_PAINTED = 0.84;
+
+/** The halo of one colour, drawn once: a radial fade on a small canvas, stamped with drawImage. */
+function haloSprite(colour: string): HTMLCanvasElement {
+  const hit = sprites.get(colour);
+  if (hit) return hit;
+  const c = document.createElement("canvas");
+  c.width = c.height = HALO_PX;
+  const g = c.getContext("2d")!;
+  const base = parseColour(colour);
+  const r = HALO_PX / 2;
+  const fade = g.createRadialGradient(r, r, 0, r, r, r);
+  for (const [at, share] of HALO_STOPS)
+    fade.addColorStop(at, css({ ...base, a: share }));
+  g.fillStyle = fade;
+  g.fillRect(0, 0, HALO_PX, HALO_PX);
+  // A handful of colours per theme; a theme change leaves the old ones to be collected.
+  if (sprites.size > 16) sprites.clear();
+  sprites.set(colour, c);
+  return c;
+}
+
+/** Stamps a halo of radius `r` (in drawing units) at (x, y), at opacity `a`. */
+function stampHalo(
+  F: Frame,
+  colour: string,
+  x: number,
+  y: number,
+  r: number,
+  a: number,
+) {
+  if (a <= 0 || r <= 0) return;
+  const { ctx, pal } = F;
+  ctx.globalAlpha = pal.haloBlend === "source-over" ? a * HALO_PAINTED : a;
+  ctx.globalCompositeOperation = pal.haloBlend;
+  ctx.drawImage(haloSprite(colour), x - r, y - r, 2 * r, 2 * r);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+}
 
 type Batch = {
   topic: number; // hubs: their group; notes and files: -1 (brand colour)
   kind: Kind;
   alpha: number;
-  level: number; // freshness, for the glow; 0 for hubs and locked dots
+  level: number; // freshness, for the halo; 0 for hubs and locked dots
+  tone: number; // Rings: the ramp step the dots are filled with (7 for hot, focused, selected)
   outline: number;
+  halo: number[]; // Rings: the nodes of this batch that get a halo (level 6 or 7, hubs), else []
+  hubs: number[]; // the batch's hub nodes (for their glow), else []
+  /** Lit and not focused or selected: drops to the soft dim while a dot is hovered. */
+  soft: boolean;
   paths: Path2D[];
 };
 type DotCache = {
   pos: FrameState["pos"];
   lit: boolean[];
+  /** A preview's soft set; a hover's is drawn at draw time, so it is never part of the key. */
   soft: Set<number> | null;
-  hot: number | null;
   sel: number | null;
   focus: number | null;
   grow: Set<number> | null;
@@ -947,10 +1147,17 @@ type DotCache = {
   batches: Batch[];
 };
 const dotCaches = new WeakMap<Scene, DotCache>();
+/** The scene's cached dot batches (for tests: a hover or a zoom must not rebuild them). */
+export function dotBatches(scene: Scene): readonly unknown[] | undefined {
+  return dotCaches.get(scene)?.batches;
+}
 
-type Group = Omit<Batch, "paths"> & { n: number[] };
+type Group = Omit<Batch, "paths" | "hubs"> & { n: number[] };
+/** Lit and not strong: the dots a hover's soft dim fades (see `Batch.soft`). */
+const softens = (F: Frame, i: number) => !!F.f.lit[i] && !strong(F, i);
 const toBatch = (F: Frame, { n, ...g }: Group): Batch => ({
   ...g,
+  hubs: g.kind === "hub" ? n : [],
   paths: groupPaths(F, g.kind, n, 1),
 });
 
@@ -963,30 +1170,58 @@ function freshBatches(F: Frame, fresh: Uint8Array): Batch[] {
   const dots = new Map<string, Group>();
   const hubs: Group[] = [];
   scene.byTopic.forEach((nodes, topic) => {
-    const own = new Map<number, Group>();
+    const own = new Map<string, Group>();
     for (const i of nodes) {
       if (special(F, i)) continue;
       const n = model.nodes[i]!;
       const kind = kindOf(n);
       const dim = alphaOf(F, i);
+      const soft = softens(F, i);
       if (kind === "hub") {
-        const g = own.get(dim);
-        if (g) g.n.push(i);
-        else {
-          const h = { topic, kind, alpha: dim, level: 0, outline: 0, n: [i] };
-          own.set(dim, h);
-          hubs.push(h);
+        const hk = `${dim}|${soft}`;
+        let g = own.get(hk);
+        if (!g) {
+          g = {
+            topic,
+            kind,
+            alpha: dim,
+            level: 0,
+            tone: 0,
+            outline: 0,
+            halo: [],
+            soft,
+            n: [],
+          };
+          own.set(hk, g);
+          hubs.push(g);
         }
+        g.n.push(i);
+        g.halo.push(i);
         continue;
       }
       const locked = kind === "lnote" || kind === "lfile";
       const level = locked ? 0 : fresh[i]!;
-      const alpha = locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim;
+      // The ramp carries freshness now; opacity only dims for a filter or a selection.
+      const tone = strong(F, i) ? 7 : level;
       const outline = locked ? 0 : outlineOf(diam(F, n), dim);
-      const key = `${kind}|${level}|${alpha}|${outline}`;
-      const g = dots.get(key);
-      if (g) g.n.push(i);
-      else dots.set(key, { topic: -1, kind, alpha, level, outline, n: [i] });
+      const key = `${kind}|${level}|${tone}|${dim}|${outline}|${soft}`;
+      let g = dots.get(key);
+      if (!g) {
+        g = {
+          topic: -1,
+          kind,
+          alpha: dim,
+          level,
+          tone,
+          outline,
+          halo: [],
+          soft,
+          n: [],
+        };
+        dots.set(key, g);
+      }
+      g.n.push(i);
+      if (level >= 6) g.halo.push(i);
     }
   });
   // Older dots first so fresher ones draw over them, hubs on top.
@@ -1006,11 +1241,22 @@ function topicBatches(F: Frame): Batch[] {
       const n = model.nodes[i]!;
       const kind = kindOf(n);
       const alpha = alphaOf(F, i) * (theirs(n) ? 0.72 : 1);
-      const key = `${kind}|${alpha}`;
+      const soft = softens(F, i);
+      const key = `${kind}|${alpha}|${soft}`;
       const g = groups.get(key);
       if (g) g.n.push(i);
       else
-        groups.set(key, { topic, kind, alpha, level: 0, outline: 0, n: [i] });
+        groups.set(key, {
+          topic,
+          kind,
+          alpha,
+          level: 0,
+          tone: 0,
+          outline: 0,
+          halo: [],
+          soft,
+          n: [i],
+        });
     }
     // Plain dots first, hubs on top.
     for (const g of [...groups.values()].sort(
@@ -1021,31 +1267,46 @@ function topicBatches(F: Frame): Batch[] {
   return batches;
 }
 
+const NO_NODES: ReadonlySet<number> = new Set();
+
+/** The soft set is a hover's: the hot dot and its neighbours, nothing else (no preview). */
+function hoverSoft(F: Frame): boolean {
+  const { soft, hot } = F.f;
+  if (!soft || hot === null || soft.size > F.near.size + 1) return false;
+  for (const i of soft) if (i !== hot && !F.near.has(i)) return false;
+  return true;
+}
+
 /**
  * The dots, in Rings by freshness (freshBatches), elsewhere by topic (topicBatches). The batches
- * (keys and paths) are cached per scene, positions, filter, soft set, hot, selection, focus and
- * scale, so a frame that only breathes is a few dozen fills.
+ * (keys and paths) are cached per scene, positions, filter, preview, selection, focus and scale,
+ * so a frame that only breathes is a few dozen fills. A hover is not in the key: the batches
+ * hold every dot as if nothing were hot, the soft dim is an opacity at draw time, and the hot dot
+ * and its neighbours are drawn on top (drawHot). While the camera moves the last batches are
+ * kept (the dots scale with the zoom for a moment) and rebuilt once it settles.
  */
 function drawDots(F: Frame) {
   const { scene, f, s } = F;
+  const hover = hoverSoft(F);
+  const soft = hover ? null : f.soft;
   let dc = dotCaches.get(scene);
   if (
     !dc ||
     dc.pos !== f.pos ||
     dc.lit !== f.lit ||
-    dc.soft !== f.soft ||
-    dc.hot !== f.hot ||
+    dc.soft !== soft ||
     dc.sel !== f.sel ||
     dc.focus !== f.focusRing ||
     dc.grow !== (f.grow?.nodes ?? null) ||
-    dc.s !== s
+    (dc.s !== s && !f.moving)
   ) {
-    const batches = F.fresh ? freshBatches(F, F.fresh) : topicBatches(F);
+    // Built as if nothing were hot: no dot is left out for drawHot, no hover dim.
+    const B: Frame = { ...F, f: { ...f, hot: null, soft }, near: NO_NODES };
+    const batches = F.fresh ? freshBatches(B, F.fresh) : topicBatches(B);
     dc = {
       pos: f.pos,
       lit: f.lit,
-      soft: f.soft,
-      hot: f.hot,
+      soft,
       sel: f.sel,
       focus: f.focusRing,
       grow: f.grow?.nodes ?? null,
@@ -1054,20 +1315,64 @@ function drawDots(F: Frame) {
     };
     dotCaches.set(scene, dc);
   }
-  for (const b of dc.batches)
+  // A hover: what it does not keep drops to the soft dim; what drawHot draws on top is skipped.
+  const dimOf = (b: Batch) => (hover && b.soft ? SOFT_DIM : 1);
+  const lifted = f.hot !== null;
+  if (F.fresh) {
+    // Every halo first, so none covers a neighbour's dot. Hubs are few, so they keep theirs
+    // when too many notes are fresh for note halos.
+    for (const b of dc.batches) {
+      if (!b.halo.length) continue;
+      const hub = b.kind === "hub";
+      if (!hub && !F.c.glow) continue;
+      const peak = hub
+        ? 0.3
+        : haloAlpha(b.level, F.f.clock ?? F.f.time, F.still);
+      if (!hub && b.level === 7 && !F.still) F.ambient = true;
+      const a = peak * b.alpha * dimOf(b);
+      for (const i of b.halo) {
+        if (lifted && special(F, i)) continue;
+        const [x, y] = P(F, i);
+        const r = (diam(F, F.model.nodes[i]!) / 2) * depthOf(F, i) * F.px;
+        stampHalo(
+          F,
+          hub ? F.pal.hub : F.pal.glow,
+          x,
+          y,
+          r * (hub ? HUB_REACH : HALO_REACH),
+          a,
+        );
+      }
+    }
+  }
+  for (const b of dc.batches) {
+    const k = dimOf(b);
     if (b.topic >= 0)
-      fillGroup(F, b.kind, hueOf(F, b.topic), b.alpha, b.paths, 0, b.topic);
+      fillGroup(
+        F,
+        b.kind,
+        b.kind === "hub" ? hubColour(F, b.topic) : hueOf(F, b.topic),
+        b.alpha * k,
+        b.paths,
+        0,
+        b.topic,
+        0,
+        lifted ? b.hubs.filter((i) => !special(F, i)) : b.hubs,
+      );
     else
       fillGroup(
         F,
         b.kind,
-        F.pal.brand,
-        b.alpha,
+        b.kind === "lnote" || b.kind === "lfile"
+          ? F.pal.accent
+          : F.pal.fresh[b.tone]!,
+        b.alpha * k,
         b.paths,
-        freshGlow(F, b.level),
+        0,
         -1,
-        b.outline,
+        b.outline * k,
       );
+  }
 }
 
 /** Agents: a ring with a centre point. */
@@ -1108,9 +1413,18 @@ function drawRoot(F: Frame, s0: number, glow: number) {
   const scale = s0 * depthOf(F, scene.root);
   const [x, y] = P(F, scene.root);
   if (!still) F.ambient = true;
-  const turn = still ? 0 : (TAU * (f.time % 30_000)) / 30_000;
+  const turn = still ? 0 : (TAU * ((f.clock ?? f.time) % 30_000)) / 30_000;
   const p = new Path2D();
   hex(p, x, y, (diam(F, n) / 2) * scale * px, turn);
+  if (F.fresh)
+    stampHalo(
+      F,
+      pal.glow,
+      x,
+      y,
+      (diam(F, n) / 2) * scale * px * ROOT_REACH,
+      0.4 * alphaOf(F, scene.root),
+    );
   ctx.globalAlpha = alphaOf(F, scene.root);
   ctx.fillStyle = pal.fg;
   if (glow) {
@@ -1130,38 +1444,223 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
   const kind = kindOf(n);
   const paths = groupPaths(F, kind, [i], scale);
   if (F.fresh && kind !== "hub") {
-    // Rings: brand colour, brighter when fresher; hot, focused and selected at full.
+    // Rings: the ramp colour of its freshness; hot, focused and selected take the fresh end.
     const dim = alphaOf(F, i);
     const locked = kind === "lnote" || kind === "lfile";
     const level = locked ? 0 : (F.fresh[i] ?? 0);
+    if (F.c.glow && level >= 6) {
+      const [x, y] = P(F, i);
+      if (level === 7 && !F.still) F.ambient = true;
+      stampHalo(
+        F,
+        F.pal.glow,
+        x,
+        y,
+        (diam(F, n) / 2) * scale * depthOf(F, i) * F.px * HALO_REACH,
+        haloAlpha(level, F.f.clock ?? F.f.time, F.still) * dim,
+      );
+    }
     fillGroup(
       F,
       kind,
-      F.pal.brand,
-      locked || strong(F, i) ? dim : FRESH_ALPHA[level]! * dim,
+      locked ? F.pal.accent : F.pal.fresh[strong(F, i) ? 7 : level]!,
+      dim,
       paths,
-      glow || freshGlow(F, level),
+      glow,
       n.topic,
       locked ? 0 : outlineOf(diam(F, n) * scale, dim),
     );
     return;
   }
+  if (F.fresh)
+    stampHalo(
+      F,
+      F.pal.hub,
+      ...P(F, i),
+      (diam(F, n) / 2) * scale * depthOf(F, i) * F.px * HUB_REACH,
+      0.3 * alphaOf(F, i),
+    );
   fillGroup(
     F,
     kind,
-    colourOf(F, n),
+    kind === "hub" ? hubColour(F, n.topic) : colourOf(F, n),
     alphaOf(F, i) * (theirs(n) && i !== F.f.hot ? 0.72 : 1),
     paths,
     glow,
     n.topic,
+    0,
+    [i],
+    scale,
   );
+}
+
+/** At most this many of the hot dot's neighbours are drawn in front with the soft glow. */
+const NEAR_MAX = 400;
+/** The neighbours' glow, in screen px. */
+const NEAR_GLOW = 10;
+
+/**
+ * A batch of the hot dot's neighbours. `tone`: a group (>= 0), a Rings note or file (-1: its
+ * colour is the ramp step `step`, or the accent if locked) or fg2 (-2).
+ */
+type NearBatch = {
+  tone: number;
+  kind: Kind;
+  alpha: number;
+  outline: number;
+  step: number; // Rings: the ramp step of a note or file; else 0
+  level: number; // Rings: its freshness, for the halo; else 0
+  halo: number[]; // Rings: the nodes that get a halo (hubs, notes at level 6 or 7), else []
+  hubs: number[]; // the batch's hub nodes (for their glow), else []
+  paths: Path2D[];
+};
+type NearCache = Omit<DotCache, "batches" | "grow"> & {
+  hot: number | null;
+  batches: NearBatch[];
+  /** Agents and the index among the neighbours: drawn one by one (there are few). */
+  loose: number[];
+};
+const nearCaches = new WeakMap<Scene, NearCache>();
+
+/**
+ * The hot dot's neighbours, batched per kind, colour, alpha and outline exactly as drawOne would
+ * colour each one. A shadow blur costs a full pass per draw call, so one fill per batch instead of
+ * one per dot is what keeps hovering a big hub (hundreds of neighbours) smooth.
+ */
+function nearBatches(F: Frame): Pick<NearCache, "batches" | "loose"> {
+  const { model, f } = F;
+  const groups = new Map<
+    string,
+    Omit<NearBatch, "paths" | "hubs"> & { n: number[] }
+  >();
+  const loose: number[] = [];
+  let budget = NEAR_MAX;
+  for (const i of F.near) {
+    if (i === f.hot) continue;
+    if (budget-- <= 0) break;
+    const n = model.nodes[i];
+    if (!n) continue;
+    if (n.kind === "agent" || n.kind === "root") {
+      loose.push(i);
+      continue;
+    }
+    const kind = kindOf(n);
+    let tone: number;
+    let alpha: number;
+    let outline = 0;
+    let step = 0;
+    let level = 0;
+    if (F.fresh && kind !== "hub") {
+      const dim = alphaOf(F, i);
+      const locked = kind === "lnote" || kind === "lfile";
+      level = locked ? 0 : (F.fresh[i] ?? 0);
+      step = strong(F, i) ? 7 : level;
+      tone = -1;
+      alpha = dim;
+      outline = locked ? 0 : outlineOf(diam(F, n), dim);
+    } else {
+      tone = kind === "hub" || n.topic >= 0 ? n.topic : -2;
+      alpha = alphaOf(F, i) * (theirs(n) ? 0.72 : 1);
+    }
+    const key = `${kind}|${tone}|${alpha}|${outline}|${step}|${level}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { tone, kind, alpha, outline, step, level, halo: [], n: [] };
+      groups.set(key, g);
+    }
+    g.n.push(i);
+    if (F.fresh && (kind === "hub" || level >= 6)) g.halo.push(i);
+  }
+  // Plain dots first, hubs on top.
+  const batches = [...groups.values()]
+    .sort((x, y) => +(x.kind === "hub") - +(y.kind === "hub"))
+    .map(({ n, ...g }) => ({
+      ...g,
+      hubs: g.kind === "hub" ? n : [],
+      paths: groupPaths(F, g.kind, n, 1),
+    }));
+  return { batches, loose };
+}
+
+/** The neighbours' batches, cached like the resting dots' (a hover frame only fills). */
+function drawNear(F: Frame) {
+  const { scene, f, s, pal } = F;
+  let nc = nearCaches.get(scene);
+  if (
+    !nc ||
+    nc.pos !== f.pos ||
+    nc.lit !== f.lit ||
+    nc.soft !== f.soft ||
+    nc.hot !== f.hot ||
+    nc.sel !== f.sel ||
+    nc.focus !== f.focusRing ||
+    nc.s !== s ||
+    // Orbit: the projection (sizes per depth) changes while it turns.
+    F.depth !== null
+  ) {
+    nc = {
+      pos: f.pos,
+      lit: f.lit,
+      soft: f.soft,
+      hot: f.hot,
+      sel: f.sel,
+      focus: f.focusRing,
+      s,
+      ...nearBatches(F),
+    };
+    nearCaches.set(scene, nc);
+  }
+  if (F.fresh) {
+    // Rings: every halo first, so none covers a neighbour's dot (as in drawDots).
+    for (const b of nc.batches) {
+      const hub = b.kind === "hub";
+      if (!b.halo.length || (!hub && !F.c.glow)) continue;
+      const peak = hub ? 0.3 : haloAlpha(b.level, f.clock ?? f.time, F.still);
+      if (!hub && b.level === 7 && !F.still) F.ambient = true;
+      for (const i of b.halo) {
+        const [x, y] = P(F, i);
+        const r = (diam(F, F.model.nodes[i]!) / 2) * depthOf(F, i) * F.px;
+        stampHalo(
+          F,
+          hub ? pal.hub : pal.glow,
+          x,
+          y,
+          r * (hub ? HUB_REACH : HALO_REACH),
+          peak * b.alpha,
+        );
+      }
+    }
+  }
+  for (const b of nc.batches) {
+    const colour =
+      b.kind === "hub"
+        ? hubColour(F, b.tone)
+        : b.tone === -1
+          ? b.kind === "lnote" || b.kind === "lfile"
+            ? pal.accent
+            : pal.fresh[b.step]!
+          : b.tone === -2
+            ? pal.fg2
+            : hueOf(F, b.tone);
+    fillGroup(
+      F,
+      b.kind,
+      colour,
+      b.alpha,
+      b.paths,
+      NEAR_GLOW,
+      b.tone >= 0 ? b.tone : -1,
+      b.outline,
+      b.hubs,
+    );
+  }
+  for (const i of nc.loose) drawOne(F, i, 1, NEAR_GLOW);
 }
 
 /** The hot dot grown x1.7 with a glow, and its neighbours with a softer one. */
 function drawHot(F: Frame) {
   const { ctx, f, model, pal, px } = F;
-  let budget = 400;
-  for (const i of F.near) if (i !== f.hot && budget-- > 0) drawOne(F, i, 1, 10);
+  if (F.near.size) drawNear(F);
   if (f.hot === null || !model.nodes[f.hot]) return;
   const n = model.nodes[f.hot]!;
   const [x, y] = P(F, f.hot);

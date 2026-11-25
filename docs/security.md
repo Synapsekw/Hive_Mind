@@ -33,7 +33,7 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 | Prompt injection via note content    | A shared note tells agents to exfiltrate data                                       | Reads are framed as data; no tool changes sharing, members or tokens; inbound scan and quarantine                                                                                                                                                                                          | partly   |
 | Departing member                     | Colleague leaves with access                                                        | Owner removes member; tokens revoked; content stays or is withdrawn by owner decision                                                                                                                                                                                                      | designed |
 | Joining a hive unasked or uninvited  | A stranger signs up, or an owner adds a person who never agreed                     | Sign-ups off; an account exists only through an emailed invitation; a person becomes a member only by pressing Join, and only for their own confirmed email (section 3)                                                                                                                    | built    |
-| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs and the invitation mail function; secrets in a vault; MFA on the owner account                                                                                                                                                                    | designed |
+| Platform compromise                  | Project credentials exposed                                                         | Service-role key only in background jobs, the invitation mail function and the function that erases deleted hives; secrets in a vault; MFA on the owner account                                                                                                                            | designed |
 | Overlap detection as a side channel  | Notifications reveal what a colleague works on                                      | Notification names only the entity; content never moves before double accept; mute per folder                                                                                                                                                                                              | designed |
 | The map as a side channel            | Locked dots show that a colleague has notes in a folder                             | A stub shows only existence, owner, topic (two folder levels) and last change; refused for agents                                                                                                                                                                                          | built    |
 
@@ -62,9 +62,11 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   that protects it is that it never leaves the function's secrets.
 - Function secrets are readable by every Edge Function of the project, not only by
   `agent-session`. Any function deployed to this project can therefore read the key, so a new
-  function is reviewed as code that holds it. There are three today: `agent-session`, the
-  connector `mcp` (section 10) and `invite-email` (below). The first two sign with it and do
-  not log it; `invite-email` does not read it.
+  function is reviewed as code that holds it. There are four today: `agent-session`, the
+  connector `mcp` (section 10), `invite-email` (below) and `purge-hives` (section 12). The
+  first two sign with it and do not log it; `invite-email` and `purge-hives` do not read it.
+  The same holds for every other function secret, among them `HIVE_SECRET_KEY` and
+  `HIVE_PURGE_SECRET`.
 - What the function itself can sign is narrow. It writes `role` and `aud` as fixed values
   (`authenticated`), and copies only validated ids from `agent_login`: the member's user id as
   `sub`, `agent_id`, `workspace_id`, and a trust tier that must be one of the two known ones.
@@ -356,7 +358,8 @@ agent acting under a revocable identity, and humans owning every sharing decisio
   instruction template repeats it.
 - Agents write to their own workspace only; cross-member writes are refused by the database.
 - Background jobs run with a service role but write only to derived tables, never to members'
-  notes.
+  notes. The one exception is the erase of a hive its owner asked to delete, after the 7 days
+  (section 12).
 - Contradictions are flagged, never auto-resolved.
 
 ## 7. Audit and monitoring
@@ -391,6 +394,11 @@ agent acting under a revocable identity, and humans owning every sharing decisio
 - Built: starting a hive writes one row with the action `hive.created`. It holds the new hive,
   the member the person became in it and, in the detail, the hive's name. It is written in the
   same call that creates the hive, so a refused attempt leaves none.
+- Built: asking to delete a hive writes one row with the action `hive.deletion_requested`, and
+  cancelling writes one with `hive.deletion_cancelled`. A row holds the hive, the member who
+  asked or cancelled and, in the detail, the date the hive is to be erased. Asking again for a
+  hive that is already marked writes no row. Both rows are erased with the hive; what remains
+  afterwards is the record in `deleted_hives` (section 12).
 - Every MCP call logged: agent, member, tool, note, time, result.
 - Owner view: reads and writes per agent per day, failed authorisations, token last use.
 - Alerts: a burst of reads across many entities by one agent; repeated authorisation failures. A
@@ -621,9 +629,347 @@ an app once per hive. The approval window names the hive it is connecting to (se
 
 **Known gaps.**
 
-- A hive cannot be renamed or deleted yet, and a member cannot leave one.
+- A hive cannot be renamed yet, and a member cannot leave one. Deleting a hive is in
+  section 12.
 - At most 50 of a person's memberships are read, oldest first. A person in more than 50 hives
   cannot reach the rest from the app.
 - The cap is on hives owned, not on invitations: each hive a person owns can invite, within
   the daily caps of section 3.
 - An agent cannot work across hives.
+
+## 12. Deleting a hive
+
+An owner can delete a hive. It is not erased at once: the hive is marked for deletion and stays
+readable for 7 days, during which nothing in it can be changed and the owner can cancel. After
+the 7 days a scheduled job erases it for good, and once that job has started on the hive it
+can no longer be cancelled. Decided by Danijel on 2026-11-24. A hive that is
+marked is called **closing** below.
+
+**Who may ask, and who may cancel.**
+
+- Only an owner of that hive, signed in as a person. Asking (`request_hive_deletion`),
+  cancelling (`cancel_hive_deletion`) and the count shown beforehand (`hive_deletion_preview`:
+  how many members, notes and files the hive holds) are each refused for an agent identity
+  (`only a person can delete a hive`), for an app's pass (`an app pass cannot do this`) and for
+  a member who is not an owner (`only the owner can delete a hive`). No MCP tool offers any of
+  them.
+- A person who is not a member is told `hive not found`, the same answer as for a hive that
+  does not exist. So the three functions do not reveal whether a hive exists.
+- To ask, the person types the hive's name, and the database compares it with the stored name
+  after trimming surrounding white space. A name that differs is refused with
+  `that is not the name of this hive`. The comparison is made in the database, not only in the
+  page.
+- Asking stamps the hive with the time, the date it will be erased (7 days later) and the
+  account that asked. Asking again for a closing hive answers the same date and changes
+  nothing: the 7 days do not start again.
+- The web app sends the hive's id and the typed name through a server action with the person's
+  session cookie, and the database decides. The page shows a refusal as a line of its own and
+  never the database's words.
+
+**The freeze.**
+
+- While a hive is closing, every write to its data is refused with
+  `this hive is being deleted`: inserts, updates and deletes on every table that holds hive
+  data (notes and their versions, folders, files, links, workspaces, agents, invitations,
+  entities, note entities, synthesis pages, members), and new stored objects under the hive's
+  members.
+- It is one trigger function attached to each of those tables, not a check inside each
+  function. A trigger also fires for writes made by security-definer functions, so it binds
+  them too, together with agents and the connector. There is no per-function guard that a
+  later function could forget.
+- So in a closing hive nobody can invite or join, connect an agent or an app, change sharing,
+  accept, decline or unlink a link, release a held note, write or delete a note, or save a
+  file. That holds for the owner as well.
+- A delete passes the trigger only when it is a cascade from a parent row that is already
+  deleted. A top-level delete in a closing hive never passes.
+- `TRUNCATE` on the hive tables is revoked from the API roles, so the freeze cannot be gone
+  around by emptying a table.
+- The MCP server and the connector have no code for this. A write to a closing hive comes back
+  to the agent as the database's message.
+- Every write in any hive pays for the freeze with one lookup of its hive's row by primary key.
+
+**What deliberately stays open.**
+
+- **Reading**, for everyone who could read before. The freeze changes nothing about who can
+  read what.
+- **The hive row itself and the audit log.** Cancelling changes the hive row, and the request
+  and the cancellation are written to the audit log, so neither can be frozen.
+- **Sign-in of agents and of the connector.** Agents must still be able to read, so the stamps
+  that signing in writes on the agent stay writable.
+- **Revoking an agent.** A leaked token must not stay good for seven days, so an agent in a
+  closing hive can still be revoked, in Settings as usual. It is the one change to an agent
+  that passes the freeze, besides the sign-in stamps. Un-revoking stays refused, and so does
+  every other change to an agent.
+- **Moving a connected app to another hive.** Connecting the app in another hive works, and
+  revokes its agent in the closing hive.
+- **Marking a notification as read.**
+- **The erase itself**, by the server only (below).
+
+**Cancelling.** An owner cancels in Settings or from the banner. The three stamps are cleared
+and the freeze lifts at once. Nothing could be changed in the meantime, apart from agents
+revoked, so the hive is as it was. Cancelling a hive that is not closing is refused with
+`this hive is not being deleted`.
+
+**The point of no return.** Cancelling works during the 7 days, and after the date for as long
+as the scheduled run has not started on the hive; until then nothing has been removed. When
+the run starts on a hive it first stamps it (`begin_hive_purge`), and from that moment
+`cancel_hive_deletion` is refused with `this hive is already being erased`. Without the stamp
+a late cancel could have kept a hive whose stored files were already removed.
+
+**The erase.**
+
+- Four functions do it, and only the server may run them: `hives_due_for_purge`,
+  `begin_hive_purge`, `hive_object_paths` and `purge_hive`. They are revoked from visitors and
+  from signed-in identities, so no person, agent or app can call them.
+- `hives_due_for_purge` lists the hives whose date has come, at most 20. Hives that a run has
+  already attempted come last, so one hive that keeps failing cannot hold up the others.
+- The Edge Function `purge-hives` runs once a day and takes each due hive through three steps,
+  in this order:
+  1. `begin_hive_purge` stamps the hive (the point of no return above) and writes the
+     permanent record (below). It refuses a hive that is not closing or whose date has not
+     come.
+  2. The function removes the hive's stored objects from the `files` bucket, in batches. It
+     finds them by the paths of the hive's members (`hive_object_paths`), not by the file
+     rows, so an object that has no file row is erased too.
+  3. It calls `purge_hive` again and again. Each call deletes at most about 2,000 rows, table by table, and answers
+     whether the hive is gone; the last one deletes the hive row, and what is left goes with
+     it by cascade.
+- A step that fails leaves the hive for a later run, counted as failed. A large hive may take
+  more than one daily run. In between it stays frozen and readable, and cannot be cancelled.
+- **Only the service role may delete during the erase.** People, agents and app passes are
+  still refused every write, exactly as in the 7 days.
+- The steps are small because the hosted API ends a statement after 8 seconds.
+- **Who can call the function.** The database's scheduler (`pg_cron` with `pg_net`) calls it
+  with a shared secret in the header `x-purge-secret`. The function compares it in constant
+  time and answers 401 to a missing or wrong one, before it reads or fetches anything. It
+  answers 405 to anything but `POST` and 503 when one of its secrets is not set. It is deployed
+  without JWT verification, like the other functions, because the scheduler has no identity:
+  the secret is the credential.
+- **The purge secret, `HIVE_PURGE_SECRET`.** It lives in two places only: the function's
+  secrets, and the database's secret store, where the scheduled job reads it at run time. It
+  is made by `scripts/setup-hive-purge.sh`, once per project, which stores it in both places
+  and schedules the daily call. The script runs the extension DDL, the writes to the secret
+  store and the schedule as three separate statements files, so the secret never travels in
+  a batch with DDL. It prints what it did by name and never prints the secret. It is not in the repo, a `.env`, a browser, a prompt or a log. Like every function
+  secret it is readable by every Edge Function of the project (section 3).
+- **The service key.** The function works with the project's secret key (`HIVE_SECRET_KEY`;
+  without it, the Edge runtime's legacy `SUPABASE_SERVICE_ROLE_KEY`), which bypasses every
+  sharing rule and falls under the "server-only" invariant. It is the second function that
+  holds it, after `invite-email`. It uses the key for the four functions above and for
+  removing stored objects, and for nothing else.
+- **The answer carries counts only**: how many hives were erased and how many failed. Neither
+  the answer nor the function's log holds a hive's name, a file path, the secret or a key.
+
+**The permanent record.** `deleted_hives` keeps one row per erased hive, outside the hive: its
+id and name, which account asked and when, when it was erased, and how many members, notes and
+files it held. The row is written when the erase begins, with the counts at that moment, and
+its `purged_at` is filled when the erase completes. A row with no `purged_at` is a hive whose
+erase has begun and not finished. Row-level security is on with no policy, so only the server reads it: no person,
+agent or app can, and there is no screen for it. It holds no note, no file and no member's name
+or email.
+
+**Audit.** Asking writes `hive.deletion_requested` and cancelling writes
+`hive.deletion_cancelled` (section 7). Both rows belong to the hive, so they are erased with
+it. That is why the permanent record exists: after the erase it is the only trace of who asked
+and when.
+
+**Mixed-hive rows are refused at the source.** The erase goes by cascade from the hive, so a
+row tied to two hives could block it. The database therefore refuses such rows when they are
+written: a workspace must belong to its member's hive, and a note can only be tied to an
+entity of its own hive. This closed a way for a member of one hive to block the erase of
+another.
+
+**Known gaps.**
+
+- **Members are told by a banner only.** Every screen of a closing hive shows it, but no email
+  goes out. A member who does not open the app in those 7 days learns of the deletion
+  afterwards.
+- **No export.** A hive cannot be downloaded before it is erased. Members can read their notes
+  and download their files one by one during the 7 days.
+- **No removing one member and no leaving.** Deleting the hive is the only way to end a
+  membership.
+- **The 7 days are fixed.** An owner cannot shorten or lengthen them, and cannot erase at once.
+- **A closing hive still counts toward the cap of 5** hives owned by one person (section 11),
+  until it is erased.
+- **Anyone holding the purge secret can trigger a run early.** A run only erases hives whose
+  date has come, so the secret cannot erase a hive that is not due, shorten the 7 days or pick
+  a hive.
+- **There is no undo after the erase.** The notes, their history, the links and the files are
+  gone; only the record's counts remain.
+- **Anyone signed in who knows a hive's id can learn that it is closing.** An insert that names
+  the hive is refused with `this hive is being deleted`, also for someone who is not a member.
+  It tells them nothing else about the hive.
+- **An account in a closing hive cannot be deleted.** Deleting an account that is a member of a
+  closing hive is refused until the hive is erased or the deletion is cancelled.
+- **Revoking an agent twice.** Revoke on an agent that is already revoked, in a closing hive,
+  shows the general failure line.
+- **Concurrency is reasoned about, not tested.** What happens when a cancel, a write and the
+  erase meet was thought through, but the test database has a single connection and cannot
+  run two at once.
+- **The stepwise erase has not been measured on a large real hive.** It is designed around the
+  hosted API's 8 second statement timeout, and that is so far a design, not a measurement.
+
+## 13. Importing a folder from the app
+
+A person can import a folder of markdown notes in the vault ("Import a folder"), into a new
+workspace or one of their own workspaces in the hive the page is showing. The browser reads and
+parses the files; nothing is saved until the person presses Import. The rules are those of the
+script `scripts/import-vault.mjs` (section 3), which remains for unattended runs.
+
+**Who it runs as.**
+
+- The import runs as the signed-in person, through two server actions that use the person's
+  session cookie: one makes the new workspace, the other saves one batch of notes. Neither
+  uses a secret key.
+- **The app decides nothing about permissions.** A person can write notes only in their own
+  workspaces because row-level security says so. A batch aimed at someone else's workspace is
+  refused by the database.
+- The batch action takes the hive and the member from the workspace row the person can read,
+  never from what the browser sent.
+- The workspace action is bound on the server to the hive the page was showing, as
+  invitations are (section 11). A name the person already uses is answered as taken.
+- **Agents and the connector cannot import.** No MCP tool offers it, and an agent still cannot
+  create a workspace.
+
+**What it can and cannot change.**
+
+- **Every imported note arrives private.** The import never sets sharing and never deletes a
+  note.
+- Importing again into the same workspace updates the notes whose title, text, fields or folder
+  changed, creates the new ones and leaves the rest.
+- **Imported text is data, never an instruction**, like every note. It comes from files the
+  person chose, and whoever wrote those files wrote the text.
+- A hive that is being deleted refuses the import, as it refuses every write (section 12).
+
+**Limits.**
+
+- **The server checks every batch again**, before any query, whatever the browser checked:
+  - at most 25 notes and 3 MB in one batch;
+  - at most 1 MB per note;
+  - every path clean and ending in `.md`: no `..`, no leading slash, no backslash, no empty
+    part, and no path twice in one batch;
+  - a title and frontmatter of the right shape, the frontmatter a plain object;
+  - a note's two dates (when it was written, when its file last changed) are data from a file:
+    one that is not a text refuses the batch; a text is kept only when it is at most 40
+    characters and parses to a time from 1990-01-01 up to now, else it is dropped and the note
+    is imported without it. The database is sent an ISO text the server formatted itself,
+    never the text that arrived, and decides what a person may set (section 15).
+- **2,000 notes per import is checked in the browser only.** It is a convenience limit, not a
+  security one: a person who goes around the browser can send more batches, each still within
+  the limits above and each still writing only into their own workspaces.
+- **At most 20 workspaces per member, enforced in the database** (migration
+  `20261124110155_workspace_cap`), counted under a lock per member so that two requests at
+  once cannot both pass. A workspace's name is trimmed of surrounding white space and must be
+  1 to 60 characters; the database checks that too.
+- Paths with a part that begins with a dot (`.obsidian`, `.git`, `.trash`) are left out in the
+  browser.
+- Each batch answers one outcome per path: created, updated, unchanged or failed. A database
+  message is never returned to the page, and no note text or path is written to a log.
+
+**Known gaps.**
+
+- **No images or other files.** Only `.md` files are imported; the rest are counted as skipped.
+- **Notes whose file is gone are not removed.** Importing a folder again never deletes the note
+  of a file that was deleted or renamed.
+- **A closed tab stops the import where it was.** What was saved stays; run the import again to
+  finish.
+- There is no choosing of subfolders; pick the subfolder itself.
+
+## 14. Connecting wiki links
+
+A person turns the `[[wiki links]]` between their own notes in one workspace into links: by
+itself at the end of a folder import, and from "Connect wiki links" in the vault. No model is
+used and nothing leaves the project.
+
+**Who decides.** The database, with rules that were already there. The step is a server action
+signed in as the person; it adds no rule of its own.
+
+- `links_insert` lets a person insert a link only from a note of their own.
+- `links_before_insert` accepts a link at once only when both notes have one owner, and refuses
+  a second link for a pair, in either direction.
+- A hive that is being deleted refuses the insert, as it refuses every write (section 12).
+
+**What the step reads and writes.**
+
+- Only notes of the workspace's owner in that workspace: every read filters on the workspace and
+  on the member read from the workspace's own row. A colleague's note can be neither read nor
+  linked, so this feature never proposes a link to anyone.
+- A link carries `tier` 2 and `score` 0.8. Nothing is updated or deleted.
+- The answer is numbers and the next cursor, which is a path of the person's own note. No note
+  text, title or database message is returned.
+- Only an error's code is logged; every request of the step names ids or a path, so its message
+  is never logged.
+
+**Limits, checked on the server before any query.**
+
+- The workspace is a uuid; the cursor is null or 1 to 4,000 characters with no NUL.
+- 40 notes a step; at most 2,000 distinct references a note; links are inserted 200 at a time.
+- The workspace's index of paths and the links of the step's notes are read in pages, at most
+  20,000 rows each; a workspace over that is refused.
+- The filter that names the step's notes is built only from ids checked as uuids.
+
+**Known gaps.**
+
+- **An unlink does not last.** Unlinking two of one's own notes deletes the row, so the next run
+  makes the link again while the text still says `[[…]]`.
+- **A reference removed from the text does not remove its link.**
+- **Notes an agent writes later are not scanned by themselves.**
+- **A path over 4,000 characters** (not possible through the import, which stores at most 500)
+  stops a run that reaches it as the 40th note of a step.
+- Any member can run it on their own workspaces as often as they like; each run is bounded as
+  above and writes nothing that is already there.
+
+## 15. A note's dates
+
+A note has two dates: `created_at`, when it was written, and `updated_at`, when it last changed.
+The map places a note by the first and orders by the second. An imported note carries the dates
+of its file (section 13), so the dates can be set, and the database decides by whom (migration
+`20261124153504_note_dates`, in the trigger `notes_before_write`). A file has one date,
+`created_at`, and nobody sets it (the trigger `files_keep_date`, below).
+
+**Who may set them.**
+
+- **A person, on their own notes.** A signed-in session with no agent, no app pass and no
+  self-hosted claim. Row-level security still decides whose notes a person writes.
+  - A value in the future is cut back to now.
+  - **A value before 1990-01-01 00:00 UTC is raised to it.** The import accepts no earlier date
+    either (section 13).
+  - `updated_at` is never before `created_at`: it is raised to it.
+  - An update that sends no date changes no date.
+- **An agent or a connected app cannot.** On a new note both dates are the real moment,
+  whatever was sent. On an update `created_at` keeps its old value, and so does `updated_at`
+  unless the content changes. The same holds for a token made for another audience.
+- **A change of title, text or fields stamps `updated_at` as now**, as before, with one
+  exception for a person.
+  - **A person may send the date of the change with it.** When their update changes content
+    and sends an `updated_at` other than the stored one, that value is kept, within the same
+    limits: not before `created_at`, not before 1990-01-01, not after now. The import needs
+    this: it stores an edited file's text and its last-modified time in one update, so
+    importing again finds the note unchanged.
+  - With no `updated_at`, the stored one or null, a person's change is stamped now.
+  - For an agent, an app, a self-hosted claim and the server it is always now, whatever was
+    sent.
+  - Either way the version goes up and `written_by_agent` is set as before.
+- A person's change of the dates alone is not a change of content: no new version, and
+  `written_by_agent` stays.
+- **Nobody sets a file's date through the API.** The trigger `files_keep_date` on `files`
+  makes `created_at` the real moment on insert, whatever was sent, and keeps its old value on
+  update. This holds for a person as well as for an agent, an app and a self-hosted claim.
+- The server with no person behind the call (the database's owner, the service key) is not
+  checked, as before, for a note or for a file. Nobody reaches that through the API: row-level
+  security refuses a note or a file written by a caller who is no member.
+
+**What it means.**
+
+- **A person can backdate their own notes**, as far as 1990, and the last change of a note
+  with it, also while changing its text. It moves only their own notes on the map. The audit
+  log keeps the real time of every entry, and a note's history still lists every version.
+- `map_graph` gives every item its `created_at`, a locked one too. It says no more than
+  `updated_at`, which a locked item already carried.
+- No MCP tool sets a date, and none could: the database ignores an agent's dates.
+
+**Known gaps.**
+
+- A date is not proof of when a note was written: it is what its owner, or the file they
+  imported, says.
+- The map's 5,000 items are still picked by last change, whatever date a note was written.

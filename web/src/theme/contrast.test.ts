@@ -1,201 +1,86 @@
 import { describe, expect, it } from "vitest";
-import {
-  contrast,
-  fromHex,
-  over,
-  parseColour,
-  toHex,
-  type RGB,
-} from "./colour";
-import {
-  DOT_MODES,
-  MODES,
-  REACHES,
-  THEMES,
-  type Mode,
-  type Reach,
-} from "./look";
-import {
-  backgrounds,
-  baseTokens,
-  chromeTokens,
-  dotTokens,
-  resetTokens,
-  type Surface,
-  type Tokens,
-} from "./tokens";
+import { contrast, over, parseColour, type RGB } from "./colour";
+import { THEMES } from "./look";
+import { tokens } from "./tokens";
 
-// Spec §3. Each row: which token set, which tokens, on which surfaces, and the minimum.
-// A translucent foreground is composited over the background before measuring.
-type Row = {
-  scope: string;
-  tokens: (t: string, m: Mode) => Tokens;
-  names: string[];
-  on: Surface[];
-  min: number;
+// Every theme against the limits of the spec, section 6. A failure is fixed by hand in
+// themes.json; nothing adjusts a colour automatically.
+const opaque = (value: string): RGB => {
+  const c = parseColour(value);
+  expect(c.a, value).toBe(1);
+  return c;
 };
 
-function rows(mode: Mode): Row[] {
-  const base = (t: string, m: Mode) => baseTokens(t, m);
-  const reset = (t: string, m: Mode) => resetTokens(t, m);
-  const card: Surface[] = ["card", "cardSolid"];
-  const sides: Surface[] = ["rail", "panel", "panelSolid"];
-  const list: Row[] = [
-    {
-      scope: "card",
-      tokens: base,
-      names: ["--fg", "--fg2", "--muted"],
-      on: card,
-      min: 4.5,
-    },
-    {
-      scope: "card",
-      tokens: base,
-      names: ["--quiet", "--acc"],
-      on: card,
-      min: 3,
-    },
-    {
-      scope: "reset popover",
-      tokens: reset,
-      names: ["--fg", "--fg2", "--muted"],
-      on: ["popover"],
-      min: 4.5,
-    },
-    {
-      scope: "reset popover",
-      tokens: reset,
-      names: ["--quiet", "--acc"],
-      on: ["popover"],
-      min: 3,
-    },
-  ];
-  if (mode === "dark") {
-    // No chrome scope in dark: the rail and the side panel use the base tokens.
-    list.push(
-      {
-        scope: "rail/panel",
-        tokens: base,
-        names: ["--fg", "--fg2", "--muted"],
-        on: sides,
-        min: 4.5,
-      },
-      {
-        scope: "rail/panel",
-        tokens: base,
-        names: ["--quiet", "--acc"],
-        on: sides,
-        min: 3,
-      },
-    );
-  } else {
-    const chrome = (t: string, m: Mode) => chromeTokens(t, m);
-    list.push(
-      {
-        scope: "chrome",
-        tokens: chrome,
-        names: ["--fg", "--muted"],
-        on: sides,
-        min: 4.5,
-      },
-      {
-        scope: "chrome",
-        tokens: chrome,
-        names: ["--quiet", "--acc"],
-        on: sides,
-        min: 3,
-      },
-    );
-  }
-  return list;
-}
+describe.each(THEMES.map((t) => t.id))("contrast in %s", (id) => {
+  const t = tokens(id);
+  const bg = opaque(t["--bg"]!);
+  const card = opaque(t["--glass"]!);
+  const ratio = (fg: string, on: RGB) => contrast(opaque(t[fg]!), on);
 
-function hexes(value: string): RGB[] {
-  return (value.match(/#[0-9a-f]{6}/g) ?? []).map(fromHex);
-}
+  it("text and muted text reach 4.5:1 on the page and the card", () => {
+    for (const fg of ["--fg", "--muted"])
+      for (const on of [bg, card])
+        expect(ratio(fg, on), fg).toBeGreaterThanOrEqual(4.5);
+    expect(ratio("--fg2", card)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio("--fg2", bg)).toBeGreaterThanOrEqual(4.5);
+  });
 
-function worst(fg: string, bgs: RGB[]): { ratio: number; bg: string } {
-  const c = parseColour(fg);
-  let best = { ratio: Infinity, bg: "" };
-  for (const bg of bgs) {
-    const ratio = contrast(over(c, bg), bg);
-    if (ratio < best.ratio) best = { ratio, bg: toHex(bg) };
-  }
-  return best;
-}
+  it("the accent, used as link text, reaches 4.5:1 on the card", () => {
+    expect(ratio("--acc", card)).toBeGreaterThanOrEqual(4.5);
+  });
 
-function failures(theme: string, mode: Mode, reach: Reach): string[] {
-  const out: string[] = [];
-  const bgs = backgrounds(theme, mode, reach);
-  const where = `${theme} ${mode} ${reach}`;
-  const check = (
-    label: string,
-    fg: string,
-    on: string,
-    list: RGB[],
-    min: number,
-  ) => {
-    const w = worst(fg, list);
-    if (!(w.ratio >= min))
-      out.push(
-        `${where}: ${label} ${fg} on ${on} ${w.bg} is ${w.ratio.toFixed(2)} < ${min}`,
-      );
-  };
+  it("text and muted text reach 4.5:1 on the selection fill", () => {
+    const sel = over(parseColour(t["--sel"]!), card);
+    for (const fg of ["--fg", "--muted"])
+      expect(ratio(fg, sel), fg).toBeGreaterThanOrEqual(4.5);
+  });
 
-  for (const row of rows(mode)) {
-    const tokens = row.tokens(theme, mode);
-    for (const name of row.names)
-      for (const surface of row.on)
-        check(
-          `${row.scope} ${name}`,
-          tokens[name]!,
-          surface,
-          bgs[surface],
-          row.min,
-        );
-  }
-
-  // --on-brand on each stop of --grad.
-  const base = baseTokens(theme, mode);
-  check(
-    "--on-brand",
-    base["--on-brand"]!,
-    "--grad",
-    hexes(base["--grad"]!),
-    4.5,
-  );
-  if (mode === "light") {
-    const chrome = chromeTokens(theme, mode);
-    check(
-      "chrome --on-brand",
-      chrome["--on-brand"]!,
-      "chrome --grad",
-      hexes(chrome["--grad"]!),
+  it("muted text reaches 4.5:1 on the active fill", () => {
+    expect(ratio("--muted", opaque(t["--active-bg"]!))).toBeGreaterThanOrEqual(
       4.5,
     );
-  }
+  });
 
-  // The eight dots on the card, in both dot modes.
-  for (const dots of DOT_MODES) {
-    const d = dotTokens(theme, mode, dots);
+  it("quiet labels, the accent and the hub reach 3:1", () => {
+    for (const on of [bg, card]) {
+      expect(ratio("--quiet", on)).toBeGreaterThanOrEqual(3);
+      expect(ratio("--acc", on)).toBeGreaterThanOrEqual(3);
+    }
+    expect(ratio("--hub", card)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("the three freshest ramp steps reach 3:1 on the card", () => {
+    for (const i of [5, 6, 7])
+      expect(
+        ratio(`--fresh-${i}`, card),
+        `--fresh-${i}`,
+      ).toBeGreaterThanOrEqual(3);
+  });
+
+  it("the ramp gets steadily easier to see", () => {
+    const r = Array.from({ length: 8 }, (_, i) => ratio(`--fresh-${i}`, card));
+    for (let i = 1; i < 8; i++) expect(r[i]!).toBeGreaterThan(r[i - 1]!);
+  });
+
+  it("the eight topic colours reach 3:1 on the card", () => {
     for (let i = 1; i <= 8; i++)
-      for (const surface of ["card", "cardSolid"] as const)
-        check(
-          `dots=${dots} --hue-${i}`,
-          d[`--hue-${i}`]!,
-          surface,
-          bgs[surface],
-          3,
-        );
-  }
-  return out;
-}
+      expect(ratio(`--hue-${i}`, card), `--hue-${i}`).toBeGreaterThanOrEqual(3);
+  });
 
-describe("contrast, every theme × mode × reach (spec §3)", () => {
-  for (const t of THEMES)
-    for (const mode of MODES)
-      for (const reach of REACHES)
-        it(`${t.id} ${mode} ${reach}`, () => {
-          expect(failures(t.id, mode, reach)).toEqual([]);
-        });
+  it("text on the accent reaches 4.5:1", () => {
+    expect(ratio("--on-brand", opaque(t["--brand"]!))).toBeGreaterThanOrEqual(
+      4.5,
+    );
+  });
+
+  it("the active item's text reaches 4.5:1 on its fill", () => {
+    expect(
+      ratio("--active-fg", opaque(t["--active-bg"]!)),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("text on a hover fill still reaches 4.5:1", () => {
+    const fill = over(parseColour(t["--fill"]!), card);
+    expect(ratio("--fg", fill)).toBeGreaterThanOrEqual(4.5);
+  });
 });

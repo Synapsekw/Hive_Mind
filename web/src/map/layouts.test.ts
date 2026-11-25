@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { grouping } from "./arrange";
-import { buildModel } from "./graph";
-import { layout, orbit, ringsLayout } from "./layouts";
+import { buildModel, dayIndex } from "./graph";
+import { layout, orbit, ringsLayout, timelineScale } from "./layouts";
 import { fixturePayload } from "./fixture";
 import type { MapModel, MapNode, MapPayload } from "./types";
 
@@ -298,18 +298,131 @@ describe("ringsLayout scale", () => {
 });
 
 describe("timeline", () => {
-  it("puts today's items in the rightmost column and old items in the first", () => {
+  const DAY = 86_400_000;
+  const iso = (t: number) => new Date(t).toISOString();
+  /** The column a position's x falls in. */
+  const col = (x: number) => Math.floor((x - 250) / 51);
+  const at = (model: MapModel, pos: [number, number][], id: string) =>
+    col(pos[model.nodes.findIndex((n) => n.id === id)]![0]);
+  const hubOf = (model: MapModel, pos: [number, number][], topic: string) =>
+    col(
+      pos[
+        model.nodes.findIndex((n) => n.kind === "hub" && n.title === topic)
+      ]![0],
+    );
+
+  it("puts today's items in the rightmost column and the oldest of two weeks in the first", () => {
     const recent = note("recent", "A");
     const old = {
       ...note("old", "A"),
-      updated_at: new Date(NOW - 40 * 86_400_000).toISOString(),
+      updated_at: iso(NOW - 13 * DAY),
     };
-    recent.updated_at = new Date(NOW - 60_000).toISOString();
+    recent.updated_at = iso(NOW - 60_000);
     const model = buildModel(base([recent, old]));
     const pos = layout("timeline", model, NOW);
     const ri = model.nodes.findIndex((n) => n.id === "recent");
     const oi = model.nodes.findIndex((n) => n.id === "old");
     expect(pos[ri]![0]).toBeGreaterThanOrEqual(250 + 13 * 51);
     expect(pos[oi]![0]).toBeLessThan(250 + 51);
+  });
+
+  it("gives a hive of recent notes the positions it had by day and last change", () => {
+    // Before created dates the Timeline placed an item by the day of its last change. A sample
+    // written and changed within 14 days must sit exactly there still.
+    const model = buildModel(fixturePayload(NOW));
+    expect(timelineScale(model, NOW).unit).toBe("day");
+    const pos = layout("timeline", model, NOW);
+    const total = new Array<number>(14).fill(0);
+    for (const n of model.nodes)
+      if (n.kind === "note" || n.kind === "file")
+        total[dayIndex(n.updatedAt, NOW)]!++;
+    const seen = new Array<number>(14).fill(0);
+    for (const n of model.nodes) {
+      if (n.kind !== "note" && n.kind !== "file") continue;
+      const c = dayIndex(n.updatedAt, NOW);
+      const k = seen[c]!++;
+      const rows = Math.ceil(total[c]! / 4);
+      const step = rows > 1 ? Math.min(11, (745 - 430) / (rows - 1)) : 11;
+      expect(pos[n.i]).toEqual([
+        250 + c * 51 + 6 + (k % 4) * 11,
+        430 + Math.floor(k / 4) * step,
+      ]);
+    }
+  });
+
+  it("places an old note in the column of its created date, not of its last change", () => {
+    const old = {
+      ...note("old", "A"),
+      created_at: iso(Date.UTC(2026, 7, 5)),
+      updated_at: iso(NOW - 60_000),
+    };
+    const fresh = {
+      ...note("fresh", "A"),
+      created_at: iso(NOW - 60_000),
+      updated_at: iso(NOW - 60_000),
+    };
+    const model = buildModel(base([old, fresh]));
+    // August to November: more than 14 weeks, so months.
+    expect(timelineScale(model, NOW)).toEqual({ unit: "month", now: NOW });
+    const pos = layout("timeline", model, NOW);
+    expect(at(model, pos, "fresh")).toBe(13);
+    expect(at(model, pos, "old")).toBe(10);
+  });
+
+  it("falls back to the last change for a note without a created date", () => {
+    const old = { ...note("old", "A"), updated_at: iso(NOW - 40 * DAY) };
+    const fresh = { ...note("fresh", "A"), updated_at: iso(NOW - 60_000) };
+    const model = buildModel(base([old, fresh]));
+    expect(timelineScale(model, NOW).unit).toBe("week");
+    const pos = layout("timeline", model, NOW);
+    expect(at(model, pos, "fresh")).toBe(13);
+    // 13 October 2026 is five Mondays before the week of 22 November.
+    expect(at(model, pos, "old")).toBe(8);
+  });
+
+  it("puts a hub under its topic's newest created date", () => {
+    const a1 = { ...note("a1", "A"), created_at: iso(Date.UTC(2025, 2, 1)) };
+    const a2 = {
+      ...note("a2", "A"),
+      created_at: iso(Date.UTC(2026, 4, 9)),
+    };
+    // Changed a minute ago: only the created date counts.
+    const b1 = {
+      ...note("b1", "B"),
+      created_at: iso(Date.UTC(2025, 2, 1)),
+      updated_at: iso(NOW - 60_000),
+    };
+    const model = buildModel(base([a1, a2, b1]));
+    const scale = timelineScale(model, NOW);
+    expect(scale.unit).toBe("quarter");
+    const pos = layout("timeline", model, NOW, scale);
+    // Q4 2026 is the last column; Q2 2026 two before it, Q1 2025 seven before.
+    expect(hubOf(model, pos, "A")).toBe(11);
+    expect(hubOf(model, pos, "B")).toBe(6);
+    expect(at(model, pos, "a1")).toBe(6);
+    expect(layout("timeline", model, NOW)).toEqual(pos);
+  });
+
+  it("uses the scale it is given", () => {
+    const model = buildModel(base([note("n", "A")]));
+    const day = layout("timeline", model, NOW, { unit: "day", now: NOW });
+    const year = layout("timeline", model, NOW, { unit: "year", now: NOW });
+    expect(at(model, day, "n")).toBe(12);
+    expect(at(model, year, "n")).toBe(13);
+  });
+
+  it("takes the scale from the oldest created date among notes and files only", () => {
+    const model = buildModel(base([]));
+    expect(timelineScale(model, NOW).unit).toBe("day");
+    const old = buildModel(fixturePayload(NOW, { old: true }));
+    expect(timelineScale(old, NOW).unit).toBe("quarter");
+    const pos = layout("timeline", old, NOW);
+    const used = new Set(
+      old.nodes
+        .filter((n) => n.kind === "note" || n.kind === "file")
+        .map((n) => col(pos[n.i]![0])),
+    );
+    // Spread over the columns, not piled on today.
+    expect(used.size).toBeGreaterThan(8);
   });
 });
