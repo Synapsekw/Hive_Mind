@@ -84,10 +84,10 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  // Refreshes the session and validates it with the auth server.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Refreshes the session and verifies the token locally against the project's signing keys
+  // (ES256); no call to the auth server. A missing, expired or forged token answers no claims.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims?.sub ?? null;
 
   const redirect = (to: string) => {
     const res = NextResponse.redirect(new URL(to, request.url));
