@@ -28,6 +28,8 @@ import { NoteList } from "./NoteList";
 import { Summary } from "./Summary";
 import { overview, sharedOverview } from "./overview";
 import { Preview } from "./Preview";
+import { ScopePicker } from "./ScopePicker";
+import { useNarrow } from "./useNarrow";
 import {
   DELETE_FAILED,
   DELETED,
@@ -155,6 +157,8 @@ export function Vault({
     (addRef.current ?? filterRef.current)?.focus();
   }
   const main = useRef<HTMLElement>(null);
+  const narrow = useNarrow(main);
+  const [picking, setPicking] = useState(false);
   // Where the focus goes once a deleted note has left the page.
   const target = useRef<{ row: HTMLElement | null } | null>(null);
 
@@ -437,12 +441,92 @@ export function Vault({
   if (scope.kind === "topic")
     title = data.topics.find((x) => x.id === scope.id)?.name ?? ALL_NOTES;
 
+  const scopeList = (
+    <>
+      <div role="group" aria-label={SWITCH} className={`${s.tabs} ${s.switch}`}>
+        {(
+          [
+            ["folders", BY_FOLDERS],
+            ["topics", BY_TOPICS],
+          ] as const
+        ).map(([by, label]) => (
+          <button
+            key={by}
+            type="button"
+            className={s.tab}
+            aria-pressed={local.by === by}
+            onClick={() =>
+              setLocal((l) =>
+                l.by === by ? l : { ...l, by, scope: { kind: "all" } },
+              )
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {local.by === "topics" ? (
+        <TopicList
+          tree={byTopic}
+          total={data.notes.length}
+          hiveEmpty={data.topics.length === 0}
+          scope={scope}
+          opened={local.kinds}
+          onScope={(next) => {
+            setPicking(false);
+            setLocal((l) => ({ ...l, scope: next }));
+          }}
+          onToggle={(kind) =>
+            setLocal((l) => {
+              const kinds = new Set(l.kinds);
+              if (kinds.has(kind)) kinds.delete(kind);
+              else kinds.add(kind);
+              return { ...l, kinds };
+            })
+          }
+        />
+      ) : (
+        <Folders
+          root={tree}
+          scope={scope}
+          opened={local.opened}
+          held={held}
+          members={data.members}
+          onScope={(next) => {
+            setPicking(false);
+            setLocal((l) => {
+              const opened = new Set(l.opened);
+              if (next.kind === "folder") opened.add(next.path);
+              return { ...l, scope: next, opened };
+            });
+          }}
+          onToggle={(path) =>
+            setLocal((l) => {
+              const opened = new Set(l.opened);
+              if (opened.has(path)) opened.delete(path);
+              else opened.add(path);
+              return { ...l, opened };
+            })
+          }
+        />
+      )}
+    </>
+  );
+
   const header = (
     <div className={s.listHead}>
       <div className={s.listTitleRow}>
-        <h2 className={s.listTitle} title={title}>
-          {title}
-        </h2>
+        {narrow && !shared ? (
+          <h2 className={s.listTitlePick}>
+            <ScopePicker title={title} open={picking} onOpenChange={setPicking}>
+              {scopeList}
+            </ScopePicker>
+          </h2>
+        ) : (
+          <h2 className={s.listTitle} title={title}>
+            {title}
+          </h2>
+        )}
         <span className={s.listCount}>{count(listed.length)}</span>
       </div>
       {scope.kind === "folder" && folderNode && wsId && (
@@ -569,78 +653,12 @@ export function Vault({
             />
           </PanelDialog>
         )}
-        <div className={s.cols} data-shared={shared || undefined}>
-          {!shared && (
-            <div className={s.folders}>
-              <div
-                role="group"
-                aria-label={SWITCH}
-                className={`${s.tabs} ${s.switch}`}
-              >
-                {(
-                  [
-                    ["folders", BY_FOLDERS],
-                    ["topics", BY_TOPICS],
-                  ] as const
-                ).map(([by, label]) => (
-                  <button
-                    key={by}
-                    type="button"
-                    className={s.tab}
-                    aria-pressed={local.by === by}
-                    onClick={() =>
-                      setLocal((l) =>
-                        l.by === by ? l : { ...l, by, scope: { kind: "all" } },
-                      )
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {local.by === "topics" ? (
-                <TopicList
-                  tree={byTopic}
-                  total={data.notes.length}
-                  hiveEmpty={data.topics.length === 0}
-                  scope={scope}
-                  opened={local.kinds}
-                  onScope={(next) => setLocal((l) => ({ ...l, scope: next }))}
-                  onToggle={(kind) =>
-                    setLocal((l) => {
-                      const kinds = new Set(l.kinds);
-                      if (kinds.has(kind)) kinds.delete(kind);
-                      else kinds.add(kind);
-                      return { ...l, kinds };
-                    })
-                  }
-                />
-              ) : (
-                <Folders
-                  root={tree}
-                  scope={scope}
-                  opened={local.opened}
-                  held={held}
-                  members={data.members}
-                  onScope={(next) =>
-                    setLocal((l) => {
-                      const opened = new Set(l.opened);
-                      if (next.kind === "folder") opened.add(next.path);
-                      return { ...l, scope: next, opened };
-                    })
-                  }
-                  onToggle={(path) =>
-                    setLocal((l) => {
-                      const opened = new Set(l.opened);
-                      if (opened.has(path)) opened.delete(path);
-                      else opened.add(path);
-                      return { ...l, opened };
-                    })
-                  }
-                />
-              )}
-            </div>
-          )}
+        <div
+          className={s.cols}
+          data-shared={shared || undefined}
+          data-narrow={(narrow && !shared) || undefined}
+        >
+          {!shared && !narrow && <div className={s.folders}>{scopeList}</div>}
           <NoteList
             header={header}
             notes={listed}
@@ -677,13 +695,14 @@ export function Vault({
                   data={summary.data}
                   hrefFor={hrefFor}
                   now={now}
-                  onReview={() =>
+                  onReview={() => {
+                    setPicking(false);
                     setLocal((l) => ({
                       ...l,
                       by: "folders",
                       scope: { kind: "held" },
-                    }))
-                  }
+                    }));
+                  }}
                 />
               )
             }

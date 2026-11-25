@@ -107,6 +107,28 @@ for (const look of LOOKS)
     });
   }
 
+test("in a narrow card the folders fold into the list title", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await open(page);
+  await expect(folders(page)).toHaveCount(0);
+  const picker = page.getByRole("button", { name: /^Choose folder or topic/ });
+  await picker.click();
+  await page
+    .getByRole("group", { name: "Folders and topics" })
+    .getByRole("button", { name: /^decisions\b/ })
+    .click();
+  await expect(
+    page.getByRole("group", { name: "Folders and topics" }),
+  ).toHaveCount(0);
+  await expect(picker).toHaveAccessibleName(/decisions/);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(
+    folders(page).getByRole("button", { name: /^decisions\b/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
 test("the vault is a solid card with no blur", async ({ page }) => {
   await open(page, `?note=${README}`);
   const flat = await page
@@ -484,7 +506,15 @@ for (const look of LOOKS)
       if (look) await setLook(context, look);
       await page.setViewportSize(size);
       await open(page);
-      await folders(page)
+      // With the rail open the card here is narrow: the folders are in the list title's picker.
+      const picker = page.getByRole("button", {
+        name: /^Choose folder or topic/,
+      });
+      const scopes = (await picker.count())
+        ? (await picker.click(),
+          page.getByRole("group", { name: "Folders and topics" }))
+        : folders(page);
+      await scopes
         .getByRole("button", { name: new RegExp(`^${GROUP_FOLDER}\\b`) })
         .click();
       await page.getByRole("button", { name: /^Folder sharing: / }).click();
@@ -3185,6 +3215,9 @@ test("at 390 px the column and the chips stay inside the window", async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await open(page, `?note=${SCOPE}`);
+  // Narrow: the switch and the topic list are in the list title's picker.
+  const pick = page.getByRole("button", { name: /^Choose folder or topic/ });
+  await pick.click();
   await switchGroup(page).getByRole("button", { name: P.BY_TOPICS }).click();
   const nav = topicNav(page);
   await nav.getByRole("button", { name: /^Customers/ }).click();
@@ -3202,6 +3235,7 @@ test("at 390 px the column and the chips stay inside the window", async ({
     expect(box.x + box.width).toBeLessThanOrEqual(390);
   }
   expect((await scrolls(page)).across).toBe(false);
+  await page.keyboard.press("Escape");
   await removeButton(page, "Survey Kit Co").click();
   await expect(status(page)).toHaveText(P.removed("Survey Kit Co"));
   await addTopicButton(page).click();

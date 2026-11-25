@@ -1385,7 +1385,8 @@
     padding-top: 0;
   }
 
-  .cols[data-shared] {
+  .cols[data-shared],
+  .cols[data-narrow] {
     grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
   }
 
@@ -1406,7 +1407,8 @@
     border-right: 1px solid var(--line);
   }
 
-  .cols[data-shared] .notes {
+  .cols[data-shared] .notes,
+  .cols[data-narrow] .notes {
     padding-left: 0;
   }
 
@@ -1465,7 +1467,8 @@
     border-bottom: 1px solid var(--line);
   }
 
-  .cols[data-shared] .notes > .listHead {
+  .cols[data-shared] .notes > .listHead,
+  .cols[data-narrow] .notes > .listHead {
     margin-left: 0;
     padding-left: 12px;
   }
@@ -1731,4 +1734,71 @@
   display: inline-flex;
   align-items: center;
   text-decoration: none;
+}
+
+/* ---- Narrow card: the folder column folded into the list title ---- */
+
+.listTitlePick {
+  margin: 0;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 32px;
+}
+
+/* The popover is placed from the card (the panel is positioned), not from this column, so its
+   height can be a share of the card's. */
+.cols[data-narrow] .notes {
+  position: static;
+}
+
+.scopePicker {
+  min-width: 0;
+}
+
+.scopeButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.scopeButton:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.scopeTitle {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scopePop {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  width: 300px;
+  max-width: calc(100% - 16px);
+  max-height: 70%;
+  margin-top: 6px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+  scrollbar-width: thin;
 }
