@@ -376,6 +376,14 @@ function shapePath(path: Path2D, kind: Kind, x: number, y: number, r: number) {
   }
 }
 
+/** The canvas is never drawn at more than this many device pixels per CSS pixel. */
+export const MAX_DPR = 2;
+
+/** The device pixel ratio the map draws at: the screen's, at most MAX_DPR. */
+export function canvasDpr(raw: number | undefined): number {
+  return Math.min(raw || 1, MAX_DPR);
+}
+
 export function drawFrame(
   ctx: CanvasRenderingContext2D,
   dpr: number,
@@ -691,7 +699,7 @@ function layerFor(ctx: CanvasRenderingContext2D): Layer {
 }
 
 /** Up to half a viewport of overscan on each side, within this many layer pixels. */
-export const LAYER_MAX_PX = 16_000_000;
+export const LAYER_MAX_PX = 6_000_000;
 
 /**
  * The guides, then the resting edges. The edges are a bitmap, redrawn only when what it shows

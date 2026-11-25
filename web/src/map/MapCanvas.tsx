@@ -26,6 +26,7 @@ import { toScreen } from "./camera";
 import { buildHitGrid, hitTest, type HitGrid } from "./hitGrid";
 import { projectOrbit, type OrbitProjection } from "./orbit3d";
 import {
+  canvasDpr,
   clearTextCache,
   dotDiameter,
   drawFrame,
@@ -318,7 +319,7 @@ export function MapCanvas(props: Props): JSX.Element {
     const { sw, sh, w, h } = size.current;
     if (!el || !ctx || sw <= 0 || sh <= 0) return;
     if (!pal.current) pal.current = readPalette(el);
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = canvasDpr(window.devicePixelRatio);
     const W = Math.max(1, Math.round(sw * dpr));
     const H = Math.max(1, Math.round(sh * dpr));
     if (el.width !== W || el.height !== H) {

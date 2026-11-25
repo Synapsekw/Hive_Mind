@@ -7,6 +7,7 @@
 // dot hot (the peek card, firing links, the soft dim).
 import {
   startTransition,
+  useDeferredValue,
   useCallback,
   useEffect,
   useMemo,
@@ -92,6 +93,9 @@ export function HiveMap({
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [selKey, setSelKey] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  // The search box shows every keystroke at once; what it lights (and the dot list after it)
+  // follows a moment later, so typing never waits on a 5,000-node pass.
+  const dq = useDeferredValue(q);
   const [names, setNames] = useState(true);
   const [hot, setHotNow] = useState<number | null>(null);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -300,7 +304,7 @@ export function HiveMap({
         }),
     [model, agentInfo, lastUsed],
   );
-  const query = q.trim();
+  const query = dq.trim();
   // In Rings by Links or Time a group's name is a note's title or a month, not a word the user
   // filed by, so the search does not light whole groups by it.
   const groupNames =
@@ -311,8 +315,8 @@ export function HiveMap({
   // What the filter and the search light, without the selection. The bar's count follows only
   // this, so selecting a dot runs `lit` once (for `on`) and leaves the count alone.
   const base = useMemo(
-    () => lit(model, { topics, kinds, members, q, sel: null, groupNames }),
-    [model, topics, kinds, members, q, groupNames],
+    () => lit(model, { topics, kinds, members, q: dq, sel: null, groupNames }),
+    [model, topics, kinds, members, dq, groupNames],
   );
   const counts = useMemo(() => shown(model, base), [model, base]);
   // With no selection `on` is `base` itself, so the canvas caches keyed on it still hit.
@@ -320,8 +324,8 @@ export function HiveMap({
     () =>
       sel === null
         ? base
-        : lit(model, { topics, kinds, members, q, sel, groupNames }),
-    [base, model, topics, kinds, members, q, sel, groupNames],
+        : lit(model, { topics, kinds, members, q: dq, sel, groupNames }),
+    [base, model, topics, kinds, members, dq, sel, groupNames],
   );
   const hits = query ? on.filter(Boolean).length : 0;
   const selNode = sel !== null ? model.nodes[sel] : undefined;
@@ -429,7 +433,7 @@ export function HiveMap({
         topics: preview.topic != null ? [preview.topic] : topics,
         kinds: preview.kind != null ? [preview.kind] : kinds,
         members: preview.member != null ? [preview.member] : members,
-        q,
+        q: dq,
         sel: null,
         groupNames,
       });
@@ -440,7 +444,7 @@ export function HiveMap({
     if (hot !== null && sel === null)
       return new Set([hot, ...(model.nodes[hot]?.nb ?? [])]);
     return null;
-  }, [model, preview, hot, sel, topics, kinds, members, q, groupNames]);
+  }, [model, preview, hot, sel, topics, kinds, members, dq, groupNames]);
   // While a preview is on, the canvas also lights what it points at, so a row the filter leaves
   // out still shows: its dots at full strength, the rest of the filter at the soft dim.
   const drawn = useMemo(

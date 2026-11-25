@@ -3,11 +3,13 @@ import { fixturePayload } from "./fixture";
 import { activity, buildModel } from "./graph";
 import { layout } from "./layouts";
 import {
+  canvasDpr,
   dotBatches,
   dotDiameter,
   drawFrame,
   fitGroupLabel,
   haloAlpha,
+  LAYER_MAX_PX,
   type FrameState,
   type Palette,
 } from "./renderer";
@@ -307,5 +309,20 @@ describe("hover and zoom keep the caches", () => {
     expect(settled).not.toBe(before);
     draw({ cam: { k: 2, tx: -200, ty: -160 }, moving: false });
     expect(dotBatches(w.scene)).toBe(settled);
+  });
+});
+
+describe("canvas size caps", () => {
+  it("draws at a device pixel ratio of at most 2", () => {
+    expect(canvasDpr(1)).toBe(1);
+    expect(canvasDpr(1.5)).toBe(1.5);
+    expect(canvasDpr(2)).toBe(2);
+    expect(canvasDpr(3)).toBe(2);
+    expect(canvasDpr(undefined)).toBe(1);
+    expect(canvasDpr(0)).toBe(1);
+  });
+
+  it("keeps the edge layer within 6 megapixels", () => {
+    expect(LAYER_MAX_PX).toBe(6_000_000);
   });
 });

@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { FOLD_FALLBACK_MS, FOLDING_ATTR } from "../map/foldResize";
 import { foldCookie } from "./cookie";
 import { DEFAULT_FOLD, foldKeyIgnored, formatFold, type Fold } from "./fold";
 
@@ -46,6 +47,23 @@ function apply(fold: Fold) {
 
 export { foldKeyIgnored, quietTarget, QUIET } from "./fold";
 
+let foldTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Marks the rail's width transition as under way, so the map keeps its canvas bitmap until it
+ * ends (map/foldResize.ts clears the mark on the transition's end). Cleared here too, in case
+ * no map is on the page or no transition runs.
+ */
+function startFold() {
+  const root = document.documentElement;
+  root.setAttribute(FOLDING_ATTR, "");
+  if (foldTimer !== null) clearTimeout(foldTimer);
+  foldTimer = setTimeout(() => {
+    foldTimer = null;
+    root.removeAttribute(FOLDING_ATTR);
+  }, FOLD_FALLBACK_MS);
+}
+
 /** Below this width the page stacks and nothing folds; the CSS uses the same figure. */
 export const FOLD_MEDIA = "(min-width: 700px)";
 
@@ -68,6 +86,7 @@ export function FoldProvider({
   const change = useCallback((patch: Partial<Fold>) => {
     const next = { ...latest.current, ...patch };
     if (formatFold(next) === formatFold(latest.current)) return;
+    if (next.rail !== latest.current.rail && foldWide()) startFold();
     latest.current = next;
     apply(next);
     set(next);
