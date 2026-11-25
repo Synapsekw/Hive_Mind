@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fixtureGallery } from "../src/gallery/fixture";
-import { visibleFiles } from "../src/gallery/filters";
+import { applyFilters, DEFAULT_FILTERS } from "../src/gallery/filters";
 import type { GalleryFile } from "../src/gallery/types";
 
 // The v2 viewer over the dev gallery, with every file opening in the viewer (?every=1). PDFs,
@@ -10,15 +10,20 @@ const DATA = fixtureGallery(NOW);
 const file = (name: string): GalleryFile =>
   DATA.files.find((f) => f.name === name)!;
 const PROPOSAL = file("Proposal - Harbour Logistics v3.pdf");
-const CSV = file("pricing-tiers.csv"); // Ahmed's: on the All tab
+const CSV = file("pricing-tiers.csv"); // Ahmed's
 const NOTES = file("meeting-notes.md");
 const DECK = file("Kickoff deck - Harbour Logistics.pptx");
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const card = (page: Page, f: GalleryFile) =>
   page
-    .getByRole("list", { name: "Files" })
+    .getByRole("main", { name: "Gallery" })
     .getByRole("button", { name: new RegExp(`^${escaped(f.name)}`) });
+/** Selects the card, then opens it: Enter on a selected card opens the viewer. */
+async function view(page: Page, f: GalleryFile) {
+  await card(page, f).click();
+  await card(page, f).press("Enter");
+}
 const viewer = (page: Page, f?: GalleryFile) =>
   f ? page.getByRole("dialog", { name: f.name }) : page.getByRole("dialog");
 
@@ -37,7 +42,7 @@ test("a PDF opens with pdf.js: pages, a page strip, PageDown and zoom", async ({
   page,
 }) => {
   await open(page);
-  await card(page, PROPOSAL).click();
+  await view(page, PROPOSAL);
   const dialog = viewer(page, PROPOSAL);
   const strip = dialog.getByRole("navigation", { name: "Pages" });
   await expect(strip.getByRole("button")).toHaveCount(2);
@@ -85,11 +90,7 @@ test("a PDF opens with pdf.js: pages, a page strip, PageDown and zoom", async ({
 
 test("a CSV opens as a table of text cells", async ({ page }) => {
   await open(page);
-  await page
-    .getByRole("group", { name: "Show" })
-    .getByRole("button", { name: /^All\b/ })
-    .click();
-  await card(page, CSV).click();
+  await view(page, CSV);
   const table = viewer(page, CSV).getByRole("table");
   await expect(table.getByRole("columnheader").first()).toHaveText("tier");
   await expect(table.getByRole("cell", { name: "1,690" })).toBeVisible();
@@ -100,7 +101,7 @@ test("Markdown opens as plain text and nothing in it runs", async ({
   page,
 }) => {
   await open(page);
-  await card(page, NOTES).click();
+  await view(page, NOTES);
   const dialog = viewer(page, NOTES);
   const text = dialog.locator("pre");
   await expect(text).toContainText("<script>alert(1)</script> stays text");
@@ -113,15 +114,15 @@ test("a 'PDF' that is really a web page shows the tile and Download", async ({
   page,
 }) => {
   await open(page, "&mislabel=1");
-  await card(page, PROPOSAL).click();
+  await view(page, PROPOSAL);
   const dialog = viewer(page, PROPOSAL);
   await expect(dialog).toContainText(
     "No preview yet for this kind of file. Download to open it.",
   );
   await expect(dialog.locator("canvas, iframe, img")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Download" })).toHaveCount(
-    // The viewer's own, the tile's, and the v1 screen's action row (Task 8 drops that one).
-    3,
+    // The viewer's own and the tile's.
+    2,
   );
   await expect(page.getByText("mislabelled page")).toHaveCount(0);
   expect(await page.evaluate(() => document.title)).not.toBe("pwned");
@@ -130,9 +131,15 @@ test("a 'PDF' that is really a web page shows the tile and Download", async ({
 test("the arrows move through the view; Escape returns to the card", async ({
   page,
 }) => {
-  await open(page);
-  const mine = visibleFiles(DATA.files, "mine", "");
-  await card(page, mine[0]!).click();
+  await open(page, "&view=grid&scope=mine");
+  const mine = applyFilters(
+    DATA.files,
+    { ...DEFAULT_FILTERS, scope: "mine" },
+    new Map(),
+    () => new Set(),
+    NOW,
+  ).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  await view(page, mine[0]!);
   await expect(viewer(page, mine[0]!)).toBeVisible();
   await expect(viewer(page)).toContainText(`1 of ${mine.length} in view`);
   await page.keyboard.press("ArrowRight");
@@ -149,7 +156,7 @@ test("the arrows move through the view; Escape returns to the card", async ({
 
 test("a deck shows its tile with Download and no canvas", async ({ page }) => {
   await open(page);
-  await card(page, DECK).click();
+  await view(page, DECK);
   const dialog = viewer(page, DECK);
   await expect(dialog).toContainText(
     "No preview yet for this kind of file. Download to open it.",
@@ -177,7 +184,7 @@ test.describe("on a 2x screen", () => {
     page,
   }) => {
     await open(page);
-    await card(page, PROPOSAL).click();
+    await view(page, PROPOSAL);
     const dialog = viewer(page, PROPOSAL);
     const zoomIn = dialog.getByRole("button", { name: "Zoom in" });
     await expect(dialog.getByTestId("pdf-pages")).toHaveText("2");

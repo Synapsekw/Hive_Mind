@@ -242,31 +242,3 @@ export function viewable(f: GalleryFile): boolean {
     (f.kind === "pdf" && f.size <= PDF_VIEW_MAX)
   );
 }
-
-// Gallery v2: replaced in Task 8 (the v1 screen still reads tabs and a name filter).
-export type Tab = Scope;
-export const tabCounts = scopeCounts;
-
-// Gallery v2: replaced in Task 8
-export function visibleFiles(
-  files: GalleryFile[],
-  tab: Tab,
-  filter: string,
-): GalleryFile[] {
-  const needle = filter.trim().toLowerCase();
-  return files.filter(
-    (f) =>
-      (tab === "all" || (tab === "mine" ? f.mine : !f.mine)) &&
-      f.name.toLowerCase().includes(needle),
-  );
-}
-
-// Gallery v2: replaced in Task 8
-export function defaultTab(files: GalleryFile[]): Tab {
-  return files.some((f) => f.mine) ? "mine" : "all";
-}
-
-// Gallery v2: replaced in Task 8 (the v1 viewer only shows images and PDFs, not text or CSV).
-export function viewableV1(f: GalleryFile): boolean {
-  return f.kind === "image" || (f.kind === "pdf" && f.size <= PDF_VIEW_MAX);
-}

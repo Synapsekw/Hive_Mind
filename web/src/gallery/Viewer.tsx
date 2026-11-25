@@ -10,7 +10,7 @@
 //     and text and CSV cells are text nodes, never HTML.
 // Anything else, and anything that fails those checks, shows its type tile and Download.
 import { useEffect, useRef, useState } from "react";
-import { Chevron, Cross, useDownload } from "./Details";
+import { Chevron, Cross } from "./icons";
 import { Sheet } from "./FileCard";
 import { kindLabel, PDF_VIEW_MAX, TEXT_VIEW_MAX } from "./kind";
 import { CsvView } from "./preview/CsvView";
@@ -19,6 +19,7 @@ import { PdfView } from "./preview/PdfView";
 import { TextView } from "./preview/TextView";
 import { sizeText } from "./text";
 import type { GalleryFile, ViewerProps } from "./types";
+import { useDownload } from "./useDownload";
 import s from "./gallery.module.css";
 import p from "./preview/preview.module.css";
 

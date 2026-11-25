@@ -9,6 +9,7 @@ import { DevGallery } from "./DevGallery";
 //   ?empty=1     a hive with no files
 //   ?every=1     every file opens in the viewer (the v2 viewer's tests)
 //   ?stale=1     every thumbnail link is dead, as on a page left open past ten minutes
+//   ?more=1      older files wait behind "Load more", so server-side filters ask the server
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -24,6 +25,8 @@ export default async function DevGalleryPage({
     one(q.empty) === "1"
       ? { files: [], sessions: [], folders: [], members: [], next: null }
       : fixtureGallery(NOW);
+  // Without ?more the first page is the whole gallery: every filter is answered in the page.
+  if (one(q.more) !== "1") data = { ...data, next: null };
   if (one(q.stale) === "1")
     data = {
       ...data,

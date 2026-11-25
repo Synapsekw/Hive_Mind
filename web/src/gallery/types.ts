@@ -130,9 +130,3 @@ export type ViewerProps = {
   aside: React.ReactNode; // the info strip (rendered by the screen)
   toolbar: React.ReactNode; // extra top-bar buttons, e.g. Add to folder
 };
-
-// Gallery v2: replaced in Task 8 (the v1 screen still loads more by cursor).
-export type LegacyActions = Pick<
-  GalleryActions,
-  "openFile" | "downloadFile" | "deleteFile"
-> & { loadMore(cursor: Cursor): Promise<GalleryPage | null> };

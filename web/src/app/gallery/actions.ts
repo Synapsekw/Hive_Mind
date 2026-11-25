@@ -24,7 +24,7 @@ import {
   removeFromFolderIn,
   renameFolderIn,
 } from "./folders";
-import { loadPage as loadPageIn, NO_FILTER } from "./load-gallery";
+import { loadPage as loadPageIn } from "./load-gallery";
 import { endUploadIn, finishUploadIn, startUploadIn } from "./upload";
 import { cleanCursor, cleanServerFilter } from "./validate";
 import { deleteIn, downloadIn, findNotesIn, openIn, setHomeIn } from "./write";
@@ -75,15 +75,6 @@ export async function loadPage(
   }
   return withSession<GalleryPage | null>(null, (db) =>
     loadPageIn(db, clean, after),
-  );
-}
-
-// Gallery v2: replaced in Task 8 (the v1 screen still loads more by cursor alone).
-export async function loadMore(cursor: Cursor): Promise<GalleryPage | null> {
-  const clean = cleanCursor(cursor);
-  if (!clean) return null;
-  return withSession<GalleryPage | null>(null, (db) =>
-    loadPageIn(db, NO_FILTER, clean),
   );
 }
 

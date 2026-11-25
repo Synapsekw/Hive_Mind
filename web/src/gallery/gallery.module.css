@@ -1,8 +1,8 @@
-/* The gallery screen, in the vault's grammar (vault.module.css): the rail
-   (web/src/shell/) on the page colour, then one card holding the tabs, the filter and a grid of
-   file cards that scrolls inside it. The details of a file open under its card as a
-   popover; the viewer is a sheet over the whole window. Colours are
-   tokens only (themes.generated.css). */
+/* The gallery screen, in the vault's grammar (vault.module.css): the rail (web/src/shell/) on the
+   page colour, then one card in three columns: the sidebar (scopes and folders, 200 px), the
+   files (top bar, chips, and the stream or grid scrolling inside the card), and the panel of the
+   selected file (260 px, folded away when nothing is selected). The viewer and the upload
+   dialog sit over the whole window. Colours are tokens only (themes.generated.css). */
 
 .root {
   color: var(--fg);
@@ -18,12 +18,14 @@
 }
 
 .root button,
-.root input {
+.root input,
+.root select {
   font-family: inherit;
 }
 
 .root button:focus-visible,
 .root input:focus-visible,
+.root select:focus-visible,
 .root a:focus-visible {
   outline: 2px solid var(--acc);
   outline-offset: 2px;
@@ -39,36 +41,46 @@
   white-space: nowrap;
 }
 
-/* ---- The card ---- */
+/* ---- The card: sidebar | files | panel ---- */
 
 .panel {
   flex: 999 1 620px;
   min-width: 0;
   margin: 8px 8px 8px 4px;
-  padding: 16px 20px 0;
   border: 1px solid var(--edge-card);
   border-radius: 20px;
   background: var(--glow), var(--glass);
   box-shadow: var(--lift);
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.panel[data-panel] {
+  grid-template-columns: 200px minmax(0, 1fr) 260px;
+}
+
+.center {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+  padding: 16px 20px 0;
 }
 
 .bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px 16px;
+  gap: 10px 12px;
 }
 
-/* Mine / Shared with me / All: the map's view switch, a 10 px hairline track with 7 px
-   segments. Buttons, not links: choosing one loads nothing. */
+/* By session / Grid: the map's view switch, a 10 px hairline track with 7 px segments.
+   Buttons, not links: choosing one loads nothing. */
 .tabs {
   position: relative;
   display: flex;
-  flex-wrap: wrap;
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -78,9 +90,8 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 14px;
+  height: 28px;
+  padding: 0 12px;
   border: 0;
   border-radius: 7px;
   background: none;
@@ -112,14 +123,11 @@
 }
 
 .filter {
-  flex: 0 1 260px;
+  flex: 1 1 120px;
   min-width: 0;
+  max-width: 320px;
+  margin-left: auto;
   display: flex;
-  transition: flex-basis 0.4s var(--ease);
-}
-
-.filter:focus-within {
-  flex-basis: 320px;
 }
 
 .search {
@@ -147,15 +155,476 @@
   color: var(--muted);
 }
 
-/* ---- The grid ---- */
+/* ---- The sidebar ---- */
 
-/* The scroll box runs to the card's edges, so the scrollbar sits on the edge and a focus
+.side {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 10px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.side > * {
+  flex: none;
+}
+
+.rows,
+.folders {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sideHead {
+  margin: 0 8px 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.folderList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.folderItem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.folderItem[data-sub] {
+  padding-left: 16px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.row[data-sub] {
+  padding-left: 16px;
+}
+
+.rowButton {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+
+/* In the scope list the rows stack, so each keeps its own height. */
+.rows > .rowButton {
+  flex: none;
+}
+
+.rowButton:hover {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.rowButton[aria-pressed="true"] {
+  background: var(--active-bg);
+  color: var(--active-fg);
+  font-weight: 500;
+}
+
+/* A dragged card over a folder: the folder says it will take it. */
+.rowButton[data-over] {
+  border-color: var(--acc);
+  background: var(--sel);
+}
+
+.rowName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowMore {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.rowMore:hover,
+.rowMore[aria-expanded="true"] {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.nameField {
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--brand);
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.newFolder {
+  align-self: flex-start;
+  height: 30px;
+  margin-top: 4px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--acc);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.newFolder:hover {
+  background: var(--fill);
+}
+
+/* The folder's in-page question. */
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 6px;
+  padding: 10px;
+  border: 1px solid var(--line-hi);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.ask p {
+  margin: 0;
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.askButtons {
+  display: flex;
+  gap: 6px;
+}
+
+.askButtons > button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+/* ---- Popovers: a folder's menu, a chip's list, Add to folder ---- */
+
+.menuWrap,
+.chipWrap {
+  position: relative;
+  flex: none;
+}
+
+.menu,
+.popover {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  color: var(--fg);
+}
+
+.menu {
+  right: 0;
+  min-width: 150px;
+}
+
+.popover {
+  left: 0;
+}
+
+.popover[data-end] {
+  left: auto;
+  right: 0;
+}
+
+.menuItem,
+.popItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menuItem:hover,
+.popItem:hover {
+  background: var(--fill);
+}
+
+.popItem[aria-pressed="true"] {
+  background: var(--active-bg);
+  color: var(--active-fg);
+  font-weight: 500;
+}
+
+.popItem input {
+  margin: 0;
+  accent-color: var(--brand);
+}
+
+.popNote {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.popNote:empty {
+  display: none;
+}
+
+.range {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--line);
+}
+
+.range label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.range input,
+.select {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--fill);
+  color: var(--fg);
+  font-size: 13px;
+  color-scheme: inherit;
+}
+
+/* ---- Filter chips ---- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  transition: border-color 0.18s var(--ease);
+}
+
+.chip:hover {
+  border-color: var(--line-hi);
+}
+
+.chip[data-on] {
+  border-color: var(--acc);
+  background: var(--sel);
+}
+
+.chipButton,
+.chipClear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--fg2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chipButton {
+  max-width: 260px;
+  padding: 0 8px 0 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chip[data-on] .chipButton {
+  color: var(--active-fg);
+  font-weight: 500;
+  padding-right: 2px;
+}
+
+.chipClear {
+  padding: 0 8px 0 4px;
+  color: var(--active-fg);
+}
+
+.clearAll,
+.textButton {
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--acc);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.clearAll:hover,
+.textButton:hover {
+  text-decoration: underline;
+}
+
+.textButton {
+  height: auto;
+  padding: 2px 0;
+  align-self: flex-start;
+  font-size: 13px;
+}
+
+/* ---- The files ---- */
+
+/* The scroll box runs to the column's edges, so the scrollbar sits on the edge and a focus
    outline on the outermost cards is not cut off. */
 .scroller {
   position: relative;
   margin: 0 -20px;
-  padding: 16px 20px 20px;
+  padding: 14px 20px 20px;
   border-top: 1px solid var(--line);
+}
+
+.stream {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.groupHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.groupTitle {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.groupMeta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* An open session: a steady dot and the word, never colour alone. */
+.openMark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg2);
+}
+
+.openDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--acc);
+}
+
+.groupLink,
+.link {
+  color: var(--acc);
+  text-decoration: none;
+}
+
+.groupLink {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.groupLink:hover,
+.link:hover {
+  text-decoration: underline;
 }
 
 .grid {
@@ -163,8 +632,8 @@
   padding: 0;
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
 }
 
 .cell {
@@ -173,18 +642,13 @@
   display: flex;
 }
 
-/* The open card and its popover sit above the rows that follow. */
-.cell[data-open] {
-  z-index: 2;
-}
-
 .card {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 8px 8px 10px;
+  padding: 6px 6px 8px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: none;
@@ -205,9 +669,11 @@
   transform: translateY(-1px);
 }
 
-.card[aria-expanded="true"] {
-  border-color: var(--line-hi);
+/* The selected card: an edge in the accent and the selection fill. */
+.card[aria-pressed="true"] {
+  border-color: var(--acc);
   background: var(--sel);
+  box-shadow: inset 0 0 0 1px var(--acc);
 }
 
 .root .card:focus-visible {
@@ -220,10 +686,15 @@
   display: grid;
   place-items: center;
   aspect-ratio: 16 / 10;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   border-radius: 8px;
   background: var(--fill);
   overflow: hidden;
+}
+
+.tile[data-large] {
+  aspect-ratio: 4 / 3;
+  margin: 0;
 }
 
 /* A PDF's drawn page sits over its type tile, in the same cell. */
@@ -249,12 +720,12 @@
   display: flex;
   align-items: flex-end;
   box-sizing: border-box;
-  width: 60px;
-  height: 74px;
-  padding: 0 0 9px 8px;
+  width: 52px;
+  height: 64px;
+  padding: 0 0 8px 7px;
   border-radius: 4px;
   background: var(--fill-on);
-  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
 }
 
 /* The folded corner. */
@@ -263,8 +734,8 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-bottom-left-radius: 4px;
   background: var(--line-hi);
 }
@@ -295,20 +766,6 @@
   font-weight: 500;
 }
 
-.meta,
-.owner {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.owner {
-  color: var(--fg2);
-}
-
 /* ---- Sharing: a dot and its words, never colour alone ----
    Hollow: private. Filled: shared through a note. Half: a colleague's, shared with you. */
 
@@ -324,6 +781,7 @@
 
 .sharing[data-wrap] {
   align-items: baseline;
+  font-size: 13px;
 }
 
 .sharing[data-wrap] .mark {
@@ -358,8 +816,12 @@
 .empty {
   margin: 0;
   padding: 8px 0;
-  max-width: 44ch;
+  max-width: 48ch;
   color: var(--muted);
+}
+
+.empty .textButton {
+  font-size: 14px;
 }
 
 .foot {
@@ -370,82 +832,86 @@
   padding-top: 18px;
 }
 
-/* ---- Details: the popover under a card ---- */
+/* ---- The file panel ---- */
 
-.details {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  width: 100%;
+.filePanel {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 12px 12px;
-  border: 1px solid var(--line-hi);
-  border-radius: 14px;
+  gap: 12px;
+  padding: 12px 14px 16px;
+  border-left: 1px solid var(--line);
   background: var(--surface);
-  box-shadow: var(--lift);
   color: var(--fg);
-  font-size: 13px;
-  scroll-margin-bottom: 16px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
 }
 
-/* Room under the popover when it is the last thing in the scroll box. */
-.details::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 0;
-  width: 1px;
-  height: 16px;
-}
-
-.detailsHead {
+.panelHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
   min-height: 28px;
 }
 
-.detailsName {
+.panelHead .icon {
+  width: 28px;
+  height: 28px;
+  margin-right: -4px;
+}
+
+.panelName {
   margin: 0;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
-.facts {
+.factQuiet,
+.factText {
   margin: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 3px 12px;
-  align-items: baseline;
   font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
-.facts dt {
+.factText {
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.factHead {
+  margin: 0;
   font-family: var(--font-mono), monospace;
   font-size: 11px;
+  font-weight: 400;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-.facts dd {
+.links {
   margin: 0;
-  color: var(--fg);
-  overflow-wrap: anywhere;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.why {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* ---- The action row: Download, the note link, Delete ---- */
-
+/* Open, Download, Add to folder, Delete. */
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -454,32 +920,225 @@
   min-width: 0;
 }
 
-.actions[data-stacked] {
-  flex-direction: column;
-  align-items: stretch;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
+.filePanel .actions > button,
+.filePanel .actions .menuWrap > button {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
-.ask {
-  margin: 0 4px 0 0;
+/* In the narrow panel, Add to folder's list spans the action row instead of hanging off the
+   button, so it stays inside the panel. */
+.filePanel .actions {
+  position: relative;
+}
+
+.filePanel .actions .menuWrap {
+  position: static;
+}
+
+.filePanel .actions .popover {
+  left: 0;
+  right: 0;
+  min-width: 0;
+}
+
+.filePanel .popItem {
+  white-space: normal;
+}
+
+.askText {
+  flex-basis: 100%;
+  margin: 0 0 2px;
   font-size: 13px;
   font-weight: 500;
   color: var(--fg);
 }
 
-/* In the popover the question fills exactly the room of the controls it replaces (Download,
-   and the note link when there is one), so Cancel lands where Delete was. */
-.actions[data-stacked] .ask {
+/* ---- The note picker ---- */
+
+.picker {
   display: flex;
-  align-items: center;
-  min-height: 34px;
-  margin: 0;
-  line-height: 1.3;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
 }
 
-.actions[data-stacked][data-note] .ask {
-  min-height: 74px;
+.picker .search {
+  height: 32px;
+}
+
+.options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  padding: 5px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.option:hover,
+.option[aria-selected="true"] {
+  background: var(--fill);
+}
+
+.option[aria-selected="true"] {
+  box-shadow: inset 2px 0 0 var(--acc);
+}
+
+.option[data-none] {
+  color: var(--fg2);
+  font-size: 13px;
+}
+
+.optionTitle {
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.optionPath {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.picker > .quiet {
+  align-self: flex-start;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+/* ---- The upload dialog ---- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  animation: arrive var(--dur) var(--ease);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(520px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 20px 22px;
+  border: 1px solid var(--line-hi);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+  color: var(--fg);
+}
+
+.dialogTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.choose {
+  display: grid;
+  place-items: center;
+  min-height: 72px;
+  border: 1px dashed var(--line-hi);
+  border-radius: 12px;
+  color: var(--fg2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.choose:hover {
+  background: var(--fill);
+}
+
+.choose:focus-within {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.uploads {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.upload {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--fill);
+  font-size: 13px;
+}
+
+.uploadName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.uploadStatus {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.upload[data-status="done"] .uploadStatus {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* A failed or refused file is said in words; the bar beside it only draws the eye. */
+.upload[data-status="failed"],
+.upload[data-status="refused"] {
+  box-shadow: inset 2px 0 0 var(--hue-6);
+}
+
+.upload[data-status="failed"] .uploadStatus,
+.upload[data-status="refused"] .uploadStatus {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.dialogField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dialogButtons {
+  display: flex;
+  gap: 8px;
+}
+
+.primary[aria-disabled="true"],
+.secondary[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+  filter: none;
+  transform: none;
 }
 
 .primary,
@@ -597,12 +1256,6 @@
   background: none;
   color: var(--quiet);
   cursor: default;
-}
-
-.detailsHead .icon {
-  width: 28px;
-  height: 28px;
-  margin-right: -4px;
 }
 
 /* ---- The viewer: one sheet over the whole window ---- */
@@ -743,8 +1396,8 @@
 }
 
 /* ---- One window from 1100 x 560 ----
-   The page is exactly one window tall and the grid scrolls inside the card. Narrower or very
-   short windows let the page scroll instead. */
+   The page is exactly one window tall; the sidebar, the files and the panel each scroll inside
+   the card. Narrower or very short windows let the page scroll instead. */
 
 @media (min-width: 1100px) and (min-height: 560px) {
   .page {
@@ -768,11 +1421,21 @@
   }
 }
 
-/* Stacked, the grid is not a scroll box, so an open popover under the last row needs room of
-   its own inside the card. */
-@media not ((min-width: 1100px) and (min-height: 560px)) {
-  .scroller:has(.details) {
-    padding-bottom: 340px;
+/* A narrow window: the three columns stack. */
+@media not (min-width: 1100px) {
+  .panel,
+  .panel[data-panel] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .side {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .filePanel {
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
 }
 
@@ -786,17 +1449,14 @@
   .viewerTitle {
     flex-basis: 100%;
   }
-
-  .viewerBar > .actions {
-    flex: 1 1 auto;
-    flex-wrap: wrap;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .tab,
   .search,
   .card,
+  .rowButton,
+  .chip,
   .primary,
   .secondary,
   .quiet,
@@ -805,7 +1465,8 @@
     transition: none;
   }
 
-  .viewer {
+  .viewer,
+  .scrim {
     animation: none;
   }
 
@@ -816,11 +1477,13 @@
   }
 }
 
-/* Forced colours: the chosen tab and the open card are drawn in Highlight, since backgrounds
-   are overridden, and the sharing dots keep their three shapes. */
+/* Forced colours: the chosen view, scope, folder and card are drawn in Highlight, since
+   backgrounds are overridden, and the sharing dots keep their three shapes. */
 @media (forced-colors: active) {
   .tab[aria-pressed="true"],
-  .card[aria-expanded="true"] {
+  .rowButton[aria-pressed="true"],
+  .card[aria-pressed="true"],
+  .chip[data-on] {
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }
