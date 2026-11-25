@@ -80,7 +80,9 @@ export function Topics({
   const opener = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const grid = useRef<HTMLUListElement>(null);
-  // Where the focus goes after the next render: a topic's Keep, its ⋯ button, or the grid.
+  const search = useRef<HTMLInputElement>(null);
+  // Where the focus goes after the next render: a topic's Keep, its ⋯ button, or, when that
+  // topic is not in the grid (the last one went), the search.
   const target = useRef<{ id: string; pick: "keep" | "menu" } | null>(null);
   useEffect(() => {
     const want = target.current;
@@ -93,7 +95,7 @@ export function Topics({
       want.pick === "keep"
         ? cell?.querySelector<HTMLElement>('[data-pick="keep"]')
         : cell?.querySelector<HTMLElement>("[data-menu]");
-    (to ?? cell ?? grid.current)?.focus();
+    (to ?? cell ?? search.current)?.focus();
   });
   useEffect(() => {
     alive.current = true;
@@ -145,7 +147,8 @@ export function Topics({
   }
 
   async function find() {
-    if (running.current) return;
+    // Only from rest: a press while the candidates are open would throw them away.
+    if (running.current || stage.kind !== "idle") return;
     running.current = true;
     say("");
     setStage({ kind: "finding", read: 0 });
@@ -264,6 +267,10 @@ export function Topics({
       target.current = { id: topic.id, pick: "menu" };
       return say(t.FAILED, true);
     }
+    // The focus goes to the next topic's ⋯, else the one before, else the search.
+    const at = listed.findIndex((x) => x.id === topic.id);
+    const next = listed[at + 1] ?? listed[at - 1];
+    target.current = { id: next?.id ?? "", pick: "menu" };
     setGone((set) => new Set(set).add(topic.id));
     say(t.deleted(topic.name));
     onChanged();
@@ -274,7 +281,8 @@ export function Topics({
       aria-labelledby="settings-topics"
       className={`${s.section} ${s.topicsSection}`}
     >
-      <div className={s.sectionHead}>
+      {/* While the candidates are open, what is behind their dim takes no focus and no press. */}
+      <div className={s.sectionHead} inert={picking || undefined}>
         <div className={s.headText}>
           <h2 className={s.label}>
             <span id="settings-topics">{t.TITLE}</span>
@@ -284,6 +292,7 @@ export function Topics({
         </div>
         <div className={s.topicTools}>
           <input
+            ref={search}
             type="search"
             aria-label={t.SEARCH}
             placeholder={t.SEARCH}
@@ -482,7 +491,7 @@ export function Topics({
           </div>
         )
       ) : (
-        <>
+        <div inert={picking || undefined}>
           <div role="group" aria-label="Kinds" className={s.chips}>
             <button
               type="button"
@@ -591,7 +600,7 @@ export function Topics({
               })}
             </ul>
           )}
-        </>
+        </div>
       )}
     </section>
   );

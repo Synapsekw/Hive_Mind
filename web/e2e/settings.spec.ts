@@ -1824,6 +1824,8 @@ test("Topics: Delete, from ⋯, asks first and says the notes stay; a failed rea
   );
   await row.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(row).toHaveCount(0);
+  // The focus is not lost with the cell: it goes to the topic beside it.
+  await expect(moreButton(topicCell(page, "Zain"))).toBeFocused();
   await expect(live(page)).toHaveText("Terra Drone deleted.");
   await expect(topics(page).getByText("Terra Drone deleted.")).toBeVisible();
 
@@ -1921,6 +1923,54 @@ test("Topics: the candidates scroll inside the dialog and Save stays in view", a
   );
   expect(names).toHaveLength(39);
   expect(names).not.toContain("Maker 2");
+});
+
+test("Topics: with the candidates open, nothing behind the dialog takes the focus or throws them away", async ({
+  page,
+}) => {
+  await open(page, "?tab=topics");
+  await findTopics(page).click();
+  const found = foundForm(page);
+  const orbit = found.getByRole("checkbox", { name: "Customers: Orbit" });
+  await orbit.uncheck();
+  await expect(found).toContainText("1 of 4 ticked");
+
+  // From the Topics tab, Tab goes into the dialog: the search, Find, the chips and ⋯ are
+  // passed over.
+  await tabOf(page, "Topics").focus();
+  await page.keyboard.press("Tab");
+  expect(
+    await page.evaluate(() =>
+      Boolean(document.activeElement?.closest('[role="dialog"]')),
+    ),
+  ).toBe(true);
+  for (const control of [
+    findTopics(page),
+    topics(page).getByRole("searchbox", { name: "Find a topic" }),
+    kindChip(page, "All"),
+    moreButton(topicCell(page, "Zain")),
+  ]) {
+    await control.evaluate((el) => (el as HTMLElement).focus());
+    await expect(control).not.toBeFocused();
+  }
+  // A press that reaches Find anyway starts nothing: the dialog and its ticks stay.
+  await findTopics(page).dispatchEvent("click");
+  await page.waitForTimeout(200);
+  await expect(foundDialog(page)).toBeVisible();
+  await expect(orbit).not.toBeChecked();
+  await expect(found).toContainText("1 of 4 ticked");
+  expect(
+    (await calls(page)).filter((c) => c.name === "scanTopics"),
+  ).toHaveLength(2);
+  expect((await calls(page)).filter((c) => c.name === "deleteTopic")).toEqual(
+    [],
+  );
+
+  // Closed, everything behind is back in reach.
+  await found.getByRole("button", { name: "Cancel" }).click();
+  await expect(findTopics(page)).toBeFocused();
+  await moreButton(topicCell(page, "Zain")).focus();
+  await expect(moreButton(topicCell(page, "Zain"))).toBeFocused();
 });
 
 test("Topics: search and chips filter the topics without a request; the chips show counts", async ({
