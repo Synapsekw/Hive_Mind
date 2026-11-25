@@ -21,7 +21,11 @@ type Db = Pick<SupabaseClient, "from" | "rpc" | "auth">;
 type Row = Record<string, unknown>;
 type Res = { data: unknown; error: { code?: string; message: string } | null };
 
-/** The note index: metadata and the database's own answer on sharing. Never the body. */
+/**
+ * A note row's metadata and the database's own answer on sharing, from per-row computed
+ * columns: the shared tab and the opened note. Never the body. A workspace's index comes from
+ * `vault_index` instead, with the same columns and `topics` in place of `note_entities`.
+ */
 export const NOTE_COLUMNS =
   "id,workspace_id,member_id,path,title,updated_at,written_by_agent,visibility,shared_with," +
   "quarantined,effective:note_visibility,effective_with:note_shared_with," +
@@ -43,7 +47,9 @@ const ids = (v: unknown): string[] =>
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /**
- * The ids of a note's attached topics, strongest first: rows not detached. With the hive's
+ * The ids of a note's attached topics, strongest first: rows not detached. The rows are
+ * `note_entities` (`{entity_id, confidence, detached_at}`) or `vault_index`'s `topics`
+ * (`{entity_id, confidence}`, attached only), read alike. With the hive's
  * topics given, in the order the map uses (`compareRanked`); without them, by confidence
  * descending, ties in the order the database answered. Anything that is not a pair of an id and
  * a number is skipped.
@@ -106,7 +112,7 @@ export function toNote(
     effective_with: ids(r.effective_with),
     rule_folder: typeof r.rule_folder === "string" ? r.rule_folder : null,
     access,
-    topics: topicsOf(r.note_entities, known),
+    topics: topicsOf(r.topics ?? r.note_entities, known),
   };
 }
 
@@ -190,7 +196,8 @@ async function hiveTopics(db: Db, hiveId: string): Promise<VaultTopic[]> {
 }
 
 /**
- * A workspace's note index, in ranges of `PAGE` rows by path, until a range comes back short or
+ * A workspace's note index from `vault_index` (the caller's own workspace in one pass), in
+ * ranges of `PAGE` rows by path, until a range comes back short or
  * empty or `INDEX_CAP + 1` rows are in hand (one more than is shown, so a cut is known): the
  * hosted API answers at most 1,000 rows per request, however many are asked for. The first
  * range that fails is the answer.
@@ -200,9 +207,7 @@ async function workspaceIndex(db: Db, workspaceId: string): Promise<Res> {
   for (let from = 0; all.length < INDEX_CAP + 1; from = all.length) {
     const to = Math.min(from + PAGE - 1, INDEX_CAP);
     const res = (await db
-      .from("notes")
-      .select(NOTE_COLUMNS)
-      .eq("workspace_id", workspaceId)
+      .rpc("vault_index", { p_workspace: workspaceId })
       .order("path")
       .range(from, to)) as Res;
     if (res.error) return res;

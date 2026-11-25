@@ -5542,6 +5542,7 @@ test("every function refuses an app pass except connector_login", async () => {
     ],
     unlink: [`select public.unlink($1)`, [ca.ownLink], true],
     note_links: [`select id from public.note_links($1)`, [ca.ownNote]],
+    vault_index: [`select id from public.vault_index($1)`, [ws.kai]],
     connect_app: [`select public.connect_app($1, $2)`, [apps.a, ws.kai], true],
     can_delete_file: [`select public.can_delete_file($1)`, [ca.filePath]],
     hive_deletion_preview: [
@@ -11217,4 +11218,226 @@ test("an agent and an app pass are still refused the map", async () => {
     /an app pass cannot do this/,
   );
   await assert.rejects(map(person("outsider")), /not a member of this hive/);
+});
+
+// ------------------------------------------------------------ vault_index
+// The vault's note index for one of the caller's own workspaces in one call:
+// the same answers as the per-row columns the vault used to ask for
+// (note_visibility, note_shared_with, note_rule_folder, note_access and the
+// note's attached topics), and nothing at all for anyone who is not that
+// workspace's owner signed in as a person.
+
+// What the vault read before vault_index, column for column: the computed
+// columns on each note row and the note's attached topics, by entity id.
+const indexByColumns = (who, workspace) =>
+  as(
+    who,
+    `select n.id, n.workspace_id, n.member_id, n.path, n.title, n.updated_at,
+            n.written_by_agent, n.visibility, n.shared_with, n.quarantined,
+            public.note_visibility(n) as effective,
+            public.note_shared_with(n) as effective_with,
+            public.note_rule_folder(n) as rule_folder,
+            public.note_access(n) as access,
+            coalesce((select jsonb_agg(jsonb_build_object(
+                        'entity_id', e.entity_id, 'confidence', e.confidence)
+                        order by e.entity_id)
+                        from public.note_entities e
+                       where e.note_id = n.id and e.detached_at is null),
+                     '[]'::jsonb) as topics
+       from public.notes n
+      where n.workspace_id = $1
+      order by n.path`,
+    [workspace],
+  );
+const vaultIndex = (who, workspace) =>
+  as(who, `select * from public.vault_index($1)`, [workspace]);
+const byId = (rows) =>
+  [...rows]
+    .map((r) => ({
+      ...r,
+      topics: [...r.topics].sort((a, b) =>
+        a.entity_id < b.entity_id ? -1 : a.entity_id > b.entity_id ? 1 : 0,
+      ),
+    }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+let vi;
+const viFixture = async () => {
+  if (vi) return vi;
+  const owner = asUser(await addUser("vi-owner@example.com"));
+  const hiveId = (
+    await as(owner, `select public.create_hive('VI hive', 'Vi') as id`)
+  )[0].id;
+  const colleagueUser = await addUser("vi-colleague@example.com");
+  const colleague = asUser(colleagueUser);
+  const colleagueMember = await addMember(hiveId, colleagueUser, "Col");
+  const me = (
+    await as(owner, `select id from public.members where hive_id = $1`, [
+      hiveId,
+    ])
+  ).find(Boolean).id;
+  const workspace = (
+    await as(owner, `select id from public.workspaces where member_id = $1`, [
+      me,
+    ])
+  )[0].id;
+  // The owner's default: a note with no setting and no rule is the group's.
+  await as(
+    owner,
+    `update public.members set default_visibility = 'group' where id = $1`,
+    [me],
+  );
+  await as(
+    owner,
+    `insert into public.folders (workspace_id, member_id, path, visibility, shared_with)
+     values ($1, $2, 'x', 'members', $3), ($1, $2, 'x/y', 'group', '{}')`,
+    [workspace, me, [colleagueMember]],
+  );
+  const note = async (path, visibility = null, shared = []) =>
+    (
+      await as(
+        owner,
+        `insert into public.notes (hive_id, member_id, workspace_id, path, title, body, visibility, shared_with)
+         values ($1, $2, $3, $4, $4, 'text', $5, $6) returning id`,
+        [hiveId, me, workspace, path, visibility, shared],
+      )
+    )[0].id;
+  const a = await note("a.md");
+  const b = await note("x/b.md");
+  const c = await note("x/y/c.md");
+  const d = await note("z/d.md");
+  const kept = await note("x/kept.md", "private");
+  const named = await note("z/named.md", "members", [colleagueMember]);
+  // Held for review: still the owner's, still in the index.
+  await db.exec("reset role");
+  await db.query(`update public.notes set quarantined = true where id = $1`, [
+    d,
+  ]);
+  // Written by the owner's agent.
+  const made = (
+    await as(
+      owner,
+      `select * from public.create_agent($1, 'VI agent', 'other', 'vendor')`,
+      [workspace],
+    )
+  )[0];
+  const login = (
+    await as(null, `select * from public.agent_login($1)`, [made.token])
+  )[0];
+  const agent = {
+    sub: login.user_id,
+    role: "authenticated",
+    agent_id: login.agent_id,
+    workspace_id: login.workspace_id,
+    trust_tier: login.trust_tier,
+  };
+  await as(
+    agent,
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title, body)
+     values ($1, $2, $3, 'x/y/by-agent.md', 'by agent', 'text')`,
+    [hiveId, me, workspace],
+  );
+  // Two topics on one note, one of them detached.
+  const t1 = await addTopic(owner, hiveId, "client", "vi Client");
+  const t2 = await addTopic(owner, hiveId, "client", "vi Other");
+  await attachTopic(owner, b, t1.id, 0.8);
+  await attachTopic(owner, b, t2.id, 0.4);
+  await attachTopic(owner, c, t2.id, 0.7);
+  await detachTopic(owner, c, t2.id);
+  vi = {
+    owner,
+    colleague,
+    hiveId,
+    me,
+    workspace,
+    agent,
+    notes: { a, b, c, d, kept, named },
+    topics: { t1: t1.id, t2: t2.id },
+  };
+  return vi;
+};
+
+test("vault_index answers the owner's workspace exactly as the per-row columns do", async () => {
+  const f = await viFixture();
+  const got = await vaultIndex(f.owner, f.workspace);
+  const want = await indexByColumns(f.owner, f.workspace);
+  assert.equal(got.length, 7);
+  assert.deepEqual(byId(got), byId(want));
+  // Ordered by path.
+  assert.deepEqual(
+    got.map((r) => r.path),
+    want.map((r) => r.path),
+  );
+  // The fixture covers each answer the columns give.
+  const at = Object.fromEntries(got.map((r) => [r.path, r]));
+  assert.equal(at["a.md"].effective, "group");
+  assert.equal(at["a.md"].rule_folder, null);
+  assert.equal(at["x/b.md"].effective, "members");
+  assert.equal(at["x/b.md"].rule_folder, "x");
+  assert.equal(at["x/y/c.md"].effective, "group");
+  assert.equal(at["x/y/c.md"].rule_folder, "x/y");
+  assert.equal(at["x/kept.md"].effective, "private");
+  assert.equal(at["x/kept.md"].rule_folder, "x");
+  assert.deepEqual(at["x/kept.md"].effective_with, []);
+  assert.equal(at["z/named.md"].effective, "members");
+  assert.equal(at["z/d.md"].quarantined, true);
+  assert.ok(at["x/y/by-agent.md"].written_by_agent);
+  for (const r of got) assert.equal(r.access, "own");
+  // Attached topics only: the detached pair is left out, and none is [].
+  assert.deepEqual(
+    byId([at["x/b.md"]])[0].topics,
+    [
+      { entity_id: f.topics.t1, confidence: 0.8 },
+      { entity_id: f.topics.t2, confidence: 0.4 },
+    ].sort((a, b) => (a.entity_id < b.entity_id ? -1 : 1)),
+  );
+  assert.deepEqual(at["x/y/c.md"].topics, []);
+  assert.deepEqual(at["a.md"].topics, []);
+});
+
+test("vault_index matches the per-row columns on a long-used workspace too", async () => {
+  // Dani's workspace holds what every test above wrote into it: links,
+  // folder rules, files, held notes, topics.
+  const got = await vaultIndex(person("dani"), ws.dani);
+  assert.ok(got.length > 10);
+  assert.deepEqual(
+    byId(got),
+    byId(await indexByColumns(person("dani"), ws.dani)),
+  );
+});
+
+test("vault_index answers nobody but the workspace's owner, as a person", async () => {
+  const f = await viFixture();
+  // A colleague in the same hive, with the owner's workspace id.
+  assert.deepEqual(await vaultIndex(f.colleague, f.workspace), []);
+  // Someone in another hive, and a workspace id nobody has.
+  assert.deepEqual(await vaultIndex(person("outsider"), f.workspace), []);
+  assert.deepEqual(
+    await vaultIndex(f.owner, "6f1d1c3e-0000-4000-8000-000000000001"),
+    [],
+  );
+  // The owner's own workspace id, from Dani in another hive.
+  assert.deepEqual(await vaultIndex(person("dani"), f.workspace), []);
+  // The owner's agent, with its token for this very workspace.
+  assert.deepEqual(await vaultIndex(f.agent, f.workspace), []);
+  // A self-hosted claim on the owner's own session.
+  assert.deepEqual(
+    await vaultIndex({ ...f.owner, trust_tier: "self_hosted" }, f.workspace),
+    [],
+  );
+  // A connected app's pass, approved by the owner.
+  const client = await addClient("VI app", "https://vi.example.com/cb");
+  await addConsent(f.owner.sub, client);
+  assert.deepEqual(
+    await vaultIndex({ ...f.owner, client_id: client }, f.workspace),
+    [],
+  );
+  assert.deepEqual(await vaultIndex(passOf(f.owner), f.workspace), []);
+  // A token made for another audience.
+  assert.deepEqual(
+    await vaultIndex({ ...f.owner, aud: "elsewhere" }, f.workspace),
+    [],
+  );
+  // The public cannot call it at all.
+  await assert.rejects(vaultIndex(null, f.workspace), /permission denied/);
 });
