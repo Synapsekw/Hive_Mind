@@ -1,9 +1,10 @@
 "use server";
 
-// The vault's writes, as server actions. These are public HTTP endpoints: each one signs in as
-// the person behind the session cookie (never a service key), checks its arguments in `write.ts`
-// before any query, and lets the database decide. No session, no Supabase configuration or an
-// unexpected failure answers `{ ok: false }` / `null`.
+// The vault's writes, and the one read that opens a note, as server actions. These are public
+// HTTP endpoints: each one signs in as the person behind the session cookie (never a service
+// key), checks its arguments (in `write.ts`, `validate.ts`) before any query, and lets the
+// database decide. No session, no Supabase configuration or an unexpected failure answers
+// `{ ok: false }` / `null`.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ImportNote } from "../../import/plan";
 import type {
@@ -17,6 +18,7 @@ import type { Result, SharePreview, TopicChange } from "../../vault/types";
 import { attachBatchIn } from "./attach";
 import { connectBatchIn } from "./connect";
 import { createImportWorkspaceIn, importBatchIn } from "./import";
+import { openNoteIn, type OpenAnswer } from "./load-vault";
 import {
   addTopicIn,
   deleteNoteIn,
@@ -38,6 +40,15 @@ async function withSession<T>(
     console.error("vault action failed", e instanceof Error ? e.name : "");
     return fallback;
   }
+}
+
+/**
+ * One note for the preview, read under the session like every other action: its row, body,
+ * links and topics, never the hive's index. Not a write; the vault opens notes with it in place
+ * of reloading the page.
+ */
+export async function openNote(id: string): Promise<OpenAnswer> {
+  return withSession<OpenAnswer>({ ok: false }, (db) => openNoteIn(db, id));
 }
 
 export async function saveNote(
