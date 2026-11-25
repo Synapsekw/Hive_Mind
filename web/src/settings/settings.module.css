@@ -889,8 +889,124 @@
   margin-top: 6px;
 }
 
-/* ---- Topics: a kind folds, and what it holds is set in columns inside its own scroll box,
-   so 300 topics stay one screen long ---- */
+/* ---- Topics: the search and Find in the heading row, a chip per kind, then the topics in
+   columns across the full width ---- */
+
+.topicTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.search {
+  width: 220px;
+  height: 34px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    background 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.chip:hover {
+  border-color: var(--line-hi);
+  color: var(--fg);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--line-hi);
+  background: var(--fill-on);
+  color: var(--fg);
+}
+
+.topicGrid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0 24px;
+}
+
+/* Each cell is its own stacking context, so an open ⋯ menu would sit under the next cell: the
+   cell whose menu is open comes forward. */
+.topicCell {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.topicCell:hover {
+  border-top-color: var(--line-hi);
+}
+
+.topicCell:has(.moreButton[aria-expanded="true"]) {
+  z-index: 5;
+}
+
+.topicCell:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The question needs the grid's whole width. */
+.topicCell[data-asking] {
+  grid-column: 1 / -1;
+}
+
+.topicAsk {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---- The candidates, in their dialog: a kind folds, and what it holds is set in columns ---- */
+
+/* The dialog's dim covers the tab's scroll box, not the window: the dialog keeps inside it and
+   inside the window, so it scrolls itself and Save, on its bottom edge, stays in view. */
+.topicsSection [role="dialog"] {
+  max-height: min(calc(100% - 96px), calc(100dvh - 120px));
+}
+
+.foundHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
 
 .fold {
   min-width: 0;
@@ -974,8 +1090,7 @@
   cursor: default;
 }
 
-.picks,
-.topics {
+.picks {
   margin: 6px 0 0;
   padding: 2px 8px 2px 2px;
   list-style: none;
@@ -984,11 +1099,6 @@
   gap: 0 24px;
   max-height: 264px;
   overflow-y: auto;
-}
-
-.topics {
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-  margin-bottom: 10px;
 }
 
 .pick {
@@ -1027,39 +1137,22 @@
   overflow-wrap: anywhere;
 }
 
-.topic {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  min-width: 0;
-  min-height: 34px;
-  padding: 3px 0;
-  border-top: 1px solid var(--line);
-  font-size: 13px;
-}
-
-.topicName {
-  flex: 1 1 0;
-}
-
-/* The question needs the row's whole width. */
-.topic[data-asking] {
-  grid-column: 1 / -1;
-  padding: 8px 0;
-}
-
-/* Save stays in reach however long the candidates run. The scroll box has 24px of padding
-   under its content, which a sticky edge is measured from: the bar sits on the box's edge. */
+/* Save stays in reach however long the candidates run: the dialog scrolls, and the bar sits on
+   its bottom edge, across the form's padding. */
 .saveBar {
   position: sticky;
-  bottom: -24px;
+  bottom: 0;
   z-index: 1;
-  margin: 0 -16px -16px;
-  padding: 12px 16px;
+  margin: 0 -20px -20px;
+  padding: 12px 20px;
   border-top: 1px solid var(--line);
-  border-radius: 0 0 13px 13px;
   background: var(--surface);
+}
+
+/* In the dialog the dialog does the scrolling, not each kind. */
+.dialogForm .picks {
+  max-height: none;
+  overflow: visible;
 }
 
 /* ---- No agents yet ---- */

@@ -1003,23 +1003,29 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
       main(page).getByRole("button", { name: `Actions for ${space.name}` }),
     ).toBeFocused();
   }
-  // Then the Topics tab: Find, and each topic's Delete (customers before vendors).
+  // Then the Topics tab: the search, Find, the kind chips, and each topic's ⋯ (customers
+  // before vendors).
   await openTab(page, "Topics");
+  await page.keyboard.press("Tab");
+  await expect(
+    main(page).getByRole("searchbox", { name: "Find a topic" }),
+  ).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(
     main(page).getByRole("button", { name: "Find topics in my notes" }),
   ).toBeFocused();
-  for (const [kind, topic] of [
-    ["Customers", "Zain"],
-    ["Vendors", "Terra Drone"],
-  ]) {
+  for (const chip of ["All", "Customers", "Vendors"]) {
     await page.keyboard.press("Tab");
     await expect(
-      main(page).getByRole("button", { name: new RegExp(`^${kind}`) }),
+      main(page)
+        .getByRole("group", { name: "Kinds" })
+        .getByRole("button", { name: new RegExp(`^${chip}`) }),
     ).toBeFocused();
+  }
+  for (const topic of ["Zain", "Terra Drone"]) {
     await page.keyboard.press("Tab");
     await expect(
-      main(page).getByRole("button", { name: `Delete ${topic}` }),
+      main(page).getByRole("button", { name: `Actions for ${topic}` }),
     ).toBeFocused();
   }
   await openTab(page, "People");
@@ -1693,6 +1699,24 @@ test("a failed workspace delete keeps the row and says so; a hive that is being 
 const topics = (page: Page) => section(page, "Topics");
 const findTopics = (page: Page) =>
   topics(page).getByRole("button", { name: "Find topics in my notes" });
+/** The candidates: a form in the dialog named for them. */
+const foundDialog = (page: Page) =>
+  page.getByRole("dialog", { name: "Topics found in your notes" });
+const foundForm = (page: Page) =>
+  foundDialog(page).getByRole("form", { name: "Topics found in your notes" });
+const topicGrid = (page: Page) =>
+  topics(page).getByRole("list", { name: "Topics" });
+const topicCell = (page: Page, name: string) =>
+  topicGrid(page).getByRole("listitem").filter({ hasText: name });
+const kindChip = (page: Page, name: string) =>
+  topics(page)
+    .getByRole("group", { name: "Kinds" })
+    .getByRole("button", { name: new RegExp(`^${name}`) });
+/** Opens a topic's ⋯ menu and picks Delete topic…, which asks the question in the cell. */
+async function askDeleteTopic(cell: Locator) {
+  await moreButton(cell).click();
+  await cell.getByRole("button", { name: "Delete topic…" }).click();
+}
 
 test("Topics: the owner finds candidates, new ones only, with subjects unticked; Save adds the ticked ones", async ({
   page,
@@ -1704,12 +1728,13 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
   await expect(topics(page)).toContainText("No notes yet");
 
   await findTopics(page).click();
-  const found = topics(page).getByRole("form", {
-    name: "Topics found in your notes",
-  });
+  // The candidates open in a dialog named for them, with their heading focused.
+  await expect(foundDialog(page)).toBeVisible();
+  const found = foundForm(page);
   await expect(
     found.getByRole("heading", { name: "Topics found in your notes" }),
   ).toBeFocused();
+  await expect(found).toContainText("2 of 4 ticked");
   // Zain is there already: only Orbit and the tag are offered.
   const orbit = found.getByRole("checkbox", { name: "Customers: Orbit" });
   const flare = found.getByRole("checkbox", { name: "Subjects: flare-stack" });
@@ -1740,8 +1765,8 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
     ),
   ).toBeVisible();
 
-  await found.getByRole("button", { name: "Save topics" }).click();
-  await expect(found).toHaveCount(0);
+  await found.getByRole("button", { name: "Save 2 topics" }).click();
+  await expect(foundDialog(page)).toHaveCount(0);
   await expect(live(page)).toHaveText(
     "2 topics saved. Now open the vault and press Attach topics.",
   );
@@ -1752,12 +1777,8 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
     ),
   ).toBeVisible();
   await expect(findTopics(page)).toBeFocused();
-  await expect(
-    topics(page).getByRole("heading", { name: /^Customers/ }),
-  ).toBeVisible();
-  await expect(
-    topics(page).getByRole("list", { name: "Customers" }),
-  ).toContainText("Orbit");
+  await expect(topicGrid(page)).toContainText("Orbit");
+  await expect(kindChip(page, "Customers")).toContainText("2");
   const saves = (await calls(page)).filter((c) => c.name === "saveTopics");
   expect(saves).toEqual([
     {
@@ -1781,17 +1802,25 @@ test("Topics: the owner finds candidates, new ones only, with subjects unticked;
   ]);
 });
 
-test("Topics: Delete asks first and says the notes stay; a failed read or save says so", async ({
+test("Topics: Delete, from ⋯, asks first and says the notes stay; a failed read or save says so; a hive being deleted offers no Find and no ⋯", async ({
   page,
 }) => {
   await open(page, "?tab=topics");
-  const row = topics(page)
-    .getByRole("listitem")
-    .filter({ hasText: "Terra Drone" });
-  await row.getByRole("button", { name: "Delete Terra Drone" }).click();
+  const row = topicCell(page, "Terra Drone");
+  // Keep puts the question away and the focus back on ⋯.
+  await askDeleteTopic(row);
+  await expect(row).toContainText("Delete the topic Terra Drone?");
+  await expect(row.getByRole("button", { name: "Keep" })).toBeFocused();
+  await row.getByRole("button", { name: "Keep" }).click();
+  await expect(row).not.toContainText("Delete the topic Terra Drone?");
+  await expect(moreButton(row)).toBeFocused();
+  await askDeleteTopic(row);
   await expect(row).toContainText("Delete the topic Terra Drone?");
   await expect(row).toContainText(
     "Notes stay. They are no longer under this topic.",
+  );
+  expect((await calls(page)).filter((c) => c.name === "deleteTopic")).toEqual(
+    [],
   );
   await row.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(row).toHaveCount(0);
@@ -1803,56 +1832,71 @@ test("Topics: Delete asks first and says the notes stay; a failed read or save s
   await expect(topics(page)).toContainText(
     "Your notes could not be read. Try again.",
   );
+  await expect(foundDialog(page)).toHaveCount(0);
+
+  await open(page, "?closing=1&tab=topics", false);
+  await expect(topicGrid(page).getByRole("listitem")).toHaveCount(2);
+  await expect(findTopics(page)).toHaveCount(0);
+  await expect(moreButton(topicCell(page, "Zain"))).toHaveCount(0);
 });
 
-test("Topics: a long kind starts folded, opens into a box that scrolls on its own, and Save stays in view", async ({
+test("Topics: the candidates scroll inside the dialog and Save stays in view", async ({
   page,
 }) => {
   await open(page, "?many=1&tab=topics");
-  // Thirty-one vendors: folded, so none of them is drawn; the one customer is.
-  const vendors = topics(page).getByRole("button", { name: /^Vendors/ });
-  await expect(vendors).toHaveAttribute("aria-expanded", "false");
-  await expect(
-    topics(page).getByText("Supplier 7", { exact: true }),
-  ).toHaveCount(0);
-  await expect(topics(page).getByText("Zain", { exact: true })).toBeVisible();
-  await vendors.click();
-  await expect(vendors).toHaveAttribute("aria-expanded", "true");
-  const list = topics(page).getByRole("list", { name: "Vendors" });
-  await expect(list.getByRole("listitem")).toHaveCount(31);
-  const box = await list.evaluate((el) => ({
-    height: el.clientHeight,
-    inner: el.scrollHeight,
-  }));
-  expect(box.height).toBeLessThanOrEqual(270);
-  expect(box.inner).toBeGreaterThan(box.height);
-  // Delete still asks in the row.
-  await list
-    .getByRole("button", { name: "Delete Supplier 3", exact: true })
-    .click();
-  await expect(list).toContainText("Delete the topic Supplier 3?");
-  await list.getByRole("button", { name: "Keep" }).click();
-  await vendors.click();
-
   await findTopics(page).click();
-  const found = topics(page).getByRole("form", {
-    name: "Topics found in your notes",
-  });
+  const found = foundForm(page);
   const group = found.getByRole("group", { name: /^Vendors/ });
   const toggle = group.getByRole("button", { name: /^Vendors/ });
+  // A long kind still starts folded inside the dialog.
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(group).toContainText("40 of 40 ticked");
   await expect(found.getByRole("checkbox")).toHaveCount(0);
   // Save is on screen without scrolling, and says how many it will save.
-  const save = found.getByRole("button", { name: "Save topics" });
+  const save = found.getByRole("button", { name: "Save 40 topics" });
   await expect(save).toBeInViewport();
   await expect(found).toContainText("40 of 40 ticked");
+  // One primary on the tab, the dialog's Save: Find behind the dim is outlined.
+  const yellow = await save.evaluate(
+    (b) => getComputedStyle(b).backgroundColor,
+  );
+  expect(
+    await page.evaluate(
+      (bg) =>
+        [
+          ...document
+            .getElementById("panel-topics")!
+            .querySelectorAll("button"),
+        ].filter(
+          (b) =>
+            b.getClientRects().length > 0 &&
+            getComputedStyle(b).backgroundColor === bg,
+        ).length,
+      yellow,
+    ),
+  ).toBe(1);
 
   await group.getByRole("button", { name: "Untick all Vendors" }).click();
   await expect(group).toContainText("0 of 40 ticked");
-  await expect(save).toHaveAttribute("aria-disabled", "true");
+  const none = found.getByRole("button", { name: "Save 0 topics" });
+  await expect(none).toHaveAttribute("aria-disabled", "true");
+  // Pressed anyway, it saves nothing and the dialog stays.
+  await none.dispatchEvent("click");
+  await expect(foundDialog(page)).toBeVisible();
   await toggle.click();
   await expect(found.getByRole("checkbox")).toHaveCount(40);
+  // The dialog scrolls; the page behind it does not grow a scroll of its own for the list.
+  const box = await foundDialog(page).evaluate((el) => ({
+    height: el.clientHeight,
+    inner: el.scrollHeight,
+    scrolls: /auto|scroll/.test(getComputedStyle(el).overflowY),
+    bottom: el.getBoundingClientRect().bottom,
+  }));
+  expect(box.scrolls).toBe(true);
+  expect(box.inner).toBeGreaterThan(box.height);
+  expect(box.bottom).toBeLessThanOrEqual(
+    await page.evaluate(() => window.innerHeight),
+  );
   await found
     .getByRole("checkbox", { name: "Vendors: Maker 9", exact: true })
     .check();
@@ -1863,8 +1907,9 @@ test("Topics: a long kind starts folded, opens into a box that scrolls on its ow
     .getByRole("checkbox", { name: "Vendors: Maker 2", exact: true })
     .uncheck();
   await expect(group).toContainText("39 of 40 ticked");
-  await expect(save).toBeInViewport();
-  await save.click();
+  const save39 = found.getByRole("button", { name: "Save 39 topics" });
+  await expect(save39).toBeInViewport();
+  await save39.click();
   await expect(
     topics(page).getByText(
       "39 topics saved. Now open the vault and press Attach topics.",
@@ -1876,6 +1921,86 @@ test("Topics: a long kind starts folded, opens into a box that scrolls on its ow
   );
   expect(names).toHaveLength(39);
   expect(names).not.toContain("Maker 2");
+});
+
+test("Topics: search and chips filter the topics without a request; the chips show counts", async ({
+  page,
+}) => {
+  await open(page, "?many=1&tab=topics");
+  // Every kind with topics has a chip with its count; All comes first and is chosen.
+  const chips = topics(page)
+    .getByRole("group", { name: "Kinds" })
+    .getByRole("button");
+  await expect(chips).toHaveText([
+    /^All\s*32$/,
+    /^Customers\s*1$/,
+    /^Vendors\s*31$/,
+  ]);
+  await expect(kindChip(page, "All")).toHaveAttribute("aria-pressed", "true");
+  await expect(topicGrid(page).getByRole("listitem")).toHaveCount(32);
+  // Under All each topic says its kind.
+  await expect(topicCell(page, "Zain")).toContainText("Customers");
+
+  const asked: string[] = [];
+  page.on("request", (r) => {
+    const url = r.url();
+    if (
+      /\/_next\/static\/|__nextjs|webpack-hmr|\.(js|css|woff2?|png|svg)(\?|$)/.test(
+        url,
+      )
+    )
+      return;
+    asked.push(`${r.method()} ${url}`);
+  });
+
+  await kindChip(page, "Vendors").click();
+  await expect(kindChip(page, "Vendors")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(kindChip(page, "All")).toHaveAttribute("aria-pressed", "false");
+  await expect(topicGrid(page).getByRole("listitem")).toHaveCount(31);
+  await expect(topicCell(page, "Zain")).toHaveCount(0);
+  // One kind chosen: the kind is not repeated on each topic.
+  await expect(topicCell(page, "Terra Drone")).not.toContainText("Vendors");
+
+  const search = topics(page).getByRole("searchbox", { name: "Find a topic" });
+  await search.fill("  SUPPLIER 1 ");
+  // Supplier 1 and 10 to 19.
+  await expect(topicGrid(page).getByRole("listitem")).toHaveCount(11);
+  await search.fill("zain");
+  await expect(topicGrid(page)).toHaveCount(0);
+  await expect(topics(page)).toContainText("No topic matches.");
+  await kindChip(page, "All").click();
+  await expect(topicGrid(page).getByRole("listitem")).toHaveCount(1);
+  await expect(topicCell(page, "Zain")).toBeVisible();
+  await search.fill("");
+  await expect(topicGrid(page).getByRole("listitem")).toHaveCount(32);
+
+  await page.waitForTimeout(300);
+  expect(asked).toEqual([]);
+  expect(await calls(page)).toEqual([]);
+});
+
+test("Topics: an open ⋯ menu is drawn over the cell below it", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 700, height: 800 });
+  await open(page, "?many=1&tab=topics");
+  const cell = topicCell(page, "Zain");
+  await moreButton(cell).click();
+  const item = cell.getByRole("button", { name: "Delete topic…" });
+  await expect(item).toBeVisible();
+  // The point at the item's centre hits the item, not the next cell.
+  const hit = await item.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(
+      r.left + r.width / 2,
+      r.top + r.height / 2,
+    );
+    return el === at || el.contains(at);
+  });
+  expect(hit).toBe(true);
 });
 
 test("Topics: a member who is not the owner has no Topics tab", async ({
@@ -1891,11 +2016,9 @@ test("Topics: Cancel closes the candidates and puts the focus on Find; with noth
 }) => {
   await open(page, "?tab=topics");
   await findTopics(page).click();
-  const found = topics(page).getByRole("form", {
-    name: "Topics found in your notes",
-  });
+  const found = foundForm(page);
   await found.getByRole("button", { name: "Cancel" }).click();
-  await expect(found).toHaveCount(0);
+  await expect(foundDialog(page)).toHaveCount(0);
   await expect(findTopics(page)).toBeFocused();
   expect((await calls(page)).filter((c) => c.name === "saveTopics")).toEqual(
     [],
@@ -1907,7 +2030,7 @@ test("Topics: Cancel closes the candidates and puts the focus on Find; with noth
   await found
     .getByRole("checkbox", { name: /^Partners: Zain, already under/ })
     .check();
-  await found.getByRole("button", { name: "Save topics" }).click();
+  await found.getByRole("button", { name: "Save 4 topics" }).click();
   await expect(
     topics(page).getByText(
       "4 topics saved. Now open the vault and press Attach topics.",
