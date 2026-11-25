@@ -85,6 +85,26 @@ export function releaseSentence(mark: Mark): string {
   return `This note was written by a self-hosted agent. Releasing it makes it follow its sharing setting: ${mark.label}.`;
 }
 
+// The summary shown when no note is open.
+export const STAT_LABELS = {
+  notes: ["note", "notes"],
+  folders: ["folder", "folders"],
+  topics: ["topic", "topics"],
+  today: ["changed today", "changed today"],
+} as const;
+export const RECENTLY_CHANGED = "Recently changed";
+export const NEWEST = "Newest";
+export const REVIEW = "Review";
+export const SHARED_HEADING = "Shared with me";
+
+export const heldSentence = (n: number) =>
+  n === 1
+    ? "1 note is held. Your agents wrote it; nobody else sees it until you release it."
+    : `${n} notes are held. Your agents wrote them; nobody else sees them until you release them.`;
+
+export const sharedLine = (notes: number, people: number) =>
+  `${notes} ${notes === 1 ? "note" : "notes"} from ${people} ${people === 1 ? "colleague" : "colleagues"}`;
+
 // The left column and a folder's sharing control.
 export const HELD_ROW = "Held, waiting for you";
 export const FOLDER_SHARING = "Folder sharing";

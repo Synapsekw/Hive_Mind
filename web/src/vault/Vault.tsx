@@ -23,6 +23,8 @@ import { Import } from "./Import";
 import { IMPORT } from "./importText";
 import { folderMark } from "./marks";
 import { NoteList } from "./NoteList";
+import { Summary } from "./Summary";
+import { overview, sharedOverview } from "./overview";
 import { Preview } from "./Preview";
 import {
   DELETE_FAILED,
@@ -391,6 +393,21 @@ export function Vault({
   )
     scope = { kind: "all" };
 
+  const summary = useMemo(
+    () =>
+      shared
+        ? { kind: "shared" as const, data: sharedOverview(data.notes) }
+        : {
+            kind: "workspace" as const,
+            data: overview(data.notes, tree, now),
+          },
+    [data.notes, tree, now, shared],
+  );
+  const wsName =
+    ownWorkspace?.name ??
+    data.workspaces.find((w) => w.id === wsId)?.name ??
+    "";
+
   const listed = notesIn(data.notes, scope, local.q);
   const groups = shared ? byOwner(listed, data) : null;
 
@@ -684,6 +701,31 @@ export function Vault({
             onRemoveTopic={removeTopic}
             onAddTopic={addTopic}
             hrefNote={hrefNote}
+            idle={
+              summary.kind === "shared" ? (
+                <Summary
+                  kind="shared"
+                  data={summary.data}
+                  hrefFor={hrefFor}
+                  now={now}
+                />
+              ) : (
+                <Summary
+                  kind="workspace"
+                  name={wsName}
+                  data={summary.data}
+                  hrefFor={hrefFor}
+                  now={now}
+                  onReview={() =>
+                    setLocal((l) => ({
+                      ...l,
+                      by: "folders",
+                      scope: { kind: "held" },
+                    }))
+                  }
+                />
+              )
+            }
             onCopied={(ok) =>
               setSaid({
                 text: ok ? LINK_COPIED : LINK_NOT_COPIED,

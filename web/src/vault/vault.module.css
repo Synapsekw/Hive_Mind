@@ -505,6 +505,60 @@
   padding: 6px 0;
 }
 
+/* The summary when no note is open. */
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 74ch;
+}
+
+.overviewTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.overviewLine {
+  margin: 0;
+  color: var(--fg);
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+  margin: 0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statNumber {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.statWord {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.overviewLabel {
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .article {
   max-width: 74ch;
 }

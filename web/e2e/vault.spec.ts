@@ -743,7 +743,9 @@ test("a second, deliberate Delete removes the note", async ({ page }) => {
   expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
   // The note is closed and out of the list.
   await expect(page).not.toHaveURL(/note=/);
-  await expect(preview(page)).toContainText("Choose a note to read it.");
+  await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText(
+    DATA.workspaces[0]!.name,
+  );
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length - 1);
   await expect(noteLinks(page).filter({ hasText: "Readme" })).toHaveCount(0);
   expect(await inList(page)).toBe(true);
@@ -922,7 +924,9 @@ test("deleting the only note a filter lists leaves the empty list and a focused 
   await expect(page.getByRole("navigation", { name: "Notes" })).toContainText(
     "No notes match the filter.",
   );
-  await expect(preview(page)).toContainText("Choose a note to read it.");
+  await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText(
+    DATA.workspaces[0]!.name,
+  );
   await expect(tab(page, "Consulting")).toBeFocused();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(300);
@@ -957,7 +961,9 @@ test("deleting the last held note goes back to all notes", async ({ page }) => {
     page.getByRole("heading", { name: "All notes", level: 2 }),
   ).toBeVisible();
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length - 2);
-  await expect(preview(page)).toContainText("Choose a note to read it.");
+  await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText(
+    DATA.workspaces[0]!.name,
+  );
   await expect(noteLinks(page).first()).toBeFocused();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(300);
@@ -3106,4 +3112,34 @@ test("at 390 px the column and the chips stay inside the window", async ({
     expect(box.x + box.width).toBeLessThanOrEqual(390);
   }
   expect((await scrolls(page)).across).toBe(false);
+});
+
+test("with no note open the vault shows its summary", async ({ page }) => {
+  await open(page);
+  const pane = preview(page);
+  await expect(pane.getByRole("heading", { level: 2 })).toHaveText(
+    DATA.workspaces[0]!.name,
+  );
+  await expect(pane).toContainText(/\d+\s*notes/);
+  await expect(pane.getByRole("link")).toHaveCount(6);
+});
+
+test("Review shows the held notes", async ({ page }) => {
+  await open(page);
+  await preview(page).getByRole("button", { name: "Review" }).click();
+  await expect(
+    folders(page).getByRole("button", { name: /^Held, waiting for you/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(noteLinks(page)).toHaveCount(
+    DATA.notes.filter(
+      (n) => n.quarantined && n.workspace_id === DATA.workspaces[0]!.id,
+    ).length,
+  );
+});
+
+test("Shared with me says how many notes from how many colleagues", async ({
+  page,
+}) => {
+  await open(page, "?tab=shared");
+  await expect(preview(page)).toContainText(/\d+ notes? from \d+ colleagues?/);
 });
