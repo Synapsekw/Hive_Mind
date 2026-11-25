@@ -605,6 +605,42 @@ describe("finishUploadIn", () => {
     expect(t.remove).not.toHaveBeenCalled();
   });
 
+  it("records an HTML or SVG upload as a plain byte stream of kind other, and refuses one stored as a page", async () => {
+    for (const name of ["site.html", "logo.svg"]) {
+      const t = stub({
+        listed: {
+          data: [
+            {
+              name,
+              metadata: { size: 5, mimetype: "application/octet-stream" },
+            },
+          ],
+          error: null,
+        },
+      });
+      expect(await finishUploadIn(t.db, SID, name, N, null)).not.toBeNull();
+      expect(t.inserted("files")[0]).toMatchObject({
+        name,
+        mime: "application/octet-stream",
+      });
+    }
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const [name, mimetype] of [
+      ["site.html", "text/html"],
+      ["logo.svg", "image/svg+xml"],
+    ] as const) {
+      const t = stub({
+        listed: {
+          data: [{ name, metadata: { size: 5, mimetype } }],
+          error: null,
+        },
+      });
+      expect(await finishUploadIn(t.db, SID, name, N, null)).toBeNull();
+      expect(t.remove).toHaveBeenCalledWith([`${DIR}/${name}`]);
+      expect(t.inserted("files")).toEqual([]);
+    }
+  });
+
   it("finishUpload removes the object when the row insert fails", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const t = stub({ fileInsert: boom });
