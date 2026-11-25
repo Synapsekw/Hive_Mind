@@ -13,6 +13,7 @@ import {
   unlinkName,
   unlinkQuestion,
 } from "./sentences";
+import * as S from "./sentences";
 import type { Mark } from "./marks";
 
 const none = { follows: 0, own_setting: 0, under_nested_rule: 0, held: 0 };
@@ -272,5 +273,21 @@ describe("unlinking two notes", () => {
   it("has a heading and says when it did not work", () => {
     expect(LINKED_WITH).toBe("Linked with");
     expect(UNLINK_FAILED).toBe("That didn't work. Try again.");
+  });
+});
+
+describe("the open note's meta line and menu", () => {
+  it("says who the note is from", () => {
+    expect(S.WRITTEN_BY_YOU).toBe("written by you");
+    expect(S.WRITTEN_BY_AGENT).toBe("written by your agent");
+    expect(S.sharedBy("Ahmed")).toBe("shared by Ahmed");
+    expect(S.OPENED_BY_LINK).toBe("opened by a link");
+  });
+  it("names the menu and its items, and says how Copy link went", () => {
+    expect(S.MORE_ACTIONS).toBe("More actions for this note");
+    expect(S.COPY_LINK).toBe("Copy link");
+    expect(S.DELETE_ITEM).toBe("Delete note…");
+    expect(S.LINK_COPIED).toBe("Link copied.");
+    expect(S.LINK_NOT_COPIED).toBe("The link could not be copied.");
   });
 });

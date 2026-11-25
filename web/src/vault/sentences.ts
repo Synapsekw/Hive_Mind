@@ -92,6 +92,19 @@ export const NO_FOLDER_RULE = "none";
 export const NONE_OPTION = "None (each note decides)";
 export const folderSharing = (text: string) => `${FOLDER_SHARING}: ${text}`;
 
+// The open note: who it is from, on its meta line.
+export const WRITTEN_BY_YOU = "written by you";
+export const WRITTEN_BY_AGENT = "written by your agent";
+export const sharedBy = (owner: string) => `shared by ${owner}`;
+export const OPENED_BY_LINK = "opened by a link";
+
+// The open note's menu, and what Copy link says.
+export const MORE_ACTIONS = "More actions for this note";
+export const COPY_LINK = "Copy link";
+export const DELETE_ITEM = "Delete note…";
+export const LINK_COPIED = "Link copied.";
+export const LINK_NOT_COPIED = "The link could not be copied.";
+
 // Deleting a note: the question before it, and what is said after.
 export const DELETE_QUESTION =
   "Delete this note? It is gone for good, with its history and its links. Files attached to it stay in the gallery.";

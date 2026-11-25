@@ -15,9 +15,10 @@ describe("the sentences of browsing and changing topics", () => {
 
   it("words the open note's section", () => {
     expect(t.TOPICS_HEADING).toBe("Topics");
-    expect(t.NO_TOPICS_YET).toBe("No topics yet.");
     expect(t.ADD_TOPIC).toBe("Add topic");
-    expect(t.ADD).toBe("Add");
+    expect(t.ADD_TOPIC_BUTTON).toBe("+ Topic");
+    expect(t.FIND_TOPIC).toBe("Find a topic");
+    expect(t.NO_TOPIC_MATCHES).toBe("No topic matches.");
   });
 
   it("names each remove button by its topic", () => {

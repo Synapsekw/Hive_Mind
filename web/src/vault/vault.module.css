@@ -852,21 +852,235 @@
   font-size: 11px;
 }
 
-.chip .quiet {
-  height: 28px;
+/* A colleague's chip has no ×: even padding. */
+.chip:not(:has(button)) {
+  padding-right: 10px;
 }
 
-.addRow {
+/* ---- The open note's meta line and action row ----
+   One mono line (path · changed · who), then one row that wraps: the sharing control's button,
+   the topic chips and + Topic, and ⋯ pushed to the end. The sharing panel, when open, and a
+   refusal take a full line under the row. */
+.meta {
+  margin: 0 0 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.actionRow {
+  align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.actionRow[hidden] {
+  display: none;
+}
+
+.actionRow > .share {
+  display: contents;
+}
+
+.actionRow .control {
+  order: 1;
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.noteTopics {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
-.addSelect {
-  flex: 1 1 160px;
-  max-width: 280px;
+.noteTopics > .refused {
+  flex: 1 0 100%;
+}
+
+.head > .release:not(.wide) {
+  margin: 14px 0;
+}
+
+.chipRemove {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.chipRemove:hover,
+.chipRemove:focus-visible {
+  border-color: var(--line);
+  color: var(--fg);
+}
+
+/* + Topic and ⋯: quiet hairline buttons, each the anchor of its popover. */
+.pickRoot,
+.noteMenu {
+  position: relative;
+}
+
+.noteMenu {
+  margin-left: auto;
+}
+
+.addTopic,
+.moreButton {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px dashed var(--line-hi);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.24s var(--ease),
+    background 0.18s var(--ease);
+}
+
+.moreButton {
+  min-width: 32px;
+  border-style: solid;
+  border-color: transparent;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.addTopic:hover,
+.addTopic:focus-visible,
+.addTopic[aria-expanded="true"],
+.moreButton:hover,
+.moreButton:focus-visible,
+.moreButton[aria-expanded="true"] {
+  border-color: var(--line-hi);
+  color: var(--fg);
+}
+
+.addTopic[aria-expanded="true"],
+.moreButton[aria-expanded="true"] {
+  background: var(--fill);
+}
+
+/* The popovers: the map's menu surface. The picker opens under + Topic at its left edge, the
+   note menu under ⋯ at its right edge. */
+.pickPop,
+.menuPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 4;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+}
+
+.pickPop {
+  left: 0;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-on) transparent;
+}
+
+.pickPop > .search {
+  flex: none;
+  margin-bottom: 4px;
   font-family: inherit;
+}
+
+/* In a narrow pane + Topic may sit near the right edge: the picker opens under the row's start
+   instead, so it stays inside the window. */
+@media (max-width: 600px) {
+  .actionRow {
+    position: relative;
+  }
+
+  .pickRoot {
+    position: static;
+  }
+}
+
+.menuPop {
+  right: 0;
+  width: max-content;
+  min-width: 160px;
+}
+
+.pickGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pickKind {
+  margin: 6px 0 2px;
+  padding: 0 8px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pickNone {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  flex: none;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+.menuItem[aria-disabled="true"] {
+  color: var(--quiet);
+  cursor: default;
 }
 
 /* Delete before it has asked: words only, no edge and no fill until it is pointed at. */

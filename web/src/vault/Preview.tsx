@@ -1,24 +1,36 @@
 "use client";
 
-// The open note: title, path, last change, who wrote it, the sharing control and Delete for the
-// person's own notes (a colleague's note says how it reached you instead), release for a held
-// note, the notes it is linked with and Unlink for each, its topics, then the rendered text.
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+// The open note: its title, one meta line (path, last change, who it is from), one action row
+// (the sharing control on the person's own notes, the topic chips and + Topic, and ⋯ with Copy
+// link and, on one's own note, Delete note…), release for a held note, the notes it is linked
+// with and Unlink for each, then the text without a first heading that repeats the title.
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { longDate } from "./format";
 import { folderMark, noteMark } from "./marks";
 import { Markdown } from "./Markdown";
+import { NoteMenu } from "./NoteMenu";
 import { NoteTopics } from "./NoteTopics";
 import {
   DELETE_QUESTION,
   keepLinkName,
   LINKED_WITH,
+  OPENED_BY_LINK,
   releaseSentence,
+  sharedBy,
   UNLINK,
   UNLINK_GROUP,
   unlinkName,
   unlinkQuestion,
+  WRITTEN_BY_AGENT,
+  WRITTEN_BY_YOU,
   YOU,
 } from "./sentences";
 import { ShareControl } from "./ShareControl";
@@ -31,6 +43,7 @@ import type {
   VaultNote,
 } from "./types";
 import s from "./vault.module.css";
+import { withoutTitle } from "./withoutTitle";
 
 /**
  * A confirming press sooner than this after the question opened, or after the press before it,
@@ -90,7 +103,8 @@ function Release({
  * only a later, separate press on the question's own button does it. Mounted per note or per
  * link, so opening another note or tab drops a waiting question. What happens after the answer
  * (the list, the line that says how it went, the re-read) is the screen's; this only goes back
- * to the quiet button when it failed.
+ * to the quiet button when it failed. With `onDone` (Delete, opened from the note menu) there is
+ * no quiet button: it mounts asking and hands Keep and a failure back to its parent.
  */
 function Ask({
   word,
@@ -99,6 +113,7 @@ function Ask({
   yes,
   no,
   onConfirm,
+  onDone,
 }: {
   /** The word on the quiet button and on the question's own. */
   word: string;
@@ -109,15 +124,21 @@ function Ask({
   no: string;
   /** Does it, and says whether it worked. */
   onConfirm: () => Promise<boolean>;
+  /**
+   * Opened from elsewhere (a menu): there is no quiet button. Mounted already asking; Keep, or a
+   * failure, calls this instead of going back to a quiet button, `refocus` saying whether the
+   * focus should go back to whatever opened it.
+   */
+  onDone?: (refocus: boolean) => void;
 }) {
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState(!!onDone);
   const [busy, setBusy] = useState(false);
   // The same as `busy`, readable at once by a second press that arrives before the render.
   const running = useRef(false);
   // When the question was opened, or when the last press that came too soon landed.
   const askedAt = useRef(0);
   // Where the focus goes after the next render.
-  const target = useRef<"keep" | "opener" | null>(null);
+  const target = useRef<"keep" | "opener" | null>(onDone ? "keep" : null);
   const opener = useRef<HTMLButtonElement>(null);
   const keeper = useRef<HTMLButtonElement>(null);
   const question = useRef<HTMLDivElement>(null);
@@ -129,6 +150,13 @@ function Ask({
     (want === "keep" ? keeper : opener).current?.focus();
   });
 
+  // Opened from elsewhere: the question opened as this mounted.
+  useEffect(() => {
+    if (onDone) askedAt.current = Date.now();
+    // Once, on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function ask() {
     askedAt.current = Date.now();
     target.current = "keep";
@@ -137,6 +165,11 @@ function Ask({
 
   function keep() {
     if (running.current) return;
+    if (onDone) {
+      setAsking(false);
+      onDone(true);
+      return;
+    }
     target.current = "opener";
     setAsking(false);
   }
@@ -162,10 +195,12 @@ function Ask({
     if (ok) return; // The note or the link, and this control with it, leaves the page.
     // Back to the quiet button, with the focus if it was still here (or nowhere).
     const at = document.activeElement;
-    if (!at || at === document.body || question.current?.contains(at))
-      target.current = "opener";
+    const refocus =
+      !at || at === document.body || !!question.current?.contains(at);
     setBusy(false);
     setAsking(false);
+    if (onDone) onDone(refocus);
+    else if (refocus) target.current = "opener";
   }
 
   const off = busy || undefined;
@@ -206,7 +241,7 @@ function Ask({
         </button>
       </div>
     </div>
-  ) : (
+  ) : onDone ? null : (
     <button
       ref={opener}
       type="button"
@@ -219,7 +254,14 @@ function Ask({
   );
 }
 
-function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
+/** The delete question, opened from the note menu's Delete note…. */
+function DeleteNote({
+  onDelete,
+  onDone,
+}: {
+  onDelete: () => Promise<boolean>;
+  onDone: (refocus: boolean) => void;
+}) {
   return (
     <Ask
       word="Delete"
@@ -228,6 +270,7 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
       yes="Delete note"
       no="Keep note"
       onConfirm={onDelete}
+      onDone={onDone}
     />
   );
 }
@@ -235,7 +278,7 @@ function DeleteNote({ onDelete }: { onDelete: () => Promise<boolean> }) {
 /**
  * The notes the open note is linked with, as the database listed them: each a row of the note
  * list (title, then whose it is) with Unlink at its end. Nothing at all when there is none.
- * The row and its Unlink share the line the way the sharing control and Delete do.
+ * The row and its Unlink share one line.
  */
 function Linked({
   links,
@@ -282,6 +325,134 @@ function Linked({
   );
 }
 
+/**
+ * The open note's head: title, the meta line, the action row (sharing, topics, ⋯) or the delete
+ * question in its place, the release box, and Linked with. Mounted per note, so opening another
+ * note drops a waiting question.
+ */
+function Head({
+  data,
+  note: n,
+  links,
+  onSave,
+  onRelease,
+  onDelete,
+  onUnlink,
+  onRemoveTopic,
+  onAddTopic,
+  hrefNote,
+  onCopied,
+}: {
+  data: VaultData;
+  note: VaultNote;
+  links: NoteLink[];
+  onSave: (noteId: string, choice: Choice) => Promise<Result>;
+  onRelease: (noteId: string) => Promise<Result>;
+  onDelete: (noteId: string) => Promise<boolean>;
+  onUnlink: (linkId: string) => Promise<boolean>;
+  onRemoveTopic: (noteId: string, topicId: string) => Promise<boolean>;
+  onAddTopic: (noteId: string, topicId: string) => Promise<TopicChange>;
+  hrefNote: (noteId: string) => string;
+  onCopied: (ok: boolean) => void;
+}) {
+  const [asking, setAsking] = useState(false);
+  const more = useRef<HTMLButtonElement>(null);
+  // Whether ⋯ takes the focus back once the row is shown again.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (asking || !refocus.current) return;
+    refocus.current = false;
+    more.current?.focus();
+  }, [asking]);
+
+  const mine = n.member_id === data.me && n.access === "own";
+  const owner =
+    data.members.find((m) => m.id === n.member_id)?.display_name ?? "Someone";
+  const rule = n.rule_folder
+    ? (data.folders.find((f) => f.path === n.rule_folder) ?? null)
+    : null;
+  const who = mine
+    ? n.by_agent
+      ? WRITTEN_BY_AGENT
+      : WRITTEN_BY_YOU
+    : n.access === "link"
+      ? OPENED_BY_LINK
+      : sharedBy(owner);
+
+  return (
+    <header className={s.head}>
+      <h2 className={s.noteTitle}>{n.title}</h2>
+      <p className={s.meta}>
+        {n.path} · changed {longDate(n.updated_at)} · {who}
+      </p>
+      <div className={s.actionRow} hidden={asking}>
+        {mine && (
+          <ShareControl
+            subject="note"
+            mark={noteMark(n, data.members)}
+            current={{
+              visibility: n.visibility,
+              shared_with: n.shared_with,
+            }}
+            effective={n.effective}
+            ruleFolder={n.rule_folder}
+            folderRule={
+              // The rule's own record when this tab has it; else, for a note that follows
+              // the rule, what the database says the note gets from it.
+              folderMark(rule, data.members) ??
+              (n.rule_folder && n.visibility === null
+                ? { ...noteMark(n, data.members), from: null }
+                : null)
+            }
+            hive={data.hive}
+            members={data.members}
+            me={data.me}
+            onSave={(c) => onSave(n.id, c)}
+          />
+        )}
+        <NoteTopics
+          noteId={n.id}
+          served={n.topics}
+          topics={data.topics}
+          own={mine}
+          onRemove={onRemoveTopic}
+          onAdd={onAddTopic}
+        />
+        <NoteMenu
+          own={mine}
+          href={hrefNote(n.id)}
+          onCopied={onCopied}
+          onDelete={() => setAsking(true)}
+          buttonRef={more}
+        />
+      </div>
+      {asking && (
+        <DeleteNote
+          onDelete={() => onDelete(n.id)}
+          onDone={(back) => {
+            refocus.current = back;
+            setAsking(false);
+          }}
+        />
+      )}
+      {mine && n.quarantined && (
+        <Release
+          note={n}
+          members={data.members}
+          onRelease={() => onRelease(n.id)}
+        />
+      )}
+      <Linked
+        links={links}
+        own={n.member_id === data.me}
+        owner={owner}
+        hrefNote={hrefNote}
+        onUnlink={onUnlink}
+      />
+    </header>
+  );
+}
+
 export function Preview({
   data,
   onSave,
@@ -291,6 +462,8 @@ export function Preview({
   onRemoveTopic,
   onAddTopic,
   hrefNote,
+  onCopied,
+  idle,
 }: {
   data: VaultData;
   onSave: (noteId: string, choice: Choice) => Promise<Result>;
@@ -305,105 +478,43 @@ export function Preview({
   onAddTopic: (noteId: string, topicId: string) => Promise<TopicChange>;
   /** The address of another note in the vault. */
   hrefNote: (noteId: string) => string;
+  /** Copy link was pressed: whether the link reached the clipboard. */
+  onCopied: (ok: boolean) => void;
+  /** Shown when no note is open, in place of the line that asks to choose one. */
+  idle?: ReactNode;
 }) {
   const open = data.open;
   let body;
   if (open === null) {
-    body = <p className={s.empty}>Choose a note to read it.</p>;
+    body = idle ?? <p className={s.empty}>Choose a note to read it.</p>;
   } else if ("missing" in open) {
     body = <p className={s.empty}>That note isn&apos;t available.</p>;
   } else {
     const n = open.note;
-    const mine = n.member_id === data.me && n.access === "own";
-    const owner =
-      data.members.find((m) => m.id === n.member_id)?.display_name ?? "Someone";
-    const rule = n.rule_folder
-      ? (data.folders.find((f) => f.path === n.rule_folder) ?? null)
-      : null;
     body = (
       <article
         key={n.id}
         className={`${s.article} rise`}
         style={{ "--rise-delay": "0s" } as CSSProperties}
       >
-        <header className={s.head}>
-          <h2 className={s.noteTitle}>{n.title}</h2>
-          <p className={s.path}>{n.path}</p>
-          <p className={s.facts}>
-            <span>Changed {longDate(n.updated_at)}</span>
-            {mine ? (
-              <span>
-                {n.by_agent ? "Written by your agent" : "Written by you"}
-              </span>
-            ) : (
-              <span>
-                {n.access === "link"
-                  ? "Opened by a link"
-                  : `Shared by ${owner}`}
-              </span>
-            )}
-          </p>
-          {mine && (
-            <div className={s.tools}>
-              <ShareControl
-                key={n.id}
-                subject="note"
-                mark={noteMark(n, data.members)}
-                current={{
-                  visibility: n.visibility,
-                  shared_with: n.shared_with,
-                }}
-                effective={n.effective}
-                ruleFolder={n.rule_folder}
-                folderRule={
-                  // The rule's own record when this tab has it; else, for a note that follows
-                  // the rule, what the database says the note gets from it.
-                  folderMark(rule, data.members) ??
-                  (n.rule_folder && n.visibility === null
-                    ? { ...noteMark(n, data.members), from: null }
-                    : null)
-                }
-                hive={data.hive}
-                members={data.members}
-                me={data.me}
-                onSave={(c) => onSave(n.id, c)}
-              />
-              <DeleteNote
-                key={`delete-${n.id}`}
-                onDelete={() => onDelete(n.id)}
-              />
-            </div>
-          )}
-          {mine && n.quarantined && (
-            <Release
-              key={`release-${n.id}`}
-              note={n}
-              members={data.members}
-              onRelease={() => onRelease(n.id)}
-            />
-          )}
-          <Linked
-            key={`links-${n.id}`}
-            links={open.links}
-            own={n.member_id === data.me}
-            owner={owner}
-            hrefNote={hrefNote}
-            onUnlink={onUnlink}
-          />
-          <NoteTopics
-            key={`topics-${n.id}`}
-            noteId={n.id}
-            served={n.topics}
-            topics={data.topics}
-            own={mine}
-            onRemove={onRemoveTopic}
-            onAdd={onAddTopic}
-          />
-        </header>
+        <Head
+          key={n.id}
+          data={data}
+          note={n}
+          links={open.links}
+          onSave={onSave}
+          onRelease={onRelease}
+          onDelete={onDelete}
+          onUnlink={onUnlink}
+          onRemoveTopic={onRemoveTopic}
+          onAddTopic={onAddTopic}
+          hrefNote={hrefNote}
+          onCopied={onCopied}
+        />
         {open.cut && (
           <p className={s.cut}>Showing the first 200,000 characters.</p>
         )}
-        <Markdown body={open.body} />
+        <Markdown body={withoutTitle(open.body, n.title)} />
       </article>
     );
   }

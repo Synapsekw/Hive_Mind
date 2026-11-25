@@ -24,7 +24,13 @@ import { IMPORT } from "./importText";
 import { folderMark } from "./marks";
 import { NoteList } from "./NoteList";
 import { Preview } from "./Preview";
-import { DELETE_FAILED, DELETED, UNLINK_FAILED } from "./sentences";
+import {
+  DELETE_FAILED,
+  DELETED,
+  LINK_COPIED,
+  LINK_NOT_COPIED,
+  UNLINK_FAILED,
+} from "./sentences";
 import { ShareControl } from "./ShareControl";
 import { Tabs } from "./Tabs";
 import { TopicList } from "./TopicList";
@@ -678,6 +684,12 @@ export function Vault({
             onRemoveTopic={removeTopic}
             onAddTopic={addTopic}
             hrefNote={hrefNote}
+            onCopied={(ok) =>
+              setSaid({
+                text: ok ? LINK_COPIED : LINK_NOT_COPIED,
+                failed: !ok,
+              })
+            }
           />
         </div>
       </main>

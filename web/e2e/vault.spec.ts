@@ -8,15 +8,20 @@ import {
   HOSTILE_NOTE_ID,
 } from "../src/vault/fixture";
 import {
+  COPY_LINK,
   DELETE_FAILED,
   DELETE_QUESTION,
   DELETED,
   folderSentence,
   folderSharing,
   keepLinkName,
+  LINK_COPIED,
+  LINK_NOT_COPIED,
   LINKED_WITH,
+  MORE_ACTIONS,
   NONE_OPTION,
   noteSentence,
+  OPENED_BY_LINK,
   UNLINK_FAILED,
   UNLINK_GROUP,
   unlinkName,
@@ -461,7 +466,7 @@ test("the shared tab groups colleagues' notes and offers no control", async ({
   ).not.toContainText("Opened by a link");
   await list.getByRole("link", { name: /Pricing options/ }).click();
   const preview = page.getByRole("region", { name: "Note" });
-  await expect(preview).toContainText("Opened by a link");
+  await expect(preview).toContainText(OPENED_BY_LINK);
   await expect(page.getByRole("button", { name: /^Sharing: / })).toHaveCount(0);
 });
 
@@ -540,6 +545,13 @@ const CLIENT_LIST = idOf("Client list");
 const preview = (page: Page) => page.getByRole("region", { name: "Note" });
 const deleteButton = (page: Page) =>
   preview(page).getByRole("button", { name: "Delete note" });
+const moreButton = (page: Page) =>
+  preview(page).getByRole("button", { name: MORE_ACTIONS });
+/** Opens ⋯ and presses Delete note…: the question is asked. */
+async function askDelete(page: Page) {
+  await moreButton(page).click();
+  await preview(page).getByRole("button", { name: "Delete note" }).click();
+}
 const keepButton = (page: Page) =>
   preview(page).getByRole("button", { name: "Keep note" });
 const question = (page: Page) =>
@@ -564,52 +576,68 @@ const inList = (page: Page) =>
 
 /** Asks, waits out the guard and answers Delete. */
 async function confirmDelete(page: Page) {
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   await page.waitForTimeout(600);
   await deleteButton(page).click();
 }
 
-test("your own note has Delete, a held one too; a colleague's has none", async ({
+test("your own note has Delete in its menu, a held one too; a colleague's has none", async ({
   page,
 }) => {
   await open(page, `?note=${README}`);
+  // Not on the row: in the ⋯ menu.
+  await expect(deleteButton(page)).toHaveCount(0);
+  await moreButton(page).click();
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "true");
   await expect(deleteButton(page)).toBeVisible();
-  await expect(deleteButton(page)).toHaveText("Delete");
+  await expect(deleteButton(page)).toHaveText("Delete note…");
+  await expect(
+    preview(page).getByRole("button", { name: COPY_LINK }),
+  ).toBeVisible();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
 
   await open(page, `?note=${HELD}`);
   await expect(
     preview(page).getByRole("button", { name: "Release" }),
   ).toBeVisible();
+  await moreButton(page).click();
   await expect(deleteButton(page)).toBeVisible();
 
   await open(page, "?tab=shared");
   await noteLinks(page).filter({ hasText: "Site visit" }).click();
   await expect(openTitle(page, "Site visit")).toBeVisible();
-  await expect(preview(page).getByRole("button")).toHaveCount(0);
+  // A colleague's note: ⋯ alone, holding Copy link only.
+  await expect(preview(page).getByRole("button")).toHaveCount(1);
+  await moreButton(page).click();
+  await expect(preview(page).getByRole("button")).toHaveText(["⋯", COPY_LINK]);
+  await expect(deleteButton(page)).toHaveCount(0);
   // Opened by a link: the link can be ended, the note cannot be deleted or shared.
   await noteLinks(page).filter({ hasText: "Pricing options" }).click();
   await expect(openTitle(page, "Pricing options")).toBeVisible();
+  await expect(preview(page).getByRole("button")).toHaveText(["⋯", "Unlink"]);
+  await moreButton(page).click();
   await expect(deleteButton(page)).toHaveCount(0);
-  await expect(preview(page).getByRole("button")).toHaveCount(1);
-  await expect(preview(page).getByRole("button")).toHaveText("Unlink");
+  await expect(
+    preview(page).getByRole("button", { name: COPY_LINK }),
+  ).toBeVisible();
 });
 
 test("Delete asks first; Keep puts everything back", async ({ page }) => {
   await open(page, `?note=${README}`);
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   await expect(deleteButton(page)).toHaveCount(1);
   await expect(deleteButton(page)).toHaveText("Delete");
   await expect(keepButton(page)).toHaveText("Keep");
-  // The safe answer holds the focus.
+  // The safe answer holds the focus; the action row is hidden while it is asked.
   await expect(keepButton(page)).toBeFocused();
+  await expect(moreButton(page)).toBeHidden();
 
   await keepButton(page).click();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
   await expect(keepButton(page)).toHaveCount(0);
-  await expect(deleteButton(page)).toBeFocused();
+  await expect(moreButton(page)).toBeFocused();
   await expect(page.getByRole("button", { name: /^Sharing: / })).toBeVisible();
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length);
   await expect(status(page)).toHaveText("");
@@ -627,7 +655,7 @@ for (const width of [390, 700, 1600]) {
       .locator("main")
       .evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     // Where the question's Delete will be: ask once, measure, answer Keep.
-    await deleteButton(page).click();
+    await askDelete(page);
     await expect(keepButton(page)).toBeFocused();
     const box = await deleteButton(page).boundingBox();
     expect(box).not.toBeNull();
@@ -654,14 +682,18 @@ for (const width of [390, 700, 1600]) {
       );
     });
     // Ask, and press again at once where the question's Delete has just appeared.
-    await deleteButton(page).click();
+    await askDelete(page);
     await page.mouse.click(x, y);
     await page.waitForTimeout(300);
     expect(
       await page.evaluate(
         () => (window as unknown as { __hits: string[] }).__hits,
       ),
-    ).toEqual(["page: Delete note", "question: Delete note"]);
+    ).toEqual([
+      `page: ${MORE_ACTIONS}`,
+      "page: Delete note",
+      "question: Delete note",
+    ]);
     expect(await calls(page)).toEqual([]);
     await expect(preview(page)).toContainText(DELETE_QUESTION);
     await expect(openTitle(page, "Readme")).toBeVisible();
@@ -672,7 +704,7 @@ test("a burst of presses on the question's Delete deletes nothing; a later one d
   page,
 }) => {
   await open(page, `?note=${README}`);
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   const box = await deleteButton(page).boundingBox();
   expect(box).not.toBeNull();
@@ -697,7 +729,7 @@ test("a burst of presses on the question's Delete deletes nothing; a later one d
 
 test("a second, deliberate Delete removes the note", async ({ page }) => {
   await open(page, `?note=${README}`);
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   // Past the double-click guard.
   await page.waitForTimeout(600);
@@ -787,7 +819,7 @@ test("a refused delete says so, keeps the note and closes the question", async (
   await expect(status(page)).toBeVisible();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
   await expect(keepButton(page)).toHaveCount(0);
-  await expect(deleteButton(page)).toBeFocused();
+  await expect(moreButton(page)).toBeFocused();
   await expect(openTitle(page, "Readme")).toBeVisible();
   await expect(page).toHaveURL(/note=/);
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length);
@@ -933,11 +965,27 @@ test("deleting the last held note goes back to all notes", async ({ page }) => {
   await expect(noteLinks(page).first()).toBeFocused();
 });
 
-test("by keyboard: Delete follows the sharing control; Escape answers Keep", async ({
+test("by keyboard: the topics and ⋯ follow the sharing control; Delete note asks; Escape answers Keep", async ({
   page,
 }) => {
-  await open(page, `?note=${README}`);
+  // A note with two topics: Tab goes sharing, ×, ×, + Topic, ⋯.
+  await open(page, `?note=${INTERVIEW_1}`);
   await page.getByRole("button", { name: /^Sharing: / }).focus();
+  await page.keyboard.press("Tab");
+  await expect(removeButton(page, "Harbor Logistics")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(removeButton(page, "Route optimisation")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(addTopicButton(page)).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(moreButton(page)).toBeFocused();
+  // Enter opens the menu; Tab reaches Copy link, then Delete note…, which asks.
+  await page.keyboard.press("Enter");
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Tab");
+  await expect(
+    preview(page).getByRole("button", { name: COPY_LINK }),
+  ).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(deleteButton(page)).toBeFocused();
   await page.keyboard.press("Enter");
@@ -945,9 +993,14 @@ test("by keyboard: Delete follows the sharing control; Escape answers Keep", asy
   await expect(keepButton(page)).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
-  await expect(deleteButton(page)).toBeFocused();
+  await expect(moreButton(page)).toBeFocused();
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "false");
 
   // Delete comes before Keep; Enter on it after the guard deletes.
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(deleteButton(page)).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(keepButton(page)).toBeFocused();
   await page.keyboard.press("Shift+Tab");
@@ -955,17 +1008,20 @@ test("by keyboard: Delete follows the sharing control; Escape answers Keep", asy
   await page.waitForTimeout(600);
   await page.keyboard.press("Enter");
   await expect(status(page)).toHaveText(DELETED);
-  expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
+  expect(await calls(page)).toEqual([
+    { name: "deleteNote", args: [INTERVIEW_1] },
+  ]);
 });
 
 test("opening another note closes a pending question", async ({ page }) => {
   await open(page, `?note=${README}`);
-  await deleteButton(page).click();
+  await askDelete(page);
   await expect(preview(page)).toContainText(DELETE_QUESTION);
   await noteLinks(page).filter({ hasText: "Client list" }).click();
   await expect(openTitle(page, "Client list")).toBeVisible();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
-  await expect(deleteButton(page)).toBeVisible();
+  await expect(moreButton(page)).toBeVisible();
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "false");
   // And it is not waiting when the first note is opened again.
   await noteLinks(page).filter({ hasText: "Readme" }).click();
   await expect(openTitle(page, "Readme")).toBeVisible();
@@ -1001,7 +1057,7 @@ for (const look of LOOKS)
       await page.setViewportSize(size);
       // A held note: the tallest header, with the release box under the question.
       await open(page, `?note=${HELD}`);
-      await deleteButton(page).click();
+      await askDelete(page);
       await expect(preview(page)).toContainText(DELETE_QUESTION);
       for (const button of [deleteButton(page), keepButton(page)]) {
         await button.scrollIntoViewIfNeeded();
@@ -1033,6 +1089,41 @@ for (const look of LOOKS)
         if (size.width >= 1100) expect(page_.down).toBe(false);
       });
   }
+
+// ---- The note pane: the title once, and Copy link ----
+
+test("the open note shows its title once", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await expect(
+    preview(page).getByRole("heading", { name: "Readme" }),
+  ).toHaveCount(1);
+});
+
+test("Copy link says it copied", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await open(page, `?note=${README}`);
+  await moreButton(page).click();
+  await preview(page).getByRole("button", { name: COPY_LINK }).click();
+  await expect(status(page)).toHaveText(LINK_COPIED);
+  // The note's absolute address, and the menu is closed.
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(new URL(copied).searchParams.get("note")).toBe(README);
+  await expect(moreButton(page)).toHaveAttribute("aria-expanded", "false");
+  expect(await calls(page)).toEqual([]);
+});
+
+test("Copy link says so when the browser refuses", async ({ page }) => {
+  await open(page, `?note=${README}`);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("refused")) },
+    });
+  });
+  await moreButton(page).click();
+  await preview(page).getByRole("button", { name: COPY_LINK }).click();
+  await expect(status(page)).toHaveText(LINK_NOT_COPIED);
+});
 
 // ---- Linked with, and Unlink ----
 
@@ -1097,18 +1188,23 @@ test("an open note lists the notes it is linked with, under the sharing control"
   );
   for (const title of ["Pricing options", "Call notes"])
     await expect(unlinkButton(page, title)).toHaveText("Unlink");
-  // After the sharing control and Delete, before the note's text.
-  const order = await page.evaluate(() => {
-    const at = (sel: string) => document.querySelector(sel)!;
-    const before = (a: Element, b: Element) =>
-      !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const list = at('section[aria-label="Note"] section');
-    return [
-      before(at('button[aria-label^="Sharing: "]'), list),
-      before(at('button[aria-label="Delete note"]'), list),
-      before(list, at('section[aria-label="Note"] article > :last-child')),
-    ];
-  });
+  // After the action row (the sharing control and ⋯), before the note's text.
+  const order = await page.evaluate(
+    ([linkedWith, more]) => {
+      const at = (sel: string) => document.querySelector(sel)!;
+      const before = (a: Element, b: Element) =>
+        !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      const list = at(
+        `section[aria-label="Note"] section[aria-label="${linkedWith}"]`,
+      );
+      return [
+        before(at('button[aria-label^="Sharing: "]'), list),
+        before(at(`button[aria-label="${more}"]`), list),
+        before(list, at('section[aria-label="Note"] article > :last-child')),
+      ];
+    },
+    [LINKED_WITH, MORE_ACTIONS] as const,
+  );
   expect(order).toEqual([true, true, true]);
   expect(await calls(page)).toEqual([]);
 });
@@ -2541,10 +2637,22 @@ const topicsSection = (page: Page) =>
 const chips = (page: Page) => topicsSection(page).getByRole("listitem");
 const removeButton = (page: Page, name: string) =>
   topicsSection(page).getByRole("button", { name: P.removeName(name) });
-const addSelect = (page: Page) =>
-  topicsSection(page).getByRole("combobox", { name: P.ADD_TOPIC });
-const addButton = (page: Page) =>
-  topicsSection(page).getByRole("button", { name: P.ADD, exact: true });
+const addTopicButton = (page: Page) =>
+  topicsSection(page).getByRole("button", {
+    name: P.ADD_TOPIC_BUTTON,
+    exact: true,
+  });
+const picker = (page: Page) =>
+  topicsSection(page).getByRole("group", { name: P.ADD_TOPIC });
+const findTopic = (page: Page) =>
+  picker(page).getByRole("searchbox", { name: P.FIND_TOPIC });
+/** The picker's topic buttons, in order. */
+const pickable = (page: Page) => picker(page).getByRole("button");
+/** Opens + Topic and chooses the topic called `name`. */
+async function pickTopic(page: Page, name: string) {
+  await addTopicButton(page).click();
+  await picker(page).getByRole("button", { name, exact: true }).click();
+}
 const listHeading = (page: Page, name: string) =>
   page.getByRole("heading", { level: 2, name, exact: true });
 const chipNames = (page: Page) =>
@@ -2666,9 +2774,8 @@ test("a note's chips are its topics in order, with their kind", async ({
   page,
 }) => {
   await open(page, `?note=${SCOPE}`);
-  await expect(
-    topicsSection(page).getByRole("heading", { name: P.TOPICS_HEADING }),
-  ).toBeVisible();
+  // Inline in the action row: no heading of their own.
+  await expect(topicsSection(page).getByRole("heading")).toHaveCount(0);
   expect(await chipNames(page)).toEqual([
     "Harbor Logistics",
     "Route optimisation",
@@ -2681,18 +2788,36 @@ test("a note's chips are its topics in order, with their kind", async ({
   await expect(chips(page).nth(2)).toContainText("Subjects");
   await expect(chips(page).nth(3)).toContainText("Partners");
   await expect(chips(page).nth(4)).toContainText("Vendors");
-  // Five topics: Remove on each, no Add control.
+  // Five topics: × on each, no + Topic.
   await expect(
     topicsSection(page).getByRole("button", { name: /^Remove / }),
   ).toHaveCount(5);
-  await expect(addSelect(page)).toHaveCount(0);
-  await expect(addButton(page)).toHaveCount(0);
-  // The section sits under the sharing control.
-  const tools = await page
+  await expect(
+    topicsSection(page)
+      .getByRole("button", { name: /^Remove / })
+      .first(),
+  ).toHaveText("×");
+  await expect(addTopicButton(page)).toHaveCount(0);
+  // The chips follow the sharing control, and ⋯ follows them, in one row.
+  const order = await page
     .getByRole("button", { name: /^Sharing: / })
-    .boundingBox();
+    .evaluate((pill, label) => {
+      const section = pill
+        .closest("header")
+        ?.querySelector(`section[aria-label="${label}"]`);
+      return {
+        sameRow: !!section?.parentElement?.contains(pill),
+        after: !!(
+          section &&
+          pill.compareDocumentPosition(section) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+        ),
+      };
+    }, P.TOPICS_HEADING);
+  expect(order).toEqual({ sameRow: true, after: true });
   const section = await topicsSection(page).boundingBox();
-  expect(section!.y).toBeGreaterThan(tools!.y);
+  const more = await moreButton(page).boundingBox();
+  expect(more!.x).toBeGreaterThan(section!.x);
 });
 
 test("Remove takes a topic off at once, says so and records one call", async ({
@@ -2706,7 +2831,7 @@ test("Remove takes a topic off at once, says so and records one call", async ({
   await removeButton(page, "Harbor Logistics").click();
   await expect(status(page)).toHaveText(P.removed("Harbor Logistics"));
   expect(await chipNames(page)).toEqual(["Route optimisation"]);
-  // The focus lands on the next chip's Remove.
+  // The focus lands on the next chip's ×.
   await expect(removeButton(page, "Route optimisation")).toBeFocused();
   expect(await calls(page)).toEqual([
     {
@@ -2714,12 +2839,12 @@ test("Remove takes a topic off at once, says so and records one call", async ({
       args: [INTERVIEW_1, topicId("Harbor Logistics")],
     },
   ]);
-  // The last one: no chip is left, the Add control takes the focus.
+  // The last one: no chip is left, and no words say so; + Topic takes the focus.
   await removeButton(page, "Route optimisation").click();
   await expect(status(page)).toHaveText(P.removed("Route optimisation"));
   await expect(chips(page)).toHaveCount(0);
-  await expect(topicsSection(page).getByText(P.NO_TOPICS_YET)).toBeVisible();
-  await expect(addSelect(page)).toBeFocused();
+  await expect(topicsSection(page)).not.toContainText("No topics");
+  await expect(addTopicButton(page)).toBeFocused();
   expect(await calls(page)).toHaveLength(2);
 });
 
@@ -2730,47 +2855,77 @@ test("removing the last chip of several moves the focus to the one before", asyn
   await removeButton(page, "Survey Kit Co").click();
   await expect(status(page)).toHaveText(P.removed("Survey Kit Co"));
   await expect(removeButton(page, "Bluewater Partners")).toBeFocused();
-  // Under five now, the Add control is there, with the removed topic in it.
-  await expect(addSelect(page)).toBeVisible();
-  await expect(addSelect(page).locator("option")).toHaveText([
+  // Under five now, + Topic is there, and its picker offers the removed topic.
+  await expect(addTopicButton(page)).toBeVisible();
+  await addTopicButton(page).click();
+  await expect(pickable(page)).toHaveText([
     "Northfield Foods",
     "Survey Kit Co",
   ]);
 });
 
-test("Add offers the topics the note does not carry, by kind, and adds the chosen one", async ({
+test("+ Topic offers the topics the note does not carry, by kind, and adds the chosen one", async ({
   page,
 }) => {
   await open(page, `?note=${KICKOFF}`);
+  const requests = watch(page);
   expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
-  await expect(addSelect(page).locator("optgroup")).toHaveCount(5);
+  await expect(picker(page)).toHaveCount(0);
+  await addTopicButton(page).click();
+  await expect(addTopicButton(page)).toHaveAttribute("aria-expanded", "true");
+  // The search field takes the focus.
+  await expect(findTopic(page)).toBeFocused();
+  const kinds = picker(page).getByRole("group");
+  await expect(kinds).toHaveCount(5);
   expect(
-    await addSelect(page)
-      .locator("optgroup")
-      .evaluateAll((els) => els.map((e) => e.getAttribute("label"))),
+    await kinds.evaluateAll((els) =>
+      els.map((e) => e.firstElementChild?.textContent ?? ""),
+    ),
   ).toEqual(["Customers", "Partners", "Vendors", "Solutions", "Subjects"]);
-  await expect(addSelect(page).locator("option")).toHaveText([
+  await expect(pickable(page)).toHaveText([
     "Northfield Foods",
     "Bluewater Partners",
     "Survey Kit Co",
     "Route optimisation",
     "Pricing",
   ]);
-  await addSelect(page).selectOption({ label: "Pricing" });
-  await addButton(page).click();
+  // Opening it is client state only.
+  expect(requests()).toEqual([]);
+  await picker(page).getByRole("button", { name: "Pricing" }).click();
+  await expect(picker(page)).toHaveCount(0);
+  await expect(addTopicButton(page)).toBeFocused();
   await expect(status(page)).toHaveText(P.added("Pricing"));
   expect(await chipNames(page)).toEqual(["Harbor Logistics", "Pricing"]);
   expect(await calls(page)).toEqual([
     { name: "addTopic", args: [KICKOFF, topicId("Pricing")] },
   ]);
-  await expect(addSelect(page).locator("option")).toHaveCount(4);
+  await addTopicButton(page).click();
+  await expect(pickable(page)).toHaveCount(4);
+});
+
+test("the topic picker filters by its text, says when nothing matches and closes with Escape", async ({
+  page,
+}) => {
+  await open(page, `?note=${KICKOFF}`);
+  await addTopicButton(page).click();
+  await findTopic(page).fill("  sURVEY ");
+  await expect(pickable(page)).toHaveText(["Survey Kit Co"]);
+  await expect(picker(page).getByRole("group")).toHaveCount(1);
+  await findTopic(page).fill("zzz");
+  await expect(pickable(page)).toHaveCount(0);
+  await expect(picker(page)).toContainText(P.NO_TOPIC_MATCHES);
+  await page.keyboard.press("Escape");
+  await expect(picker(page)).toHaveCount(0);
+  await expect(addTopicButton(page)).toBeFocused();
+  await expect(addTopicButton(page)).toHaveAttribute("aria-expanded", "false");
+  expect(await calls(page)).toEqual([]);
 });
 
 test("a refused add or remove says so and leaves the chips as they were", async ({
   page,
 }) => {
   await open(page, `?fail=1&note=${KICKOFF}`);
-  await addButton(page).click();
+  await pickTopic(page, "Northfield Foods");
   await expect(topicsSection(page).getByRole("alert")).toHaveText(P.REFUSED);
   expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
   await removeButton(page, "Harbor Logistics").click();
@@ -2809,8 +2964,9 @@ test("a colleague's note shows its chips and nothing to change", async ({
 }) => {
   await open(page, `?tab=shared&note=${SHARED_SITE_VISIT}`);
   expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  // Chips without ×, and no + Topic.
   await expect(topicsSection(page).getByRole("button")).toHaveCount(0);
-  await expect(addSelect(page)).toHaveCount(0);
+  await expect(addTopicButton(page)).toHaveCount(0);
   // And no switch, as there is no folder column.
   await expect(switchGroup(page)).toHaveCount(0);
   // Without topics there is no section at all.
@@ -2822,11 +2978,41 @@ test("a note with no topics of one's own offers to add one", async ({
   page,
 }) => {
   await open(page, `?note=${README}`);
-  await expect(topicsSection(page).getByText(P.NO_TOPICS_YET)).toBeVisible();
-  await expect(addSelect(page)).toBeVisible();
-  await expect(addSelect(page).locator("option")).toHaveCount(
-    DATA.topics.length,
-  );
+  // No chips and no words for their absence: + Topic alone.
+  await expect(chips(page)).toHaveCount(0);
+  await expect(topicsSection(page)).toHaveText(P.ADD_TOPIC_BUTTON);
+  await addTopicButton(page).click();
+  await expect(pickable(page)).toHaveCount(DATA.topics.length);
+});
+
+test("+ Topic finds and adds a topic; × removes it", async ({ page }) => {
+  // Kickoff notes carries one topic (Harbor Logistics), so + Topic is offered.
+  await open(page, `?note=${KICKOFF}`);
+  expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  await addTopicButton(page).click();
+  await findTopic(page).fill("route");
+  await expect(pickable(page)).toHaveText(["Route optimisation"]);
+  await pickable(page).first().click();
+  await expect(status(page)).toHaveText(P.added("Route optimisation"));
+  expect(await chipNames(page)).toEqual([
+    "Harbor Logistics",
+    "Route optimisation",
+  ]);
+  await expect(chips(page).nth(1)).toContainText("Solutions");
+  expect(await calls(page)).toEqual([
+    { name: "addTopic", args: [KICKOFF, topicId("Route optimisation")] },
+  ]);
+
+  await removeButton(page, "Route optimisation").click();
+  await expect(status(page)).toHaveText(P.removed("Route optimisation"));
+  expect(await chipNames(page)).toEqual(["Harbor Logistics"]);
+  expect(await calls(page)).toEqual([
+    { name: "addTopic", args: [KICKOFF, topicId("Route optimisation")] },
+    {
+      name: "detachTopic",
+      args: [KICKOFF, topicId("Route optimisation")],
+    },
+  ]);
 });
 
 test("by keyboard: the switch, a kind, a topic and the chips are reached by Tab and worked by Enter or Space", async ({
@@ -2860,7 +3046,8 @@ test("by keyboard: the switch, a kind, a topic and the chips are reached by Tab 
   await expect(listHeading(page, "Harbor Logistics")).toBeVisible();
   await expect(noteLinks(page)).toHaveCount(3);
 
-  // The chips: Remove, Remove, the Add control, its button.
+  // The chips: ×, ×, + Topic; Space opens the picker on its search field, Tab reaches the
+  // first topic and Space adds it.
   await page.goto(`/dev/vault?note=${INTERVIEW_1}`, {
     waitUntil: "networkidle",
   });
@@ -2868,13 +3055,15 @@ test("by keyboard: the switch, a kind, a topic and the chips are reached by Tab 
   await page.keyboard.press("Tab");
   await expect(removeButton(page, "Route optimisation")).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(addSelect(page)).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(addButton(page)).toBeFocused();
+  await expect(addTopicButton(page)).toBeFocused();
   await page.keyboard.press("Space");
-  await expect(status(page)).toHaveText(
-    P.added(DATA.topics.find((x) => x.name === "Northfield Foods")!.name),
-  );
+  await expect(findTopic(page)).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    picker(page).getByRole("button", { name: "Northfield Foods" }),
+  ).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(status(page)).toHaveText(P.added("Northfield Foods"));
   await removeButton(page, "Harbor Logistics").focus();
   await page.keyboard.press("Enter");
   await expect(status(page)).toHaveText(P.removed("Harbor Logistics"));
@@ -2905,7 +3094,12 @@ test("at 390 px the column and the chips stay inside the window", async ({
   expect((await scrolls(page)).across).toBe(false);
   await removeButton(page, "Survey Kit Co").click();
   await expect(status(page)).toHaveText(P.removed("Survey Kit Co"));
-  for (const control of [addSelect(page), addButton(page)]) {
+  await addTopicButton(page).click();
+  for (const control of [
+    addTopicButton(page),
+    findTopic(page),
+    ...(await pickable(page).all()),
+  ]) {
     await control.scrollIntoViewIfNeeded();
     const box = (await control.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);

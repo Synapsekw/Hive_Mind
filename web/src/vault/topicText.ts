@@ -9,10 +9,13 @@ export const BY_TOPICS = "Topics";
 export const ALL_NOTES = "All notes";
 export const NO_TOPIC = "No topic";
 
+/** The name of the open note's topics: its chips, + Topic and the picker. */
 export const TOPICS_HEADING = "Topics";
-export const NO_TOPICS_YET = "No topics yet.";
+/** The name of the picker's popover. */
 export const ADD_TOPIC = "Add topic";
-export const ADD = "Add";
+export const ADD_TOPIC_BUTTON = "+ Topic";
+export const FIND_TOPIC = "Find a topic";
+export const NO_TOPIC_MATCHES = "No topic matches.";
 
 /** The name of a chip's Remove button. */
 export const removeName = (name: string) => `Remove ${name}`;
