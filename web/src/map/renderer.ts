@@ -570,6 +570,8 @@ function drawOrbit(
         groupPaths(F, kind, list, 1),
         0,
         topic,
+        0,
+        kind === "hub" ? list : [],
       );
       list.length = 0;
     }
@@ -892,9 +894,75 @@ function groupPaths(
   return [at(rad)];
 }
 
+/** A hub's breathing glow, in device px of blur: its centre and its value when still. */
+const HUB_BLUR = 19;
+const HUB_BLUR_STILL = 14;
+const GLOW_STEP = 1.08;
+const glowSprites = new Map<string, { c: HTMLCanvasElement; pad: number }>();
+
+/**
+ * A hub's glow, drawn once per colour, outer radius and blur (device px, whole): the disc and
+ * its shadow blur on a small canvas, stamped with drawImage. A shadow blur on the map's canvas
+ * is a full blur pass per fill, every frame; the sprite is one copy.
+ */
+function glowSprite(colour: string, r: number, blur: number) {
+  const key = `${colour}|${r}|${blur}`;
+  const hit = glowSprites.get(key);
+  if (hit) return hit;
+  const pad = r + 2 * blur;
+  const c = document.createElement("canvas");
+  c.width = c.height = 2 * pad;
+  const g = c.getContext("2d");
+  if (g) {
+    g.fillStyle = colour;
+    g.shadowColor = colour;
+    g.shadowBlur = blur;
+    g.beginPath();
+    g.arc(pad, pad, r, 0, TAU);
+    g.fill();
+  }
+  // Hub sizes and colours per theme are few; a theme change or a long zoom starts afresh.
+  if (glowSprites.size > 64) glowSprites.clear();
+  const out = { c, pad };
+  glowSprites.set(key, out);
+  return out;
+}
+
+/** Stamps the glow under each hub in `hubs` (drawn at `scale`), `blur` device px wide. */
+function stampHubGlow(
+  F: Frame,
+  colour: string,
+  hubs: readonly number[],
+  scale: number,
+  blur: number,
+  a: number,
+) {
+  const { ctx, dpr, s, model } = F;
+  // One drawing unit in device px (the flat views draw in box units, Orbit in stage px).
+  const dev = dpr * s;
+  ctx.globalAlpha = Math.min(1, a);
+  for (const i of hubs) {
+    const n = model.nodes[i];
+    if (!n) continue;
+    // The outer ring's radius (groupPaths), in device px.
+    const rDev = ((diam(F, n) / 2) * scale * depthOf(F, i) + 1.5) * dpr;
+    // Radii in 8% steps, so a zoom reuses a handful of sprites instead of making one per frame;
+    // the sprite is stretched to the exact radius.
+    const rb = Math.max(
+      1,
+      Math.round(GLOW_STEP ** Math.round(Math.log(rDev) / Math.log(GLOW_STEP))),
+    );
+    const { c, pad } = glowSprite(colour, rb, blur);
+    const [x, y] = P(F, i);
+    const h = (pad * (rDev / rb)) / dev;
+    ctx.drawImage(c, x - h, y - h, 2 * h, 2 * h);
+  }
+}
+
 /**
  * Fills one group: hubs with their soft breathing glow, locked dots hollow. `outline` is the
- * opacity of a 1 px outline, in the dot's own colour, around readable dots (0: none).
+ * opacity of a 1 px outline, in the dot's own colour, around readable dots (0: none). `hubs`
+ * are the group's hub nodes (for their glow), drawn at `scale`.
  */
 function fillGroup(
   F: Frame,
@@ -905,6 +973,8 @@ function fillGroup(
   glow: number,
   topic: number,
   outline = 0,
+  hubs: readonly number[] = [],
+  scale = 1,
 ) {
   const { ctx, pal, px, still, f, T } = F;
   if (kind === "hub") {
@@ -912,16 +982,20 @@ function fillGroup(
     if (!still && !F.fresh) F.ambient = true;
     ctx.fillStyle = colour;
     if (!F.fresh || glow) {
-      // Timeline and Orbit keep the soft breathing blur; so does a hub the pointer is on.
-      ctx.shadowColor = colour;
-      ctx.shadowBlur =
-        glow ||
-        (still
-          ? 14
-          : 19 + 5 * Math.sin(TAU * ((f.clock ?? f.time) / 5000 + topic / T)));
-      ctx.globalAlpha = 0.35 * alpha;
-      ctx.fill(outer);
-      ctx.shadowBlur = 0;
+      // Timeline and Orbit keep the soft breathing glow; so does a hub the pointer is on. The
+      // breathing swells its opacity (it once swelled the blur, 14 to 24 px).
+      const breath =
+        glow || still
+          ? 1
+          : 1 + 0.25 * Math.sin(TAU * ((f.clock ?? f.time) / 5000 + topic / T));
+      stampHubGlow(
+        F,
+        colour,
+        hubs,
+        scale,
+        glow || (still ? HUB_BLUR_STILL : HUB_BLUR),
+        0.35 * alpha * breath,
+      );
     }
     ctx.globalAlpha = alpha;
     ctx.fill(outer);
@@ -1037,6 +1111,7 @@ type Batch = {
   tone: number; // Rings: the ramp step the dots are filled with (7 for hot, focused, selected)
   outline: number;
   halo: number[]; // Rings: the nodes of this batch that get a halo (level 6 or 7, hubs), else []
+  hubs: number[]; // the batch's hub nodes (for their glow), else []
   paths: Path2D[];
 };
 type DotCache = {
@@ -1052,9 +1127,10 @@ type DotCache = {
 };
 const dotCaches = new WeakMap<Scene, DotCache>();
 
-type Group = Omit<Batch, "paths"> & { n: number[] };
+type Group = Omit<Batch, "paths" | "hubs"> & { n: number[] };
 const toBatch = (F: Frame, { n, ...g }: Group): Batch => ({
   ...g,
+  hubs: g.kind === "hub" ? n : [],
   paths: groupPaths(F, g.kind, n, 1),
 });
 
@@ -1226,6 +1302,8 @@ function drawDots(F: Frame) {
         b.paths,
         0,
         b.topic,
+        0,
+        b.hubs,
       );
     else
       fillGroup(
@@ -1355,6 +1433,9 @@ function drawOne(F: Frame, i: number, scale: number, glow: number) {
     paths,
     glow,
     n.topic,
+    0,
+    [i],
+    scale,
   );
 }
 
@@ -1375,6 +1456,7 @@ type NearBatch = {
   step: number; // Rings: the ramp step of a note or file; else 0
   level: number; // Rings: its freshness, for the halo; else 0
   halo: number[]; // Rings: the nodes that get a halo (hubs, notes at level 6 or 7), else []
+  hubs: number[]; // the batch's hub nodes (for their glow), else []
   paths: Path2D[];
 };
 type NearCache = Omit<DotCache, "batches" | "grow"> & {
@@ -1391,7 +1473,10 @@ const nearCaches = new WeakMap<Scene, NearCache>();
  */
 function nearBatches(F: Frame): Pick<NearCache, "batches" | "loose"> {
   const { model, f } = F;
-  const groups = new Map<string, Omit<NearBatch, "paths"> & { n: number[] }>();
+  const groups = new Map<
+    string,
+    Omit<NearBatch, "paths" | "hubs"> & { n: number[] }
+  >();
   const loose: number[] = [];
   let budget = NEAR_MAX;
   for (const i of F.near) {
@@ -1433,7 +1518,11 @@ function nearBatches(F: Frame): Pick<NearCache, "batches" | "loose"> {
   // Plain dots first, hubs on top.
   const batches = [...groups.values()]
     .sort((x, y) => +(x.kind === "hub") - +(y.kind === "hub"))
-    .map(({ n, ...g }) => ({ ...g, paths: groupPaths(F, g.kind, n, 1) }));
+    .map(({ n, ...g }) => ({
+      ...g,
+      hubs: g.kind === "hub" ? n : [],
+      paths: groupPaths(F, g.kind, n, 1),
+    }));
   return { batches, loose };
 }
 
@@ -1506,6 +1595,7 @@ function drawNear(F: Frame) {
       NEAR_GLOW,
       b.tone >= 0 ? b.tone : -1,
       b.outline,
+      b.hubs,
     );
   }
   for (const i of nc.loose) drawOne(F, i, 1, NEAR_GLOW);

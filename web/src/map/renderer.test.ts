@@ -1,6 +1,125 @@
-import { describe, expect, it } from "vitest";
-import { dotDiameter, fitGroupLabel, haloAlpha } from "./renderer";
-import type { ModelNode } from "./types";
+import { beforeAll, describe, expect, it } from "vitest";
+import { fixturePayload } from "./fixture";
+import { activity, buildModel } from "./graph";
+import { layout } from "./layouts";
+import {
+  dotDiameter,
+  drawFrame,
+  fitGroupLabel,
+  haloAlpha,
+  type FrameState,
+  type Palette,
+} from "./renderer";
+import { buildScene, type Scene } from "./scene";
+import type { MapModel, ModelNode } from "./types";
+
+// ---- A recording 2D context (no DOM under Vitest) ----
+
+type Log = {
+  /** Every property assignment, in order: [name, value]. */
+  sets: [string, unknown][];
+  /** Method calls by name. */
+  calls: Map<string, number>;
+};
+
+function fakeCanvas(log: Log = { sets: [], calls: new Map() }) {
+  const canvas = { width: 0, height: 0, log, getContext: () => ctx };
+  const state: Record<string | symbol, unknown> = { canvas };
+  const ctx = new Proxy(state, {
+    get(t, k) {
+      if (k in t) return t[k];
+      if (k === "createRadialGradient" || k === "createLinearGradient")
+        return () => ({ addColorStop() {} });
+      if (k === "measureText")
+        return (text: string) => ({ width: text.length * 6 });
+      if (k === "getTransform") return () => ({ a: 1, d: 1 });
+      return (..._: unknown[]) => {
+        const name = String(k);
+        log.calls.set(name, (log.calls.get(name) ?? 0) + 1);
+      };
+    },
+    set(t, k, v) {
+      log.sets.push([String(k), v]);
+      t[k] = v;
+      return true;
+    },
+  }) as unknown as CanvasRenderingContext2D;
+  return { canvas, ctx, log };
+}
+
+/** Every canvas the renderer makes for itself (layers, sprites), so their logs can be read. */
+const made: ReturnType<typeof fakeCanvas>[] = [];
+
+beforeAll(() => {
+  const g = globalThis as Record<string, unknown>;
+  g.Path2D = class {
+    moveTo() {}
+    lineTo() {}
+    arc() {}
+    closePath() {}
+    rect() {}
+  };
+  g.document = {
+    createElement: () => {
+      const c = fakeCanvas();
+      made.push(c);
+      return c.canvas;
+    },
+  };
+});
+
+const NOW = Date.UTC(2026, 10, 23, 14, 0);
+// Any parseable colour: the fake context draws nothing.
+const C = "rgb(10, 20, 30)";
+const PAL: Palette = {
+  hue: Array.from({ length: 8 }, () => C),
+  fg: C,
+  fg2: C,
+  bg: C,
+  brand: C,
+  line: C,
+  lineHi: C,
+  edge: C,
+  accent: C,
+  fresh: Array.from({ length: 8 }, () => C),
+  glow: C,
+  hub: C,
+  haloBlend: "lighter",
+};
+
+function world(view: "rings" | "timeline"): {
+  model: MapModel;
+  scene: Scene;
+  pos: [number, number][];
+} {
+  const model = buildModel(fixturePayload(NOW));
+  const pos = layout(view, model, NOW);
+  const scene = buildScene(model, view, pos, activity(model, NOW), NOW);
+  return { model, scene, pos };
+}
+
+function frame(
+  view: "rings" | "timeline",
+  w: ReturnType<typeof world>,
+  over: Partial<FrameState> = {},
+): FrameState {
+  return {
+    view,
+    cam: { k: 1, tx: 0, ty: 0 },
+    world: { w: 1000, h: 760 },
+    pos: w.pos,
+    lit: w.model.nodes.map(() => true),
+    soft: null,
+    hot: null,
+    sel: null,
+    focusRing: null,
+    labels: new Set(),
+    pulses: [],
+    time: 1000,
+    reducedMotion: false,
+    ...over,
+  };
+}
 
 function node(kind: ModelNode["kind"], nb: number[] = []): ModelNode {
   return {
@@ -96,5 +215,42 @@ describe("haloAlpha", () => {
     expect(haloAlpha(7, 1000, false)).toBeCloseTo(0.58, 10);
     expect(haloAlpha(7, 3000, false)).toBeCloseTo(0.42, 10);
     expect(haloAlpha(7, 4000, false)).toBeCloseTo(0.5, 10);
+  });
+});
+
+describe("hub glow", () => {
+  it("is stamped from a sprite: a calm frame never sets a shadow blur", () => {
+    for (const view of ["timeline", "rings"] as const) {
+      const w = world(view);
+      for (const time of [1000, 3333]) {
+        const { canvas, ctx, log } = fakeCanvas();
+        canvas.width = 1000;
+        canvas.height = 760;
+        drawFrame(ctx, 2, w.scene, w.model, frame(view, w, { time }), PAL);
+        const blurs = log.sets.filter(([k, v]) => k === "shadowBlur" && v);
+        expect(blurs).toEqual([]);
+      }
+    }
+  });
+
+  it("a hovered hub glows from a sprite too", () => {
+    const w = world("timeline");
+    const hub = w.model.nodes.find((n) => n.kind === "hub" && n.nb.length)!;
+    // Its neighbours keep their own soft glow; the hub's is the one drawn at 14 px.
+    const { canvas, ctx, log } = fakeCanvas();
+    canvas.width = 1000;
+    canvas.height = 760;
+    drawFrame(
+      ctx,
+      1,
+      w.scene,
+      w.model,
+      frame("timeline", w, { hot: hub.i }),
+      PAL,
+    );
+    const blurs = new Set(
+      log.sets.filter(([k, v]) => k === "shadowBlur" && v).map(([, v]) => v),
+    );
+    expect(blurs.has(14)).toBe(false);
   });
 });
