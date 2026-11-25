@@ -83,6 +83,8 @@ export type Result = { ok: true } | { ok: false };
 export type NoteChoice = { id: string; title: string; path: string };
 export type UploadStart = {
   batch: string;
+  /** One per file, in order: the name it is stored under (pass it to finishUpload) and its
+   * signed upload link; null when the link could not be signed. */
   slots: ({ name: string; url: string } | null)[];
 };
 
@@ -108,9 +110,15 @@ export type GalleryActions = {
     files: { name: string; size: number }[];
     noteId: string | null; // null: the person's private Uploads note
     folderId: string | null;
-  }): Promise<UploadStart | null>;
-  finishUpload(batch: string, name: string): Promise<GalleryFile | null>;
-  endUpload(batch: string): Promise<Result>;
+  }): Promise<(UploadStart & { noteId: string }) | null>; // noteId: the resolved home note
+  // The screen passes the batch's home note and folder again; the server re-checks them.
+  finishUpload(
+    batch: string,
+    name: string, // the slot's name
+    noteId: string,
+    folderId: string | null,
+  ): Promise<GalleryFile | null>;
+  endUpload(batch: string, noteId: string): Promise<Result>;
 };
 
 export type ViewerProps = {
