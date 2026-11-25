@@ -135,7 +135,12 @@ keyboard and screen-reader access. The same dots are shown in three views, and R
   topic, the largest first, up to twelve groups, the rest folded into "Other topics" (or "More
   topics" when a topic already has that name; "No topic" is always the last ring, is never folded
   and takes one of the twelve places), and a name that two kinds share carries its kind in
-  brackets, as "Atlas (Projects)". Links
+  brackets, as "Atlas (Projects)". Under Topic a second menu, "Kind", sits beside Group by and
+  lists the kinds the hive has topics of, each with its note count, then "All kinds". It opens on
+  the first kind (customers when there are any). With a kind chosen only the notes that hold a
+  topic of that kind are drawn, each under its strongest topic of that kind, and the fold is
+  named for the kind ("Other customers"); there is no "No topic" ring. "All kinds" is the mixed
+  view described above. Choosing a kind is client state, no request. Links
   groups items that link to each other into clusters, named after their best-linked note, with
   "Hub notes", "Small clusters", "Linked to hubs" (notes whose only links go to hub notes) and
   "Unlinked" for the rest. Time groups by month, with "Last 2 weeks" first when anything changed

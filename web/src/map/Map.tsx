@@ -25,12 +25,15 @@ import type { Scale } from "./timescale";
 import {
   GROUP_HEADING,
   grouping,
+  ofKind,
+  topicKinds,
   type Arrange,
   type Grouping,
 } from "./arrange";
 import { lit, nodeIndex, nodeKey, shown, topicIndexOf } from "./select";
 import { buildScene } from "./scene";
 import type { MapModel, MapPayload, NodeKind, View } from "./types";
+import { KIND_NAMES, type Kind } from "../topics/types";
 import { TopBar } from "./Controls";
 import { TodayButton } from "./TodayButton";
 import { DetailRail } from "./DetailRail";
@@ -79,6 +82,9 @@ export function HiveMap({
 }) {
   const [view, setView] = useState<View>("rings");
   const [arrange, setArrange] = useState<Arrange>("folder");
+  // Under Group by Topic: the kind whose topics are the groups, "all" for every kind mixed, or
+  // null while nothing is chosen (the first kind the hive has is then shown).
+  const [pickedKind, setPickedKind] = useState<Kind | "all" | null>(null);
   // The group filter and the selection are kept by name and by key, not by index, so they
   // follow the same group and node when a refresh shifts the indices (see `nodeKey`); people by id.
   const [topicNames, setTopicNames] = useState<string[]>([]);
@@ -109,11 +115,17 @@ export function HiveMap({
   // they are not rebuilt every minute. Going back to one already seen returns the same object.
   const entries = useMemo(() => new Map<string, Entry>(), [parsed]);
   const dayNow = Math.floor(now / DAY_MS) * DAY_MS;
-  const entryOf = (key: string, groups: () => Grouping): Entry => {
+  const entryOf = (
+    key: string,
+    groups: (p: MapPayload) => Grouping,
+    // The payload the model is built from: all of it, or the notes of one kind of topic.
+    from: () => MapPayload = () => parsed,
+  ): Entry => {
     let e = entries.get(key);
     if (!e) {
+      const p = from();
       e = {
-        model: buildModel(parsed, groups()),
+        model: buildModel(p, groups(p)),
         timeline: null,
         timelineAt: 0,
         scale: null,
@@ -125,8 +137,29 @@ export function HiveMap({
     }
     return e;
   };
+  const kindRows = useMemo(() => topicKinds(parsed), [parsed]);
+  // The kind in force: the one chosen if the hive still has it, else the first it has.
+  const kind: Kind | null =
+    pickedKind === "all"
+      ? null
+      : (kindRows.find((r) => r.kind === pickedKind)?.kind ??
+        kindRows[0]?.kind ??
+        null);
+  const kindOptions = useMemo(
+    () => [
+      ...kindRows.map((r) => [r.kind, KIND_NAMES[r.kind], r.notes] as const),
+      ["all", "All kinds"] as const,
+    ],
+    [kindRows],
+  );
   let entry: Entry;
-  if (view === "rings")
+  if (view === "rings" && arrange === "topic" && kind !== null)
+    entry = entryOf(
+      `rings:topic:${kind}`,
+      (p) => grouping(p, "topic", dayNow, 12, kind),
+      () => ofKind(parsed, kind),
+    );
+  else if (view === "rings")
     entry = entryOf(
       arrange === "time" ? `rings:time:${dayNow}` : `rings:${arrange}`,
       () => grouping(parsed, arrange, dayNow),
@@ -431,6 +464,16 @@ export function HiveMap({
     cameraRef.current?.fitView();
   };
 
+  const changeKind = (k: string) => {
+    setPickedKind(k as Kind | "all");
+    // As with a new arrangement: the group filter names groups of the old one.
+    setTopicNames([]);
+    setPreview(null);
+    setHot(null);
+    setSelKey(null);
+    cameraRef.current?.fitView();
+  };
+
   const filter =
     <T,>(set: (v: T) => void) =>
     (v: T) => {
@@ -501,6 +544,9 @@ export function HiveMap({
           onView={switchView}
           arrange={arrange}
           onArrange={changeArrange}
+          kinds={kindRows.length > 0 ? kindOptions : []}
+          kind={kind ?? "all"}
+          onKind={changeKind}
           filter={
             <FilterBar
               model={model}
