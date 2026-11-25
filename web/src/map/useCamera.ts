@@ -22,6 +22,7 @@ import {
   type Cam,
   type StageSize,
 } from "./camera";
+import { foldAware } from "./foldResize";
 
 export type CameraApi = {
   zoomBy(f: number): void;
@@ -187,9 +188,15 @@ export function useCamera(
       settle(SETTLE_MS);
     };
     measure();
-    const ro = new ResizeObserver(measure);
+    // A rail fold resizes the stage on every frame of its transition: the canvas keeps its
+    // bitmap (stretched by CSS) meanwhile and the stage is measured once, when it ends.
+    const fold = foldAware(measure, document.documentElement);
+    const ro = new ResizeObserver(fold.onResize);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      fold.dispose();
+    };
   }, [stage, set, settle, stop]);
 
   // Wheel, drag and double-click on the stage. Overlays (`data-map-overlay`) are left alone.

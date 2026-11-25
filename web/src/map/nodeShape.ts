@@ -35,3 +35,21 @@ export function ariaLabel(model: MapModel, n: ModelNode): string {
   if (n.locked) return `${n.title}${topic}`;
   return `${n.title}, ${KIND_WORD[n.kind]}${topic}`;
 }
+
+const labelCache = new WeakMap<MapModel, string[]>();
+
+/**
+ * Every node's aria label, built once per model: the hidden dot list re-renders on each filter
+ * keystroke, selection or glide, and 5,000 labels built each time showed up in typing.
+ */
+export function ariaLabels(
+  model: MapModel,
+  build: (model: MapModel, n: ModelNode) => string = ariaLabel,
+): string[] {
+  let out = labelCache.get(model);
+  if (!out) {
+    out = model.nodes.map((n) => build(model, n));
+    labelCache.set(model, out);
+  }
+  return out;
+}
