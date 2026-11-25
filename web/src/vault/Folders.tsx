@@ -1,8 +1,9 @@
 // The folder column: "All notes", the folder tree with counts and rule marks, and "Held" when
 // the workspace has held notes. Choosing and opening folders is client state only.
 import { folderMark } from "./marks";
-import { MarkTag } from "./MarkTag";
-import type { Scope, TreeNode } from "./tree";
+import { Glyph, markText } from "./MarkTag";
+import { folderSharing, HELD_ROW } from "./sentences";
+import { isShown, type Scope, type TreeNode } from "./tree";
 import type { VaultData } from "./types";
 import s from "./vault.module.css";
 
@@ -24,7 +25,8 @@ function Folder({
   const isOpen = p.opened.has(node.path);
   const chosen = p.scope.kind === "folder" && p.scope.path === node.path;
   const mark = folderMark(node.rule, p.members);
-  const hasChildren = node.children.length > 0;
+  const kids = node.children.filter(isShown);
+  const hasChildren = kids.length > 0;
   return (
     <li>
       <div className={s.folderRow} style={{ paddingLeft: depth * 14 }}>
@@ -54,13 +56,21 @@ function Folder({
           <span className={s.folderName} title={node.path}>
             {node.name}
           </span>
-          {mark && <MarkTag mark={mark} quiet />}
+          {mark && (
+            <span
+              className={s.folderMark}
+              title={folderSharing(markText(mark))}
+            >
+              <Glyph kind={mark.kind} />
+              <span className={s.srOnly}>{folderSharing(markText(mark))}</span>
+            </span>
+          )}
           <span className={s.folderCount}>{node.count}</span>
         </button>
       </div>
       {hasChildren && isOpen && (
         <ul className={s.tree}>
-          {node.children.map((c) => (
+          {kids.map((c) => (
             <Folder key={c.path} {...p} node={c} depth={depth + 1} />
           ))}
         </ul>
@@ -87,7 +97,7 @@ export function Folders(p: Props) {
             </button>
           </div>
         </li>
-        {p.root.children.map((c) => (
+        {p.root.children.filter(isShown).map((c) => (
           <Folder key={c.path} {...p} node={c} depth={0} />
         ))}
         {p.held > 0 && (
@@ -100,8 +110,12 @@ export function Folders(p: Props) {
                 aria-pressed={p.scope.kind === "held"}
                 onClick={() => p.onScope({ kind: "held" })}
               >
-                <span className={s.folderName}>Held</span>
-                <span className={s.folderCount}>{p.held}</span>
+                <span className={`${s.folderName} ${s.heldName}`}>
+                  {HELD_ROW}
+                </span>
+                <span className={`${s.folderCount} ${s.heldName}`}>
+                  {p.held}
+                </span>
               </button>
             </div>
           </li>

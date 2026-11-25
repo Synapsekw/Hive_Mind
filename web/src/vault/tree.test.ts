@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTree, notesIn } from "./tree";
+import { buildTree, isShown, notesIn } from "./tree";
 import type { FolderRule, VaultNote } from "./types";
 
 function note(path: string, extra: Partial<VaultNote> = {}): VaultNote {
@@ -142,5 +142,27 @@ describe("notesIn by topic", () => {
       notesIn(notes, { kind: "untopiced" }, "pricing").map((n) => n.path),
     ).toEqual(["c.md"]);
     expect(notesIn(notes, { kind: "untopiced" }, "call")).toEqual([]);
+  });
+});
+
+describe("isShown", () => {
+  it("hides a folder with no notes and no rule", () => {
+    const root = buildTree(
+      [note("a/x.md")],
+      [{ path: "empty", visibility: null, shared_with: [] }],
+    );
+    expect(isShown(root.children.find((c) => c.path === "empty")!)).toBe(false);
+  });
+  it("keeps an empty folder that has a rule", () => {
+    const root = buildTree([], [rule("ruled")]);
+    expect(isShown(root.children[0]!)).toBe(true);
+  });
+  it("keeps an empty folder whose child has a rule", () => {
+    const root = buildTree([], [rule("p/c")]);
+    expect(isShown(root.children[0]!)).toBe(true);
+  });
+  it("keeps a folder with notes", () => {
+    const root = buildTree([note("a/x.md")], []);
+    expect(isShown(root.children[0]!)).toBe(true);
   });
 });

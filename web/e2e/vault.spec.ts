@@ -12,8 +12,10 @@ import {
   DELETE_QUESTION,
   DELETED,
   folderSentence,
+  folderSharing,
   keepLinkName,
   LINKED_WITH,
+  NONE_OPTION,
   noteSentence,
   UNLINK_FAILED,
   UNLINK_GROUP,
@@ -330,10 +332,61 @@ test("the folder control shows the database's exact counts", async ({
       preview: fixturePreview(DATA, GROUP_FOLDER),
     }),
   );
-  await expect(control.getByRole("radio", { name: "No rule" })).toBeVisible();
+  await expect(control.getByRole("radio", { name: NONE_OPTION })).toBeVisible();
   expect(await calls(page)).toEqual([
     { name: "preview", args: [DATA.workspaces[0]!.id, GROUP_FOLDER] },
   ]);
+});
+
+test("rows show their topics and no sharing words", async ({ page }) => {
+  await open(page);
+  const row = noteLinks(page).filter({ hasText: "Kickoff notes" });
+  await expect(row).toContainText("Harbor Logistics");
+  await expect(row.locator("[title]")).toHaveAttribute(
+    "title",
+    /harbor-logistics/,
+  );
+  // The words are for screen readers only now: present, but clipped to a point.
+  const words = row.getByText("Ahmed, from harbor-logistics", { exact: true });
+  await expect(words).toHaveCount(1);
+  const box = await words.boundingBox();
+  expect(box!.width).toBeLessThanOrEqual(1);
+  expect(box!.height).toBeLessThanOrEqual(1);
+});
+
+test("a row with many topics shows two and a count", async ({ page }) => {
+  await open(page);
+  const row = noteLinks(page).filter({ hasText: "Scope and assumptions" });
+  await expect(row).toContainText("Harbor Logistics");
+  await expect(row).toContainText("Route optimisation");
+  await expect(row).toContainText("+3");
+});
+
+test("an empty folder without a rule is not listed", async ({ page }) => {
+  await open(page);
+  await expect(
+    folders(page).getByRole("button", { name: /^archive\b/ }),
+  ).toHaveCount(0);
+  await expect(
+    folders(page).getByRole("button", { name: /^clients\b/ }),
+  ).toBeVisible();
+});
+
+test("a folder's sharing reads Folder sharing", async ({ page }) => {
+  await open(page);
+  await folders(page)
+    .getByRole("button", { name: /^decisions\b/ })
+    .click();
+  await expect(
+    page.getByRole("button", { name: folderSharing("none") }),
+  ).toBeVisible();
+});
+
+test("the held row says it waits for you", async ({ page }) => {
+  await open(page);
+  await expect(
+    folders(page).getByRole("button", { name: /^Held, waiting for you/ }),
+  ).toBeVisible();
 });
 
 test("a note under a folder rule offers Same as folder", async ({ page }) => {
@@ -343,7 +396,7 @@ test("a note under a folder rule offers Same as folder", async ({ page }) => {
     noteControl(page).getByRole("radio", { name: "Same as folder" }),
   ).toBeChecked();
   await expect(
-    noteControl(page).getByRole("radio", { name: "No rule" }),
+    noteControl(page).getByRole("radio", { name: NONE_OPTION }),
   ).toHaveCount(0);
 });
 

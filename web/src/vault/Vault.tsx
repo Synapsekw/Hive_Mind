@@ -665,6 +665,7 @@ export function Vault({
             hrefFor={hrefFor}
             now={now}
             members={data.members}
+            topics={data.topics}
             empty={empty}
             more={more}
           />

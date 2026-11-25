@@ -85,6 +85,13 @@ export function releaseSentence(mark: Mark): string {
   return `This note was written by a self-hosted agent. Releasing it makes it follow its sharing setting: ${mark.label}.`;
 }
 
+// The left column and a folder's sharing control.
+export const HELD_ROW = "Held, waiting for you";
+export const FOLDER_SHARING = "Folder sharing";
+export const NO_FOLDER_RULE = "none";
+export const NONE_OPTION = "None (each note decides)";
+export const folderSharing = (text: string) => `${FOLDER_SHARING}: ${text}`;
+
 // Deleting a note: the question before it, and what is said after.
 export const DELETE_QUESTION =
   "Delete this note? It is gone for good, with its history and its links. Files attached to it stay in the gallery.";
