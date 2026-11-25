@@ -3275,6 +3275,46 @@ test("Review shows the held notes", async ({ page }) => {
   );
 });
 
+test("in a narrow card Review shows the held notes and the picker stays shut", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await open(page);
+  await preview(page).getByRole("button", { name: "Review" }).click();
+  const picker = page.getByRole("button", { name: /^Choose folder or topic/ });
+  await expect(picker).toHaveAccessibleName(/: Held$/);
+  await expect(picker).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    page.getByRole("group", { name: "Folders and topics" }),
+  ).toHaveCount(0);
+  await expect(noteLinks(page)).toHaveCount(
+    DATA.notes.filter(
+      (n) => n.quarantined && n.workspace_id === DATA.workspaces[0]!.id,
+    ).length,
+  );
+});
+
+test("the narrow picker closes on an outside press and on Escape", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await open(page);
+  const picker = page.getByRole("button", { name: /^Choose folder or topic/ });
+  const pop = page.getByRole("group", { name: "Folders and topics" });
+  await picker.click();
+  await expect(pop).toBeVisible();
+  // An outside press on a spot that takes no focus.
+  await page
+    .getByRole("main", { name: "Vault" })
+    .click({ position: { x: 600, y: 4 } });
+  await expect(pop).toHaveCount(0);
+  await picker.click();
+  await expect(pop).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(pop).toHaveCount(0);
+  await expect(picker).toBeFocused();
+});
+
 test("Shared with me says how many notes from how many colleagues", async ({
   page,
 }) => {
