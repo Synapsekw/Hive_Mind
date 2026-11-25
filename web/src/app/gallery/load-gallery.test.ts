@@ -974,6 +974,76 @@ describe("loadPage: server filters", () => {
     expect(op(q!, "or")).toHaveLength(0);
   });
 
+  it("asks for 120 ids in three requests of at most 50, merged newest first", async () => {
+    const ids = Array.from({ length: 120 }, (_, i) => fid(i + 1));
+    // Each request answers its own ids' rows, in its own (newest-first) order.
+    const t = stub((c) => {
+      if (c.table !== "files") return world()(c);
+      const asked = (args(c, "in") as [string, string[]] | undefined)?.[1];
+      return ok(
+        (asked ?? [])
+          .map((id) => file(Number(id.slice(-12))))
+          .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
+      );
+    });
+    const cursor = {
+      created_at: "2026-11-21T00:00:00.000000+00:00",
+      id: fid(999),
+    };
+    const page = await loadPage(t.db, { ...NO_FILTER, ids }, cursor);
+    const reads = table(t, "files");
+    expect(
+      reads.map((q) => (args(q, "in") as [string, string[]])[1].length),
+    ).toEqual([50, 50, 20]);
+    for (const q of reads) {
+      expect(args(q, "limit")).toEqual([201]);
+      expect(op(q, "or")).toHaveLength(1);
+    }
+    // file(n) is newer the smaller n is: the merged page is 1..120 in order, with no next.
+    expect(page!.files.map((f) => f.id)).toEqual(ids);
+    expect(page!.next).toBeNull();
+  });
+
+  it("cuts merged id requests to 200 and points next at the 200th", async () => {
+    // 60 ids are two requests (50 and 10); the stub answers 150 rows to each so the union
+    // holds more than a page, and the merge must keep only its newest 201.
+    const ids = Array.from({ length: 60 }, (_, i) => fid(i + 1));
+    let n = 0;
+    const t = stub((c) => {
+      if (c.table !== "files") return world()(c);
+      n += 1;
+      const start = n === 1 ? 1 : 2;
+      // Interleaved: the first answers odd rows, the second even rows.
+      return ok(Array.from({ length: 150 }, (_, i) => file(start + 2 * i)));
+    });
+    const page = await loadPage(t.db, { ...NO_FILTER, ids }, null);
+    expect(page!.files).toHaveLength(200);
+    expect(page!.files.map((f) => f.id)).toEqual(
+      Array.from({ length: 200 }, (_, i) => fid(i + 1)),
+    );
+    expect(page!.next).toEqual({
+      created_at: file(200).created_at,
+      id: fid(200),
+    });
+  });
+
+  it("an empty id list is one request, and a failed id request fails the page", async () => {
+    const t = stub(world({ files: [] }));
+    await loadPage(t.db, { ...NO_FILTER, ids: [] }, null);
+    expect(table(t, "files").map((q) => args(q, "in"))).toEqual([["id", []]]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let n = 0;
+    const failing = stub((c) => {
+      if (c.table !== "files") return world()(c);
+      n += 1;
+      return n === 2
+        ? { data: null, error: { message: "boom", code: "XX000" } }
+        : ok([]);
+    });
+    const ids = Array.from({ length: 60 }, (_, i) => fid(i + 1));
+    expect(await loadPage(failing.db, { ...NO_FILTER, ids }, null)).toBeNull();
+  });
+
   it("adds nothing for an empty filter, and the keyset with a cursor", async () => {
     const t = stub(world({ files: [] }));
     const cursor = {

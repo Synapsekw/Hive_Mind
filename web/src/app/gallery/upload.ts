@@ -34,6 +34,8 @@ const UPLOADS_BODY = "Files you uploaded in the gallery.";
 const FILE_NAME_MAX = 255;
 /** A type that says nothing about the content; the row's own type is what the gallery reads. */
 const BYTES = "application/octet-stream";
+/** Postgres: unique violation. */
+const UNIQUE = "23505";
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 const first = (res: Res): Row | undefined =>
@@ -134,15 +136,16 @@ async function destination(
 ): Promise<{ workspace: string; noteId: string } | null> {
   if (noteId) {
     // The session lives in the note's workspace, so its files and the note it ends in agree.
+    // Whose note it is, is the database's answer: upload_session_open refuses a workspace that
+    // is not the caller's, and files_before_insert a note that is not theirs.
     const res = (await db
       .from("notes")
-      .select("id,workspace_id,member_id")
+      .select("id,workspace_id")
       .eq("id", noteId)
       .limit(1)) as Res;
     if (failed("home note query", res)) return null;
     const note = first(res);
-    if (!note || note.member_id !== member || !isUuid(note.workspace_id))
-      return null;
+    if (!note || !isUuid(note.workspace_id)) return null;
     return { workspace: note.workspace_id, noteId };
   }
   const ws = (await db
@@ -220,7 +223,11 @@ const baseType = (v: unknown) => text(v).split(";")[0]!.trim().toLowerCase();
 /**
  * Records one uploaded file: checks the object is in the batch's folder, at most 50 MB and not
  * stored under a type other than its name's, then inserts its row with the type its name gives.
- * An object whose row cannot be written is removed. A failure to join the folder keeps the file.
+ * Whose session, note and folder these are is the database's answer (tag_session,
+ * files_before_insert, the folder policies); this side only builds the path from the session
+ * row. Once the object has been seen, any refusal removes it, but never an object a file row
+ * already points at: a second finish of the same file answers the row the first one recorded.
+ * A failure to join the folder keeps the file.
  */
 export async function finishUploadIn(
   db: Db,
@@ -242,7 +249,7 @@ export async function finishUploadIn(
     ownHive(db, uid, { profile: true }),
     db
       .from("sessions")
-      .select("id,hive_id,member_id,workspace_id,agent_id,ended_at")
+      .select("hive_id,member_id,workspace_id")
       .eq("id", batch)
       .limit(1) as unknown as Promise<Res>,
     db
@@ -251,23 +258,67 @@ export async function finishUploadIn(
       .eq("id", noteId)
       .limit(1) as unknown as Promise<Res>,
   ]);
-  if (hive === "error" || hive === null) return null;
+  // Without the session row there is no path to look at, so nothing to record or remove.
   if (failed("upload session query", sessionRes)) return null;
   const session = first(sessionRes);
-  if (
-    !session ||
-    session.member_id !== hive.memberId ||
-    session.agent_id != null ||
-    session.ended_at != null ||
-    !isUuid(session.workspace_id)
-  )
+  if (!session || !isUuid(session.member_id) || !isUuid(session.workspace_id))
     return null;
+  const member = session.member_id;
 
-  const dir = batchDir(hive.memberId, session.workspace_id, batch);
+  const notes = new Map<string, { title: string; effective: string }>();
+  const note = failed("upload note query", noteRes)
+    ? undefined
+    : first(noteRes);
+  if (note && note.id === noteId)
+    notes.set(noteId, {
+      title: text(note.title),
+      effective: text(note.effective),
+    });
+  const profile = hive === "error" || hive === null ? null : hive;
+  // A row the database accepted (or already holds) under this member is the caller's.
+  const asFile = async (row: Row, folders: string[]): Promise<GalleryFile> =>
+    toFile(row, {
+      mine: new Set([member]),
+      names: new Map(profile ? [[profile.memberId, profile.displayName]] : []),
+      notes,
+      thumbs: await thumbsFor(db, [row]),
+      refs: new Map(),
+      folders: new Map([[text(row.id), folders]]),
+    });
+
+  const dir = batchDir(member, session.workspace_id, batch);
   const path = `${dir}/${name}`;
   const bucket = db.storage.from(BUCKET);
+
+  /** The file row already pointing at the object, if the caller can read one. */
+  const recorded = async (): Promise<Row | null | "error"> => {
+    const res = (await db
+      .from("files")
+      .select(FILE_COLUMNS)
+      .eq("storage_path", path)
+      .limit(1)) as Res;
+    if (failed("upload row query", res)) return "error";
+    return first(res) ?? null;
+  };
+  /**
+   * Gives up on the object: answers the row already recorded for it, if there is one, and
+   * otherwise removes it. With no way to tell (the read failed), it is kept.
+   */
+  const giveUp = async (what: string): Promise<GalleryFile | null> => {
+    const row = await recorded();
+    if (row && row !== "error") return asFile(row, []);
+    if (row === null) {
+      const gone = await bucket.remove([path]);
+      storageFailed(what, gone.error);
+    }
+    return null;
+  };
+
   const listed = await bucket.list(dir, { search: name });
-  if (storageFailed("upload check", listed.error)) return null;
+  // The object cannot be confirmed: answer a row already recorded for it, else remove it, best
+  // effort, so an upload that is not recorded leaves nothing behind.
+  if (storageFailed("upload check", listed.error))
+    return giveUp("removing an unconfirmed upload");
   const object = (listed.data ?? []).find((o) => o.name === name);
   if (!object) return null;
   const meta = (object.metadata ?? {}) as Row;
@@ -280,17 +331,14 @@ export async function finishUploadIn(
     size < 0 ||
     size > MAX_UPLOAD_BYTES ||
     (stored !== "" && stored !== BYTES && stored !== mime)
-  ) {
-    const gone = await bucket.remove([path]);
-    storageFailed("removing a refused upload", gone.error);
-    return null;
-  }
+  )
+    return giveUp("removing a refused upload");
 
   const inserted = (await db
     .from("files")
     .insert({
       hive_id: session.hive_id,
-      member_id: hive.memberId,
+      member_id: member,
       workspace_id: session.workspace_id,
       note_id: noteId,
       storage_path: path,
@@ -300,45 +348,26 @@ export async function finishUploadIn(
       session_id: batch,
     })
     .select(FILE_COLUMNS)) as Res;
-  const row = failed("upload row insert", inserted)
-    ? undefined
-    : first(inserted);
-  if (!row) {
-    const gone = await bucket.remove([path]);
-    storageFailed("removing an unrecorded upload", gone.error);
-    return null;
+  if (inserted.error) {
+    failed("upload row insert", inserted);
+    // A row already holds this path (a second finish): never remove what it points at.
+    if (inserted.error.code === UNIQUE) {
+      const row = await recorded();
+      return row && row !== "error" ? asFile(row, []) : null;
+    }
+    return giveUp("removing an unrecorded upload");
   }
+  const row = first(inserted);
+  if (!row) return giveUp("removing an unrecorded upload");
 
   const fileId = text(row.id);
-  const [joined, thumbs] = await Promise.all([
-    folderId
-      ? (db.from("gallery_folder_files").insert({
-          folder_id: folderId,
-          file_id: fileId,
-        }) as unknown as Promise<Res>)
-      : Promise.resolve(null),
-    thumbsFor(db, [row]),
-  ]);
-  const inFolder =
-    !!folderId && !!joined && !failed("upload folder join", joined);
-
-  const notes = new Map<string, { title: string; effective: string }>();
-  const note = failed("upload note query", noteRes)
-    ? undefined
-    : first(noteRes);
-  if (note && note.id === noteId)
-    notes.set(noteId, {
-      title: text(note.title),
-      effective: text(note.effective),
-    });
-  return toFile(row, {
-    mine: new Set([hive.memberId]),
-    names: new Map([[hive.memberId, hive.displayName]]),
-    notes,
-    thumbs,
-    refs: new Map(),
-    folders: new Map(inFolder ? [[fileId, [folderId as string]]] : []),
-  });
+  const joined = folderId
+    ? ((await db
+        .from("gallery_folder_files")
+        .insert({ folder_id: folderId, file_id: fileId })) as Res)
+    : null;
+  const inFolder = !!joined && !failed("upload folder join", joined);
+  return asFile(row, inFolder ? [folderId as string] : []);
 }
 
 /** Ends the batch: its files' session gets its home note and a title, and is closed. */

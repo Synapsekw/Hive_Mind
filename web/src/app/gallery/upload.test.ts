@@ -60,6 +60,8 @@ function stub(
     session?: Res;
     rpc?: Record<string, Res>;
     fileInsert?: Res;
+    /** The read of a file row by its storage path. */
+    existing?: Res;
     folderInsert?: Res;
     listed?: unknown;
     signUpload?: (path: string) => unknown;
@@ -119,6 +121,7 @@ function stub(
           ])
         );
       case "files":
+        if (!has(c, "insert")) return opts.existing ?? ok([]);
         return opts.fileInsert ?? ok([fileRow()]);
       case "gallery_folder_files":
         return opts.folderInsert ?? ok(null);
@@ -345,23 +348,28 @@ describe("startUploadIn", () => {
     expect(t.inserted("notes")).toEqual([]);
   });
 
-  it("refuses a given note that is not the caller's, or not readable, before opening a session", async () => {
-    for (const note of [
-      ok([]),
-      ok([
-        {
-          id: N2,
-          title: "His",
-          workspace_id: W2,
-          member_id: "someone",
-          effective: "group",
-        },
-      ]),
-    ]) {
+  it("refuses a given note it cannot read before opening a session", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const note of [ok([]), boom, ok([{ id: N2, workspace_id: null }])]) {
       const t = stub({ note });
       expect(await startUploadIn(t.db, request({ noteId: N2 }))).toBeNull();
       expect(t.rpc).not.toHaveBeenCalled();
     }
+  });
+
+  it("leaves whose note it is to the database: its refusal to open the session answers null", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      note: ok([{ id: N2, workspace_id: W2, member_id: "someone" }]),
+      rpc: { upload_session_open: boom },
+    });
+    expect(await startUploadIn(t.db, request({ noteId: N2 }))).toBeNull();
+    expect(t.rpc).toHaveBeenCalledWith("upload_session_open", {
+      p_workspace: W2,
+    });
+    expect(t.createSignedUploadUrl).not.toHaveBeenCalled();
+    const [q] = t.calls.filter((c) => c.table === "notes");
+    expect(q!.ops[0]).toEqual(["select", ["id,workspace_id"]]);
   });
 
   it("gives files with the same stored name a slot each, under distinct names", async () => {
@@ -528,7 +536,6 @@ describe("finishUploadIn", () => {
         data: [{ name: "Deck-v2.pptx.old", metadata: { size: 1 } }],
         error: null,
       },
-      { data: null, error: { message: "down", statusCode: "500" } },
     ]) {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const t = stub({ listed });
@@ -537,6 +544,26 @@ describe("finishUploadIn", () => {
       ).toBeNull();
       expect(t.inserted("files")).toEqual([]);
     }
+  });
+
+  it("removes, best effort, an object it cannot confirm, unless a row already records it", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const down = { data: null, error: { message: "down", statusCode: "500" } };
+    const t = stub({ listed: down });
+    expect(await finishUploadIn(t.db, SID, "Deck-v2.pptx", N, null)).toBeNull();
+    expect(t.remove).toHaveBeenCalledWith([`${DIR}/Deck-v2.pptx`]);
+    expect(t.inserted("files")).toEqual([]);
+
+    const kept = stub({ listed: down, existing: ok([fileRow()]) });
+    const out = await finishUploadIn(kept.db, SID, "Deck-v2.pptx", N, null);
+    expect(out?.id).toBe(FILE);
+    expect(kept.remove).not.toHaveBeenCalled();
+
+    const unsure = stub({ listed: down, existing: boom });
+    expect(
+      await finishUploadIn(unsure.db, SID, "Deck-v2.pptx", N, null),
+    ).toBeNull();
+    expect(unsure.remove).not.toHaveBeenCalled();
   });
 
   it("removes an object that is over 50 MB or stored under a type other than its name's", async () => {
@@ -596,30 +623,85 @@ describe("finishUploadIn", () => {
     expect(t.remove).not.toHaveBeenCalled();
   });
 
-  it("refuses a session that is not the caller's open upload, before touching storage", async () => {
+  it("answers null without touching storage when the session row cannot be read", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const open = {
-      id: SID,
-      hive_id: HIVE,
-      member_id: M,
-      workspace_id: W,
-      agent_id: null,
-      ended_at: null,
-    };
     for (const session of [
       ok([]),
       boom,
-      ok([{ ...open, member_id: "someone" }]),
-      ok([{ ...open, agent_id: "00000000-0000-4000-8000-00000000a9e7" }]),
-      ok([{ ...open, ended_at: "2026-11-25T10:00:00Z" }]),
+      ok([{ hive_id: HIVE, member_id: M, workspace_id: null }]),
     ]) {
       const t = stub({ session });
       expect(
         await finishUploadIn(t.db, SID, "Deck-v2.pptx", N, null),
       ).toBeNull();
       expect(t.list).not.toHaveBeenCalled();
+      expect(t.remove).not.toHaveBeenCalled();
       expect(t.inserted("files")).toEqual([]);
     }
+  });
+
+  it("reads the session only to build the path, and leaves whose it is to the database", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      // An ended session or another's: tag_session refuses the row, and the object goes.
+      fileInsert: {
+        data: null,
+        error: { message: "not your upload session", code: "P0001" },
+      },
+    });
+    expect(await finishUploadIn(t.db, SID, "Deck-v2.pptx", N, null)).toBeNull();
+    const [q] = t.calls.filter((c) => c.table === "sessions");
+    expect(q!.ops[0]).toEqual(["select", ["hive_id,member_id,workspace_id"]]);
+    expect(t.inserted("files")).toHaveLength(1);
+    expect(t.remove).toHaveBeenCalledWith([`${DIR}/Deck-v2.pptx`]);
+  });
+
+  it("still records the file when the caller's profile cannot be read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({ own: boom });
+    const out = await finishUploadIn(t.db, SID, "Deck-v2.pptx", N, null);
+    expect(out).toMatchObject({ id: FILE, mine: true, owner: "" });
+  });
+
+  it("a second finish of the same file never removes what the first recorded", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const dup = {
+      data: null,
+      error: { message: "duplicate key", code: "23505" },
+    };
+    const again = stub({ fileInsert: dup, existing: ok([fileRow()]) });
+    const out = await finishUploadIn(again.db, SID, "Deck-v2.pptx", N, F);
+    expect(again.remove).not.toHaveBeenCalled();
+    expect(out).toMatchObject({
+      id: FILE,
+      name: "Deck-v2.pptx",
+      session_id: SID,
+    });
+    const read = again.calls.filter(
+      (c) => c.table === "files" && !c.ops.some(([m]) => m === "insert"),
+    );
+    expect(read[0]!.ops).toContainEqual([
+      "eq",
+      ["storage_path", `${DIR}/Deck-v2.pptx`],
+    ]);
+
+    // The row is there but not readable, or the read fails: still nothing is removed.
+    for (const existing of [ok([]), boom]) {
+      const t = stub({ fileInsert: dup, existing });
+      expect(
+        await finishUploadIn(t.db, SID, "Deck-v2.pptx", N, null),
+      ).toBeNull();
+      expect(t.remove).not.toHaveBeenCalled();
+    }
+  });
+
+  it("a refused upload that a row already records is answered, not removed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({ fileInsert: boom, existing: ok([fileRow()]) });
+    expect((await finishUploadIn(t.db, SID, "Deck-v2.pptx", N, null))?.id).toBe(
+      FILE,
+    );
+    expect(t.remove).not.toHaveBeenCalled();
   });
 
   it("refuses bad arguments before any query", async () => {

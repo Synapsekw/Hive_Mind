@@ -73,6 +73,30 @@ const chunks = <T>(all: T[]): T[][] => {
   return out;
 };
 
+/** Newest first, as the index is ordered: created_at, then id, both descending. */
+const newestFirst = (a: Row, b: Row) => {
+  const ta = text(a.created_at),
+    tb = text(b.created_at);
+  if (ta !== tb) return ta < tb ? 1 : -1;
+  const ia = text(a.id),
+    ib = text(b.id);
+  return ia === ib ? 0 : ia < ib ? 1 : -1;
+};
+
+/** The answers of one index read split by ids, as one answer: the first error, or the rows. */
+function merged(answers: Res[]): Res {
+  if (answers.length === 1) return answers[0]!;
+  const bad = answers.find((r) => r.error);
+  if (bad) return bad;
+  return {
+    data: answers
+      .flatMap(rows)
+      .sort(newestFirst)
+      .slice(0, PAGE + 1),
+    error: null,
+  };
+}
+
 /** Only the error's code and message, never a payload. */
 function failed(what: string, res: Res): boolean {
   if (!res.error) return false;
@@ -300,18 +324,32 @@ async function page(
   if (hive === null) return { state: "no-hive" };
   const hiveId = hive.id;
 
-  let index = db.from("files").select(FILE_COLUMNS).eq("hive_id", hiveId);
-  if (filter.kinds.length) index = index.in("kind", filter.kinds);
-  if (filter.session) index = index.eq("session_id", filter.session);
-  if (filter.owner) index = index.eq("member_id", filter.owner);
-  if (filter.from) index = index.gte("created_at", filter.from);
-  if (filter.to) index = index.lt("created_at", filter.to);
-  if (filter.ids) index = index.in("id", filter.ids);
-  // Keyset: strictly after the last file shown, in the same (created_at, id) order.
-  if (cursor)
-    index = index.or(
-      `created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`,
-    );
+  const indexFor = (ids: string[] | null) => {
+    let index = db.from("files").select(FILE_COLUMNS).eq("hive_id", hiveId);
+    if (filter.kinds.length) index = index.in("kind", filter.kinds);
+    if (filter.session) index = index.eq("session_id", filter.session);
+    if (filter.owner) index = index.eq("member_id", filter.owner);
+    if (filter.from) index = index.gte("created_at", filter.from);
+    if (filter.to) index = index.lt("created_at", filter.to);
+    if (ids) index = index.in("id", ids);
+    // Keyset: strictly after the last file shown, in the same (created_at, id) order.
+    if (cursor)
+      index = index.or(
+        `created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`,
+      );
+    return index
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(PAGE + 1) as unknown as Promise<Res>;
+  };
+  // An id filter goes in requests of IDS_PER_REQUEST, in parallel, as note ids do. Each request
+  // has the same keyset, order and limit, so the newest PAGE + 1 of their union are the newest
+  // PAGE + 1 of the whole filter, and the cursor means the same as with one request.
+  const idChunks: (string[] | null)[] = filter.ids
+    ? filter.ids.length
+      ? chunks(filter.ids)
+      : [[]]
+    : [null];
 
   const none: Promise<Res> = Promise.resolve({ data: [], error: null });
   const [members, user, files, folders, memberships] = await Promise.all([
@@ -320,10 +358,7 @@ async function page(
       .select("id, display_name, user_id")
       .eq("hive_id", hiveId) as unknown as Promise<Res>,
     sessionUserId(db),
-    index
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(PAGE + 1) as unknown as Promise<Res>,
+    Promise.all(idChunks.map(indexFor)).then(merged),
     first
       ? (db
           .from("gallery_folders")
