@@ -131,6 +131,11 @@ export const DELETE_QUESTION =
 export const DELETED = "Note deleted.";
 export const DELETE_FAILED = "That didn't work. Try again.";
 
+// Opening a note: said while it is on its way (to screen readers only; the note shown fades),
+// and when it could not be opened (the note shown stays).
+export const OPENING = "Opening the note.";
+export const OPEN_FAILED = "Couldn't open that note. Try again.";
+
 // Linked notes: the list on the open note, the question before a link is ended, and what is
 // said when ending it did not work.
 export const LINKED_WITH = "Linked with";

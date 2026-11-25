@@ -559,6 +559,13 @@
   color: var(--muted);
 }
 
+/* Another note is on its way: the one shown fades, late enough that a quick answer never
+   flickers. */
+.preview[data-pending] > :not([data-opening]) {
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease) 150ms;
+}
+
 .article {
   max-width: 74ch;
 }
@@ -1222,6 +1229,14 @@
 /* A row brought into view by the focus stays clear of that line. */
 .row {
   scroll-margin-top: 64px;
+}
+
+/* A list of up to 2,000 notes: rows out of view are not laid out or painted. The size stands
+   for a row's content as measured (title and meta line, 41px; 57px with the padding), and is
+   replaced by the real one once a row has been drawn. */
+.noteNav .row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 41px;
 }
 
 /* ---- Markdown ---- */

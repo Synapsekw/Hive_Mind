@@ -54,6 +54,12 @@ const calls = (page: Page) =>
       (window as unknown as { __vaultCalls?: unknown[] }).__vaultCalls ?? [],
   );
 
+/** The calls that change something: opening a note is a read. */
+const writes = async (page: Page) =>
+  ((await calls(page)) as { name: string }[]).filter(
+    (c) => c.name !== "openNote",
+  );
+
 const noteLinks = (page: Page) =>
   page.getByRole("navigation", { name: "Notes" }).getByRole("link");
 
@@ -911,20 +917,12 @@ test("while a delete runs, neither answer nor Escape does anything", async ({
 test("a note opened while a delete runs stays open", async ({ page }) => {
   await open(page, `?slow=1&note=${README}`);
   await confirmDelete(page);
-  // The other note arrives only after the delete has answered: until then the address still
-  // names the note being deleted.
-  await page.route(
-    (url) => url.searchParams.get("note") === CLIENT_LIST,
-    async (route) => {
-      await new Promise((r) => setTimeout(r, 2500));
-      await route.continue();
-    },
-  );
+  // The other note is opened in place: the address names it at once, before the delete has
+  // answered, and the delete does not close it.
   await noteLinks(page).filter({ hasText: "Client list" }).click();
-  await expect(status(page)).toHaveText(DELETED);
-  await expect(page).toHaveURL(new RegExp(`note=${README}`));
-
+  await expect(page).toHaveURL(new RegExp(`note=${CLIENT_LIST}`));
   await expect(openTitle(page, "Client list")).toBeVisible();
+  await expect(status(page)).toHaveText(DELETED);
   await expect(page).toHaveURL(new RegExp(`note=${CLIENT_LIST}`));
   await expect(noteLinks(page).filter({ hasText: "Readme" })).toHaveCount(0);
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length - 1);
@@ -938,7 +936,7 @@ test("a note opened while a delete runs stays open", async ({ page }) => {
   ).toHaveAttribute("aria-current", "page");
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length - 1);
   await expect(status(page)).toHaveText(DELETED);
-  expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
+  expect(await writes(page)).toEqual([{ name: "deleteNote", args: [README] }]);
 });
 
 test("a delete refused after another note was opened says so beside that note", async ({
@@ -960,7 +958,7 @@ test("a delete refused after another note was opened says so beside that note", 
   await expect(openTitle(page, "Client list")).toBeVisible();
   await expect(status(page)).toHaveText(DELETE_FAILED);
   await expect(noteLinks(page)).toHaveCount(DATA.notes.length);
-  expect(await calls(page)).toEqual([{ name: "deleteNote", args: [README] }]);
+  expect(await writes(page)).toEqual([{ name: "deleteNote", args: [README] }]);
 });
 
 test("deleting the only note a filter lists leaves the empty list and a focused tab", async ({
@@ -1083,7 +1081,7 @@ test("opening another note closes a pending question", async ({ page }) => {
   await noteLinks(page).filter({ hasText: "Readme" }).click();
   await expect(openTitle(page, "Readme")).toBeVisible();
   await expect(preview(page)).not.toContainText(DELETE_QUESTION);
-  expect(await calls(page)).toEqual([]);
+  expect(await writes(page)).toEqual([]);
 });
 
 const inView = (el: Element) => {
@@ -1470,7 +1468,7 @@ test("opening another note closes a pending unlink question", async ({
   await expect(openTitle(page, "Findings draft")).toBeVisible();
   await expect(linkedRows(page)).toHaveCount(2);
   await expect(unlinkQuestions(page)).toHaveCount(0);
-  expect(await calls(page)).toEqual([]);
+  expect(await writes(page)).toEqual([]);
 });
 
 for (const look of LOOKS)

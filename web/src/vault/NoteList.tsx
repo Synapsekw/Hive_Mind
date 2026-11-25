@@ -1,7 +1,10 @@
 // The note column: one link per note with its last change, an agent or held tag, and its
 // sharing mark. On the shared tab the notes are grouped by owner. Every title is a text node.
+// A row is drawn again only when its own note, address or state changes: opening a note
+// redraws two rows, not the list. The screen opens a plain click on a row itself (`Vault`); the
+// link is still a link, for a new tab or no script.
 import Link from "next/link";
-import { useMemo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { shortDate } from "./format";
 import { noteMark } from "./marks";
 import { Glyph, markText, markTitle } from "./MarkTag";
@@ -19,7 +22,7 @@ type RowProps = {
   topics: Map<string, VaultTopic>;
 };
 
-function Row({
+const Row = memo(function Row({
   note,
   current,
   href,
@@ -67,7 +70,7 @@ function Row({
       </Link>
     </li>
   );
-}
+});
 
 export function NoteList({
   header,

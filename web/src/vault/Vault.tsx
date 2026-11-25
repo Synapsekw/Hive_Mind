@@ -1,12 +1,15 @@
 "use client";
 
 // The vault screen. The only state holder: the chosen folder, the open folders and the filter,
-// all client state that survives choosing a note. The tab and the open note come from the URL;
-// writes go through `actions`, and the database decides whether they are allowed.
+// all client state that survives choosing a note. The tab comes from the URL. The open note
+// comes from the URL on a load; a click on a note asks the server for that note alone
+// (`actions.openNote`) and puts it in the address, so the list is not read again. Writes go
+// through `actions`, and the database decides whether they are allowed.
 import { usePathname, useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type CSSProperties,
@@ -25,6 +28,7 @@ import { IMPORT, IMPORT_LINE } from "./importText";
 import { PanelDialog } from "./PanelDialog";
 import { folderMark } from "./marks";
 import { NoteList } from "./NoteList";
+import { noteOfClick, openFrom, reduceOpen } from "./openNote";
 import { Summary } from "./Summary";
 import { overview, sharedOverview } from "./overview";
 import { Preview } from "./Preview";
@@ -51,7 +55,13 @@ import {
 } from "./topicText";
 import { topicTree } from "./topicTree";
 import { buildTree, notesIn, type Scope, type TreeNode } from "./tree";
-import type { TopicChange, VaultActions, VaultData, VaultNote } from "./types";
+import type {
+  OpenAnswer,
+  TopicChange,
+  VaultActions,
+  VaultData,
+  VaultNote,
+} from "./types";
 import s from "./vault.module.css";
 
 const ancestors = (path: string) => {
@@ -119,16 +129,26 @@ export function Vault({
   const [said, setSaid] = useState<{ text: string; failed: boolean } | null>(
     null,
   );
-  // The note this screen shows or is on its way to: the one last served, or the one the person
-  // last asked for. The address is not asked; it changes only once a note has arrived.
-  const servedOpen =
-    served.open && "note" in served.open ? served.open.note.id : null;
-  const wanted = useRef<string | null>(servedOpen);
-  // A note that arrives is the one shown. A note that stops being served is not the person
-  // going elsewhere: it may be the very note a delete has just removed.
+  // The open note, held here: the one served, or the one the person last asked for.
+  const [opening, dispatch] = useReducer(reduceOpen, served.open, openFrom);
+  // A new server render (a load, a tab, a re-read after a change) brings its own open note; it
+  // is taken unless the person has since asked for another.
+  const [seenOpen, setSeenOpen] = useState(served.open);
+  if (seenOpen !== served.open) {
+    setSeenOpen(served.open);
+    dispatch({ type: "served", open: served.open });
+  }
+  // The note this screen shows or is on its way to, readable at once by the click that comes
+  // before the next render and by a delete that finishes after it.
+  const wanted = useRef<string | null>(opening.wanted);
   useEffect(() => {
-    if (servedOpen) wanted.current = servedOpen;
-  }, [servedOpen]);
+    wanted.current = opening.wanted;
+  }, [opening.wanted]);
+  // The id of the latest request for a note.
+  const seq = useRef(0);
+  // The note the preview shows now.
+  const shownId =
+    opening.open && "note" in opening.open ? opening.open.note.id : null;
   // Deletes on their way, by note: a second request for the same note joins the first.
   const deleting = useRef(new Map<string, Promise<boolean>>());
   // The panel in the dialog over the vault: the import, connecting wiki links, attaching topics,
@@ -166,18 +186,60 @@ export function Vault({
   // Where the focus goes once a deleted note has left the page.
   const target = useRef<{ row: HTMLElement | null } | null>(null);
 
-  // A press on a link to this screen says which note is wanted next, before it arrives.
-  function follow(e: MouseEvent<HTMLElement>) {
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
-      return;
-    const link = (e.target as Element).closest<HTMLAnchorElement>("a[href]");
-    if (!link || link.target === "_blank") return;
-    const to = new URL(link.href, window.location.href);
-    if (to.origin !== window.location.origin || to.pathname !== base) return;
-    const id = to.searchParams.get("note");
-    if (id && id !== wanted.current) setSaid(null);
+  /**
+   * Opens a note without reloading the page: the preview keeps what it shows until the note
+   * arrives, and only the latest request's answer is shown. `href`, when given, is pushed as
+   * the new address. A note of another tab than the one on screen is then read again by the
+   * server, which picks its tab, as a load of its address would.
+   */
+  async function openNote(id: string | null, href: string | null) {
+    const at = ++seq.current;
+    if (id !== wanted.current) setSaid(null);
     wanted.current = id;
+    dispatch({ type: "request", id, seq: at });
+    if (href !== null && href !== window.location.href)
+      window.history.pushState(null, "", href);
+    if (id === null) return;
+    let result: OpenAnswer;
+    try {
+      result = await actions.openNote(id);
+    } catch {
+      result = { ok: false };
+    }
+    dispatch({ type: "answer", seq: at, result });
+    if (at !== seq.current || !result.ok || !result.open) return;
+    if (!("note" in result.open)) return;
+    const n = result.open.note;
+    const tab = n.member_id === served.me ? n.workspace_id : "shared";
+    const shownTab = served.tab.kind === "shared" ? "shared" : served.tab.id;
+    if (tab !== shownTab) router.refresh();
   }
+
+  // A plain click on a link to a note of this screen (a row, a linked note) opens it here.
+  // Any other click (a modifier, another button, a new tab) is the browser's.
+  function follow(e: MouseEvent<HTMLElement>) {
+    const link = (e.target as Element).closest<HTMLAnchorElement>("a[href]");
+    if (!link) return;
+    const id = noteOfClick(e, link, window.location);
+    if (id === null) return;
+    e.preventDefault();
+    if (id === shownId && !opening.pending) return;
+    void openNote(id, link.href);
+  }
+
+  // Back and forward: the note the address names, without adding an entry.
+  const onPop = useRef<() => void>(() => {});
+  onPop.current = () => {
+    if (window.location.pathname !== base) return;
+    const id = new URLSearchParams(window.location.search).get("note");
+    if (id === shownId && !opening.pending) return;
+    void openNote(id, null);
+  };
+  useEffect(() => {
+    const pop = () => onPop.current();
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, []);
 
   function dismiss() {
     // The button leaves the page: the focus goes to the open note's row, else as after a delete.
@@ -190,19 +252,23 @@ export function Vault({
     setSaid(null);
   }
 
+  // Kept apart from the open note, so opening one does not make the list anew.
+  const notes = useMemo(
+    () =>
+      gone.size === 0
+        ? served.notes
+        : served.notes.filter((n) => !gone.has(n.id)),
+    [served.notes, gone],
+  );
   const data = useMemo<VaultData>(() => {
-    if (gone.size === 0 && unlinked.size === 0) return served;
-    let open = served.open;
-    if (open && "note" in open)
+    let open = opening.open;
+    if (open && "note" in open && (gone.size > 0 || unlinked.size > 0))
       open = gone.has(open.note.id)
         ? null
         : { ...open, links: open.links.filter((l) => !unlinked.has(l.id)) };
-    return {
-      ...served,
-      notes: served.notes.filter((n) => !gone.has(n.id)),
-      open,
-    };
-  }, [served, gone, unlinked]);
+    if (notes === served.notes && open === served.open) return served;
+    return { ...served, notes, open };
+  }, [served, notes, opening.open, gone, unlinked]);
 
   // Runs after every render, once the deleted note's row is out of the page.
   useEffect(() => {
@@ -265,6 +331,7 @@ export function Vault({
         // now names that tab itself; else a bare link to the note would fall back to the first
         // workspace.
         wanted.current = null;
+        dispatch({ type: "request", id: null, seq: ++seq.current });
         const q = new URLSearchParams(window.location.search);
         q.delete("note");
         if (shown.kind === "shared") {
@@ -681,6 +748,8 @@ export function Vault({
           />
           <Preview
             data={data}
+            pending={opening.pending}
+            failed={opening.failed}
             onSave={actions.saveNote}
             onRelease={actions.release}
             onDelete={deleteNote}

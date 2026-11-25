@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   FolderRule,
   NoteLink,
+  OpenAnswer,
   Tab,
   VaultData,
   VaultNote,
@@ -158,6 +159,99 @@ async function noteLinks(db: Db, noteId: string): Promise<NoteLink[]> {
     .slice(0, LINKS_CAP);
 }
 
+/** A note as it is opened: its row with the body, when one came back, and its links. */
+export type OpenRead = { row: Row | undefined; links: NoteLink[] };
+
+const NOTHING: OpenRead = { row: undefined, links: [] };
+
+/**
+ * One note with its body and its accepted links, read in parallel under row-level security.
+ * "error" when the note's read fails (only the code and message are logged); a note the
+ * caller cannot see comes back with no row.
+ */
+export async function readOpenNote(
+  db: Db,
+  noteId: string,
+): Promise<OpenRead | "error"> {
+  const [opened, links] = await Promise.all([
+    db
+      .from("notes")
+      .select(`${NOTE_COLUMNS},body`)
+      .eq("id", noteId)
+      .limit(1) as unknown as Promise<Res>,
+    noteLinks(db, noteId),
+  ]);
+  if (failed("note query", opened)) return "error";
+  return { row: rows(opened)[0], links };
+}
+
+/** What the preview shows for a read note: missing, or the note with its body cut at `BODY_CAP`. */
+export function toOpen(
+  read: OpenRead,
+  me: string,
+  known?: Map<string, VaultTopic>,
+): VaultData["open"] {
+  const r = read.row;
+  if (!r) return { missing: true };
+  const body = text(r.body);
+  return {
+    note: toNote(r, me, known),
+    body: body.length > BODY_CAP ? body.slice(0, BODY_CAP) : body,
+    cut: body.length > BODY_CAP,
+    links: read.links,
+  };
+}
+
+/** The most topics one note's topic read asks for. */
+const NOTE_TOPICS_CAP = 200;
+
+/**
+ * Only the topics a note is attached to, for ranking them as the vault does. Without them (a
+ * failed read, logged by code and message) the note's topics are ranked by confidence.
+ */
+async function noteTopics(
+  db: Db,
+  r: Row,
+): Promise<Map<string, VaultTopic> | undefined> {
+  const wanted = topicsOf(r.note_entities).slice(0, NOTE_TOPICS_CAP);
+  if (wanted.length === 0) return undefined;
+  let res: Res;
+  try {
+    res = (await db
+      .from("entities")
+      .select("id, type, canonical_name")
+      .in("id", wanted)
+      .limit(NOTE_TOPICS_CAP)) as Res;
+  } catch (e) {
+    console.error("note topics failed", e instanceof Error ? e.name : "");
+    return undefined;
+  }
+  if (failed("note topics", res)) return undefined;
+  const known = new Map<string, VaultTopic>();
+  for (const t of rows(res)) {
+    if (typeof t.id !== "string" || typeof t.canonical_name !== "string")
+      continue;
+    if (typeof t.type !== "string" || !KIND_ORDER.has(t.type)) continue;
+    known.set(t.id, { id: t.id, kind: t.type as Kind, name: t.canonical_name });
+  }
+  return known;
+}
+
+/**
+ * One note for the preview, without reading the hive's index again: the person's member id
+ * (from their own hive), the note with its body and links, then only that note's topics. An id
+ * that is not a uuid is missing and reads nothing. Row-level security decides what comes back.
+ */
+export async function openNoteIn(db: Db, id: unknown): Promise<OpenAnswer> {
+  if (!isUuid(id)) return { ok: true, open: { missing: true } };
+  const [hive, read] = await Promise.all([ownHive(db), readOpenNote(db, id)]);
+  if (hive === "error" || hive === null || read === "error")
+    return { ok: false };
+  if (!read.row) return { ok: true, open: { missing: true } };
+  const known = await noteTopics(db, read.row);
+  return { ok: true, open: toOpen(read, hive.memberId, known) };
+}
+
 /** Kinds in the order the vault lists them. */
 const KIND_ORDER = new Map<string, number>(KINDS.map((k, i) => [k, i]));
 
@@ -235,7 +329,7 @@ export async function loadVault(
   const noteId = query.note === undefined ? null : query.note;
   const wantNote = noteId !== null && isUuid(noteId);
 
-  const [members, workspaces, user, opened, links, topics] = await Promise.all([
+  const [members, workspaces, user, opened, topics] = await Promise.all([
     db
       .from("members")
       .select("id, display_name, user_id")
@@ -247,19 +341,12 @@ export async function loadVault(
       .eq("hive_id", hiveId)
       .order("created_at", { ascending: true }) as unknown as Promise<Res>,
     sessionUserId(db),
-    wantNote
-      ? (db
-          .from("notes")
-          .select(`${NOTE_COLUMNS},body`)
-          .eq("id", noteId)
-          .limit(1) as unknown as Promise<Res>)
-      : Promise.resolve(null),
-    wantNote ? noteLinks(db, noteId) : Promise.resolve([]),
+    wantNote ? readOpenNote(db, noteId) : Promise.resolve(null),
     hiveTopics(db, hiveId),
   ]);
   if (failed("members query", members)) return { state: "error" };
   if (failed("workspaces query", workspaces)) return { state: "error" };
-  if (opened && failed("note query", opened)) return { state: "error" };
+  if (opened === "error") return { state: "error" };
 
   const userId = user;
   if (!userId) return { state: "error" };
@@ -273,20 +360,8 @@ export async function loadVault(
   }));
 
   const known = new Map(topics.map((t) => [t.id, t]));
-  let open: VaultData["open"] = null;
-  if (noteId !== null) {
-    const r = opened ? rows(opened)[0] : undefined;
-    if (!r) open = { missing: true };
-    else {
-      const body = text(r.body);
-      open = {
-        note: toNote(r, meId, known),
-        body: body.length > BODY_CAP ? body.slice(0, BODY_CAP) : body,
-        cut: body.length > BODY_CAP,
-        links,
-      };
-    }
-  }
+  const open: VaultData["open"] =
+    noteId === null ? null : toOpen(opened ?? NOTHING, meId, known);
 
   // The open note decides the tab: a colleague's opens "Shared with me", one's own opens its
   // workspace. Otherwise `?tab=shared`, else `?ws=` when it is one of the caller's, else the first.

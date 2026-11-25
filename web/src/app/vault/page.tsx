@@ -10,6 +10,7 @@ import {
   deleteNote,
   detachTopic,
   importBatch,
+  openNote,
   preview,
   release,
   saveFolder,
@@ -66,6 +67,7 @@ export default async function VaultPage({
         unlink,
         detachTopic,
         addTopic,
+        openNote,
       }}
       importer={{
         // Bound to the hive this page shows, as inviting a member is.
