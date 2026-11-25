@@ -23,6 +23,7 @@ import {
   fixtureHeads,
 } from "../../../settings/fixture";
 import { Settings } from "../../../settings/Settings";
+import type { Tab } from "../../../settings/tabs";
 import { AccountProvider } from "../../../shell/AccountContext";
 import { ClosingBanner } from "../../../shell/ClosingBanner";
 import { HiveActionsProvider } from "../../../shell/HiveActions";
@@ -81,6 +82,7 @@ export function DevSettings({
   limit,
   closing: closingAtFirst,
   notName,
+  tab,
 }: {
   initial: SettingsData;
   now: number;
@@ -94,6 +96,8 @@ export function DevSettings({
   limit: boolean;
   closing: boolean;
   notName: boolean;
+  /** The tab open at first. */
+  tab?: Tab;
 }) {
   const [data, setData] = useState(initial);
   // Whether the hive is being deleted: the flag, until this tab's own Delete hive or Cancel
@@ -258,6 +262,7 @@ export function DevSettings({
       inbox={0}
       deletion={data.isOwner ? fixtureDeletion() : null}
       closing={closing ? FIXTURE_DELETE_AFTER : null}
+      tab={tab}
     />
   );
   if (!closing) return settings;

@@ -78,11 +78,151 @@
   letter-spacing: -0.01em;
 }
 
-/* Whose settings these are: the hive's name, beside the heading. */
-.hive {
-  margin: 0;
-  font-size: 13px;
+/* After the hive's name, quietly: which screen this is. */
+.titleSub {
+  font-weight: 400;
   color: var(--muted);
+}
+
+/* The tabs: the map's view switch, a 10 px hairline track with 7 px segments, each name
+   followed by its count. The chosen one is marked by aria-selected. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: center;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 30px;
+  cursor: pointer;
+  transition: color 0.18s var(--ease);
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tab[aria-selected="true"] {
+  background: var(--sel);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.root .tab:focus-visible {
+  border-radius: 7px;
+}
+
+/* A tab's panel: its sections one under another. Hidden panels stay in the page. */
+.tabPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.tabPanel[hidden] {
+  display: none;
+}
+
+/* ---- A row's ⋯ menu (the Vault's note menu) ---- */
+
+.rowMenu {
+  position: relative;
+  flex: none;
+}
+
+.moreButton {
+  min-width: 32px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.24s var(--ease),
+    background 0.18s var(--ease);
+}
+
+.moreButton:hover,
+.moreButton:focus-visible,
+.moreButton[aria-expanded="true"] {
+  border-color: var(--line-hi);
+  color: var(--fg);
+}
+
+.moreButton[aria-expanded="true"] {
+  background: var(--fill);
+}
+
+.moreButton[aria-disabled="true"] {
+  border-color: transparent;
+  background: none;
+  color: var(--quiet);
+  cursor: default;
+}
+
+/* Under ⋯ at its right edge, on the map's menu surface. */
+.menuPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 4;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  min-width: 160px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--lift);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  flex: none;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  background: var(--fill);
+  color: var(--fg);
+}
+
+/* What cannot be undone reads as the Hive tab's Delete hive does: full text colour, bold. */
+.menuItem[data-danger] {
+  color: var(--fg);
+  font-weight: 600;
 }
 
 /* ---- The sections ---- */
@@ -1039,7 +1179,8 @@
   }
 
   /* In a column that scrolls, a section keeps its own height. */
-  .section {
+  .section,
+  .tabPanel {
     flex: none;
   }
 }

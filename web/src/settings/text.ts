@@ -44,6 +44,9 @@ const SEND_FAILURES: Record<(Sent & { ok: false })["reason"], string> = {
   failed: "That didn't work. Try again.",
 };
 
+/** What a refused or failed action says when there is nothing more particular to say. */
+export const FAILED: string = "That didn't work. Try again.";
+
 export function tierText(t: TrustTier): string {
   return TIERS[t];
 }
