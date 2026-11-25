@@ -130,6 +130,16 @@ export function Settings({
   const held = useRef(false);
   const creating = busy === "connect";
   const shown = fresh !== null;
+  // The dialogs the Topics and Hive tabs keep themselves: whether each is open.
+  const [topicsModal, setTopicsModal] = useState(false);
+  const [hiveModal, setHiveModal] = useState(false);
+  // While any dialog is open the tabs take no focus and no press: the dialog's tab stays shown,
+  // and no other tab's dialog can open on top of it.
+  const modal =
+    open?.kind === "connect" ||
+    open?.kind === "invite" ||
+    topicsModal ||
+    hiveModal;
 
   // From Create until Done the token exists only here, so a reload or a closed tab asks first.
   useEffect(() => {
@@ -304,8 +314,7 @@ export function Settings({
   }
 
   function dismiss() {
-    target.current =
-      open?.kind === "invite" ? { form: "invite" } : { button: "invite" };
+    target.current = { button: "invite" };
     setNotice(null);
   }
 
@@ -333,8 +342,7 @@ export function Settings({
       return;
     }
     // The row and its button go; the focus moves to where the next invitation starts.
-    target.current =
-      open?.kind === "invite" ? { form: "invite" } : { button: "invite" };
+    target.current = { button: "invite" };
     setGone((set) => withId(set, invitation.id));
     // The notice is no longer true once its invitation is revoked.
     setNotice((n) =>
@@ -486,6 +494,7 @@ export function Settings({
               role="tablist"
               aria-label="Settings sections"
               className={s.tabs}
+              inert={modal || undefined}
               onKeyDown={moveTab}
             >
               {shownTabs.map((t) => {
@@ -551,6 +560,7 @@ export function Settings({
                   closing={closing !== null}
                   onSay={setSaid}
                   onChanged={() => router.refresh()}
+                  onModal={setTopicsModal}
                 />
               </section>
             )}
@@ -581,6 +591,7 @@ export function Settings({
                   closing={closing}
                   actions={actions}
                   onSay={setSaid}
+                  onModal={setHiveModal}
                 />
               </section>
             )}

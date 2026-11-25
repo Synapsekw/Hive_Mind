@@ -37,12 +37,15 @@ export function HiveTab({
   closing,
   actions,
   onSay,
+  onModal,
 }: {
   hiveName: string;
   deletion: Deletion | null;
   closing: string | null;
   actions: Pick<SettingsActions, "requestHiveDeletion" | "cancelHiveDeletion">;
   onSay: (text: string) => void;
+  /** Whether the delete dialog is open, so the screen can hold its tabs meanwhile. */
+  onModal?: (open: boolean) => void;
 }) {
   const id = useId();
   const [typed, setTyped] = useState("");
@@ -62,6 +65,9 @@ export function HiveTab({
     if (wasAsking.current && !asking) opener.current?.focus();
     wasAsking.current = asking;
   }, [asking]);
+  useEffect(() => {
+    onModal?.(asking);
+  }, [asking, onModal]);
 
   function ask() {
     if (running.current || asking) return;

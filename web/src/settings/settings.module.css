@@ -239,6 +239,13 @@
   gap: 30px;
 }
 
+/* Every Settings dialog (connect, invite, the candidates, the hive's delete): its dim covers
+   the tab's scroll box, not the window, so the dialog keeps inside that box and inside the
+   window. It scrolls itself, and the button on its bottom edge stays in view. */
+.scroller [role="dialog"] {
+  max-height: min(calc(100% - 96px), calc(100dvh - 120px));
+}
+
 /* A reading width: on a wide window the action stays near the row it acts on. */
 .section {
   width: 100%;
@@ -1019,12 +1026,6 @@
 }
 
 /* ---- The candidates, in their dialog: a kind folds, and what it holds is set in columns ---- */
-
-/* The dialog's dim covers the tab's scroll box, not the window: the dialog keeps inside it and
-   inside the window, so it scrolls itself and Save, on its bottom edge, stays in view. */
-.topicsSection [role="dialog"] {
-  max-height: min(calc(100% - 96px), calc(100dvh - 120px));
-}
 
 .foundHead {
   display: flex;

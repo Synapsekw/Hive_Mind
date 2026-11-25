@@ -68,6 +68,7 @@ export function AgentsTab({
   // `sortAgents` keeps the active ones first; each group keeps its order.
   const active = agents.filter((a) => a.status === "active");
   const off = agents.filter((a) => a.status !== "active");
+  const connecting = open?.kind === "connect";
   const row = (a: Agent) => (
     <AgentRow
       key={a.id}
@@ -84,7 +85,8 @@ export function AgentsTab({
   );
   return (
     <section aria-labelledby="settings-agents" className={s.section}>
-      <div className={s.sectionHead}>
+      {/* While the connect dialog is open, what is behind its dim takes no focus and no press. */}
+      <div className={s.sectionHead} inert={connecting || undefined}>
         <div className={s.headText}>
           <h2 className={s.label}>
             <span id="settings-agents">Agents</span>
@@ -95,16 +97,20 @@ export function AgentsTab({
             sharing, accept links or delete notes.
           </p>
         </div>
+        {/* Kept in its place behind the dialog, but not drawn: one yellow button at a time. */}
         <button
           type="button"
           data-open="connect"
           className={s.primary}
-          onClick={onShow}
+          data-behind={connecting || undefined}
+          onClick={() => {
+            if (!connecting) onShow();
+          }}
         >
           {CONNECT_TITLE}
         </button>
       </div>
-      {open?.kind === "connect" && (
+      {connecting && (
         <PanelDialog
           label={CONNECT_TITLE}
           busy={busy === "connect"}
@@ -119,37 +125,39 @@ export function AgentsTab({
           />
         </PanelDialog>
       )}
-      {agents.length === 0 ? (
-        <div className={s.empty}>
-          <p className={s.emptyTitle}>No agents yet.</p>
-          <p className={s.emptyText}>
-            Connect one and it can read the hive and write notes into the
-            workspace you choose.
-          </p>
-        </div>
-      ) : (
-        <>
-          {active.length > 0 && (
-            <ul role="list" aria-label="Agents" className={s.rows}>
-              {active.map(row)}
-            </ul>
-          )}
-          {off.length > 0 && (
-            <details className={`${s.fold} ${s.agentFold}`}>
-              <summary className={s.foldSummary}>
-                {foldedAgents(off.length)}
-              </summary>
-              <ul
-                role="list"
-                aria-label="Revoked or expired agents"
-                className={s.rows}
-              >
-                {off.map(row)}
+      <div inert={connecting || undefined}>
+        {agents.length === 0 ? (
+          <div className={s.empty}>
+            <p className={s.emptyTitle}>No agents yet.</p>
+            <p className={s.emptyText}>
+              Connect one and it can read the hive and write notes into the
+              workspace you choose.
+            </p>
+          </div>
+        ) : (
+          <>
+            {active.length > 0 && (
+              <ul role="list" aria-label="Agents" className={s.rows}>
+                {active.map(row)}
               </ul>
-            </details>
-          )}
-        </>
-      )}
+            )}
+            {off.length > 0 && (
+              <details className={`${s.fold} ${s.agentFold}`}>
+                <summary className={s.foldSummary}>
+                  {foldedAgents(off.length)}
+                </summary>
+                <ul
+                  role="list"
+                  aria-label="Revoked or expired agents"
+                  className={s.rows}
+                >
+                  {off.map(row)}
+                </ul>
+              </details>
+            )}
+          </>
+        )}
+      </div>
     </section>
   );
 }

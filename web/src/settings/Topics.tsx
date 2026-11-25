@@ -49,6 +49,7 @@ export function Topics({
   closing,
   onSay,
   onChanged,
+  onModal,
 }: {
   topics: TopicRow[];
   /** The owner's own workspaces: where their notes are read from. */
@@ -59,6 +60,8 @@ export function Topics({
   onSay: (text: string) => void;
   /** Topics were saved or deleted: the page is read again. */
   onChanged: () => void;
+  /** Whether the candidates' dialog is open, so the screen can hold its tabs meanwhile. */
+  onModal?: (open: boolean) => void;
 }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [problem, setProblem] = useState<string | null>(null);
@@ -108,6 +111,9 @@ export function Topics({
   useEffect(() => {
     if (picking) heading.current?.focus();
   }, [picking]);
+  useEffect(() => {
+    onModal?.(picking);
+  }, [picking, onModal]);
   // Leaving the candidates (Save or Cancel) closes the dialog: Find takes the focus.
   const wasPicking = useRef(false);
   useEffect(() => {
@@ -277,10 +283,7 @@ export function Topics({
   }
 
   return (
-    <section
-      aria-labelledby="settings-topics"
-      className={`${s.section} ${s.topicsSection}`}
-    >
+    <section aria-labelledby="settings-topics" className={s.section}>
       {/* While the candidates are open, what is behind their dim takes no focus and no press. */}
       <div className={s.sectionHead} inert={picking || undefined}>
         <div className={s.headText}>

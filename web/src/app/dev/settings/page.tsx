@@ -9,7 +9,7 @@ import { DevSettings } from "./DevSettings";
 //   ?none=1                 no agents yet
 //   ?many=1                 thirty more topics, and forty more for Find to offer
 //   ?fail=1                 every action is refused
-//   ?slow=1                 creating an agent takes over a second
+//   ?slow=1                 creating an agent, and Send again, take over a second
 //   ?unsent=1               inviting saves the invitation, but its email is not sent
 //   ?wait=1                 Send again answers that an email went out a moment ago
 //   ?limit=1                Send again answers that the invitation has been emailed 5 times

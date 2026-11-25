@@ -38,6 +38,8 @@ const [LENA, MARKO] = DATA.invitations as [
 /** The dev page's stand-in token; the database has never seen it. */
 const TOKEN = "hive_devtoken0000000000000000000000000000";
 const FAILED = "That didn't work. Try again.";
+/** As in `Settings`: a confirming Revoke sooner than this after the question is a double click. */
+const CONFIRM_AFTER_MS = 500;
 const WARNING =
   "This token is shown once. Copy it now; it cannot be shown again.";
 
@@ -527,6 +529,22 @@ test("Revoke asks first with the agent's name; Keep restores; a double click rev
     expect(await calls(page)).toEqual([]);
     await expect(row.getByText("Revoked", { exact: true })).toHaveCount(0);
     await expect(row).not.toContainText(`Revoke ${LOCAL.name}?`);
+
+    // A double click on Revoke… in the menu: the first press asks, the second lands where the
+    // question has just put Revoke, sooner than CONFIRM_AFTER_MS, and is not taken as an answer.
+    await moreButton(row).click();
+    const first = Date.now();
+    await row.getByRole("button", { name: REVOKE_ITEM }).click();
+    const yes = await row
+      .getByRole("button", { name: "Revoke", exact: true })
+      .boundingBox();
+    expect(yes).not.toBeNull();
+    await page.mouse.click(yes!.x + yes!.width / 2, yes!.y + yes!.height / 2);
+    expect(Date.now() - first).toBeLessThan(CONFIRM_AFTER_MS);
+    await page.waitForTimeout(300);
+    expect(await calls(page)).toEqual([]);
+    await expect(row).toContainText(`Revoke ${LOCAL.name}?`);
+    await expect(row.getByText("Revoked", { exact: true })).toHaveCount(0);
   }
 });
 
@@ -541,6 +559,7 @@ test("the Agents tab shows one primary button", async ({ page }) => {
       return [...panel.querySelectorAll("button")].filter(
         (b) =>
           b.getClientRects().length > 0 &&
+          getComputedStyle(b).visibility !== "hidden" &&
           getComputedStyle(b).backgroundColor === yellow,
       ).length;
     });
@@ -549,6 +568,38 @@ test("the Agents tab shows one primary button", async ({ page }) => {
   await askRevoke(agentRow(page, LOCAL.name));
   await foldSummary(page).click();
   expect(await primaries()).toBe(1);
+  await agentRow(page, LOCAL.name)
+    .getByRole("button", { name: "Keep" })
+    .click();
+
+  // With the connect dialog open, its Create is the one; Connect an agent keeps its place but
+  // is not drawn, and nothing behind the dim (a ⋯, the fold) takes the focus.
+  await connect(page).click();
+  await expect(connectDialog(page)).toBeVisible();
+  expect(await primaries()).toBe(1);
+  await expect(connect(page)).toBeHidden();
+  for (const behind of [
+    moreButton(agentRow(page, CLAUDE_CODE.name)),
+    foldSummary(page),
+  ]) {
+    await behind.evaluate((el) => (el as HTMLElement).focus());
+    await expect(behind).not.toBeFocused();
+  }
+  // A press that reaches Connect an agent anyway opens nothing new: the form keeps what was typed.
+  await connectForm(page).getByLabel("Name", { exact: true }).fill("Desk");
+  await page
+    .locator('[data-open="connect"]')
+    .evaluate((el) => (el as HTMLElement).click());
+  await expect(
+    connectForm(page).getByLabel("Name", { exact: true }),
+  ).toHaveValue("Desk");
+  await page.keyboard.press("Escape");
+  await expect(connectDialog(page)).toHaveCount(0);
+  await expect(connect(page)).toBeFocused();
+  const back = moreButton(agentRow(page, CLAUDE_CODE.name));
+  await back.focus();
+  await expect(back).toBeFocused();
+  expect(await calls(page)).toEqual([]);
   // With no agents, the one is Connect an agent.
   await open(page, "?none=1");
   expect(await primaries()).toBe(1);
@@ -616,8 +667,19 @@ test("Invite someone opens a dialog that says what will happen; a bad email or a
   await expect(form).toContainText("Keep the name to 60 characters or fewer.");
   expect(await calls(page)).toEqual([]);
 
-  // Opening the other form, on the Agents tab, closes this one: one at a time. The connect
-  // dialog covers the card, so it is put away before the tabs can be reached again.
+  // One dialog at a time: while this one is open the tabs take no press, so the connect
+  // dialog cannot open on top of it. Put away, the other form opens alone, and this one comes
+  // back empty.
+  const agentsTab = (await tabOf(page, "Agents").boundingBox())!;
+  await page.mouse.click(
+    agentsTab.x + agentsTab.width / 2,
+    agentsTab.y + agentsTab.height / 2,
+  );
+  await expect(tabOf(page, "Agents")).toHaveAttribute("aria-selected", "false");
+  await expect(form).toBeVisible();
+  await inviteDialog(page).focus();
+  await page.keyboard.press("Escape");
+  await expect(inviteDialog(page)).toHaveCount(0);
   await openTab(page, "Agents");
   await connect(page).click();
   await expect(form).toHaveCount(0);
@@ -693,6 +755,67 @@ test("People: with the invite dialog open, one yellow button shows and nothing b
   await lena.focus();
   await expect(lena).toBeFocused();
   expect(await calls(page)).toEqual([]);
+});
+
+test("with any dialog open, the tabs take no focus and no press: the dialog's tab stays shown", async ({
+  page,
+}) => {
+  /** Tries to leave for Workspaces by focus and by a real press on the tab. */
+  async function triesToLeave(panel: string) {
+    const away = tabOf(page, "Workspaces");
+    await away.evaluate((el) => (el as HTMLElement).focus());
+    await expect(away).not.toBeFocused();
+    const box = (await away.boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(away).toHaveAttribute("aria-selected", "false");
+    await expect(page.locator(`#panel-${panel}`)).toBeVisible();
+    await expect(page.locator("#panel-workspaces")).toBeHidden();
+  }
+
+  await open(page, "?tab=people");
+  await inviteButton(page).click();
+  await expect(inviteDialog(page)).toBeVisible();
+  await triesToLeave("people");
+  await expect(inviteDialog(page)).toBeVisible();
+  await inviteDialog(page).focus();
+  await page.keyboard.press("Escape");
+  await expect(inviteDialog(page)).toHaveCount(0);
+
+  await openTab(page, "Agents");
+  await connect(page).click();
+  await expect(connectDialog(page)).toBeVisible();
+  await triesToLeave("agents");
+  await expect(connectDialog(page)).toBeVisible();
+  await connectDialog(page).focus();
+  await page.keyboard.press("Escape");
+  await expect(connectDialog(page)).toHaveCount(0);
+
+  await openTab(page, "Topics");
+  await findTopics(page).click();
+  await expect(foundDialog(page)).toBeVisible();
+  await triesToLeave("topics");
+  // The tab with the candidates open cannot be left for People, so the invite dialog cannot
+  // open on top of them.
+  await expect(tabOf(page, "People")).toHaveAttribute("aria-selected", "false");
+  await foundDialog(page).focus();
+  await page.keyboard.press("Escape");
+  await expect(foundDialog(page)).toHaveCount(0);
+
+  await openTab(page, "Hive");
+  await deleteOpener(page).click();
+  await expect(deleteDialog(page)).toBeVisible();
+  await triesToLeave("hive");
+  await expect(deleteDialog(page)).toBeVisible();
+  await deleteDialog(page).focus();
+  await page.keyboard.press("Escape");
+  await expect(deleteDialog(page)).toHaveCount(0);
+
+  // Closed, the tabs are back in reach.
+  await openTab(page, "Workspaces");
+  await expect(page.locator("#panel-workspaces")).toBeVisible();
+  expect((await calls(page)).filter((c) => c.name !== "scanTopics")).toEqual(
+    [],
+  );
 });
 
 test("inviting never adds a member; when the email could not be sent the notice says to use Send again", async ({
@@ -897,6 +1020,26 @@ test("Send again, from ⋯, sends an invitation's email once more in one step; t
   await expect(lena).not.toContainText(FAILED);
   await expect(notice(page)).toBeEmpty();
   await expect(dialog(page)).toHaveCount(0);
+
+  // A second press while the first is still under way asks once: while Send again runs, the
+  // row's ⋯ stays in place but opens nothing, and Send again on another row is not sent either.
+  await open(page, "?slow=1&tab=people");
+  const twice = invitationRow(page, LENA.name);
+  await sendAgain(twice);
+  await expect(moreButton(twice)).toHaveAttribute("aria-disabled", "true");
+  // Forced: the button says it is disabled, and a press on it still lands.
+  await moreButton(twice).click({ force: true });
+  await expect(moreButton(twice)).toHaveAttribute("aria-disabled", "true");
+  await expect(twice.getByRole("group")).toHaveCount(0);
+  await expect(moreButton(twice)).toHaveAttribute("aria-expanded", "false");
+  await sendAgain(invitationRow(page, MARKO.name));
+  await expect(live(page)).toHaveText(
+    `Invitation for ${LENA.name} sent again.`,
+  );
+  await expect(moreButton(twice)).not.toHaveAttribute("aria-disabled");
+  expect(await calls(page)).toEqual([
+    { name: "resendInvitation", args: [LENA.id] },
+  ]);
 
   await open(page, "?limit=1&tab=people");
   const spent = invitationRow(page, LENA.name);
@@ -1156,9 +1299,32 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   await expect(form.getByLabel("Name", { exact: true })).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(form.getByRole("button", { name: "Create" })).toBeFocused();
-  // With the dialog open the page does not scroll, and Create is inside the window.
+  // With the dialog open the page does not scroll, and Create is wholly inside the window and
+  // inside the tab's scroll box: the dialog keeps within both and scrolls itself.
   expect((await fits()).pageScrolls).toBe(false);
   await expect(form.getByRole("button", { name: "Create" })).toBeInViewport();
+  // Measured, to the pixel (a focus scrolled into view may sit a fraction of one under the edge).
+  const within = await connectDialog(page).evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    let scroller: Element | null = el.parentElement;
+    while (
+      scroller &&
+      !/auto|scroll/.test(getComputedStyle(scroller).overflowY)
+    )
+      scroller = scroller.parentElement;
+    const floor = Math.min(
+      window.innerHeight,
+      scroller!.getBoundingClientRect().bottom,
+    );
+    const create = [...el.querySelectorAll("button")]
+      .find((b) => b.textContent === "Create")!
+      .getBoundingClientRect();
+    return {
+      dialog: box.bottom <= floor + 1,
+      create: create.top >= box.top && create.bottom <= box.bottom + 1,
+    };
+  });
+  expect(within).toEqual({ dialog: true, create: true });
   await page.keyboard.press("Enter");
 
   const box = dialog(page);
@@ -2299,15 +2465,15 @@ test("?tab=topics opens Topics; choosing a tab writes ?tab= without a request", 
   await page.waitForTimeout(300);
   expect(asked).toEqual([]);
 
-  // A Find topics under way, or a typed form, survives a switch: the panels stay in the page.
-  await openTab(page, "People");
-  await inviteButton(page).click();
-  await inviteForm(page).getByLabel("Email").fill("mira@example.com");
+  // What was typed survives a switch: the panels stay in the page. (A dialog cannot be left
+  // open across one: while it is open the tabs take no press.)
   await openTab(page, "Topics");
+  const search = topics(page).getByRole("searchbox", { name: "Find a topic" });
+  await search.fill("Zain");
   await openTab(page, "People");
-  await expect(inviteForm(page).getByLabel("Email")).toHaveValue(
-    "mira@example.com",
-  );
+  await openTab(page, "Topics");
+  await expect(search).toHaveValue("Zain");
+  await openTab(page, "People");
 
   // A reload opens the tab in the address.
   await page.reload({ waitUntil: "networkidle" });

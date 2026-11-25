@@ -2,8 +2,9 @@
 
 // The People tab: one list of the hive's members and, for the owner, the invitations still
 // open, each with its ⋯ menu (Send again, Revoke invitation); Invite someone and its dialog;
-// and the notice that says whether the email went out. Markup only: the state and what each
-// press does live in `Settings`.
+// and the notice that says whether the email went out. What each press does, and every state
+// but the invite form's own fields (what is being typed, and why it was refused), lives in
+// `Settings`.
 import { useId, useRef, useState } from "react";
 import { PanelDialog } from "../vault/PanelDialog";
 import { RowMenu } from "./RowMenu";
