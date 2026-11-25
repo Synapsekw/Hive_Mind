@@ -144,6 +144,7 @@ export const WORKSPACES_TITLE: string = "Workspaces";
 export const WORKSPACES_NOTE: string =
   "Where your notes live. Deleting a workspace erases its notes here for good; files on your computer are not touched.";
 export const DELETE_WORKSPACE: string = "Delete";
+export const DELETE_WORKSPACE_ITEM: string = "Delete workspace…";
 export const KEEP_WORKSPACE: string = "Keep";
 export const WORKSPACE_ASIDE: string = "This cannot be undone.";
 /** Under the only workspace a person has, in place of Delete. */

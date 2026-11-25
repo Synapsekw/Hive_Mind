@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { fixtureSettings } from "../src/settings/fixture";
 import {
   CONNECT_TITLE,
+  DELETE_WORKSPACE_ITEM,
   INVITATIONS_NOTE,
   INVITE_HELP,
   MCP_COMMAND,
@@ -973,7 +974,7 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   expect((await scrolls()).sideways).toBe(false);
 
   // From the heading, Tab reaches the open tab, then walks its panel: Connect and each ⋯.
-  // Each other tab, once chosen, is followed by its own panel: each workspace's Delete, the
+  // Each other tab, once chosen, is followed by its own panel: each workspace's ⋯, the
   // topics' controls, Invite a member, then each invitation's Send again and Revoke.
   await main(page).getByRole("heading", { level: 1 }).focus();
   await page.keyboard.press("Tab");
@@ -999,7 +1000,7 @@ test("at 1100 x 560 the page does not scroll; the keyboard reaches every control
   for (const space of [MAIN, DRA]) {
     await page.keyboard.press("Tab");
     await expect(
-      main(page).getByRole("button", { name: `Delete ${space.name}` }),
+      main(page).getByRole("button", { name: `Actions for ${space.name}` }),
     ).toBeFocused();
   }
   // Then the Topics tab: Find, and each topic's Delete (customers before vendors).
@@ -1610,8 +1611,11 @@ test("at 390 px the banner and the delete section stay inside the window and cov
 
 const workspaceRow = (page: Page, name: string) =>
   rows(page, "Workspaces").filter({ hasText: name });
-const deleteSpace = (row: Locator) =>
-  row.getByRole("button", { name: /^Delete/ });
+/** Opens a workspace's ⋯ menu and picks Delete workspace…, which asks the question in the row. */
+async function askDelete(row: Locator) {
+  await moreButton(row).click();
+  await row.getByRole("button", { name: DELETE_WORKSPACE_ITEM }).click();
+}
 
 test("Workspaces: Delete asks first with the note count; an agent in use refuses it; once revoked the workspace goes", async ({
   page,
@@ -1626,19 +1630,20 @@ test("Workspaces: Delete asks first with the note count; an agent in use refuses
   );
 
   // Asked first; Keep and Escape change nothing.
-  await deleteSpace(dra).click();
+  await askDelete(dra);
   await expect(dra).toContainText("Delete DRA and its 25 notes?");
   await expect(dra).toContainText("This cannot be undone.");
   await expect(dra.getByRole("button", { name: "Keep" })).toBeFocused();
   await dra.getByRole("button", { name: "Keep" }).click();
   await expect(dra).not.toContainText("Delete DRA and its 25 notes?");
-  await deleteSpace(dra).click();
+  await expect(moreButton(dra)).toBeFocused();
+  await askDelete(dra);
   await page.keyboard.press("Escape");
   await expect(dra).not.toContainText("This cannot be undone.");
   expect(await calls(page)).toEqual([]);
 
   // Its agent is still in use: refused, and the row says what to do.
-  await deleteSpace(dra).click();
+  await askDelete(dra);
   await dra.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(dra).toContainText("Revoke this workspace's agents first.");
   await expect(rows(page, "Workspaces")).toHaveCount(2);
@@ -1652,7 +1657,7 @@ test("Workspaces: Delete asks first with the note count; an agent in use refuses
   await expect(foldSummary(page)).toHaveText(foldedAgents(2));
 
   await openTab(page, "Workspaces");
-  await deleteSpace(dra).click();
+  await askDelete(dra);
   await dra.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(rows(page, "Workspaces")).toHaveCount(1);
   await expect(live(page)).toHaveText("DRA deleted.");
@@ -1665,7 +1670,7 @@ test("Workspaces: Delete asks first with the note count; an agent in use refuses
   // The one that is left cannot go.
   const last = workspaceRow(page, MAIN.name);
   await expect(last).toContainText("Your only workspace");
-  await expect(deleteSpace(last)).toHaveCount(0);
+  await expect(moreButton(last)).toHaveCount(0);
 });
 
 test("a failed workspace delete keeps the row and says so; a hive that is being deleted offers no Delete", async ({
@@ -1673,14 +1678,14 @@ test("a failed workspace delete keeps the row and says so; a hive that is being 
 }) => {
   await open(page, "?fail=1&tab=workspaces");
   const dra = workspaceRow(page, DRA.name);
-  await deleteSpace(dra).click();
+  await askDelete(dra);
   await dra.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(dra).toContainText(FAILED);
   await expect(rows(page, "Workspaces")).toHaveCount(2);
 
   await open(page, "?closing=1&tab=workspaces", false);
   await expect(rows(page, "Workspaces")).toHaveCount(2);
-  await expect(deleteSpace(workspaceRow(page, DRA.name))).toHaveCount(0);
+  await expect(moreButton(workspaceRow(page, DRA.name))).toHaveCount(0);
 });
 
 // ---- Topics ----

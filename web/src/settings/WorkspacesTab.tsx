@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   DELETE_WORKSPACE,
+  DELETE_WORKSPACE_ITEM,
   KEEP_WORKSPACE,
   ONLY_WORKSPACE,
   WORKSPACES_NOTE,
@@ -14,6 +15,7 @@ import {
   workspaceNotes,
   workspaceQuestion,
 } from "./text";
+import { RowMenu } from "./RowMenu";
 import type { SettingsActions, Workspace } from "./types";
 import s from "./settings.module.css";
 
@@ -60,7 +62,12 @@ export function WorkspacesTab({
       ...(list.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []),
     ].find((el) => el.dataset.row === want.id);
     const to = want.pick
-      ? (row?.querySelector<HTMLElement>(`[data-pick="${want.pick}"]`) ?? row)
+      ? (row?.querySelector<HTMLElement>(`[data-pick="${want.pick}"]`) ??
+        // Once the question has closed, "delete" means the row's ⋯ button, which opens it.
+        (want.pick === "delete"
+          ? row?.querySelector<HTMLElement>("[data-menu]")
+          : null) ??
+        row)
       : row;
     (to ?? list.current)?.focus();
   });
@@ -111,7 +118,7 @@ export function WorkspacesTab({
         <div className={s.headText}>
           <h2 className={s.label}>
             <span id="settings-workspaces">{WORKSPACES_TITLE}</span>
-            <span className={s.count}>{shown.length}</span>
+            <span className={s.count}>{workspaces.length}</span>
           </h2>
           <p className={s.note}>{WORKSPACES_NOTE}</p>
         </div>
@@ -142,20 +149,19 @@ export function WorkspacesTab({
                 <p className={s.what}>
                   <span className={s.name}>{w.name}</span>
                 </p>
-                <p className={s.meta}>
-                  {notes && <span>{notes}</span>}
-                  {only && <span>{ONLY_WORKSPACE}</span>}
-                </p>
+                <p className={s.meta}>{notes && <span>{notes}</span>}</p>
               </div>
-              {!only && !closing && (
+              {(only || !closing) && (
                 <div className={s.side}>
-                  <div
-                    role="group"
-                    aria-label={`${DELETE_WORKSPACE} ${w.name}`}
-                    className={s.actions}
-                  >
-                    {isAsking ? (
-                      <>
+                  {only ? (
+                    <p className={s.onlyLine}>{ONLY_WORKSPACE}</p>
+                  ) : isAsking ? (
+                    <>
+                      <div
+                        role="group"
+                        aria-label={`${DELETE_WORKSPACE} ${w.name}`}
+                        className={s.actions}
+                      >
                         <p className={s.ask}>{workspaceQuestion(w)}</p>
                         <button
                           type="button"
@@ -175,20 +181,22 @@ export function WorkspacesTab({
                         >
                           {KEEP_WORKSPACE}
                         </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        data-pick="delete"
-                        className={s.secondary}
-                        aria-label={`${DELETE_WORKSPACE} ${w.name}`}
-                        onClick={() => ask(w.id)}
-                      >
-                        {DELETE_WORKSPACE}
-                      </button>
-                    )}
-                  </div>
-                  {isAsking && <p className={s.aside}>{WORKSPACE_ASIDE}</p>}
+                      </div>
+                      <p className={s.aside}>{WORKSPACE_ASIDE}</p>
+                    </>
+                  ) : (
+                    <RowMenu
+                      label={`Actions for ${w.name}`}
+                      items={[
+                        {
+                          key: "delete",
+                          text: DELETE_WORKSPACE_ITEM,
+                          danger: true,
+                          onPick: () => ask(w.id),
+                        },
+                      ]}
+                    />
+                  )}
                   {refused?.id === w.id && (
                     <p className={s.refused}>{refused.text}</p>
                   )}

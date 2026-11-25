@@ -421,6 +421,12 @@
   gap: 6px;
 }
 
+.onlyLine {
+  margin: 0;
+  font-size: 13px;
+  color: var(--quiet);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
