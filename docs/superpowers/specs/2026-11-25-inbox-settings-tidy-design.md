@@ -114,8 +114,8 @@ When an answer succeeds:
 
 - The item leaves the list.
 - The next item in the same group is selected, or else the first item of the other group.
-- The page's status line says "Linked.", "Declined." or "Note released." (today's words where they
-  exist).
+- The page's status line says today's words: "Link accepted.", "Link declined." or "Note
+  released."
 - With nothing left, the detail pane says "All done." with "Open the vault".
 
 When an answer fails, today's failure line shows in the detail pane, and the item stays selected.
@@ -179,12 +179,12 @@ One row inside the Settings card:
   - Topics: the number of topics.
   - People: members plus open invitations.
   - Hive: no count.
-- A member sees no Hive tab.
+- A member sees no Topics tab and no Hive tab, as today a member has neither section.
 
 The tabs are a `role="tablist"` with arrow-key movement. The chosen tab is kept in the URL as
 `?tab=agents|workspaces|topics|people|hive`, written with `history.replaceState` (no navigation,
 no server round trip). A reload or a link opens that tab. A missing or unknown value opens Agents,
-and so does `hive` for a member.
+and so do `topics` and `hive` for a member.
 
 **At most one primary (yellow) button** shows per tab.
 
@@ -217,7 +217,7 @@ and so does `hive` for a member.
 The heading row has:
 
 - A search field "Find a topic", which filters by name on the client.
-- For an owner, **Find topics in my notes** (outlined). It opens a dialog holding today's
+- **Find topics in my notes** (outlined). It opens a dialog holding today's
   suggestion list, with these changes:
   - The list scrolls inside the dialog.
   - The count reads "N of M ticked".
@@ -229,9 +229,9 @@ Under the heading row:
 - **Chips for the eight kinds**, each with its count, and "All" first. One chip is chosen at a
   time; the choice is client state.
 - **The topics** in a grid of columns across the full width, each with its note count.
-- **For an owner,** a ⋯ menu on each topic with **Delete topic…**, which asks today's question.
-- **A member** sees the same list, chips and search, without Find topics and without ⋯ (today's
-  rule).
+- A ⋯ menu on each topic with **Delete topic…**, which asks today's question.
+- While the hive is being deleted, there is no Find topics and no ⋯, as today.
+- The tab is the owner's only: a member has no Topics tab (3.1).
 
 ### 3.5 People
 
@@ -334,7 +334,7 @@ today.
 - `linkLine`: known title, unknown title, the person's title emphasised.
 - `openingOf`: front matter dropped, headings dropped, the 280 cut on a word boundary with "…",
   an empty body.
-- `tabFromParam`: each tab, unknown, missing, `hive` for a member.
+- `tabFromParam`: each tab, unknown, missing, `topics` and `hive` for a member.
 - The fold sentence: singular and plural.
 - `openingIn`: a non-UUID is refused before any query, the query shape, `{ ok: false }` on a
   database error.
@@ -348,7 +348,7 @@ today.
   - ↑/↓ moves the selection.
   - The opening lines appear for your note.
   - Their note shows "Not shared with you" when its title is unknown.
-  - Accept selects the next item and says "Linked."
+  - Accept selects the next item and says "Link accepted."
   - Decline asks, and Keep returns.
   - A held note: Release says "Note released."
   - The last answer shows "All done."
@@ -366,7 +366,7 @@ today.
   - Topics: search and chips filter, and Find topics opens the dialog.
   - People: invitations sit in the list with "Invited", and ⋯ → Send again works.
   - The Hive dialog's Delete hive is disabled until the name is typed.
-  - `?member=1`: no Hive tab, no Invite someone, no ⋯ on topics.
+  - `?member=1`: no Topics tab, no Hive tab, no Invite someone.
   - `?none=1` shows the agents' empty block.
 
 Existing Inbox and Settings tests are updated where the words or the order changed, never deleted
