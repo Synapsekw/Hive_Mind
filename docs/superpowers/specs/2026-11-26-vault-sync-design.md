@@ -1,6 +1,6 @@
 ---
 type: spec
-status: draft
+status: approved
 last-updated: 2026-11-26
 tags: [project/hive-mind, spec, db, sync, web]
 ---
