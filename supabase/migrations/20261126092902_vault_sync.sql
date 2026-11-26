@@ -511,3 +511,312 @@ grant execute on function public.jwt_sync_key() to authenticated;
 grant execute on function public.create_sync_key(uuid) to authenticated;
 grant execute on function public.revoke_sync_key(uuid) to authenticated;
 grant execute on function public.sync_login(text) to anon, authenticated;
+
+-- ------------------------------------------------------------------- runs
+
+-- The caller's open run. Raises for any other id.
+create function public._sync_run(p_run uuid) returns public.sync_runs
+language plpgsql stable security definer set search_path = '' as $$
+declare
+  k public.sync_keys := public._sync_live();
+  r public.sync_runs;
+begin
+  select * into r from public.sync_runs
+   where id = p_run and key_id = k.id and finished_at is null;
+  if r.id is null then
+    raise exception 'no such run' using errcode = '22023';
+  end if;
+  return r;
+end
+$$;
+
+create function public.sync_open_run(p_confirm boolean) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  k public.sync_keys := public._sync_live();
+  v_prev text[];
+  v_run uuid;
+begin
+  if coalesce(p_confirm, false) then
+    select r.refused_deletes into v_prev from public.sync_runs r
+     where r.key_id in (select public._sync_family(k.id))
+     order by r.started_at desc limit 1;
+  end if;
+  insert into public.sync_runs (key_id, confirmable)
+  values (k.id, coalesce(v_prev, '{}'))
+  returning id into v_run;
+  return jsonb_build_object(
+    'run_id', v_run,
+    'storage_prefix', k.member_id::text || '/' || k.workspace_id::text || '/vault/');
+end
+$$;
+
+-- A vault path the sync may name: relative, "/" separated, no empty, "." or ".." part, no
+-- backslash, 1 to 4000 characters.
+create function public._sync_path_ok(p text) returns boolean
+language sql immutable set search_path = '' as $$
+  select coalesce(
+    length(p) between 1 and 4000
+    and p !~ '(^|/)\.{1,2}(/|$)' and p !~ '//' and p !~ '^/' and p !~ '/$'
+    and position(E'\\' in p) = 0, false)
+$$;
+
+-- ------------------------------------------------------------------- plan
+
+create function public.sync_plan(p_run uuid, p_entries jsonb, p_last boolean) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  k public.sync_keys := public._sync_live();
+  r public.sync_runs := public._sync_run(p_run);
+  v_n integer;
+  v_out jsonb;
+begin
+  if coalesce(jsonb_typeof(p_entries), '') <> 'array' then
+    raise exception 'a manifest entry is not usable' using errcode = '22023';
+  end if;
+  v_n := jsonb_array_length(p_entries);
+  if v_n > 2000 then
+    raise exception 'a page holds at most 2000 entries' using errcode = '22023';
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(p_entries) e
+     where coalesce(jsonb_typeof(e), '') <> 'object'
+        or not public._sync_path_ok(e ->> 'path')
+        or coalesce(e ->> 'sha256', '') !~ '^[0-9a-f]{64}$'
+        or coalesce(jsonb_typeof(e -> 'size'), '') <> 'number'
+        or not coalesce((e ->> 'size')::numeric between 0 and 52428800, false)
+        or (coalesce(jsonb_typeof(e -> 'home'), 'null') <> 'null'
+            and not public._sync_path_ok(e ->> 'home'))) then
+    raise exception 'a manifest entry is not usable' using errcode = '22023';
+  end if;
+  insert into public.sync_manifest (run_id, path, sha256, size, home)
+  select p_run, e ->> 'path', e ->> 'sha256', (e ->> 'size')::bigint, e ->> 'home'
+    from jsonb_array_elements(p_entries) e
+  on conflict (run_id, path) do update
+    set sha256 = excluded.sha256, size = excluded.size, home = excluded.home;
+  if not coalesce(p_last, false) then
+    return jsonb_build_object('received', v_n);
+  end if;
+
+  -- Adoption: a note of the key's member and workspace at a manifest path, kept by nobody.
+  -- It has no fingerprint yet, so it is planned as changed and its text is sent once.
+  update public.notes n set synced_by = k.id, sync_sha256 = null
+    from public.sync_manifest m
+   where m.run_id = p_run and m.path ~* '\.md$'
+     and n.workspace_id = k.workspace_id and n.member_id = k.member_id
+     and n.path = m.path and n.synced_by is null;
+
+  with fam as (select f as id from public._sync_family(k.id) f),
+  m as (select path, sha256, home, (path ~* '\.md$') as note
+          from public.sync_manifest where run_id = p_run),
+  kept as (
+    select n.path, n.sync_sha256 as sha, true as note, null::text as home
+      from public.notes n
+     where n.workspace_id = k.workspace_id and n.synced_by in (select id from fam)
+       and not n.sync_generated
+    union all
+    select f.vault_path, f.sync_sha256, false,
+           (select x.path from public.notes x where x.id = f.note_id)
+      from public.files f
+     where f.workspace_id = k.workspace_id and f.synced_by in (select id from fam)),
+  fresh as (select m.* from m where not exists (
+              select 1 from kept where kept.path = m.path and kept.note = m.note)),
+  lost as (select kept.* from kept where not exists (
+              select 1 from m where m.path = kept.path and m.note = kept.note)),
+  pairs as (
+    select l.path as from_path, f.path as to_path
+      from lost l join fresh f on f.sha256 = l.sha and f.note = l.note
+     where (select count(*) from fresh f2 where f2.sha256 = l.sha and f2.note = l.note) = 1
+       and (select count(*) from lost l2 where l2.sha = l.sha and l2.note = l.note) = 1)
+  select jsonb_build_object(
+    'new', coalesce((select jsonb_agg(path order by path) from fresh
+                      where path not in (select to_path from pairs)), '[]'),
+    'changed', coalesce((select jsonb_agg(m.path order by m.path)
+                           from m join kept on kept.path = m.path and kept.note = m.note
+                          where kept.sha is distinct from m.sha256), '[]'),
+    'moved', coalesce((select jsonb_agg(jsonb_build_object('from', from_path, 'to', to_path)
+                                        order by to_path) from pairs), '[]'),
+    'gone', coalesce((select jsonb_agg(path order by path) from lost
+                       where path not in (select from_path from pairs)), '[]'),
+    'rehome', coalesce((select jsonb_agg(jsonb_build_object('path', m.path, 'home', m.home)
+                                         order by m.path)
+                          from m join kept on kept.path = m.path and not kept.note
+                         where not m.note and kept.sha = m.sha256
+                           and m.home is not null and m.home is distinct from kept.home), '[]'),
+    'kept', (select count(*) from kept))
+  into v_out;
+  return v_out;
+end
+$$;
+
+-- ------------------------------------------------------------------ notes
+
+-- The folder row of a vault path's folder, made when missing; null at the top.
+create function public._sync_folder(k public.sync_keys, p_path text) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_dir text := case when strpos(p_path, '/') > 0
+                     then regexp_replace(p_path, '/[^/]*$', '') end;
+  v_id uuid;
+begin
+  if v_dir is null then return null; end if;
+  insert into public.folders (workspace_id, member_id, path)
+  values (k.workspace_id, k.member_id, v_dir)
+  on conflict (workspace_id, path) do nothing;
+  select id into v_id from public.folders where workspace_id = k.workspace_id and path = v_dir;
+  return v_id;
+end
+$$;
+
+-- A date the job sent: an ISO text of at most 40 characters, else null.
+create function public._sync_date(p text) returns timestamptz
+language plpgsql stable set search_path = '' as $$
+begin
+  if p is null or length(p) > 40 then return null; end if;
+  return p::timestamptz;
+exception when others then
+  return null;
+end
+$$;
+
+create function public.sync_put_notes(p_run uuid, p_notes jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  k public.sync_keys := public._sync_live();
+  r public.sync_runs := public._sync_run(p_run);
+  e jsonb;
+  n public.notes;
+  v_path text;
+  v_from text;
+  v_folder uuid;
+  v_id uuid;
+  v_written jsonb := '[]';
+  v_failed jsonb := '[]';
+begin
+  if coalesce(jsonb_typeof(p_notes), '') <> 'array' then
+    raise exception 'a note is not usable' using errcode = '22023';
+  end if;
+  if jsonb_array_length(p_notes) > 50 then
+    raise exception 'a batch holds at most 50 notes' using errcode = '22023';
+  end if;
+  if (select coalesce(sum(octet_length(coalesce(x ->> 'title', ''))
+                          + octet_length(coalesce(x ->> 'body', ''))
+                          + octet_length(coalesce((x -> 'frontmatter')::text, ''))), 0)
+        from jsonb_array_elements(p_notes) x) > 1000000 then
+    raise exception 'a batch holds at most 1 MB of text' using errcode = '22023';
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(p_notes) x
+     where coalesce(jsonb_typeof(x), '') <> 'object'
+        or not public._sync_path_ok(x ->> 'path') or (x ->> 'path') !~* '\.md$'
+        or (x ? 'from' and not public._sync_path_ok(x ->> 'from'))
+        or coalesce(jsonb_typeof(x -> 'title'), '') <> 'string'
+        or not coalesce(length(x ->> 'title') between 1 and 1000, false)
+        or coalesce(jsonb_typeof(x -> 'body'), '') <> 'string'
+        or coalesce(jsonb_typeof(x -> 'frontmatter'), '') <> 'object'
+        or coalesce(x ->> 'sha256', '') !~ '^[0-9a-f]{64}$') then
+    raise exception 'a note is not usable' using errcode = '22023';
+  end if;
+
+  for e in select * from jsonb_array_elements(p_notes) loop
+    v_path := e ->> 'path';
+    v_from := e ->> 'from';
+    begin
+      v_folder := public._sync_folder(k, v_path);
+      n := null;
+      if v_from is not null then
+        select * into n from public.notes x
+         where x.workspace_id = k.workspace_id and x.path = v_from
+           and x.synced_by in (select public._sync_family(k.id));
+      end if;
+      if n.id is null then
+        v_from := null;
+        select * into n from public.notes x
+         where x.workspace_id = k.workspace_id and x.member_id = k.member_id
+           and x.path = v_path
+           and (x.synced_by is null or x.synced_by in (select public._sync_family(k.id)));
+      end if;
+      if n.id is null then
+        insert into public.notes (hive_id, member_id, workspace_id, path, title, body,
+                                  frontmatter, folder_id, sync_sha256, created_at, updated_at)
+        values ((select w.hive_id from public.workspaces w where w.id = k.workspace_id),
+                k.member_id, k.workspace_id, v_path, e ->> 'title', e ->> 'body',
+                e -> 'frontmatter', v_folder, e ->> 'sha256',
+                public._sync_date(e ->> 'created_at'),
+                coalesce(public._sync_date(e ->> 'updated_at'),
+                         public._sync_date(e ->> 'created_at')))
+        returning id into v_id;
+      else
+        update public.notes set
+          path = v_path, folder_id = v_folder,
+          title = e ->> 'title', body = e ->> 'body', frontmatter = e -> 'frontmatter',
+          synced_by = k.id, sync_sha256 = e ->> 'sha256',
+          created_at = coalesce(public._sync_date(e ->> 'created_at'), n.created_at),
+          updated_at = coalesce(public._sync_date(e ->> 'updated_at'), n.updated_at)
+         where id = n.id
+        returning id into v_id;
+        if v_from is not null and v_from <> v_path then
+          insert into public.audit_log (hive_id, member_id, agent_id, action, note_id, detail)
+          values (n.hive_id, k.member_id, k.agent_id, 'note.moved', n.id,
+                  jsonb_build_object('from', v_from, 'to', v_path, 'sync_key_id', k.id));
+        end if;
+      end if;
+      v_written := v_written || jsonb_build_array(jsonb_build_object('path', v_path, 'id', v_id));
+    exception when others then
+      v_failed := v_failed || jsonb_build_array(jsonb_build_object('path', v_path, 'code', sqlstate));
+    end;
+  end loop;
+  return jsonb_build_object('written', v_written, 'failed', v_failed);
+end
+$$;
+
+-- ------------------------------------------------------------------ links
+
+create function public.sync_link_notes(p_run uuid, p_pairs jsonb) returns integer
+language plpgsql security definer set search_path = '' as $$
+declare
+  k public.sync_keys := public._sync_live();
+  r public.sync_runs := public._sync_run(p_run);
+  v_n integer := 0;
+  p record;
+begin
+  if coalesce(jsonb_typeof(p_pairs), '') <> 'array' or jsonb_array_length(p_pairs) > 2000 then
+    raise exception 'a batch holds at most 2000 links' using errcode = '22023';
+  end if;
+  for p in
+    select distinct on (least(a.id, b.id), greatest(a.id, b.id)) a.id as a_id, b.id as b_id
+      from jsonb_array_elements(p_pairs) e
+      join public.notes a on a.workspace_id = k.workspace_id and a.path = e ->> 'from'
+                         and a.synced_by in (select public._sync_family(k.id))
+      join public.notes b on b.workspace_id = k.workspace_id and b.member_id = k.member_id
+                         and b.path = e ->> 'to'
+     where a.id <> b.id
+       and not exists (select 1 from public.links l
+                        where least(l.from_note, l.to_note) = least(a.id, b.id)
+                          and greatest(l.from_note, l.to_note) = greatest(a.id, b.id))
+  loop
+    begin
+      -- links_before_insert accepts a link between two notes of one owner at once.
+      insert into public.links (hive_id, from_note, to_note, tier, score)
+      values ((select hive_id from public.notes where id = p.a_id), p.a_id, p.b_id, 2, 0.8);
+      v_n := v_n + 1;
+    exception when others then
+      null;  -- a pair another run linked meanwhile
+    end;
+  end loop;
+  return v_n;
+end
+$$;
+
+revoke all on function public._sync_run(uuid) from public, anon, authenticated;
+revoke all on function public._sync_path_ok(text) from public, anon;
+revoke all on function public._sync_folder(public.sync_keys, text) from public, anon, authenticated;
+revoke all on function public._sync_date(text) from public, anon;
+revoke all on function public.sync_open_run(boolean) from public, anon;
+revoke all on function public.sync_plan(uuid, jsonb, boolean) from public, anon;
+revoke all on function public.sync_put_notes(uuid, jsonb) from public, anon;
+revoke all on function public.sync_link_notes(uuid, jsonb) from public, anon;
+grant execute on function public.sync_open_run(boolean) to authenticated;
+grant execute on function public.sync_plan(uuid, jsonb, boolean) to authenticated;
+grant execute on function public.sync_put_notes(uuid, jsonb) to authenticated;
+grant execute on function public.sync_link_notes(uuid, jsonb) to authenticated;

@@ -346,3 +346,218 @@ test("the sync changes only the files its key keeps", async () => {
   );
   await t.as(s.claims, `select public.zz_vpath($1, 'a')`, [mine.id]);
 });
+
+const sha = (c) => c.repeat(64);
+const openRun = async (t, s, confirm = false) =>
+  (await t.as(s.claims, `select public.sync_open_run($1) as r`, [confirm]))[0]
+    .r;
+const plan = async (t, s, run, entries) =>
+  (
+    await t.as(s.claims, `select public.sync_plan($1, $2, true) as p`, [
+      run,
+      JSON.stringify(entries),
+    ])
+  )[0].p;
+const putNotes = async (t, s, run, notes) =>
+  (
+    await t.as(s.claims, `select public.sync_put_notes($1, $2) as r`, [
+      run,
+      JSON.stringify(notes),
+    ])
+  )[0].r;
+const note = (path, c, extra = {}) => ({
+  path,
+  title: path.replace(/\.md$/, ""),
+  body: `body ${c}`,
+  frontmatter: {},
+  sha256: sha(c),
+  ...extra,
+});
+
+test("a run opens only with a live key, and names its storage folder", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  assert.equal(r.storage_prefix, `${t.members.dani}/${t.ws.dani}/vault/`);
+  await t.as(t.person("dani"), `select public.revoke_sync_key($1)`, [s.keyId]);
+  await assert.rejects(openRun(t, s), /this sync key is not live/);
+});
+
+test("the plan lists new, changed, moved and gone, and adopts imported notes", async () => {
+  const t = await setupHive();
+  await t.addNote("dani", "Imported", { path: "a/Imported.md" });
+  await t.addNote("dani", "Uploads", { path: "Uploads.md" });
+  const s = await syncFor(t, "dani");
+  let run = (await openRun(t, s)).run_id;
+  let p = await plan(t, s, run, [
+    { path: "a/Imported.md", sha256: sha("1"), size: 4 },
+    { path: "b/New.md", sha256: sha("2"), size: 4 },
+  ]);
+  // The imported note is adopted with no fingerprint yet, so it is "changed".
+  assert.deepEqual(p.new, ["b/New.md"]);
+  assert.deepEqual(p.changed, ["a/Imported.md"]);
+  assert.deepEqual(p.gone, []);
+  await putNotes(t, s, run, [
+    note("a/Imported.md", "1"),
+    note("b/New.md", "2"),
+  ]);
+
+  run = (await openRun(t, s)).run_id;
+  p = await plan(t, s, run, [
+    { path: "a/Imported.md", sha256: sha("1"), size: 4 },
+    { path: "c/New.md", sha256: sha("2"), size: 4 },
+  ]);
+  assert.deepEqual(p.moved, [{ from: "b/New.md", to: "c/New.md" }]);
+  assert.deepEqual(p.new, []);
+  assert.deepEqual(p.changed, []);
+  // Uploads.md was never synced: it is not gone.
+  assert.deepEqual(p.gone, []);
+  assert.equal(p.kept, 2);
+});
+
+test("two new paths with the moved content are not a move", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let run = (await openRun(t, s)).run_id;
+  await plan(t, s, run, [{ path: "x.md", sha256: sha("3"), size: 1 }]);
+  await putNotes(t, s, run, [note("x.md", "3")]);
+  run = (await openRun(t, s)).run_id;
+  const p = await plan(t, s, run, [
+    { path: "y.md", sha256: sha("3"), size: 1 },
+    { path: "z.md", sha256: sha("3"), size: 1 },
+  ]);
+  assert.deepEqual(p.moved, []);
+  assert.deepEqual(p.gone, ["x.md"]);
+  assert.deepEqual(p.new, ["y.md", "z.md"]);
+});
+
+test("pages are refused when malformed or too long", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const run = (await openRun(t, s)).run_id;
+  await assert.rejects(
+    plan(t, s, run, [{ path: "../x.md", sha256: sha("1"), size: 1 }]),
+    /a manifest entry is not usable/,
+  );
+  await assert.rejects(
+    plan(t, s, run, [{ path: "x.md", sha256: "nope", size: 1 }]),
+    /a manifest entry is not usable/,
+  );
+  await assert.rejects(
+    plan(t, s, run, [{ path: "x.md", sha256: sha("1") }]),
+    /a manifest entry is not usable/,
+  );
+  const many = Array.from({ length: 2001 }, (_, i) => ({
+    path: `n${i}.md`,
+    sha256: sha("1"),
+    size: 1,
+  }));
+  await assert.rejects(plan(t, s, run, many), /a page holds at most 2000/);
+});
+
+test("another member's run cannot be used", async () => {
+  const t = await setupHive();
+  const a = await syncFor(t, "dani");
+  const b = await syncFor(t, "ahmed");
+  const run = (await openRun(t, a)).run_id;
+  await assert.rejects(plan(t, b, run, []), /no such run/);
+});
+
+test("synced notes: a move keeps the note, dates come from the vault, no session", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let run = (await openRun(t, s)).run_id;
+  const r = await putNotes(t, s, run, [
+    note("old/A.md", "4", { created_at: "2024-03-01T12:00:00Z" }),
+  ]);
+  const id = r.written[0].id;
+  run = (await openRun(t, s)).run_id;
+  await putNotes(t, s, run, [note("new/A.md", "4", { from: "old/A.md" })]);
+  const row = (
+    await t.db.query(
+      `select n.path, n.created_at, n.session_id, n.visibility, n.synced_by,
+              f.path as folder
+         from public.notes n left join public.folders f on f.id = n.folder_id
+        where n.id = $1`,
+      [id],
+    )
+  ).rows[0];
+  assert.equal(row.path, "new/A.md");
+  assert.equal(row.folder, "new");
+  assert.equal(row.session_id, null);
+  assert.equal(row.visibility, null);
+  assert.equal(row.synced_by, s.keyId);
+  assert.equal(
+    new Date(row.created_at).toISOString(),
+    "2024-03-01T12:00:00.000Z",
+  );
+  const audit = await t.db.query(
+    `select detail from public.audit_log where action = 'note.moved'`,
+  );
+  assert.equal(audit.rows[0].detail.sync_key_id, s.keyId);
+});
+
+test("a move from a note the sync does not keep writes a new note instead", async () => {
+  const t = await setupHive();
+  await t.addNote("dani", "Mine", { path: "Mine.md" });
+  const s = await syncFor(t, "dani");
+  const run = (await openRun(t, s)).run_id;
+  const r = await putNotes(t, s, run, [
+    note("Elsewhere.md", "5", { from: "Mine.md" }),
+  ]);
+  assert.equal(r.written.length, 1);
+  const still = await t.db.query(
+    `select count(*)::int as n from public.notes
+      where path = 'Mine.md' and synced_by is null`,
+  );
+  assert.equal(still.rows[0].n, 1);
+});
+
+test("a new key keeps what the old key synced", async () => {
+  const t = await setupHive();
+  const first = await syncFor(t, "dani");
+  let run = (await openRun(t, first)).run_id;
+  await putNotes(t, first, run, [note("K.md", "a")]);
+  const second = await syncFor(t, "dani");
+  run = (await openRun(t, second)).run_id;
+  const p = await plan(t, second, run, [
+    { path: "K.md", sha256: sha("a"), size: 1 },
+  ]);
+  assert.deepEqual(p.new, []);
+  assert.deepEqual(p.changed, []);
+});
+
+test("a batch over 50 notes or 1 MB of text is refused whole", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const run = (await openRun(t, s)).run_id;
+  const many = Array.from({ length: 51 }, (_, i) => note(`n${i}.md`, "6"));
+  await assert.rejects(
+    putNotes(t, s, run, many),
+    /a batch holds at most 50 notes/,
+  );
+  const big = note("big.md", "7", { body: "x".repeat(1_000_001) });
+  await assert.rejects(
+    putNotes(t, s, run, [big]),
+    /a batch holds at most 1 MB/,
+  );
+});
+
+test("wiki links between synced notes are made and accepted at once", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const run = (await openRun(t, s)).run_id;
+  await putNotes(t, s, run, [note("A.md", "8"), note("B.md", "9")]);
+  const made = (
+    await t.as(s.claims, `select public.sync_link_notes($1, $2) as n`, [
+      run,
+      JSON.stringify([
+        { from: "A.md", to: "B.md" },
+        { from: "B.md", to: "A.md" },
+      ]),
+    ])
+  )[0].n;
+  assert.equal(made, 1);
+  const l = await t.db.query(`select status from public.links`);
+  assert.equal(l.rows[0].status, "accepted");
+});

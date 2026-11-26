@@ -5471,6 +5471,8 @@ test("every function refuses an app pass except connector_login", async () => {
     "jwt_oauth_client", // the caller's own client_id and aud claims
     "jwt_has_sync_claim", // the caller's own sync_key_id claim
     "note_topic", // cuts a path given as the argument
+    "_sync_path_ok", // checks a path given as the argument
+    "_sync_date", // reads a date given as the argument
     "file_kind", // a name and a type given as arguments
   ];
   // Signs in by the token in its argument, for anyone, as it does for anon:
@@ -5480,6 +5482,14 @@ test("every function refuses an app pass except connector_login", async () => {
   const bySyncClaim = ["jwt_sync_key"];
   // Refused to a pass in their own words: only a person makes or revokes a key.
   const forSyncKeys = ["create_sync_key", "revoke_sync_key"];
+  // Refused to anyone but the sync's own identity: a person and a pass both get
+  // "this sync key is not live".
+  const forSync = [
+    "sync_open_run",
+    "sync_plan",
+    "sync_put_notes",
+    "sync_link_notes",
+  ];
   // The one function made for an app pass.
   const forApps = ["connector_login"];
 
@@ -5611,6 +5621,7 @@ test("every function refuses an app pass except connector_login", async () => {
     ...byToken,
     ...bySyncClaim,
     ...forSyncKeys,
+    ...forSync,
     ...forApps,
     ...forAgents,
     ...forPeople,
@@ -5701,6 +5712,18 @@ test("every function refuses an app pass except connector_login", async () => {
       sql,
     );
   }
+  for (const [sql, params] of [
+    [`select public.sync_open_run(false)`, []],
+    [`select public.sync_plan(gen_random_uuid(), '[]', true)`, []],
+    [`select public.sync_put_notes(gen_random_uuid(), '[]')`, []],
+    [`select public.sync_link_notes(gen_random_uuid(), '[]')`, []],
+  ])
+    for (const who of [kai, pass])
+      assert.match(
+        (await trial(who, sql, params)).error?.message ?? "(no error)",
+        /this sync key is not live/,
+        sql,
+      );
   // sync_login likewise: the pass has no sync key, so it gets what anyone gets.
   const syncGuess = await trial(
     pass,
