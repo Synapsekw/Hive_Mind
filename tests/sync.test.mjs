@@ -561,3 +561,129 @@ test("wiki links between synced notes are made and accepted at once", async () =
   const l = await t.db.query(`select status from public.links`);
   assert.equal(l.rows[0].status, "accepted");
 });
+
+test("a link never reaches another member's note of the same path", async () => {
+  const t = await setupHive();
+  await t.addNote("ahmed", "B", { path: "B.md" });
+  const s = await syncFor(t, "dani");
+  const run = (await openRun(t, s)).run_id;
+  await putNotes(t, s, run, [note("A.md", "8")]);
+  const made = (
+    await t.as(s.claims, `select public.sync_link_notes($1, $2) as n`, [
+      run,
+      JSON.stringify([{ from: "A.md", to: "B.md" }]),
+    ])
+  )[0].n;
+  assert.equal(made, 0);
+  const l = await t.db.query(`select count(*)::int as n from public.links`);
+  assert.equal(l.rows[0].n, 0);
+});
+
+test("a move from a note another member's key keeps writes a new note", async () => {
+  const t = await setupHive();
+  const a = await syncFor(t, "ahmed");
+  const s = await syncFor(t, "dani");
+  let run = (await openRun(t, a)).run_id;
+  await putNotes(t, a, run, [note("X.md", "a")]);
+  run = (await openRun(t, s)).run_id;
+  const r = await putNotes(t, s, run, [note("Y.md", "b", { from: "X.md" })]);
+  assert.equal(r.written.length, 1);
+  assert.equal(r.failed.length, 0);
+  const theirs = (
+    await t.db.query(
+      `select path, body, synced_by from public.notes where workspace_id = $1`,
+      [t.ws.ahmed],
+    )
+  ).rows;
+  assert.deepEqual(theirs, [
+    { path: "X.md", body: "body a", synced_by: a.keyId },
+  ]);
+  const mine = (
+    await t.db.query(
+      `select path, synced_by from public.notes where workspace_id = $1`,
+      [t.ws.dani],
+    )
+  ).rows;
+  assert.deepEqual(mine, [{ path: "Y.md", synced_by: s.keyId }]);
+});
+
+test("a refused note is reported by code alone and the others are written", async () => {
+  const t = await setupHive();
+  await t.addNote("dani", "Held", { path: "Held.md" });
+  const s = await syncFor(t, "dani");
+  let run = (await openRun(t, s)).run_id;
+  await putNotes(t, s, run, [note("X.md", "1")]);
+  run = (await openRun(t, s)).run_id;
+  const r = await putNotes(t, s, run, [
+    note("Held.md", "2", { from: "X.md" }),
+    note("Fine.md", "3"),
+  ]);
+  assert.equal(r.failed.length, 1);
+  assert.deepEqual(Object.keys(r.failed[0]).sort(), ["code", "path"]);
+  assert.equal(r.failed[0].path, "Held.md");
+  assert.match(r.failed[0].code, /^[0-9A-Z]{5}$/);
+  assert.deepEqual(
+    r.written.map((w) => w.path),
+    ["Fine.md"],
+  );
+});
+
+test("the plan never adopts another member's unsynced note", async () => {
+  const t = await setupHive();
+  await t.addNote("ahmed", "Shared", { path: "a/Shared.md" });
+  const s = await syncFor(t, "dani");
+  const run = (await openRun(t, s)).run_id;
+  const p = await plan(t, s, run, [
+    { path: "a/Shared.md", sha256: sha("1"), size: 1 },
+  ]);
+  assert.deepEqual(p.new, ["a/Shared.md"]);
+  assert.deepEqual(p.changed, []);
+  const row = await t.db.query(
+    `select synced_by from public.notes where workspace_id = $1`,
+    [t.ws.ahmed],
+  );
+  assert.equal(row.rows[0].synced_by, null);
+});
+
+test("a plan over two pages lists both, and a moved attachment is rehomed", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let run = (await openRun(t, s)).run_id;
+  const put = await putNotes(t, s, run, [note("Home.md", "1")]);
+  const noteId = put.written[0].id;
+  await t.db.query(
+    `insert into public.files (hive_id, member_id, workspace_id, note_id, storage_path,
+                               name, size_bytes, vault_path, synced_by, sync_sha256)
+     values ($1, $2, $3, $4, $5, 'p.png', 1, 'img/p.png', $6, $7)`,
+    [
+      t.hive,
+      t.members.dani,
+      t.ws.dani,
+      noteId,
+      `${t.members.dani}/${t.ws.dani}/vault/img/p.png`,
+      s.keyId,
+      sha("f"),
+    ],
+  );
+  run = (await openRun(t, s)).run_id;
+  const first = await t.as(
+    s.claims,
+    `select public.sync_plan($1, $2, false) as p`,
+    [
+      run,
+      JSON.stringify([
+        { path: "Home.md", sha256: sha("1"), size: 1 },
+        { path: "One.md", sha256: sha("2"), size: 1 },
+      ]),
+    ],
+  );
+  assert.deepEqual(first[0].p, { received: 2 });
+  const p = await plan(t, s, run, [
+    { path: "Two.md", sha256: sha("3"), size: 1 },
+    { path: "img/p.png", sha256: sha("f"), size: 1, home: "Other.md" },
+  ]);
+  assert.deepEqual(p.new, ["One.md", "Two.md"]);
+  assert.deepEqual(p.changed, []);
+  assert.deepEqual(p.gone, []);
+  assert.deepEqual(p.rehome, [{ path: "img/p.png", home: "Other.md" }]);
+});

@@ -585,8 +585,10 @@ begin
         or coalesce(e ->> 'sha256', '') !~ '^[0-9a-f]{64}$'
         or coalesce(jsonb_typeof(e -> 'size'), '') <> 'number'
         or not coalesce((e ->> 'size')::numeric between 0 and 52428800, false)
-        or (coalesce(jsonb_typeof(e -> 'home'), 'null') <> 'null'
-            and not public._sync_path_ok(e ->> 'home'))) then
+        or (e ? 'home'
+            and (jsonb_typeof(e -> 'home') not in ('string', 'null')
+                 or (jsonb_typeof(e -> 'home') = 'string'
+                     and not public._sync_path_ok(e ->> 'home'))))) then
     raise exception 'a manifest entry is not usable' using errcode = '22023';
   end if;
   insert into public.sync_manifest (run_id, path, sha256, size, home)
@@ -618,7 +620,8 @@ begin
     select f.vault_path, f.sync_sha256, false,
            (select x.path from public.notes x where x.id = f.note_id)
       from public.files f
-     where f.workspace_id = k.workspace_id and f.synced_by in (select id from fam)),
+     where f.workspace_id = k.workspace_id and f.vault_path is not null
+       and f.synced_by in (select id from fam)),
   fresh as (select m.* from m where not exists (
               select 1 from kept where kept.path = m.path and kept.note = m.note)),
   lost as (select kept.* from kept where not exists (
@@ -630,14 +633,16 @@ begin
        and (select count(*) from lost l2 where l2.sha = l.sha and l2.note = l.note) = 1)
   select jsonb_build_object(
     'new', coalesce((select jsonb_agg(path order by path) from fresh
-                      where path not in (select to_path from pairs)), '[]'),
+                      where not exists (select 1 from pairs where pairs.to_path = fresh.path)),
+      '[]'),
     'changed', coalesce((select jsonb_agg(m.path order by m.path)
                            from m join kept on kept.path = m.path and kept.note = m.note
                           where kept.sha is distinct from m.sha256), '[]'),
     'moved', coalesce((select jsonb_agg(jsonb_build_object('from', from_path, 'to', to_path)
                                         order by to_path) from pairs), '[]'),
     'gone', coalesce((select jsonb_agg(path order by path) from lost
-                       where path not in (select from_path from pairs)), '[]'),
+                       where not exists (select 1 from pairs where pairs.from_path = lost.path)),
+      '[]'),
     'rehome', coalesce((select jsonb_agg(jsonb_build_object('path', m.path, 'home', m.home)
                                          order by m.path)
                           from m join kept on kept.path = m.path and not kept.note
@@ -709,7 +714,8 @@ begin
     select 1 from jsonb_array_elements(p_notes) x
      where coalesce(jsonb_typeof(x), '') <> 'object'
         or not public._sync_path_ok(x ->> 'path') or (x ->> 'path') !~* '\.md$'
-        or (x ? 'from' and not public._sync_path_ok(x ->> 'from'))
+        or (x ? 'from' and (jsonb_typeof(x -> 'from') <> 'string'
+                            or not public._sync_path_ok(x ->> 'from')))
         or coalesce(jsonb_typeof(x -> 'title'), '') <> 'string'
         or not coalesce(length(x ->> 'title') between 1 and 1000, false)
         or coalesce(jsonb_typeof(x -> 'body'), '') <> 'string'
@@ -800,7 +806,7 @@ begin
       insert into public.links (hive_id, from_note, to_note, tier, score)
       values ((select hive_id from public.notes where id = p.a_id), p.a_id, p.b_id, 2, 0.8);
       v_n := v_n + 1;
-    exception when others then
+    exception when unique_violation or raise_exception then
       null;  -- a pair another run linked meanwhile
     end;
   end loop;
