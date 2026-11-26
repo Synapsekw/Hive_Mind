@@ -404,10 +404,11 @@ export async function handle(
         ? listed.filter((p): p is string => typeof p === "string" && p !== "")
         : [];
       for (let i = 0; i < paths.length && !spent(); i += BATCH) {
-        // Only what the database still calls an orphan is deleted.
-        const checked = await rpc("sync_orphans_check", {
-          p_paths: paths.slice(i, i + BATCH),
-        });
+        // Only what the database still calls an orphan is deleted, and only
+        // from this batch: an answer can narrow it, never widen it.
+        const batch = paths.slice(i, i + BATCH);
+        const inBatch = new Set(batch);
+        const checked = await rpc("sync_orphans_check", { p_paths: batch });
         const still =
           checked.status === 200
             ? await jsonOf(checked)
@@ -417,7 +418,7 @@ export async function handle(
           break;
         }
         const prefixes = still.filter(
-          (p): p is string => typeof p === "string" && p !== "",
+          (p): p is string => typeof p === "string" && inBatch.has(p),
         );
         if (prefixes.length === 0) continue;
         const gone = await call(

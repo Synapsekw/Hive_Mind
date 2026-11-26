@@ -344,6 +344,23 @@ test("5d. only the paths the check still answers are deleted and forgotten", asy
   assert.equal(none.at(STORAGE).length, 0);
 });
 
+test("5e. a check that answers a path outside the batch widens nothing", async () => {
+  const mine = "m/w/vault/x/a.pdf";
+  const net = stub(
+    {},
+    {
+      orphans: () => Response.json([mine]),
+      orphansCheck: () => Response.json([mine, "other/x.pdf"]),
+    },
+  );
+  await expectDone(await handle(good(), ENV, net.fn), 0, 0, 1);
+  assert.deepEqual(bodyOf(net.at(STORAGE)[0]), { prefixes: [mine] });
+  assert.deepEqual(bodyOf(net.at(ORPHANS_DONE)[0]), { p_paths: [mine] });
+  for (const c of [...net.at(STORAGE), ...net.at(ORPHANS_DONE)]) {
+    assert.ok(!c.init.body.includes("other/x.pdf"));
+  }
+});
+
 test("5c. orphans failing never fails the run or forgets what was not removed", async () => {
   const path = "m/w/vault/x/a.pdf";
   const cases = {
