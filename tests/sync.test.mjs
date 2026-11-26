@@ -1278,3 +1278,65 @@ test("orphans are listed for the service only, a day after they were made", asyn
   );
   assert.equal(n.rows[0].n, 1);
 });
+
+test("an orphan with a live file row is never listed, and the orphan functions refuse everyone but the service", async () => {
+  const t = await setupHive();
+  const live = `${t.members.dani}/${t.ws.dani}/live`;
+  await t.db.query(
+    `insert into public.sync_orphans (storage_path, hive_id, at)
+     values ($2, $1, now() - interval '2 days'), ('a/dead', $1, now() - interval '2 days')`,
+    [t.hive, live],
+  );
+  await t.db.query(
+    `insert into public.files (hive_id, member_id, workspace_id, storage_path, name, size_bytes)
+     values ($1, $2, $3, $4, 'a.pdf', 1)`,
+    [t.hive, t.members.dani, t.ws.dani, live],
+  );
+  const listed = await t.db.query(
+    `select * from public.sync_orphan_paths(10) as p`,
+  );
+  assert.deepEqual(
+    listed.rows.map((r) => r.p),
+    ["a/dead"],
+  );
+  const agent = await t.agentFor("dani");
+  for (const who of [null, t.person("dani"), agent]) {
+    for (const sql of [
+      `select * from public.sync_orphan_paths(10)`,
+      `select public.sync_orphans_removed(array['a/dead'])`,
+      `select * from public.sync_orphans_check(array['a/dead'])`,
+    ]) {
+      await assert.rejects(t.as(who, sql), /permission denied/, sql);
+    }
+  }
+});
+
+test("the check answers only paths still orphaned, a day old and unused", async () => {
+  const t = await setupHive();
+  const used = `${t.members.dani}/${t.ws.dani}/used`;
+  await t.db.query(
+    `insert into public.sync_orphans (storage_path, hive_id, at)
+     values ('a/old', $1, now() - interval '2 days'),
+            ('a/again', $1, now() - interval '2 days'),
+            ('a/fresh', $1, now()),
+            ($2, $1, now() - interval '2 days')`,
+    [t.hive, used],
+  );
+  await t.db.query(
+    `insert into public.files (hive_id, member_id, workspace_id, storage_path, name, size_bytes)
+     values ($1, $2, $3, $4, 'a.pdf', 1)`,
+    [t.hive, t.members.dani, t.ws.dani, used],
+  );
+  // Listed once; then one path is recorded again (its orphan row goes).
+  await t.db.query(
+    `delete from public.sync_orphans where storage_path = 'a/again'`,
+  );
+  const ok = await t.db.query(
+    `select * from public.sync_orphans_check($1::text[]) as p`,
+    [["a/old", "a/again", "a/fresh", used, "a/never"]],
+  );
+  assert.deepEqual(
+    ok.rows.map((r) => r.p),
+    ["a/old"],
+  );
+});

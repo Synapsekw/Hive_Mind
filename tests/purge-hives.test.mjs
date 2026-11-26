@@ -23,6 +23,7 @@ const BEGIN = `${RPC}/begin_hive_purge`;
 const LIST = `${RPC}/hive_object_paths`;
 const PURGE = `${RPC}/purge_hive`;
 const ORPHANS = `${RPC}/sync_orphan_paths`;
+const ORPHANS_CHECK = `${RPC}/sync_orphans_check`;
 const ORPHANS_DONE = `${RPC}/sync_orphans_removed`;
 const STORAGE = `${URL_}/storage/v1/object/files`;
 
@@ -97,6 +98,8 @@ function stub(
     },
     // A `setof text` function answers a JSON array of strings.
     orphans: () => Response.json([]),
+    // By default every listed path is still an orphan.
+    orphansCheck: (body) => Response.json(body.p_paths),
     orphansDone: (body) => Response.json(body.p_paths.length),
   };
   const answers = { ...defaults, ...over };
@@ -114,6 +117,7 @@ function stub(
     if (where === STORAGE) return answers.remove(body, call);
     if (where === PURGE) return answers.purge(body, call);
     if (where === ORPHANS) return answers.orphans(body, call);
+    if (where === ORPHANS_CHECK) return answers.orphansCheck(body, call);
     if (where === ORPHANS_DONE) return answers.orphansDone(body, call);
     throw new Error("unexpected address");
   };
@@ -301,11 +305,43 @@ test("5b. objects the vault sync left behind are removed, then forgotten", async
   const path = "m/w/vault/x/a.pdf";
   const net = stub({}, { orphans: () => Response.json([path]) });
   await expectDone(await handle(good(), ENV, net.fn), 0, 0, 1);
-  assert.deepEqual(net.order(true), [DUE, ORPHANS, STORAGE, ORPHANS_DONE]);
+  assert.deepEqual(net.order(true), [
+    DUE,
+    ORPHANS,
+    ORPHANS_CHECK,
+    STORAGE,
+    ORPHANS_DONE,
+  ]);
   assert.deepEqual(bodyOf(net.at(STORAGE)[0]), { prefixes: [path] });
   assert.equal(net.at(STORAGE)[0].init.method, "DELETE");
   assert.deepEqual(bodyOf(net.at(ORPHANS_DONE)[0]), { p_paths: [path] });
   assert.deepEqual(bodyOf(net.at(ORPHANS)[0]), { p_limit: 1000 });
+});
+
+test("5d. only the paths the check still answers are deleted and forgotten", async () => {
+  const keep = "m/w/vault/x/restored.pdf";
+  const gone = "m/w/vault/x/a.pdf";
+  const net = stub(
+    {},
+    {
+      orphans: () => Response.json([keep, gone]),
+      orphansCheck: () => Response.json([gone]),
+    },
+  );
+  await expectDone(await handle(good(), ENV, net.fn), 0, 0, 1);
+  assert.deepEqual(bodyOf(net.at(ORPHANS_CHECK)[0]), { p_paths: [keep, gone] });
+  assert.deepEqual(bodyOf(net.at(STORAGE)[0]), { prefixes: [gone] });
+  assert.deepEqual(bodyOf(net.at(ORPHANS_DONE)[0]), { p_paths: [gone] });
+  // Nothing still orphaned: nothing deleted.
+  const none = stub(
+    {},
+    {
+      orphans: () => Response.json([keep]),
+      orphansCheck: () => Response.json([]),
+    },
+  );
+  await expectDone(await handle(good(), ENV, none.fn), 0, 0, 0);
+  assert.equal(none.at(STORAGE).length, 0);
 });
 
 test("5c. orphans failing never fails the run or forgets what was not removed", async () => {
@@ -999,6 +1035,8 @@ test("23. a run that is out of time starts no new hive", async () => {
   // The other two were not even begun: their owners can still cancel.
   assert.deepEqual(slow.begun, [HIVE_A]);
   assert.deepEqual(slow.purged, [HIVE_A]);
+  // No time left: the orphan pass made no call.
+  assert.equal(slow.at(ORPHANS).length, 0);
 });
 
 test("24. out of time in the middle of a hive: it is neither purged nor failed, and continues next run", async () => {

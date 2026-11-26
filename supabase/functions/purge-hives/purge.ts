@@ -18,7 +18,10 @@
 //   4. `sync_orphan_paths`: once the hives are done, the objects the vault sync
 //      no longer uses (a day old or more, at most 1000) are removed from the
 //      bucket and forgotten with `sync_orphans_removed`. A failure here leaves
-//      them listed for the next run and never fails this one.
+//      them listed for the next run and never fails this one. Each batch is
+//      checked again with `sync_orphans_check` right before Storage deletes,
+//      so a path recorded again meanwhile is not taken. A Storage delete that
+//      removes only some names leaves the rest for a later run to retry.
 //
 // A hive whose objects could not all be removed is not erased; it is counted
 // as failed and the next run takes it up where this one stopped, since removed
@@ -401,7 +404,22 @@ export async function handle(
         ? listed.filter((p): p is string => typeof p === "string" && p !== "")
         : [];
       for (let i = 0; i < paths.length && !spent(); i += BATCH) {
-        const prefixes = paths.slice(i, i + BATCH);
+        // Only what the database still calls an orphan is deleted.
+        const checked = await rpc("sync_orphans_check", {
+          p_paths: paths.slice(i, i + BATCH),
+        });
+        const still =
+          checked.status === 200
+            ? await jsonOf(checked)
+            : (await drop(checked), null);
+        if (!Array.isArray(still)) {
+          note(`checking orphaned objects answered ${checked.status}`);
+          break;
+        }
+        const prefixes = still.filter(
+          (p): p is string => typeof p === "string" && p !== "",
+        );
+        if (prefixes.length === 0) continue;
         const gone = await call(
           `${base}/storage/v1/object/${BUCKET}`,
           "DELETE",

@@ -1155,6 +1155,17 @@ language sql stable security definer set search_path = '' as $$
    limit least(greatest(coalesce(p_limit, 0), 0), 1000)
 $$;
 
+-- Asked again for each batch right before Storage is told to delete: a path recorded again since
+-- it was listed (a file deleted long ago, then restored) has no orphan row, or has a files row, and
+-- is not answered.
+create function public.sync_orphans_check(p_paths text[]) returns setof text
+language sql stable security definer set search_path = '' as $$
+  select o.storage_path from public.sync_orphans o
+   where o.storage_path = any(coalesce(p_paths, '{}'))
+     and o.at < now() - interval '1 day'
+     and not exists (select 1 from public.files f where f.storage_path = o.storage_path)
+$$;
+
 create function public.sync_orphans_removed(p_paths text[]) returns integer
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -1168,9 +1179,11 @@ $$;
 
 revoke all on function
   public.sync_orphan_paths(integer),
+  public.sync_orphans_check(text[]),
   public.sync_orphans_removed(text[])
 from public, anon, authenticated;
 grant execute on function
   public.sync_orphan_paths(integer),
+  public.sync_orphans_check(text[]),
   public.sync_orphans_removed(text[])
 to service_role;
