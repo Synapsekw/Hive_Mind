@@ -22,6 +22,8 @@ const DUE = `${RPC}/hives_due_for_purge`;
 const BEGIN = `${RPC}/begin_hive_purge`;
 const LIST = `${RPC}/hive_object_paths`;
 const PURGE = `${RPC}/purge_hive`;
+const ORPHANS = `${RPC}/sync_orphan_paths`;
+const ORPHANS_DONE = `${RPC}/sync_orphans_removed`;
 const STORAGE = `${URL_}/storage/v1/object/files`;
 
 const request = (init = {}, query = "") =>
@@ -93,6 +95,9 @@ function stub(
       purged.push(body.p_hive);
       return Response.json(true);
     },
+    // A `setof text` function answers a JSON array of strings.
+    orphans: () => Response.json([]),
+    orphansDone: (body) => Response.json(body.p_paths.length),
   };
   const answers = { ...defaults, ...over };
   const fn = async (input, init) => {
@@ -108,10 +113,15 @@ function stub(
     if (where === LIST) return answers.list(body, call);
     if (where === STORAGE) return answers.remove(body, call);
     if (where === PURGE) return answers.purge(body, call);
+    if (where === ORPHANS) return answers.orphans(body, call);
+    if (where === ORPHANS_DONE) return answers.orphansDone(body, call);
     throw new Error("unexpected address");
   };
   const at = (where) => calls.filter((c) => c.where === where);
-  const order = () => calls.map((c) => c.where);
+  // The hives' calls in order; the orphan pass that closes every run is left
+  // out unless asked for.
+  const order = (all = false) =>
+    calls.map((c) => c.where).filter((w) => all || w !== ORPHANS);
   // The pages asked for from the start: the first of a hive, and each one that
   // checks nothing is left.
   const fromStart = (hive) =>
@@ -157,9 +167,14 @@ async function expectError(res, status) {
   assert.equal(res.headers.get("Cache-Control"), "no-store");
 }
 
-async function expectDone(res, purged, failed) {
+async function expectDone(res, purged, failed, orphans = 0) {
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ok: true, purged, failed });
+  assert.deepEqual(await res.json(), {
+    ok: true,
+    purged,
+    failed,
+    orphans,
+  });
   assert.equal(res.headers.get("Cache-Control"), "no-store");
   assert.match(res.headers.get("Content-Type"), /^application\/json/);
 }
@@ -280,6 +295,48 @@ test("5. no hives due gives purged 0", async () => {
   assert.equal(header(due, "Authorization"), `Bearer ${KEY}`);
   assert.equal(header(due, "Content-Type"), "application/json");
   assert.deepEqual(bodyOf(due), {});
+});
+
+test("5b. objects the vault sync left behind are removed, then forgotten", async () => {
+  const path = "m/w/vault/x/a.pdf";
+  const net = stub({}, { orphans: () => Response.json([path]) });
+  await expectDone(await handle(good(), ENV, net.fn), 0, 0, 1);
+  assert.deepEqual(net.order(true), [DUE, ORPHANS, STORAGE, ORPHANS_DONE]);
+  assert.deepEqual(bodyOf(net.at(STORAGE)[0]), { prefixes: [path] });
+  assert.equal(net.at(STORAGE)[0].init.method, "DELETE");
+  assert.deepEqual(bodyOf(net.at(ORPHANS_DONE)[0]), { p_paths: [path] });
+  assert.deepEqual(bodyOf(net.at(ORPHANS)[0]), { p_limit: 1000 });
+});
+
+test("5c. orphans failing never fails the run or forgets what was not removed", async () => {
+  const path = "m/w/vault/x/a.pdf";
+  const cases = {
+    "list refused": { orphans: () => new Response("x", { status: 500 }) },
+    "list unreachable": {
+      orphans: () => {
+        throw new Error("down");
+      },
+    },
+    "list not an array": { orphans: () => Response.json({ a: 1 }) },
+  };
+  for (const [name, over] of Object.entries(cases)) {
+    const net = stub({}, over);
+    await withConsoleSpy(async () =>
+      expectDone(await handle(good(), ENV, net.fn), 0, 0, 0),
+    );
+    assert.equal(net.at(STORAGE).length, 0, name);
+  }
+  const net = stub(
+    {},
+    {
+      orphans: () => Response.json([path]),
+      remove: () => new Response("x", { status: 500 }),
+    },
+  );
+  await withConsoleSpy(async () =>
+    expectDone(await handle(good(), ENV, net.fn), 0, 0, 0),
+  );
+  assert.equal(net.at(ORPHANS_DONE).length, 0);
 });
 
 test("6. a hive with 250 objects: begin, then list and remove, one list to confirm, then purge_hive", async () => {
@@ -859,7 +916,8 @@ test("21. no answer and no log line carries a name, a path, the secret or the ke
     // Counts only: not even an id.
     for (const id of [HIVE_A, HIVE_B]) assert.ok(!text.includes(id), status);
     const keys = Object.keys(JSON.parse(text));
-    if (status === 200) assert.deepEqual(keys, ["ok", "purged", "failed"]);
+    if (status === 200)
+      assert.deepEqual(keys, ["ok", "purged", "failed", "orphans"]);
     else assert.deepEqual(keys, ["error"]);
   }
 });
@@ -889,10 +947,14 @@ test("22. every outbound call has a time limit", async () => {
     PURGE,
     PURGE,
   ]);
-  // Ten seconds for everything but a step of the erase, which gets twenty.
+  // Ten seconds for everything but a step of the erase, which gets twenty;
+  // the orphan pass at the end is ten.
   assert.deepEqual(
     limits,
-    [10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 20_000, 20_000],
+    [
+      10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 20_000, 20_000,
+      10_000,
+    ],
   );
 });
 
@@ -1033,7 +1095,7 @@ test("27. a store that answers 200 but removes only some names: healed by furthe
   const order = healed.order();
   assert.equal(order.at(-1), PURGE);
   assert.equal(order.at(-2), LIST);
-  assert.equal(bodyOf(healed.calls.at(-2)).p_after, null);
+  assert.equal(bodyOf(healed.calls.at(-3)).p_after, null);
   assert.equal(healed.at(PURGE).length, 1);
 
   // Five names: two are still there after three passes. Not erased.

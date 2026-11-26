@@ -1141,3 +1141,36 @@ revoke all on function public.sync_finish(uuid, jsonb, text[], text) from public
 grant execute on function public.sync_put_files(uuid, jsonb) to authenticated;
 grant execute on function public.sync_delete(uuid, text[]) to authenticated;
 grant execute on function public.sync_finish(uuid, jsonb, text[], text) to authenticated;
+
+-- ----------------------------------------------------------------- orphans
+
+-- For purge-hives only (the secret key): stored objects no row uses, a day old or more, so an
+-- upload a run is still recording is never taken.
+create function public.sync_orphan_paths(p_limit integer) returns setof text
+language sql stable security definer set search_path = '' as $$
+  select o.storage_path from public.sync_orphans o
+   where o.at < now() - interval '1 day'
+     and not exists (select 1 from public.files f where f.storage_path = o.storage_path)
+   order by o.at
+   limit least(greatest(coalesce(p_limit, 0), 0), 1000)
+$$;
+
+create function public.sync_orphans_removed(p_paths text[]) returns integer
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_n integer;
+begin
+  delete from public.sync_orphans where storage_path = any(coalesce(p_paths, '{}'));
+  get diagnostics v_n = row_count;
+  return v_n;
+end
+$$;
+
+revoke all on function
+  public.sync_orphan_paths(integer),
+  public.sync_orphans_removed(text[])
+from public, anon, authenticated;
+grant execute on function
+  public.sync_orphan_paths(integer),
+  public.sync_orphans_removed(text[])
+to service_role;

@@ -1254,3 +1254,27 @@ test("a storage path under another member's or workspace's prefix is refused who
     );
   }
 });
+
+test("orphans are listed for the service only, a day after they were made", async () => {
+  const t = await setupHive();
+  await t.db.query(
+    `insert into public.sync_orphans (storage_path, hive_id, at)
+     values ('a/old', $1, now() - interval '2 days'), ('a/new', $1, now())`,
+    [t.hive],
+  );
+  await assert.rejects(
+    t.as(t.person("dani"), `select * from public.sync_orphan_paths(10)`),
+    /permission denied/,
+  );
+  const listed = await t.db.query(
+    `select * from public.sync_orphan_paths(10) as p`,
+  );
+  assert.deepEqual(
+    listed.rows.map((r) => r.p),
+    ["a/old"],
+  );
+  const n = await t.db.query(
+    `select public.sync_orphans_removed(array['a/old']) as n`,
+  );
+  assert.equal(n.rows[0].n, 1);
+});
