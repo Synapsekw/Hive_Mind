@@ -11,6 +11,7 @@ export type VaultNote = {
   title: string;
   updated_at: string;
   by_agent: boolean;
+  fromVault: boolean; // kept by a vault sync: its words and path are the vault's
   visibility: Visibility | null;
   shared_with: string[];
   quarantined: boolean;

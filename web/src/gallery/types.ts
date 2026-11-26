@@ -25,6 +25,7 @@ export type GalleryFile = {
   sharing: Sharing;
   thumb: string | null; // signed link: images ≤ 2 MB, PDFs ≤ 5 MB
   session_id: string | null;
+  fromVault: boolean; // kept by a vault sync; its path never leaves the server
   refs: NoteRef[]; // notes that reference it and the caller may read
   folders: string[]; // ids of the caller's folders holding it
 };

@@ -67,11 +67,12 @@ type Own = {
   w?: string[];
   held?: boolean;
   agent?: boolean;
+  synced?: boolean;
 };
 // [workspace, path, title, own setting]
 const MINE: [string, string, string, Own?][] = [
   // Consulting: clients (group rule), clients/harbor-logistics (members rule)
-  [W_CONSULTING, "clients/client-list.md", "Client list"],
+  [W_CONSULTING, "clients/client-list.md", "Client list", { synced: true }],
   [W_CONSULTING, "clients/onboarding-checklist.md", "Onboarding checklist"],
   [W_CONSULTING, "clients/harbor-logistics/kickoff-notes.md", "Kickoff notes"],
   [
@@ -424,6 +425,7 @@ function allNotes(now: number): VaultNote[] {
       title,
       updated_at: stamp(i),
       by_agent: own.agent ?? false,
+      fromVault: own.synced ?? false,
       visibility,
       shared_with,
       quarantined: own.held ?? false,
@@ -444,6 +446,7 @@ function allNotes(now: number): VaultNote[] {
       title,
       updated_at: stamp(i),
       by_agent: false,
+      fromVault: false,
       visibility: v,
       shared_with: w,
       quarantined: false,

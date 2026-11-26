@@ -22,6 +22,9 @@ export function sizeText(bytes: number): string {
   return `${text} ${UNITS[unit]}`;
 }
 
+export const HOME_FROM_VAULT = "Home note set by your vault";
+export const VAULT_GROUP = "From your vault";
+
 /** One line on who can read the file. */
 export function sharingText(f: GalleryFile): string {
   switch (f.sharing) {

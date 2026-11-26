@@ -29,7 +29,7 @@ type Res = { data: unknown; error: { code?: string; message: string } | null };
  */
 export const NOTE_COLUMNS =
   "id,workspace_id,member_id,path,title,updated_at,written_by_agent,visibility,shared_with," +
-  "quarantined,effective:note_visibility,effective_with:note_shared_with," +
+  "quarantined,synced_by,effective:note_visibility,effective_with:note_shared_with," +
   "rule_folder:note_rule_folder,access:note_access," +
   "note_entities(entity_id,confidence,detached_at)";
 
@@ -106,6 +106,7 @@ export function toNote(
     title: text(r.title),
     updated_at: text(r.updated_at),
     by_agent: r.written_by_agent !== null && r.written_by_agent !== undefined,
+    fromVault: typeof r.synced_by === "string",
     visibility: vis(r.visibility),
     shared_with: ids(r.shared_with),
     quarantined: r.quarantined === true,

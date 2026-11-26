@@ -80,6 +80,8 @@ type Row = {
   folders?: number[];
   /** For the caller's own file: whether its note is shared with a group or the hive. */
   noteShared?: boolean;
+  /** Kept by a vault sync. */
+  fromVault?: boolean;
 };
 
 const PDF = "application/pdf";
@@ -238,6 +240,22 @@ const FIRST: Row[] = [
     owner: "me",
     folders: [3],
   },
+  {
+    name: "Week plan.md",
+    mime: "text/markdown",
+    size: 3 * KB,
+    hoursAgo: 300,
+    owner: "me",
+    fromVault: true,
+  },
+  {
+    name: "Client update deck.html",
+    mime: "text/html",
+    size: 84 * KB,
+    hoursAgo: 310,
+    owner: "me",
+    fromVault: true,
+  },
 ];
 
 const MORE: Row[] = [
@@ -362,6 +380,7 @@ function build(rows: Row[], now: number, offset: number): GalleryFile[] {
           ? PIXELS[n % PIXELS.length]!
           : null,
       session_id: row.session ? SESSION_ID(row.session) : null,
+      fromVault: row.fromVault ?? false,
       refs: (row.refs ?? []).map(ref),
       folders: (row.folders ?? []).map(FOLDER_ID),
     };
@@ -416,6 +435,7 @@ export function fixtureArchive(now: number): GalleryFile[] {
     sharing: "shared-with-me" as const,
     thumb: null,
     session_id: SESSION_ID(3),
+    fromVault: false,
     refs: [],
     folders: [FOLDER_ID(3)],
   }));

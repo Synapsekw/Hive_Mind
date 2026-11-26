@@ -27,6 +27,7 @@ const f = (over: Partial<GalleryFile>): GalleryFile => ({
   sharing: "private",
   thumb: null,
   session_id: null,
+  fromVault: false,
   refs: [],
   folders: [],
   ...over,
@@ -161,7 +162,31 @@ describe("groupBySession", () => {
       ],
       sessions,
     );
-    expect(g.map((x) => x.session?.id ?? null)).toEqual(["s2", "s1", null]);
+    expect(
+      g.map((x) => (x.session as GallerySession | null)?.id ?? null),
+    ).toEqual(["s2", "s1", null]);
+  });
+});
+
+describe("groupBySession with a vault", () => {
+  it("heads the files a vault keeps and no session saved, before No session", () => {
+    const g = groupBySession(
+      [
+        f({ name: "a", session_id: "s1" }),
+        f({ name: "n" }),
+        f({ name: "v", fromVault: true }),
+        f({ name: "w", fromVault: true, session_id: "gone" }),
+        f({ name: "k", fromVault: true, session_id: "s2" }),
+      ],
+      sessions,
+    );
+    expect(
+      g.map((x) =>
+        typeof x.session === "object" && x.session ? x.session.id : x.session,
+      ),
+    ).toEqual(["s2", "s1", "vault", null]);
+    expect(g[2]!.files.map((x) => x.name)).toEqual(["v", "w"]);
+    expect(g[3]!.files.map((x) => x.name)).toEqual(["n"]);
   });
 });
 

@@ -17,6 +17,7 @@ const n = (
   title: id,
   updated_at: new Date(Date.UTC(2026, 10, day, 9)).toISOString(),
   by_agent: false,
+  fromVault: false,
   visibility: null,
   shared_with: [],
   quarantined: false,

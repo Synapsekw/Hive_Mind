@@ -306,7 +306,7 @@ describe("loadGallery: the files query", () => {
     const [q] = table(t, "files");
     expect(table(t, "files")).toHaveLength(1);
     expect(args(q!, "select")).toEqual([
-      "id,member_id,workspace_id,note_id,storage_path,name,mime,size_bytes,created_at,kind,session_id",
+      "id,member_id,workspace_id,note_id,storage_path,name,mime,size_bytes,created_at,kind,session_id,vault_path",
     ]);
     expect(op(q!, "eq").map(([, a]) => a)).toEqual([["hive_id", HIVE]]);
     expect(op(q!, "order").map(([, a]) => a)).toEqual([
@@ -402,6 +402,7 @@ describe("loadGallery: a file", () => {
       // A PDF up to 5 MB is its own thumbnail.
       thumb: `https://signed/${file(1).storage_path}`,
       session_id: null,
+      fromVault: false,
       refs: [],
       folders: [],
     });
@@ -410,6 +411,24 @@ describe("loadGallery: a file", () => {
     expect(data.files[3]).toMatchObject({ size: 0, kind: "other" });
     // The stored kind is read, not worked out again; one the gallery does not know is "other".
     expect(data.files[4]).toMatchObject({ kind: "other" });
+  });
+
+  it("marks a file a vault sync keeps, and never passes the vault path on", async () => {
+    const data = await loaded(
+      stub(
+        world({
+          files: [
+            file(1, { vault_path: "decks/secret-plan/deck.html" }),
+            file(2, { vault_path: null }),
+            file(3),
+          ],
+        }),
+      ),
+    );
+    expect(data.files.map((f) => f.fromVault)).toEqual([true, false, false]);
+    const json = JSON.stringify(data);
+    expect(json).not.toContain("vault_path");
+    expect(json).not.toContain("secret-plan");
   });
 
   it("never returns a storage path, a workspace or a member id", async () => {
@@ -441,6 +460,7 @@ describe("loadGallery: a file", () => {
       expect(Object.keys(f).sort()).toEqual(
         [
           "created_at",
+          "fromVault",
           "folders",
           "id",
           "kind",

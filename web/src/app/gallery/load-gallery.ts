@@ -27,7 +27,7 @@ type Res = { data: unknown; error: { code?: string; message: string } | null };
 
 /** The file index. `storage_path`, `workspace_id` and `member_id` are used here and not returned. */
 export const FILE_COLUMNS =
-  "id,member_id,workspace_id,note_id,storage_path,name,mime,size_bytes,created_at,kind,session_id";
+  "id,member_id,workspace_id,note_id,storage_path,name,mime,size_bytes,created_at,kind,session_id,vault_path";
 export const NOTE_COLUMNS = "id,title,member_id,effective:note_visibility";
 /** Never `client_key`: it is the agent's own handle on the session. */
 const SESSION_COLUMNS =
@@ -139,6 +139,7 @@ export function toFile(r: Row, ctx: Context): GalleryFile {
     sharing: !mine ? "shared-with-me" : shared ? "through-note" : "private",
     thumb: (hasThumb(r) && ctx.thumbs.get(text(r.storage_path))) || null,
     session_id: text(r.session_id) || null,
+    fromVault: typeof r.vault_path === "string",
     refs: ctx.refs?.get(id) ?? [],
     folders: ctx.folders?.get(id) ?? [],
   };

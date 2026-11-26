@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadVault, toNote } from "./load-vault";
+import { loadVault, NOTE_COLUMNS, toNote } from "./load-vault";
 
 const HIVE = "00000000-0000-4000-8000-000000000a01";
 const ME = "00000000-0000-4000-8000-000000000001";
@@ -581,6 +581,19 @@ describe("loadVault: the open note's links", () => {
 });
 
 describe("toNote", () => {
+  it("marks a note a vault sync keeps, and passes on no key id", () => {
+    const key = "00000000-0000-4000-8000-0000000000e1";
+    const kept = toNote(row(MINE, { synced_by: key }), ME);
+    expect(kept.fromVault).toBe(true);
+    expect(JSON.stringify(kept)).not.toContain(key);
+    expect(toNote(row(MINE, { synced_by: null }), ME).fromVault).toBe(false);
+    expect(toNote(row(MINE), ME).fromVault).toBe(false);
+  });
+
+  it("reads synced_by with the index columns", () => {
+    expect(NOTE_COLUMNS.split(",")).toContain("synced_by");
+  });
+
   it("maps a row, reading null computed columns as private, nobody and a link", () => {
     expect(
       toNote(
@@ -602,6 +615,7 @@ describe("toNote", () => {
       title: `Note ${THEIRS}`,
       updated_at: "2026-11-22T10:00:00Z",
       by_agent: true,
+      fromVault: false,
       visibility: null,
       shared_with: [],
       quarantined: false,

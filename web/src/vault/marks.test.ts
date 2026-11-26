@@ -17,6 +17,7 @@ function note(extra: Partial<VaultNote>): VaultNote {
     title: "A",
     updated_at: "2026-11-01T00:00:00.000Z",
     by_agent: false,
+    fromVault: false,
     visibility: null,
     shared_with: [],
     quarantined: false,
