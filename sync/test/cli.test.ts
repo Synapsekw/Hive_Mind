@@ -85,17 +85,23 @@ function nowDeps(run: () => Promise<Report>) {
   return { deps, state, notes, logs };
 }
 
-test("three runs where every upload failed notify once and are not successes", async () => {
-  const t = nowDeps(async () => report({ failed: ["a.md", "b.md"] }));
-  for (let i = 0; i < 3; i++) assert.equal(await now(false, t.deps), 1);
+test("completed runs with one stuck file each are successes and send nothing", async () => {
+  const t = nowDeps(async () => report({ failed: ["stuck.md"] }));
+  for (let i = 0; i < 3; i++) assert.equal(await now(false, t.deps), 0);
+  assert.deepEqual(t.notes, []);
+  assert.equal(t.state.failuresInRow, 0);
+  assert.equal(t.state.last?.ok, true);
+  assert.equal(t.state.last?.failed, 1);
+  assert.match(t.logs[0]!, /^ok .* failed 1 /);
+});
+
+test("three Unreachable runs notify once", async () => {
+  const t = nowDeps(() => Promise.reject(new Unreachable("x")));
+  for (let i = 0; i < 4; i++) assert.equal(await now(false, t.deps), 1);
   assert.deepEqual(t.notes, [
     "Hive sync has failed 3 times in a row. See the log.",
   ]);
-  assert.equal(t.state.failuresInRow, 3);
-  assert.equal(t.state.last?.ok, false);
-  assert.equal(await now(false, t.deps), 1);
-  assert.equal(t.notes.length, 1);
-  assert.match(t.logs[0]!, /^failed /);
+  assert.equal(t.state.failuresInRow, 4);
 });
 
 test("a run that stored something resets the count", async () => {

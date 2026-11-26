@@ -142,19 +142,13 @@ export async function now(
   try {
     const r = await d.run({ config, key, confirmDeletes });
     const c = r.counts;
-    // Every file tried and every one failed is a fault of the hive's, not a good run.
-    const allFailed = r.failed.length > 0 && c.added + c.changed === 0;
+    // A run that completes is a success. A file that keeps failing is counted and shown, but it
+    // is not a reason to say the sync is down; faults that hit every file throw instead.
     d.log(
-      `${allFailed ? "failed" : "ok"} added ${c.added} changed ${c.changed} moved ${c.moved} deleted ${c.deleted} skipped ${c.skipped} too-big ${c.too_big} held-back ${r.refusedDeletes} failed ${r.failed.length} deferred ${r.deferred}`,
+      `ok added ${c.added} changed ${c.changed} moved ${c.moved} deleted ${c.deleted} skipped ${c.skipped} too-big ${c.too_big} held-back ${r.refusedDeletes} failed ${r.failed.length} deferred ${r.deferred}`,
     );
-    if (allFailed) {
-      state.failuresInRow++;
-      if (state.failuresInRow === 3)
-        d.notify("Hive sync has failed 3 times in a row. See the log.");
-    } else {
-      state.failuresInRow = 0;
-      state.notified = [];
-    }
+    state.failuresInRow = 0;
+    state.notified = [];
     if (r.refusedDeletes > 0) {
       d.notify(
         `Hive sync held back ${Math.trunc(Number(r.refusedDeletes))} deletions. Run hive-sync --confirm-deletes to let them through.`,
@@ -162,15 +156,16 @@ export async function now(
     }
     state.last = {
       at: new Date().toISOString(),
-      ok: !allFailed,
+      ok: true,
       added: c.added,
       changed: c.changed,
       moved: c.moved,
       deleted: c.deleted,
       tooBig: c.too_big,
       refused: r.refusedDeletes,
+      failed: r.failed.length,
     };
-    return allFailed ? 1 : 0;
+    return 0;
   } catch (e) {
     if (e instanceof KeyRefused) {
       d.log("stopped: the sync key was refused");
@@ -304,6 +299,7 @@ function status(): number {
     console.log(
       `Last run: ${l.at} ${l.ok ? "ok" : "stopped"} (added ${l.added}, changed ${l.changed}, moved ${l.moved}, deleted ${l.deleted}, too big ${l.tooBig}, held back ${l.refused})`,
     );
+    if (l.failed) console.log(`${l.failed} items failed on the last run`);
   }
   console.log("Runs every 15 minutes and at login.");
   if (existsSync(paths.log)) {

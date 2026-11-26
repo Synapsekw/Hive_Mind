@@ -29,6 +29,8 @@ export type State = {
     deleted: number;
     tooBig: number;
     refused: number;
+    /** Items that failed on their own and are tried again next run. */
+    failed?: number;
   };
 };
 
