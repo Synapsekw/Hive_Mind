@@ -2,7 +2,7 @@
 // reads nothing else; back and forward open the note the address names.
 import { expect, test, type Page } from "@playwright/test";
 import { fixtureVault } from "../src/vault/fixture";
-import { OPEN_FAILED } from "../src/vault/sentences";
+import { FROM_VAULT, OPEN_FAILED } from "../src/vault/sentences";
 
 const DATA = fixtureVault(0);
 const [FIRST, SECOND] = DATA.notes;
@@ -149,4 +149,32 @@ test("a linked note opens in place, and a colleague's on Shared with me", async 
       .getByRole("link", { name: "Shared with me" }),
   ).toHaveAttribute("aria-current", "page");
   await expect(title(page)).toHaveText(to.title);
+});
+
+test("a note a vault keeps says where it is from and offers no edit of its words or path", async ({
+  page,
+}) => {
+  const kept = DATA.notes.find((n) => n.fromVault)!;
+  await page.goto(`/dev/vault?note=${kept.id}`, { waitUntil: "networkidle" });
+  const note = page.getByRole("region", { name: "Note" });
+  await expect(title(page)).toHaveText(kept.title);
+  await expect(note).toContainText(FROM_VAULT);
+  await expect(note).toContainText("from your vault on your Mac");
+  await note
+    .getByRole("button", { name: "More actions for this note" })
+    .click();
+  const theirs = fixtureVault(0, { tab: "shared" }).notes.find(
+    (n) => n.fromVault && n.member_id !== DATA.me,
+  )!;
+  await page.goto(`/dev/vault?note=${theirs.id}&tab=shared`, {
+    waitUntil: "networkidle",
+  });
+  await expect(title(page)).toHaveText(theirs.title);
+  await expect(note).not.toContainText("from your vault");
+  await page.goto(`/dev/vault?note=${kept.id}`, { waitUntil: "networkidle" });
+  await note
+    .getByRole("button", { name: "More actions for this note" })
+    .click();
+  const items = await page.getByRole("menuitem").allInnerTexts();
+  expect(items.join(" ")).not.toMatch(/rename|move|edit|path/i);
 });

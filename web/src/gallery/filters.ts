@@ -165,28 +165,37 @@ export function applyFilters(
   });
 }
 
+const rank = (g: { session: GallerySession | "vault" | null }) =>
+  g.session === null ? 2 : g.session === "vault" ? 1 : 0;
+const started = (g: { session: GallerySession | "vault" | null }) =>
+  typeof g.session === "object" && g.session ? g.session.started_at : "";
+
+export type SessionGroup = {
+  session: GallerySession | "vault" | null;
+  files: GalleryFile[];
+};
+
+/** Newest session first; then files a vault sync keeps and no session saved; then the rest. */
 export function groupBySession(
   files: GalleryFile[],
   sessions: Map<string, GallerySession>,
-) {
+): SessionGroup[] {
   const groups = new Map<string | null, GalleryFile[]>();
   for (const x of files) {
     const key =
-      x.session_id && sessions.has(x.session_id) ? x.session_id : null;
+      x.session_id && sessions.has(x.session_id)
+        ? x.session_id
+        : x.mine && x.fromVault
+          ? "vault"
+          : null;
     (groups.get(key) ?? groups.set(key, []).get(key)!).push(x);
   }
   return [...groups.entries()]
-    .map(([key, list]) => ({
-      session: key ? sessions.get(key)! : null,
+    .map(([key, list]): SessionGroup => ({
+      session: key === "vault" ? "vault" : key ? sessions.get(key)! : null,
       files: list,
     }))
-    .sort((a, b) =>
-      a.session === null
-        ? 1
-        : b.session === null
-          ? -1
-          : b.session.started_at.localeCompare(a.session.started_at),
-    );
+    .sort((a, b) => rank(a) - rank(b) || started(b).localeCompare(started(a)));
 }
 
 export function needsServer(f: Filters, complete: boolean): boolean {

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentStatus, loadSettings } from "./load-settings";
+import {
+  agentStatus,
+  loadSettings,
+  toSyncKey,
+  toSyncRun,
+} from "./load-settings";
 
 const HIVE = "00000000-0000-4000-8000-000000000a01";
 const W1 = "00000000-0000-4000-8000-000000000b01";
@@ -13,6 +18,9 @@ const A2 = "00000000-0000-4000-8000-000000000d02";
 const A3 = "00000000-0000-4000-8000-000000000d03";
 const I1 = "00000000-0000-4000-8000-000000000e01";
 const I2 = "00000000-0000-4000-8000-000000000e02";
+const K1 = "00000000-0000-4000-8000-000000000f01";
+const K2 = "00000000-0000-4000-8000-000000000f02";
+const R1 = "00000000-0000-4000-8000-000000000a11";
 
 const NOW = Date.parse("2026-11-23T12:00:00Z");
 
@@ -21,7 +29,14 @@ type Res = { data: unknown; error: Err | null };
 type Call = { table: string; ops: [string, unknown[]][] };
 /** `own` is the read of the person's own oldest membership, which is also from `members`. */
 type Table =
-  "own" | "members" | "workspaces" | "agents" | "invitations" | "entities";
+  | "own"
+  | "members"
+  | "workspaces"
+  | "agents"
+  | "invitations"
+  | "entities"
+  | "sync_keys"
+  | "sync_runs";
 
 const ok = (data: unknown): Res => ({ data, error: null });
 const err = (message: string, code?: string): Res => ({
@@ -139,12 +154,14 @@ function stub(
     agents: opts.agents ?? ok(AGENTS),
     invitations: opts.invitations ?? ok(INVITATIONS),
     entities: opts.entities ?? ok([]),
+    sync_keys: opts.sync_keys ?? ok([]),
+    sync_runs: opts.sync_runs ?? ok([]),
   };
   const from = vi.fn((table: Table) => {
     const call: Call = { table, ops: [] };
     calls.push(call);
     const chain: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "is", "gt", "order", "limit"])
+    for (const m of ["select", "eq", "neq", "in", "is", "gt", "order", "limit"])
       chain[m] = (...args: unknown[]) => {
         // The read of the person's own oldest membership is filed apart from the hive's members.
         if (table === "members" && m === "eq" && args[0] === "user_id")
@@ -180,6 +197,171 @@ const args = (c: Call | undefined, name: string) =>
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+function syncKey(over: Record<string, unknown> = {}) {
+  return {
+    id: K1,
+    workspace_id: W1,
+    created_at: "2026-11-22T09:00:00+00:00",
+    last_used_at: "2026-11-23T11:00:00+00:00",
+    revoked_at: null,
+    ...over,
+  };
+}
+
+function syncRun(over: Record<string, unknown> = {}) {
+  return {
+    id: R1,
+    key_id: K1,
+    started_at: "2026-11-23T11:00:00+00:00",
+    finished_at: "2026-11-23T11:00:05+00:00",
+    added: 3,
+    changed: 1,
+    moved: 0,
+    deleted: 2,
+    skipped: 4,
+    too_big: 1,
+    too_big_paths: ["talks/keynote.key"],
+    refused_deletes: [],
+    error: null,
+    ...over,
+  };
+}
+
+describe("sync keys and runs", () => {
+  it("hides the agents the sync made", async () => {
+    const t = stub();
+    await loadSettings(t.db, NOW);
+    expect(args(t.of("agents"), "neq")).toEqual(["provider", "hive-sync"]);
+  });
+
+  it("reads the newest 20 keys, never the hash, and no runs when there are no keys", async () => {
+    const t = stub();
+    await loadSettings(t.db, NOW);
+    const keys = t.of("sync_keys");
+    expect(args(keys, "select")).toEqual([
+      "id, workspace_id, created_at, last_used_at, revoked_at",
+    ]);
+    expect(args(keys, "order")).toEqual(["created_at", { ascending: false }]);
+    expect(args(keys, "limit")).toEqual([20]);
+    expect(t.of("sync_runs")).toBeUndefined();
+  });
+
+  it("reads the last 20 runs of those keys in one follow-up read", async () => {
+    const t = stub({
+      sync_keys: ok([
+        syncKey(),
+        syncKey({ id: K2, revoked_at: "2026-11-23T00:00:00+00:00" }),
+      ]),
+      sync_runs: ok([syncRun()]),
+    });
+    const out = await loadSettings(t.db, NOW);
+    const runs = t.of("sync_runs");
+    expect(args(runs, "in")).toEqual(["key_id", [K1, K2]]);
+    expect(args(runs, "order")).toEqual(["started_at", { ascending: false }]);
+    expect(args(runs, "limit")).toEqual([20]);
+    expect(String(args(runs, "select")![0])).toContain("too_big_paths");
+    if (out.state !== "ok") throw new Error("not ok");
+    expect(out.data.syncKeys.map((k) => [k.id, k.status])).toEqual([
+      [K1, "active"],
+      [K2, "revoked"],
+    ]);
+    expect(out.data.syncRuns).toHaveLength(1);
+  });
+
+  it("leaves out the keys of a workspace in another hive", async () => {
+    const t = stub({
+      sync_keys: ok([
+        syncKey({ workspace_id: "00000000-0000-4000-8000-0000000000ff" }),
+      ]),
+    });
+    const out = await loadSettings(t.db, NOW);
+    if (out.state !== "ok") throw new Error("not ok");
+    expect(out.data.syncKeys).toEqual([]);
+    expect(t.of("sync_runs")).toBeUndefined();
+  });
+
+  it("answers error when the keys read fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({ sync_keys: err("denied", "42501") });
+    expect(await loadSettings(t.db, NOW)).toEqual({ state: "error" });
+  });
+
+  it("keeps the page when only the runs read fails", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = stub({
+      sync_keys: ok([syncKey()]),
+      sync_runs: err("denied", "42501"),
+    });
+    const out = await loadSettings(t.db, NOW);
+    if (out.state !== "ok") throw new Error("not ok");
+    expect(out.data.syncKeys).toHaveLength(1);
+    expect(out.data.syncRuns).toEqual([]);
+    expect(log).toHaveBeenCalledWith(
+      "sync runs query failed",
+      "42501",
+      "denied",
+    );
+  });
+
+  it("toSyncKey maps a row and drops a malformed one", () => {
+    expect(toSyncKey(syncKey())).toEqual({
+      id: K1,
+      workspaceId: W1,
+      createdAt: "2026-11-22T09:00:00+00:00",
+      lastUsedAt: "2026-11-23T11:00:00+00:00",
+      status: "active",
+    });
+    expect(
+      toSyncKey(syncKey({ revoked_at: "2026-11-23T00:00:00Z" }))?.status,
+    ).toBe("revoked");
+    expect(toSyncKey(syncKey({ last_used_at: null }))?.lastUsedAt).toBeNull();
+    expect(toSyncKey(syncKey({ id: 5 }))).toBeNull();
+    expect(toSyncKey(syncKey({ created_at: "soon" }))).toBeNull();
+    expect(toSyncKey(syncKey({ revoked_at: "soon" }))).toBeNull();
+    expect(toSyncKey(null)).toBeNull();
+  });
+
+  it("toSyncRun maps a row, counting held-back deletes and capping the paths at 200", () => {
+    expect(toSyncRun(syncRun())).toEqual({
+      id: R1,
+      keyId: K1,
+      startedAt: "2026-11-23T11:00:00+00:00",
+      finishedAt: "2026-11-23T11:00:05+00:00",
+      added: 3,
+      changed: 1,
+      moved: 0,
+      deleted: 2,
+      skipped: 4,
+      tooBig: 1,
+      tooBigPaths: ["talks/keynote.key"],
+      heldBack: 0,
+      error: null,
+    });
+    const held = toSyncRun(
+      syncRun({
+        refused_deletes: Array.from({ length: 40 }, (_, i) => `n${i}.md`),
+        too_big_paths: Array.from({ length: 300 }, (_, i) => `f${i}`),
+        finished_at: null,
+        error: "offline",
+      }),
+    );
+    expect(held?.heldBack).toBe(40);
+    expect(held?.tooBigPaths).toHaveLength(200);
+    expect(held?.finishedAt).toBeNull();
+    expect(held?.error).toBe("offline");
+    expect(JSON.stringify(held)).not.toContain("n0.md");
+  });
+
+  it("toSyncRun drops a malformed row", () => {
+    expect(toSyncRun(syncRun({ added: -1 }))).toBeNull();
+    expect(toSyncRun(syncRun({ started_at: "soon" }))).toBeNull();
+    expect(toSyncRun(syncRun({ too_big_paths: "x" }))).toBeNull();
+    expect(toSyncRun(syncRun({ refused_deletes: null }))).toBeNull();
+    expect(toSyncRun(syncRun({ error: 5 }))).toBeNull();
+    expect(toSyncRun(undefined)).toBeNull();
+  });
 });
 
 describe("agentStatus", () => {
@@ -326,6 +508,8 @@ describe("loadSettings", () => {
           },
         ],
         topics: [],
+        syncKeys: [],
+        syncRuns: [],
       },
     });
   });
@@ -406,7 +590,7 @@ describe("loadSettings", () => {
     );
   });
 
-  it("reads the hive of the person's own oldest membership, then the four lists", async () => {
+  it("reads the hive of the person's own oldest membership, then the lists", async () => {
     const t = stub();
     await loadSettings(t.db, NOW);
     expect(t.calls.map((c) => c.table).sort()).toEqual(
@@ -416,6 +600,7 @@ describe("loadSettings", () => {
         "invitations",
         "members",
         "own",
+        "sync_keys",
         "workspaces",
       ].sort(),
     );

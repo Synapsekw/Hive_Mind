@@ -15,6 +15,14 @@ import {
   REVOKE_INVITATION,
   REVOKE_ITEM,
   SEND_AGAIN,
+  SYNC_KEY_STEP,
+  SYNC_KEY_TITLE,
+  SYNC_MAKE,
+  SYNC_NEW_KEY_REVOKES,
+  SYNC_NONE,
+  SYNC_RUNS,
+  SYNC_REVOKE,
+  SYNC_TOO_BIG,
   envLine,
   foldedAgents,
   inviteNotice,
@@ -57,7 +65,7 @@ async function open(page: Page, query = "", strict = true) {
 /** Opens a Settings tab by its name (each name is followed by its count). */
 async function openTab(
   page: Page,
-  name: "Agents" | "Workspaces" | "Topics" | "People" | "Hive",
+  name: "Agents" | "Workspaces" | "Sync" | "Topics" | "People" | "Hive",
 ) {
   await page.getByRole("tab", { name: new RegExp(`^${name}`) }).click();
 }
@@ -187,6 +195,7 @@ test("the rail marks Settings; the tabs show with counts; Agents is open; revoke
   await expect(tablist.getByRole("tab")).toHaveText([
     "Agents 2",
     "Workspaces 2",
+    "Sync 1",
     `Topics ${DATA.topics.length}`,
     "People 5",
     "Hive",
@@ -835,7 +844,7 @@ test("inviting never adds a member; when the email could not be sent the notice 
   await expect(notice(page)).toHaveText(
     "Invitation saved, but the email could not be sent. Wait two minutes, then use Send again.",
   );
-  await expect(main(page)).not.toContainText("added");
+  await expect(main(page).getByRole("tabpanel")).not.toContainText("added");
 
   // Send again on that invitation sends it, and the notice that it was not sent goes.
   const mira = invitationRow(page, "Mira");
@@ -2584,6 +2593,7 @@ test("?tab=hive for a member opens Agents", async ({ page }) => {
     await expect(main(page).getByRole("tablist").getByRole("tab")).toHaveText([
       "Agents 2",
       "Workspaces 2",
+      "Sync 1",
       "People 3",
     ]);
     await expect(tabOf(page, "Agents")).toHaveAttribute(
@@ -2592,4 +2602,125 @@ test("?tab=hive for a member opens Agents", async ({ page }) => {
     );
     await expect(section(page, "Agents")).toBeVisible();
   }
+});
+
+// ---- Sync ----
+
+const syncRow = (page: Page, name: string) =>
+  rows(page, "Sync keys").filter({ hasText: name });
+const syncDialog = (page: Page) =>
+  page.getByRole("dialog", { name: SYNC_KEY_TITLE });
+
+test("the Sync tab has a row per workspace: the live key's last use, and No sync key where there is none", async ({
+  page,
+}) => {
+  await open(page, "?tab=sync");
+  await expect(tabOf(page, "Sync")).toHaveAttribute("aria-selected", "true");
+  await expect(rows(page, "Sync keys")).toHaveCount(2);
+  await expect(syncRow(page, MAIN.name)).toContainText(
+    "Last used 23 Nov, 11:00",
+  );
+  await expect(syncRow(page, DRA.name)).toContainText(SYNC_NONE);
+  // Three runs, newest first, counts only.
+  await expect(rows(page, SYNC_RUNS)).toHaveCount(3);
+  await expect(rows(page, SYNC_RUNS).nth(0)).toContainText(
+    "1 too big · 40 deletions held back",
+  );
+  await expect(rows(page, SYNC_RUNS).nth(2)).toContainText("stopped: offline");
+  // The latest run's too-big files.
+  await expect(
+    main(page).getByRole("heading", { name: SYNC_TOO_BIG }),
+  ).toBeVisible();
+  await expect(rows(page, SYNC_TOO_BIG)).toHaveText(["talks/keynote.key"]);
+  // Opening the tab and looking asked the server for nothing.
+  expect(await calls(page)).toEqual([]);
+});
+
+test("Make a sync key shows the key once with the setup command; Done closes it", async ({
+  page,
+}) => {
+  await open(page, "?tab=sync");
+  await pick(syncRow(page, DRA.name), SYNC_MAKE);
+  const dialog = syncDialog(page);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Key")).toHaveValue(`hsync_${"0".repeat(64)}`);
+  await expect(dialog).toContainText(SYNC_KEY_STEP);
+  await expect(dialog).toContainText("node sync/src/cli.ts setup --url");
+  await expect(dialog).toContainText('--folder "<your vault folder>"');
+  // The key is in the field and nowhere else: no storage, address or history.
+  const keep = await stored(page);
+  expect(keep).not.toContain("hsync_");
+  // Escape does nothing; only Done closes it.
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(dialog).toHaveCount(0);
+  // The focus goes back to the row's menu button, not to the page.
+  await expect(moreButton(syncRow(page, DRA.name))).toBeFocused();
+  await expect(page.getByText("hsync_")).toHaveCount(0);
+  expect(await calls(page)).toEqual(
+    [["createSyncKey", [DRA.id]]].map(([name, args]) => ({ name, args })),
+  );
+  // The workspace now has a live key.
+  await expect(syncRow(page, DRA.name)).not.toContainText(SYNC_NONE);
+  await expect(tabOf(page, "Sync")).toHaveText("Sync 2");
+});
+
+test("making a key over a live one asks first and says it revokes the current key", async ({
+  page,
+}) => {
+  await open(page, "?tab=sync");
+  const row = syncRow(page, MAIN.name);
+  await pick(row, SYNC_MAKE);
+  await expect(row).toContainText(SYNC_NEW_KEY_REVOKES);
+  expect(await calls(page)).toEqual([]);
+  await row.getByRole("button", { name: "Keep" }).click();
+  await expect(row).not.toContainText(SYNC_NEW_KEY_REVOKES);
+  await pick(row, SYNC_MAKE);
+  await page.waitForTimeout(600);
+  await row.getByRole("button", { name: "Make key" }).click();
+  await expect(syncDialog(page)).toBeVisible();
+});
+
+test("Revoke sync key asks, then revokes", async ({ page }) => {
+  await open(page, "?tab=sync");
+  const row = syncRow(page, MAIN.name);
+  await pick(row, SYNC_REVOKE);
+  await page.waitForTimeout(600);
+  await row.getByRole("button", { name: "Revoke", exact: true }).click();
+  await expect(row).toContainText(SYNC_NONE);
+  await expect(moreButton(row)).toBeFocused();
+  await expect(tabOf(page, "Sync")).toHaveText("Sync 0");
+  expect((await calls(page)).map((c) => c.name)).toEqual(["revokeSyncKey"]);
+});
+
+test("a refused sync key says so", async ({ page }) => {
+  await open(page, "?tab=sync&fail=1");
+  await pick(syncRow(page, DRA.name), SYNC_MAKE);
+  await expect(syncRow(page, DRA.name)).toContainText(FAILED);
+  await expect(syncDialog(page)).toHaveCount(0);
+  await expect(moreButton(syncRow(page, DRA.name))).toBeFocused();
+});
+
+test("deleting a workspace with a live sync key is refused in the sync key's words", async ({
+  page,
+}) => {
+  await open(page);
+  await openTab(page, "Workspaces");
+  const main = rows(page, "Workspaces").filter({ hasText: MAIN.name });
+  await askDelete(main);
+  await main.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(main).toContainText(
+    "Revoke this workspace's sync key first (Settings → Sync).",
+  );
+  await expect(main).not.toContainText("agents first");
+});
+
+test("the too-big list names the workspace of the latest run", async ({
+  page,
+}) => {
+  await open(page, "?tab=sync");
+  await expect(
+    main(page).getByRole("heading", { name: SYNC_TOO_BIG }),
+  ).toContainText(MAIN.name);
 });

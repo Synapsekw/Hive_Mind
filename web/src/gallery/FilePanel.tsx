@@ -10,7 +10,13 @@ import { AddToFolder } from "./AddToFolder";
 import { Preview } from "./FileCard";
 import { Cross, SharingMark } from "./icons";
 import { NotePicker } from "./NotePicker";
-import { folderPath, metaLine, spanText, whoCanRead } from "./text";
+import {
+  folderPath,
+  HOME_FROM_VAULT,
+  metaLine,
+  spanText,
+  whoCanRead,
+} from "./text";
 import type {
   GalleryActions,
   GalleryFile,
@@ -287,30 +293,34 @@ export function FilePanel({
         now={now}
         who={changed}
         home={
-          file.mine &&
-          (picking ? (
-            <NotePicker
-              findMyNotes={actions.findMyNotes}
-              allowNone
-              onPick={pick}
-              onCancel={() => {
-                setPicking(false);
-                setFocus("home");
-              }}
-            />
+          file.mine && file.fromVault ? (
+            <p className={s.factQuiet}>{HOME_FROM_VAULT}</p>
           ) : (
-            <button
-              ref={homeButton}
-              type="button"
-              className={s.textButton}
-              onClick={() => {
-                setChanged(null);
-                setPicking(true);
-              }}
-            >
-              Change home note
-            </button>
-          ))
+            file.mine &&
+            (picking ? (
+              <NotePicker
+                findMyNotes={actions.findMyNotes}
+                allowNone
+                onPick={pick}
+                onCancel={() => {
+                  setPicking(false);
+                  setFocus("home");
+                }}
+              />
+            ) : (
+              <button
+                ref={homeButton}
+                type="button"
+                className={s.textButton}
+                onClick={() => {
+                  setChanged(null);
+                  setPicking(true);
+                }}
+              >
+                Change home note
+              </button>
+            ))
+          )
         }
       />
     </aside>

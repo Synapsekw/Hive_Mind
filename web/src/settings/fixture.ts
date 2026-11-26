@@ -10,6 +10,8 @@ import type {
   Member,
   NoteHead,
   SettingsData,
+  SyncKey,
+  SyncRun,
   TopicRow,
   Workspace,
 } from "./types";
@@ -52,6 +54,74 @@ const AGENTS: Agent[] = [
     createdAt: "2026-10-02T09:00:00.000Z",
     lastUsedAt: "2026-10-30T17:45:00.000Z",
     status: "revoked",
+  },
+];
+
+// One live key on Main, used an hour before the dev page's clock (23 Nov 2026, 12:00 UTC), and
+// one revoked on DRA. The runs are newest first; the latest left one file too big and held back
+// forty deletions.
+const SYNC_KEYS: SyncKey[] = [
+  {
+    id: "00000000-0000-4000-8000-00000000b001",
+    workspaceId: MAIN,
+    createdAt: "2026-11-20T09:00:00.000Z",
+    lastUsedAt: "2026-11-23T11:00:00.000Z",
+    status: "active",
+  },
+  {
+    id: "00000000-0000-4000-8000-00000000b002",
+    workspaceId: DRA,
+    createdAt: "2026-11-10T09:00:00.000Z",
+    lastUsedAt: "2026-11-12T08:00:00.000Z",
+    status: "revoked",
+  },
+];
+
+const SYNC_RUNS: SyncRun[] = [
+  {
+    id: "00000000-0000-4000-8000-00000000a001",
+    keyId: SYNC_KEYS[0]!.id,
+    startedAt: "2026-11-23T11:00:00.000Z",
+    finishedAt: "2026-11-23T11:00:05.000Z",
+    added: 0,
+    changed: 0,
+    moved: 0,
+    deleted: 0,
+    skipped: 12,
+    tooBig: 1,
+    tooBigPaths: ["talks/keynote.key"],
+    heldBack: 40,
+    error: null,
+  },
+  {
+    id: "00000000-0000-4000-8000-00000000a002",
+    keyId: SYNC_KEYS[0]!.id,
+    startedAt: "2026-11-23T10:45:00.000Z",
+    finishedAt: "2026-11-23T10:46:10.000Z",
+    added: 3,
+    changed: 1,
+    moved: 0,
+    deleted: 2,
+    skipped: 120,
+    tooBig: 1,
+    tooBigPaths: ["talks/keynote.key"],
+    heldBack: 0,
+    error: null,
+  },
+  {
+    id: "00000000-0000-4000-8000-00000000a003",
+    keyId: SYNC_KEYS[0]!.id,
+    startedAt: "2026-11-22T18:30:00.000Z",
+    finishedAt: null,
+    added: 0,
+    changed: 0,
+    moved: 0,
+    deleted: 0,
+    skipped: 0,
+    tooBig: 0,
+    tooBigPaths: [],
+    heldBack: 0,
+    error: "offline",
   },
 ];
 
@@ -176,6 +246,10 @@ export function fixtureSettings(
     agents: opts.none ? [] : AGENTS.map((a) => ({ ...a })),
     members: MEMBERS.map((m) => ({ ...m, isMe: m.id === me })),
     invitations: opts.member ? [] : INVITATIONS.map((i) => ({ ...i })),
+    syncKeys: opts.none ? [] : SYNC_KEYS.map((k) => ({ ...k })),
+    syncRuns: opts.none
+      ? []
+      : SYNC_RUNS.map((r) => ({ ...r, tooBigPaths: [...r.tooBigPaths] })),
     topics: opts.member
       ? []
       : [...TOPICS, ...(opts.many ? MANY_TOPICS : [])].map((x) => ({ ...x })),

@@ -275,6 +275,7 @@ export function DevGallery({
         sharing: "private",
         thumb: kind === "image" ? PIXEL : null,
         session_id: batch,
+        fromVault: false,
         refs: [],
         folders: folderId ? [folderId] : [],
       };

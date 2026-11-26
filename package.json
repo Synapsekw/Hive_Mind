@@ -10,7 +10,7 @@
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "lint": "prettier --check .",
-    "test": "node --test \"tests/**/*.test.mjs\" \".claude/hooks/*.test.mjs\" && pnpm --filter @hive-mind/web test",
+    "test": "node --test \"tests/**/*.test.mjs\" \".claude/hooks/*.test.mjs\" && node --test \"sync/test/*.test.ts\" && pnpm --filter @hive-mind/web test",
     "build": "pnpm -r build",
     "dev:web": "pnpm --filter @hive-mind/web dev",
     "test:live": "pnpm --filter @hive-mind/mcp build && node --env-file=.env --test --test-concurrency=1 tests/mcp.integration.test.mjs tests/two-members.integration.test.mjs",

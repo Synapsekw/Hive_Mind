@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createIn,
+  createSyncKeyIn,
   inviteIn,
   resendIn,
   revokeIn,
   revokeInvitationIn,
+  revokeSyncKeyIn,
 } from "./write";
 
 const HIVE = "00000000-0000-4000-8000-000000000a01";
@@ -884,5 +886,75 @@ describe("revokeInvitationIn", () => {
       "invitation not found",
     );
     expect(c.said()).not.toContain("secret payload");
+  });
+});
+
+describe("sync keys", () => {
+  const KEY = "00000000-0000-4000-8000-000000000f01";
+  const SYNC = `hsync_${"c".repeat(64)}`;
+  const made = ok([{ key_id: KEY, key: SYNC }]);
+
+  it("createSyncKeyIn checks the workspace id first, then returns the key once", async () => {
+    const t = stub({ rpc: made });
+    expect(await createSyncKeyIn(t.db, "not-a-uuid")).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(t.auth.getUser).not.toHaveBeenCalled();
+    const out = await createSyncKeyIn(t.db, W1);
+    expect(out).toEqual({ ok: true, token: SYNC });
+    expect(t.rpc.mock.calls).toEqual([
+      ["create_sync_key", { p_workspace: W1 }],
+    ]);
+    expect(t.from).not.toHaveBeenCalled();
+  });
+
+  it("createSyncKeyIn refuses without a session", async () => {
+    const t = stub({ rpc: made, user: null });
+    expect(await createSyncKeyIn(t.db, W1)).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+  });
+
+  it("createSyncKeyIn logs code and message only, never the key", async () => {
+    const c = consoles();
+    const t = stub({ rpc: err("not yours", "P0001") });
+    expect(await createSyncKeyIn(t.db, W1)).toEqual({ ok: false });
+    expect(c.error).toHaveBeenCalledWith(
+      "create_sync_key failed",
+      "P0001",
+      "not yours",
+    );
+    const odd = stub({ rpc: ok([{ key_id: KEY, key: 5, other: SYNC }]) });
+    expect(await createSyncKeyIn(odd.db, W1)).toEqual({ ok: false });
+    expect(c.said()).not.toContain(SYNC);
+    expect(c.said()).not.toContain("secret payload");
+  });
+
+  it("createSyncKeyIn says nothing when it works", async () => {
+    const c = consoles();
+    const t = stub({ rpc: made });
+    expect(await createSyncKeyIn(t.db, W1)).toEqual({ ok: true, token: SYNC });
+    expect(c.count()).toBe(0);
+  });
+
+  it("revokeSyncKeyIn revokes by id", async () => {
+    const t = stub({ rpc: ok(null) });
+    expect(await revokeSyncKeyIn(t.db, "nope")).toEqual({ ok: false });
+    expect(t.rpc).not.toHaveBeenCalled();
+    expect(await revokeSyncKeyIn(t.db, KEY)).toEqual({ ok: true });
+    expect(t.rpc.mock.calls).toEqual([["revoke_sync_key", { p_key: KEY }]]);
+  });
+
+  it("revokeSyncKeyIn answers not ok when refused or signed out", async () => {
+    const c = consoles();
+    expect(
+      await revokeSyncKeyIn(stub({ rpc: err("no", "P0001") }).db, KEY),
+    ).toEqual({ ok: false });
+    expect(c.error).toHaveBeenCalledWith(
+      "revoke_sync_key failed",
+      "P0001",
+      "no",
+    );
+    expect(await revokeSyncKeyIn(stub({ user: null }).db, KEY)).toEqual({
+      ok: false,
+    });
   });
 });

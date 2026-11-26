@@ -3,11 +3,18 @@
 // saved come last, under "No session". The cards are drawn by the screen.
 import Link from "next/link";
 import { useId, type ReactNode } from "react";
-import { spanText } from "./text";
+import { spanText, VAULT_GROUP } from "./text";
 import type { GalleryFile, GallerySession } from "./types";
 import s from "./gallery.module.css";
 
-export type Group = { session: GallerySession | null; files: GalleryFile[] };
+/** `"vault"`: files a vault sync keeps that no session saved. */
+export type Group = {
+  session: GallerySession | "vault" | null;
+  files: GalleryFile[];
+};
+
+const titleOf = (session: Group["session"]) =>
+  session === "vault" ? VAULT_GROUP : session ? session.title : "No session";
 
 function Header({
   session,
@@ -15,7 +22,7 @@ function Header({
   now,
   id,
 }: {
-  session: GallerySession | null;
+  session: Group["session"];
   count: number;
   now: number;
   id: string;
@@ -24,10 +31,10 @@ function Header({
   return (
     <header className={s.groupHead}>
       <h3 id={id} className={s.groupTitle}>
-        {session ? session.title : "No session"}
+        {titleOf(session)}
       </h3>
       <p className={s.groupMeta}>
-        {session && (
+        {session && session !== "vault" && (
           <>
             <span>{session.agent}</span>
             <span aria-hidden="true">·</span>
@@ -43,7 +50,7 @@ function Header({
         )}
         <span>{files}</span>
       </p>
-      {session?.note && (
+      {session && session !== "vault" && session.note && (
         <Link
           href={`/vault?note=${encodeURIComponent(session.note.id)}`}
           prefetch={false}
@@ -66,7 +73,7 @@ function GroupSection({
   card: (f: GalleryFile) => ReactNode;
 }) {
   const id = useId();
-  const title = group.session ? group.session.title : "No session";
+  const title = titleOf(group.session);
   return (
     <section aria-labelledby={id} className={s.group}>
       <Header
@@ -95,7 +102,7 @@ export function SessionStream({
     <div className={s.stream}>
       {groups.map((g) => (
         <GroupSection
-          key={g.session?.id ?? "none"}
+          key={g.session === "vault" ? "vault" : (g.session?.id ?? "none")}
           group={g}
           now={now}
           card={card}

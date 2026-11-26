@@ -15,6 +15,14 @@
 //   3. `purge_hive`, again and again until it answers true: it erases the
 //      hive in steps and writes the permanent record.
 //
+//   4. `sync_orphan_paths`: once the hives are done, the objects the vault sync
+//      no longer uses (a day old or more, at most 1000) are removed from the
+//      bucket and forgotten with `sync_orphans_removed`. A failure here leaves
+//      them listed for the next run and never fails this one. Each batch is
+//      checked again with `sync_orphans_check` right before Storage deletes,
+//      so a path recorded again meanwhile is not taken. A Storage delete that
+//      removes only some names leaves the rest for a later run to retry.
+//
 // A hive whose objects could not all be removed is not erased; it is counted
 // as failed and the next run takes it up where this one stopped, since removed
 // objects are no longer listed. A hive the run had no time or no steps left
@@ -25,7 +33,7 @@
 // are ignored, so a caller has nowhere to name a hive.
 //
 // Nothing here logs or returns a hive's name, a path, the secret or the key:
-// a log line is a fixed phrase with a hive's id and numbers, the answer is two
+// a log line is a fixed phrase with a hive's id and numbers, the answer is three
 // counts.
 //
 // Web platform only (Request, Response, fetch, crypto.subtle), so the same
@@ -379,6 +387,63 @@ export async function handle(
     }
   }
 
-  note(`purged ${purged}, failed ${failed}, continuing ${continuing}`);
-  return answer(200, { ok: true, purged, failed });
+  // 3. Objects the vault sync no longer uses: at most one page of 1000, in
+  //    batches. A failure leaves them listed for the next run; it never fails
+  //    this one.
+  let orphans = 0;
+  if (!spent()) {
+    try {
+      const res = await rpc("sync_orphan_paths", { p_limit: 1000 });
+      let listed: unknown;
+      if (res.status === 200) listed = await jsonOf(res);
+      else {
+        await drop(res);
+        note(`listing orphaned objects answered ${res.status}`);
+      }
+      const paths = Array.isArray(listed)
+        ? listed.filter((p): p is string => typeof p === "string" && p !== "")
+        : [];
+      for (let i = 0; i < paths.length && !spent(); i += BATCH) {
+        // Only what the database still calls an orphan is deleted, and only
+        // from this batch: an answer can narrow it, never widen it.
+        const batch = paths.slice(i, i + BATCH);
+        const inBatch = new Set(batch);
+        const checked = await rpc("sync_orphans_check", { p_paths: batch });
+        const still =
+          checked.status === 200
+            ? await jsonOf(checked)
+            : (await drop(checked), null);
+        if (!Array.isArray(still)) {
+          note(`checking orphaned objects answered ${checked.status}`);
+          break;
+        }
+        const prefixes = still.filter(
+          (p): p is string => typeof p === "string" && inBatch.has(p),
+        );
+        if (prefixes.length === 0) continue;
+        const gone = await call(
+          `${base}/storage/v1/object/${BUCKET}`,
+          "DELETE",
+          {
+            prefixes,
+          },
+        );
+        await drop(gone);
+        if (!gone.ok) {
+          note(`removing orphaned objects answered ${gone.status}`);
+          break;
+        }
+        const done = await rpc("sync_orphans_removed", { p_paths: prefixes });
+        await drop(done);
+        orphans += prefixes.length;
+      }
+    } catch {
+      note("orphaned objects could not be removed");
+    }
+  }
+
+  note(
+    `purged ${purged}, failed ${failed}, continuing ${continuing}, orphans ${orphans}`,
+  );
+  return answer(200, { ok: true, purged, failed, orphans });
 }

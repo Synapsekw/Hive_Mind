@@ -26,6 +26,7 @@ function file(over: Partial<GalleryFile> = {}): GalleryFile {
     sharing: "private",
     thumb: null,
     session_id: null,
+    fromVault: false,
     refs: [],
     folders: [],
     ...over,

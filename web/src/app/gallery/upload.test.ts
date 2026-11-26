@@ -487,6 +487,7 @@ describe("finishUploadIn", () => {
       sharing: "private",
       thumb: null,
       session_id: SID,
+      fromVault: false,
       refs: [],
       folders: [F],
     });

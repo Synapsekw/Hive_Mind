@@ -149,7 +149,10 @@ test("by session: one group per session, newest first, No session last", async (
   await expect(sections).toHaveCount(groups.length);
   for (const [i, g] of groups.entries()) {
     const section = sections.nth(i);
-    const title = g.session?.title ?? "No session";
+    const title =
+      g.session === "vault"
+        ? "From your vault"
+        : (g.session?.title ?? "No session");
     await expect(section.getByRole("heading", { level: 3 })).toHaveText(title);
     await expect(
       section
@@ -159,7 +162,7 @@ test("by session: one group per session, newest first, No session last", async (
     await expect(section).toContainText(
       `${g.files.length} ${g.files.length === 1 ? "file" : "files"}`,
     );
-    if (!g.session) continue;
+    if (!g.session || g.session === "vault") continue;
     await expect(section).toContainText(g.session.agent);
     await expect(section).toContainText(spanText(g.session, NOW));
     const link = section.getByRole("link", { name: "Session note" });
@@ -489,6 +492,29 @@ test("a colleague's file offers neither Delete nor Change home note", async ({
   await expect(
     p.getByRole("button", { name: "Change home note" }),
   ).toBeVisible();
+});
+
+test("a file the vault keeps says so in place of Change home note", async ({
+  page,
+}) => {
+  await open(page);
+  const kept = DATA.files.filter((f) => f.fromVault && f.mine);
+  const theirs = DATA.files.find((f) => f.fromVault && !f.mine)!;
+  expect(kept.length).toBe(2);
+  expect(kept.some((f) => f.name.endsWith(".html"))).toBe(true);
+  const group = main(page).getByRole("region", { name: "From your vault" });
+  await expect(group.locator("[data-file]")).toHaveCount(2);
+  await card(page, kept[0]!).click();
+  const p = panel(page);
+  await expect(p).toContainText("Home note set by your vault");
+  await expect(p.getByRole("button", { name: "Change home note" })).toHaveCount(
+    0,
+  );
+  await expect(p.getByRole("button", { name: "Delete" })).toBeVisible();
+  // A colleague's file is no vault's: no marker, and not in the group.
+  await expect(group.locator("[data-file]")).toHaveCount(2);
+  await card(page, theirs).click();
+  await expect(p).not.toContainText("Home note set by your vault");
 });
 
 test("Enter or a double-click on a selected card opens the viewer", async ({

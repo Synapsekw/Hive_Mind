@@ -284,6 +284,13 @@ describe("the workspaces", () => {
     expect(workspaceFailure("agents")).toBe(
       "Revoke this workspace's agents first.",
     );
+    // A live sync key is what blocks when the workspace has one: its agent is not on Agents.
+    expect(workspaceFailure("agents", true)).toBe(
+      "Revoke this workspace's sync key first (Settings → Sync).",
+    );
+    expect(workspaceFailure("files", true)).toBe(
+      "Delete this workspace's files in the Gallery first.",
+    );
     expect(workspaceFailure("files")).toBe(
       "Delete this workspace's files in the Gallery first.",
     );

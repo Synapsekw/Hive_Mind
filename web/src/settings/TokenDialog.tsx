@@ -6,8 +6,23 @@
 // by accident: Escape and a click outside do nothing, only Done closes it, and with it the
 // screen drops the token. Reload, tab close and Back are held off by the screen (`Settings`),
 // which owns the token. Nothing here copies it unless Copy is pressed on purpose.
+// A sync key is the same: `variant="sync"` only changes the words and the commands. The project
+// address and the publishable key it shows are the public ones the web app already ships to the
+// browser; the secret is never part of the command.
 import { useEffect, useId, useRef, useState } from "react";
-import { MCP_COMMAND, envLine } from "./text";
+import {
+  MCP_COMMAND,
+  SYNC_KEY_BY_HAND,
+  SYNC_KEY_COPIED,
+  SYNC_KEY_LABEL,
+  SYNC_KEY_STEP,
+  SYNC_KEY_TITLE,
+  SYNC_KEY_WARNING,
+  SYNC_PUBLISHABLE_PLACEHOLDER,
+  SYNC_URL_PLACEHOLDER,
+  envLine,
+  setupCommand,
+} from "./text";
 import s from "./settings.module.css";
 
 /** How long the Copy button says "Copied". */
@@ -17,12 +32,16 @@ const BY_HAND = "Select the token and copy it by hand.";
 export function TokenDialog({
   token,
   agentName,
+  variant = "agent",
   onDone,
 }: {
   token: string;
   agentName: string;
+  /** What the secret is for: an agent's token, or a workspace's sync key. */
+  variant?: "agent" | "sync";
   onDone: () => void;
 }) {
+  const sync = variant === "sync";
   const box = useRef<HTMLDivElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,14 +110,16 @@ export function TokenDialog({
         className={s.dialog}
       >
         <h2 ref={title} id={titleId} tabIndex={-1} className={s.dialogTitle}>
-          Token for {agentName}
+          {sync ? SYNC_KEY_TITLE : `Token for ${agentName}`}
         </h2>
         <p id={warningId} className={s.warning}>
-          This token is shown once. Copy it now; it cannot be shown again.
+          {sync
+            ? SYNC_KEY_WARNING
+            : "This token is shown once. Copy it now; it cannot be shown again."}
         </p>
         <div className={s.tokenRow}>
           <label htmlFor={fieldId} className={s.srOnly}>
-            Token
+            {sync ? SYNC_KEY_LABEL : "Token"}
           </label>
           <input
             id={fieldId}
@@ -126,35 +147,63 @@ export function TokenDialog({
           </button>
         </div>
         <p aria-live="polite" className={byHand ? s.refused : s.srOnly}>
-          {byHand ? BY_HAND : copied ? "Token copied." : ""}
+          {byHand
+            ? sync
+              ? SYNC_KEY_BY_HAND
+              : BY_HAND
+            : copied
+              ? sync
+                ? SYNC_KEY_COPIED
+                : "Token copied."
+              : ""}
         </p>
         <section aria-labelledby={`${titleId}-how`} className={s.how}>
           <h3 id={`${titleId}-how`} className={s.label}>
             What to do with it
           </h3>
-          <ol className={s.steps}>
-            <li>
-              <p className={s.step}>
-                For Claude Code, put this line in the <code>.env</code> file of
-                your Hive_Mind folder:
-              </p>
-              <pre className={s.code}>
-                <code>{envLine(token)}</code>
-              </pre>
-            </li>
-            <li>
-              <p className={s.step}>Add the server once, with your own path:</p>
-              <pre className={s.code}>
-                <code>{MCP_COMMAND}</code>
-              </pre>
-            </li>
-            <li>
-              <p className={s.step}>
-                Then give the agent the instruction file from
-                docs/agent-integration.md, section 5.
-              </p>
-            </li>
-          </ol>
+          {sync ? (
+            <ol className={s.steps}>
+              <li>
+                <p className={s.step}>{SYNC_KEY_STEP}</p>
+                <pre className={s.code}>
+                  <code>
+                    {setupCommand(
+                      process.env.NEXT_PUBLIC_SUPABASE_URL ??
+                        SYNC_URL_PLACEHOLDER,
+                      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+                        SYNC_PUBLISHABLE_PLACEHOLDER,
+                    )}
+                  </code>
+                </pre>
+              </li>
+            </ol>
+          ) : (
+            <ol className={s.steps}>
+              <li>
+                <p className={s.step}>
+                  For Claude Code, put this line in the <code>.env</code> file
+                  of your Hive_Mind folder:
+                </p>
+                <pre className={s.code}>
+                  <code>{envLine(token)}</code>
+                </pre>
+              </li>
+              <li>
+                <p className={s.step}>
+                  Add the server once, with your own path:
+                </p>
+                <pre className={s.code}>
+                  <code>{MCP_COMMAND}</code>
+                </pre>
+              </li>
+              <li>
+                <p className={s.step}>
+                  Then give the agent the instruction file from
+                  docs/agent-integration.md, section 5.
+                </p>
+              </li>
+            </ol>
+          )}
         </section>
         <div className={s.dialogFoot}>
           <button type="button" className={s.confirm} onClick={onDone}>

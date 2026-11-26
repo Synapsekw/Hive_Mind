@@ -25,11 +25,12 @@ type Res = { data: unknown; error: { code?: string; message: string } | null };
 /**
  * A note row's metadata and the database's own answer on sharing, from per-row computed
  * columns: the shared tab and the opened note. Never the body. A workspace's index comes from
- * `vault_index` instead, with the same columns and `topics` in place of `note_entities`.
+ * `vault_index` instead, with `topics` in place of `note_entities`; it does not carry `synced_by`,
+ * so a note read from the index is not marked (the opened note is).
  */
 export const NOTE_COLUMNS =
   "id,workspace_id,member_id,path,title,updated_at,written_by_agent,visibility,shared_with," +
-  "quarantined,effective:note_visibility,effective_with:note_shared_with," +
+  "quarantined,synced_by,effective:note_visibility,effective_with:note_shared_with," +
   "rule_folder:note_rule_folder,access:note_access," +
   "note_entities(entity_id,confidence,detached_at)";
 
@@ -106,6 +107,8 @@ export function toNote(
     title: text(r.title),
     updated_at: text(r.updated_at),
     by_agent: r.written_by_agent !== null && r.written_by_agent !== undefined,
+    // Only the caller's own notes say so; a colleague's are sent as plain notes.
+    fromVault: member_id === me && typeof r.synced_by === "string",
     visibility: vis(r.visibility),
     shared_with: ids(r.shared_with),
     quarantined: r.quarantined === true,

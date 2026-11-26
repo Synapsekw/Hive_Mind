@@ -5323,17 +5323,21 @@ test("an app pass reads and writes nothing", async () => {
   // The server's own tables: no API role has any right on them, so there is
   // no policy to look for. Every statement fails for the person, the pass
   // and a visitor alike, before row-level security is asked.
-  const serverOnly = ["deleted_hives"];
+  const serverOnly = {
+    deleted_hives: "name",
+    sync_manifest: "path",
+    sync_orphans: "storage_path",
+  };
   for (const { s, t, rowsecurity } of tables) {
     const name = `${s}.${t}`;
     // The rule itself: a restrictive policy for every command, so a table
     // added later without one fails here.
     assert.equal(rowsecurity, true, `${name} has no row-level security`);
-    if (s === "public" && serverOnly.includes(t)) {
+    if (s === "public" && t in serverOnly) {
       for (const who of [kai, pass, null])
         for (const sql of [
           `select count(*) from ${name}`,
-          `update ${name} set name = name returning 1`,
+          `update ${name} set ${serverOnly[t]} = ${serverOnly[t]} returning 1`,
           `delete from ${name} returning 1`,
           `insert into ${name} default values returning 1`,
         ]) {
@@ -5465,12 +5469,35 @@ test("every function refuses an app pass except connector_login", async () => {
     "jwt_agent_id", // the caller's own agent_id claim
     "jwt_is_self_hosted", // the caller's own trust_tier claim
     "jwt_oauth_client", // the caller's own client_id and aud claims
+    "jwt_has_sync_claim", // the caller's own sync_key_id claim
     "note_topic", // cuts a path given as the argument
+    "_sync_path_ok", // checks a path given as the argument
+    "_sync_date", // reads a date given as the argument
+    "_sync_count", // reads a count given as the argument
     "file_kind", // a name and a type given as arguments
   ];
   // Signs in by the token in its argument, for anyone, as it does for anon:
   // the caller's identity plays no part, so a pass gains nothing from it.
-  const byToken = ["agent_login"];
+  const byToken = ["agent_login", "sync_login"];
+  // Answers only for the sync's own claims: null for a person and for a pass.
+  const bySyncClaim = ["jwt_sync_key"];
+  // A restrictive Storage gate that narrows only the sync's own claims: for a
+  // person and a pass it lets through what the other policies decide (true,
+  // proved below), so a pass gains nothing from it.
+  const syncNarrows = ["sync_object_ok"];
+  // Refused to a pass in their own words: only a person makes or revokes a key.
+  const forSyncKeys = ["create_sync_key", "revoke_sync_key"];
+  // Refused to anyone but the sync's own identity: a person and a pass both get
+  // "this sync key is not live".
+  const forSync = [
+    "sync_open_run",
+    "sync_plan",
+    "sync_put_notes",
+    "sync_link_notes",
+    "sync_put_files",
+    "sync_delete",
+    "sync_finish",
+  ];
   // The one function made for an app pass.
   const forApps = ["connector_login"];
 
@@ -5494,6 +5521,9 @@ test("every function refuses an app pass except connector_login", async () => {
         await as(kai, `select public.upload_session_open($1) as id`, [ws.kai])
       )[0].id,
     );
+  const syncKey = (
+    await as(kai, `select * from public.create_sync_key($1)`, [ws.kai])
+  )[0];
   const calls = {
     my_member_ids: [`select id from public.my_member_ids() as id`],
     my_hive_ids: [`select id from public.my_hive_ids() as id`],
@@ -5597,6 +5627,10 @@ test("every function refuses an app pass except connector_login", async () => {
   const known = [
     ...pure,
     ...byToken,
+    ...bySyncClaim,
+    ...syncNarrows,
+    ...forSyncKeys,
+    ...forSync,
     ...forApps,
     ...forAgents,
     ...forPeople,
@@ -5643,6 +5677,13 @@ test("every function refuses an app pass except connector_login", async () => {
   }
 
   const first = (r) => (r.rows.length ? Object.values(r.rows[0])[0] : null);
+  for (const who of [kai, pass]) {
+    const r = await trial(who, `select public.sync_object_ok($1)`, [
+      ca.filePath,
+    ]);
+    assert.equal(r.error, undefined, r.error?.message);
+    assert.equal(first(r), true, "sync_object_ok narrows only the sync");
+  }
   for (const [name, [sql, params = [], raises = false]] of Object.entries(
     calls,
   )) {
@@ -5676,6 +5717,43 @@ test("every function refuses an app pass except connector_login", async () => {
   // agent_login: a pass that holds no token gets what anyone gets.
   const guess = await trial(pass, `select * from public.agent_login('hive_x')`);
   assert.match(guess.error?.message ?? "", /unknown, expired or revoked/);
+  for (const [sql, params] of [
+    [`select * from public.create_sync_key($1)`, [ws.kai]],
+    [`select public.revoke_sync_key($1)`, [syncKey.key_id]],
+  ]) {
+    assert.equal((await trial(kai, sql, params)).error, undefined, sql);
+    assert.match(
+      (await trial(pass, sql, params)).error?.message ?? "(no error)",
+      /only a person (makes|revokes) a sync key/,
+      sql,
+    );
+  }
+  for (const [sql, params] of [
+    [`select public.sync_open_run(false)`, []],
+    [`select public.sync_plan(gen_random_uuid(), '[]', true)`, []],
+    [`select public.sync_put_notes(gen_random_uuid(), '[]')`, []],
+    [`select public.sync_link_notes(gen_random_uuid(), '[]')`, []],
+    [`select public.sync_put_files(gen_random_uuid(), '[]')`, []],
+    [`select public.sync_delete(gen_random_uuid(), '{}')`, []],
+    [`select public.sync_finish(gen_random_uuid(), '{}', '{}', null)`, []],
+  ])
+    for (const who of [kai, pass])
+      assert.match(
+        (await trial(who, sql, params)).error?.message ?? "(no error)",
+        /this sync key is not live/,
+        sql,
+      );
+  // sync_login likewise: the pass has no sync key, so it gets what anyone gets.
+  const syncGuess = await trial(
+    pass,
+    `select * from public.sync_login('hsync_x')`,
+  );
+  assert.match(syncGuess.error?.message ?? "", /unknown or revoked sync key/);
+  for (const who of [kai, pass])
+    assert.equal(
+      (await trial(who, `select public.jwt_sync_key() as k`)).rows[0].k,
+      null,
+    );
   // connector_login is the exception: it answers the pass.
   const login = await trial(pass, `select * from public.connector_login()`);
   assert.equal(login.error, undefined, login.error?.message);
@@ -5683,6 +5761,11 @@ test("every function refuses an app pass except connector_login", async () => {
   await asDbOwner(null, `delete from public.hives where id = $1`, [
     closingHive,
   ]);
+  await asDbOwner(
+    null,
+    `delete from public.agents where id = (select agent_id from public.sync_keys where id = $1)`,
+    [syncKey.key_id],
+  );
 });
 
 test("a person connects an app to their own workspace", async () => {
@@ -6940,6 +7023,10 @@ const HD_OPEN = [
   "hives",
   "notifications",
   "sessions", // written only by the session functions, none of which writes a note into a closing hive
+  "sync_keys", // made and revoked only by a person's own functions; goes with its workspace
+  "sync_manifest", // the server's own: no API role has any right on it
+  "sync_orphans", // the server's own: no API role has any right on it
+  "sync_runs", // written only by the sync functions of a live key
 ];
 const hdSnapshot = async (hiveId) => {
   await db.exec("reset role");
@@ -8739,7 +8826,8 @@ test("only the server erases a hive, only when its day has come, and keeps a rec
   ).rows[0];
   assert.deepEqual(table, {
     rls: true,
-    policies: 0,
+    // Only the restrictive wall that keeps the sync identity off every table.
+    policies: 1,
     anon: false,
     signed_in: false,
   });
