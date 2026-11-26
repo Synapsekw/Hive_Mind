@@ -687,3 +687,467 @@ test("a plan over two pages lists both, and a moved attachment is rehomed", asyn
   assert.deepEqual(p.gone, []);
   assert.deepEqual(p.rehome, [{ path: "img/p.png", home: "Other.md" }]);
 });
+
+const putFiles = async (t, s, run, files) =>
+  (
+    await t.as(s.claims, `select public.sync_put_files($1, $2) as r`, [
+      run,
+      JSON.stringify(files),
+    ])
+  )[0].r;
+const store = async (t, s, prefix, key, name) => {
+  const path = `${prefix}${key}/${name}`;
+  await t.as(
+    s.claims,
+    `insert into storage.objects (bucket_id, name) values ('files', $1)`,
+    [path],
+  );
+  return path;
+};
+const del = async (t, s, run, paths) =>
+  (
+    await t.as(s.claims, `select public.sync_delete($1, $2) as r`, [run, paths])
+  )[0].r;
+
+test("a synced file lives in the note that links it, else in Vault files", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  await putNotes(t, s, r.run_id, [note("deck/Notes.md", "b")]);
+  const a = await store(t, s, r.storage_prefix, "a".repeat(32), "deck.html");
+  const b = await store(t, s, r.storage_prefix, "b".repeat(32), "loose.pdf");
+  const out = await putFiles(t, s, r.run_id, [
+    {
+      path: "deck/deck.html",
+      name: "deck.html",
+      size: 10,
+      sha256: sha("c"),
+      mime: "text/html",
+      home: "deck/Notes.md",
+      storage_path: a,
+    },
+    {
+      path: "deck/loose.pdf",
+      name: "loose.pdf",
+      size: 10,
+      sha256: sha("d"),
+      mime: "application/pdf",
+      home: "deck/Vault files.md",
+      storage_path: b,
+    },
+  ]);
+  assert.equal(out.written.length, 2);
+  const rows = (
+    await t.db.query(
+      `select f.vault_path, f.mime, f.synced_by, n.path as home, n.sync_generated,
+              n.synced_by as home_synced_by
+         from public.files f join public.notes n on n.id = f.note_id
+        order by f.vault_path`,
+    )
+  ).rows;
+  assert.equal(rows[0].home, "deck/Notes.md");
+  // A page type is never declared, whatever the job sends.
+  assert.equal(rows[0].mime, "application/octet-stream");
+  assert.equal(rows[0].synced_by, s.keyId);
+  assert.equal(rows[1].home, "deck/Vault files.md");
+  assert.equal(rows[1].sync_generated, true);
+  // The generated note is kept by the key, so the cleanup and the delete rules see it.
+  assert.equal(rows[1].home_synced_by, s.keyId);
+});
+
+test("a file field of the wrong JSON type is refused", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  const good = {
+    path: "x.pdf",
+    name: "x.pdf",
+    size: 1,
+    sha256: sha("e"),
+    mime: "application/pdf",
+    home: "Vault files.md",
+  };
+  for (const bad of [
+    { name: 5 },
+    { mime: 7 },
+    { home: 3 },
+    { from: 4 },
+    { path: 9 },
+    { size: "1" },
+    { storage_path: 8 },
+  ]) {
+    await assert.rejects(
+      putFiles(t, s, r.run_id, [{ ...good, ...bad }]),
+      /a file is not usable/,
+    );
+  }
+});
+
+test("a file record needs its stored object under the run's folder", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  const out = await putFiles(t, s, r.run_id, [
+    {
+      path: "x.pdf",
+      name: "x.pdf",
+      size: 1,
+      sha256: sha("e"),
+      mime: "application/pdf",
+      home: "Vault files.md",
+      storage_path: `${r.storage_prefix}${"e".repeat(32)}/x.pdf`,
+    },
+  ]);
+  assert.equal(out.written.length, 0);
+  assert.equal(out.failed.length, 1);
+});
+
+test("a changed file's old object becomes an orphan", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let r = await openRun(t, s);
+  const one = await store(t, s, r.storage_prefix, "1".repeat(32), "a.pdf");
+  await putFiles(t, s, r.run_id, [
+    {
+      path: "a.pdf",
+      name: "a.pdf",
+      size: 1,
+      sha256: sha("1"),
+      mime: "application/pdf",
+      home: "Vault files.md",
+      storage_path: one,
+    },
+  ]);
+  r = await openRun(t, s);
+  const two = await store(t, s, r.storage_prefix, "2".repeat(32), "a.pdf");
+  await putFiles(t, s, r.run_id, [
+    {
+      path: "a.pdf",
+      name: "a.pdf",
+      size: 2,
+      sha256: sha("2"),
+      mime: "application/pdf",
+      home: "Vault files.md",
+      storage_path: two,
+    },
+  ]);
+  const o = await t.db.query(`select storage_path from public.sync_orphans`);
+  assert.deepEqual(
+    o.rows.map((x) => x.storage_path),
+    [one],
+  );
+  const f = await t.db.query(`select kind, size_bytes from public.files`);
+  assert.equal(f.rows[0].kind, "pdf");
+  assert.equal(Number(f.rows[0].size_bytes), 2);
+});
+
+test("a move or rehome without a new object keeps the stored file", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let r = await openRun(t, s);
+  const one = await store(t, s, r.storage_prefix, "1".repeat(32), "a.pdf");
+  await putFiles(t, s, r.run_id, [
+    {
+      path: "a.pdf",
+      name: "a.pdf",
+      size: 1,
+      sha256: sha("1"),
+      mime: "application/pdf",
+      home: "Vault files.md",
+      storage_path: one,
+    },
+  ]);
+  r = await openRun(t, s);
+  const out = await putFiles(t, s, r.run_id, [
+    {
+      path: "docs/a.pdf",
+      from: "a.pdf",
+      name: "a.pdf",
+      size: 1,
+      sha256: sha("1"),
+      mime: "application/pdf",
+      home: "docs/Vault files.md",
+    },
+  ]);
+  assert.equal(out.written.length, 1);
+  const f = await t.db.query(
+    `select f.vault_path, f.storage_path, n.path as home from public.files f
+       join public.notes n on n.id = f.note_id`,
+  );
+  assert.deepEqual(f.rows, [
+    {
+      vault_path: "docs/a.pdf",
+      storage_path: one,
+      home: "docs/Vault files.md",
+    },
+  ]);
+  const o = await t.db.query(
+    `select count(*)::int as n from public.sync_orphans`,
+  );
+  assert.equal(o.rows[0].n, 0);
+  const a = await t.db.query(
+    `select count(*)::int as n from public.audit_log where action = 'file.moved'`,
+  );
+  assert.equal(a.rows[0].n, 1);
+});
+
+test("the person cannot change a synced file's home note", async () => {
+  const t = await setupHive();
+  const mine = await t.addNote("dani", "Other");
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  const p = await store(t, s, r.storage_prefix, "f".repeat(32), "f.pdf");
+  const out = await putFiles(t, s, r.run_id, [
+    {
+      path: "f.pdf",
+      name: "f.pdf",
+      size: 1,
+      sha256: sha("f"),
+      mime: "application/pdf",
+      home: "Vault files.md",
+      storage_path: p,
+    },
+  ]);
+  await assert.rejects(
+    t.as(t.person("dani"), `select public.file_set_home($1, $2)`, [
+      out.written[0].id,
+      mine.id,
+    ]),
+    /your vault sets where this file lives/,
+  );
+});
+
+test("deletes: a few go through, a mass delete is refused until confirmed once", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let r = await openRun(t, s);
+  const notes = Array.from({ length: 30 }, (_, i) => note(`d/${i}.md`, "9"));
+  await putNotes(t, s, r.run_id, notes);
+  r = await openRun(t, s);
+  assert.deepEqual(await del(t, s, r.run_id, ["d/0.md"]), {
+    deleted: 1,
+    refused: 0,
+  });
+  const many = notes.slice(1).map((n) => n.path);
+  assert.deepEqual(await del(t, s, r.run_id, many), {
+    deleted: 0,
+    refused: 29,
+  });
+  // The confirm lets exactly that list through, on the next run only.
+  r = await openRun(t, s, true);
+  assert.deepEqual(await del(t, s, r.run_id, [...many, "x.md"]), {
+    deleted: 0,
+    refused: 30,
+  });
+  r = await openRun(t, s, true);
+  assert.deepEqual(await del(t, s, r.run_id, many), {
+    deleted: 29,
+    refused: 0,
+  });
+  const audit = await t.db.query(
+    `select count(*)::int as n from public.audit_log where action = 'note.deleted'`,
+  );
+  assert.equal(audit.rows[0].n, 30);
+});
+
+test("deleting a synced file queues its object as an orphan", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let r = await openRun(t, s);
+  const p = await store(t, s, r.storage_prefix, "7".repeat(32), "g.pdf");
+  await putFiles(t, s, r.run_id, [
+    {
+      path: "g.pdf",
+      name: "g.pdf",
+      size: 1,
+      sha256: sha("7"),
+      mime: "application/pdf",
+      home: "Vault files.md",
+      storage_path: p,
+    },
+  ]);
+  r = await openRun(t, s);
+  assert.deepEqual(await del(t, s, r.run_id, ["g.pdf"]), {
+    deleted: 1,
+    refused: 0,
+  });
+  const o = await t.db.query(`select storage_path from public.sync_orphans`);
+  assert.deepEqual(
+    o.rows.map((x) => x.storage_path),
+    [p],
+  );
+});
+
+test("the sync deletes only what it keeps", async () => {
+  const t = await setupHive();
+  await t.addNote("dani", "Uploads", { path: "Uploads.md" });
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  assert.deepEqual(await del(t, s, r.run_id, ["Uploads.md"]), {
+    deleted: 0,
+    refused: 0,
+  });
+  const n = await t.db.query(`select count(*)::int as n from public.notes`);
+  assert.equal(n.rows[0].n, 1);
+});
+
+test("a run's record: counts, too-big files, readable only by its member", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  await t.as(s.claims, `select public.sync_finish($1, $2, $3, $4)`, [
+    r.run_id,
+    JSON.stringify({
+      added: 3,
+      changed: 1,
+      moved: 0,
+      deleted: 0,
+      skipped: 2,
+      too_big: 1,
+    }),
+    ["big.mov"],
+    null,
+  ]);
+  const mine = await t.as(t.person("dani"), `select * from public.sync_runs`);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].added, 3);
+  assert.deepEqual(mine[0].too_big_paths, ["big.mov"]);
+  assert.equal(
+    (await t.as(t.person("ahmed"), `select * from public.sync_runs`)).length,
+    0,
+  );
+  const m = await t.db.query(
+    `select count(*)::int as n from public.sync_manifest`,
+  );
+  assert.equal(m.rows[0].n, 0);
+  await assert.rejects(
+    t.as(s.claims, `select public.sync_finish($1, '{}', '{}', null)`, [
+      r.run_id,
+    ]),
+    /no such run/,
+  );
+});
+
+test("runs are trimmed to the last 200 of a key", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  for (let i = 0; i < 201; i++) {
+    const r = await openRun(t, s);
+    await t.as(s.claims, `select public.sync_finish($1, '{}', '{}', null)`, [
+      r.run_id,
+    ]);
+  }
+  const n = await t.db.query(`select count(*)::int as n from public.sync_runs`);
+  assert.equal(n.rows[0].n, 200);
+});
+
+test("finishing a run removes a generated note no file lives in", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let r = await openRun(t, s);
+  const p = await store(t, s, r.storage_prefix, "8".repeat(32), "h.pdf");
+  await putFiles(t, s, r.run_id, [
+    {
+      path: "h.pdf",
+      name: "h.pdf",
+      size: 1,
+      sha256: sha("8"),
+      mime: "application/pdf",
+      home: "Vault files.md",
+      storage_path: p,
+    },
+  ]);
+  await t.as(s.claims, `select public.sync_finish($1, '{}', '{}', null)`, [
+    r.run_id,
+  ]);
+  const count = async () =>
+    (await t.db.query(`select count(*)::int as n from public.notes`)).rows[0].n;
+  assert.equal(await count(), 1);
+  r = await openRun(t, s);
+  await del(t, s, r.run_id, ["h.pdf"]);
+  await t.as(s.claims, `select public.sync_finish($1, '{}', '{}', null)`, [
+    r.run_id,
+  ]);
+  assert.equal(await count(), 0);
+});
+
+test("purging a hive removes its sync keys, runs, orphans, notes and files", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let r = await openRun(t, s);
+  await putNotes(t, s, r.run_id, [note("n.md", "a")]);
+  const p = await store(t, s, r.storage_prefix, "9".repeat(32), "p.pdf");
+  const q = await store(t, s, r.storage_prefix, "6".repeat(32), "q.pdf");
+  const put = await putFiles(t, s, r.run_id, [
+    {
+      path: "p.pdf",
+      name: "p.pdf",
+      size: 1,
+      sha256: sha("9"),
+      mime: "application/pdf",
+      home: "n.md",
+      storage_path: p,
+    },
+  ]);
+  await t.as(s.claims, `select public.sync_finish($1, '{}', '{}', null)`, [
+    r.run_id,
+  ]);
+  assert.equal(put.written.length, 1);
+  // An orphan, as a changed file leaves one.
+  await t.db.query(
+    `insert into public.sync_orphans (storage_path, hive_id) values ($1, $2)`,
+    [q, t.hive],
+  );
+  await t.as(
+    t.person("dani"),
+    `select public.request_hive_deletion($1, 'Test hive')`,
+    [t.hive],
+  );
+  await t.db.exec("reset role");
+  await t.db.query(
+    `update public.hives set closing_at = now() - interval '7 days 1 hour',
+                             delete_after = now() - interval '1 hour' where id = $1`,
+    [t.hive],
+  );
+  const service = async (sql, params = []) => {
+    await t.db.exec("reset role");
+    await t.db.query(`select set_config('request.jwt.claims', $1, false)`, [
+      JSON.stringify({ role: "service_role" }),
+    ]);
+    await t.db.exec("set role service_role");
+    try {
+      return (await t.db.query(sql, params)).rows;
+    } finally {
+      await t.db.exec("reset role");
+    }
+  };
+  await service(`select public.begin_hive_purge($1)`, [t.hive]);
+  for (;;) {
+    const names = (
+      await service(`select * from public.hive_object_paths($1, null, 1000)`, [
+        t.hive,
+      ])
+    ).map((x) => x.name);
+    if (names.length === 0) break;
+    await service(
+      `delete from storage.objects where bucket_id = 'files' and name = any ($1::text[])`,
+      [names],
+    );
+  }
+  const [{ done }] = await service(`select public.purge_hive($1) as done`, [
+    t.hive,
+  ]);
+  assert.equal(done, true);
+  for (const table of [
+    "sync_keys",
+    "sync_runs",
+    "sync_orphans",
+    "notes",
+    "files",
+  ]) {
+    const n = await t.db.query(
+      `select count(*)::int as n from public.${table}`,
+    );
+    assert.equal(n.rows[0].n, 0, table);
+  }
+});

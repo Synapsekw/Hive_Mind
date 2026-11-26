@@ -5473,6 +5473,7 @@ test("every function refuses an app pass except connector_login", async () => {
     "note_topic", // cuts a path given as the argument
     "_sync_path_ok", // checks a path given as the argument
     "_sync_date", // reads a date given as the argument
+    "_sync_count", // reads a count given as the argument
     "file_kind", // a name and a type given as arguments
   ];
   // Signs in by the token in its argument, for anyone, as it does for anon:
@@ -5489,6 +5490,9 @@ test("every function refuses an app pass except connector_login", async () => {
     "sync_plan",
     "sync_put_notes",
     "sync_link_notes",
+    "sync_put_files",
+    "sync_delete",
+    "sync_finish",
   ];
   // The one function made for an app pass.
   const forApps = ["connector_login"];
@@ -5717,6 +5721,9 @@ test("every function refuses an app pass except connector_login", async () => {
     [`select public.sync_plan(gen_random_uuid(), '[]', true)`, []],
     [`select public.sync_put_notes(gen_random_uuid(), '[]')`, []],
     [`select public.sync_link_notes(gen_random_uuid(), '[]')`, []],
+    [`select public.sync_put_files(gen_random_uuid(), '[]')`, []],
+    [`select public.sync_delete(gen_random_uuid(), '{}')`, []],
+    [`select public.sync_finish(gen_random_uuid(), '{}', '{}', null)`, []],
   ])
     for (const who of [kai, pass])
       assert.match(

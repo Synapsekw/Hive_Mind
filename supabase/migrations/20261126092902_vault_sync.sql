@@ -826,3 +826,311 @@ grant execute on function public.sync_open_run(boolean) to authenticated;
 grant execute on function public.sync_plan(uuid, jsonb, boolean) to authenticated;
 grant execute on function public.sync_put_notes(uuid, jsonb) to authenticated;
 grant execute on function public.sync_link_notes(uuid, jsonb) to authenticated;
+
+-- ------------------------------------------------------------------ files
+
+-- An object path no row uses any more, queued for purge-hives.
+create function public._sync_orphan(p_path text, p_hive uuid) returns void
+language sql security definer set search_path = '' as $$
+  insert into public.sync_orphans (storage_path, hive_id)
+  select p_path, p_hive
+   where p_path is not null
+     and not exists (select 1 from public.files f where f.storage_path = p_path)
+  on conflict (storage_path) do nothing
+$$;
+
+-- The note a file lives in, by path. A missing "Vault files" note of a folder is made, kept by
+-- the sync (notes_before_write marks it) and marked as generated; any other missing note is a
+-- failure for that file.
+create function public._sync_home(k public.sync_keys, p_home text) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_id uuid;
+begin
+  select id into v_id from public.notes
+   where workspace_id = k.workspace_id and member_id = k.member_id and path = p_home;
+  if v_id is not null then return v_id; end if;
+  if p_home !~ '(^|/)Vault files\.md$' then
+    raise exception 'no such home note' using errcode = 'P0002';
+  end if;
+  insert into public.notes (hive_id, member_id, workspace_id, path, title, body, folder_id,
+                            sync_generated)
+  values ((select w.hive_id from public.workspaces w where w.id = k.workspace_id),
+          k.member_id, k.workspace_id, p_home, 'Vault files',
+          'Files in this folder of your vault that no note links to.',
+          public._sync_folder(k, p_home), true)
+  returning id into v_id;
+  return v_id;
+end
+$$;
+
+create function public.sync_put_files(p_run uuid, p_files jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  k public.sync_keys := public._sync_live();
+  r public.sync_runs := public._sync_run(p_run);
+  v_prefix text := k.member_id::text || '/' || k.workspace_id::text || '/vault/';
+  e jsonb;
+  f public.files;
+  v_path text;
+  v_from text;
+  v_store text;
+  v_mime text;
+  v_home uuid;
+  v_id uuid;
+  v_written jsonb := '[]';
+  v_failed jsonb := '[]';
+begin
+  if coalesce(jsonb_typeof(p_files), '') <> 'array' or jsonb_array_length(p_files) > 200 then
+    raise exception 'a batch holds at most 200 files' using errcode = '22023';
+  end if;
+  -- Every field has its JSON type checked first: a number or a null is not a text.
+  if exists (
+    select 1 from jsonb_array_elements(p_files) x
+     where coalesce(jsonb_typeof(x), '') <> 'object'
+        or coalesce(jsonb_typeof(x -> 'path'), '') <> 'string'
+        or not public._sync_path_ok(x ->> 'path') or (x ->> 'path') ~* '\.md$'
+        or (x ? 'from' and (jsonb_typeof(x -> 'from') <> 'string'
+                            or not public._sync_path_ok(x ->> 'from')))
+        or coalesce(jsonb_typeof(x -> 'home'), '') <> 'string'
+        or not public._sync_path_ok(x ->> 'home') or (x ->> 'home') !~* '\.md$'
+        or coalesce(jsonb_typeof(x -> 'name'), '') <> 'string'
+        or not coalesce(length(x ->> 'name') between 1 and 255, false)
+        or position('/' in x ->> 'name') > 0
+        or coalesce(jsonb_typeof(x -> 'size'), '') <> 'number'
+        or not coalesce(case when jsonb_typeof(x -> 'size') = 'number'
+                             then (x ->> 'size')::numeric between 0 and 52428800 end, false)
+        or coalesce(jsonb_typeof(x -> 'sha256'), '') <> 'string'
+        or coalesce(x ->> 'sha256', '') !~ '^[0-9a-f]{64}$'
+        or coalesce(jsonb_typeof(x -> 'mime'), '') <> 'string'
+        or not coalesce(length(x ->> 'mime') between 1 and 100, false)
+        or (x ? 'storage_path'
+            and (jsonb_typeof(x -> 'storage_path') <> 'string'
+                 or left(x ->> 'storage_path', length(v_prefix)) <> v_prefix
+                 or substr(x ->> 'storage_path', length(v_prefix) + 1)
+                    !~ '^[0-9a-f]{32}/[^/]{1,255}$'))) then
+    raise exception 'a file is not usable' using errcode = '22023';
+  end if;
+
+  for e in select * from jsonb_array_elements(p_files) loop
+    v_path := e ->> 'path';
+    v_from := e ->> 'from';
+    v_store := e ->> 'storage_path';
+    -- A type a browser would render as a page is never declared (gallery v2).
+    v_mime := case when lower(e ->> 'mime') in ('text/html', 'image/svg+xml',
+                         'application/xhtml+xml', 'text/xml', 'application/xml')
+                   then 'application/octet-stream' else e ->> 'mime' end;
+    begin
+      f := null;
+      if v_store is not null and not exists (
+           select 1 from storage.objects o where o.bucket_id = 'files' and o.name = v_store) then
+        raise exception 'the file was not stored' using errcode = 'P0002';
+      end if;
+      v_home := public._sync_home(k, e ->> 'home');
+      if v_from is not null then
+        select * into f from public.files x
+         where x.workspace_id = k.workspace_id and x.vault_path = v_from
+           and x.synced_by in (select public._sync_family(k.id));
+      end if;
+      if f.id is null then
+        v_from := null;
+        select * into f from public.files x
+         where x.workspace_id = k.workspace_id and x.vault_path = v_path
+           and x.synced_by in (select public._sync_family(k.id));
+      end if;
+      if f.id is null then
+        if v_store is null then
+          raise exception 'the file was not stored' using errcode = 'P0002';
+        end if;
+        insert into public.files (hive_id, member_id, workspace_id, note_id, storage_path,
+                                  name, mime, size_bytes, vault_path, sync_sha256)
+        values ((select w.hive_id from public.workspaces w where w.id = k.workspace_id),
+                k.member_id, k.workspace_id, v_home, v_store, e ->> 'name', v_mime,
+                (e ->> 'size')::bigint, v_path, e ->> 'sha256')
+        returning id into v_id;
+      else
+        -- hive_id, member_id and workspace_id are never set here.
+        update public.files set
+          note_id = v_home, vault_path = v_path, synced_by = k.id,
+          storage_path = coalesce(v_store, f.storage_path),
+          name = case when v_store is null then f.name else e ->> 'name' end,
+          mime = case when v_store is null then f.mime else v_mime end,
+          -- files_set_kind fires on insert only, so a change sets the kind itself.
+          kind = case when v_store is null then f.kind
+                      else public.file_kind(e ->> 'name', v_mime) end,
+          size_bytes = case when v_store is null then f.size_bytes
+                            else (e ->> 'size')::bigint end,
+          sync_sha256 = case when v_store is null then f.sync_sha256 else e ->> 'sha256' end
+         where id = f.id
+        returning id into v_id;
+        if v_store is not null and v_store <> f.storage_path then
+          perform public._sync_orphan(f.storage_path, f.hive_id);
+        end if;
+        if v_from is not null and v_from <> v_path then
+          insert into public.audit_log (hive_id, member_id, agent_id, action, detail)
+          values (f.hive_id, k.member_id, k.agent_id, 'file.moved',
+                  jsonb_build_object('file_id', f.id, 'from', v_from, 'to', v_path,
+                                     'sync_key_id', k.id));
+        end if;
+      end if;
+      if v_store is not null then
+        delete from public.sync_orphans where storage_path = v_store;
+      end if;
+      v_written := v_written || jsonb_build_array(jsonb_build_object('path', v_path, 'id', v_id));
+    exception when others then
+      v_failed := v_failed || jsonb_build_array(jsonb_build_object('path', v_path, 'code', sqlstate));
+    end;
+  end loop;
+  return jsonb_build_object('written', v_written, 'failed', v_failed);
+end
+$$;
+
+-- ---------------------------------------------------------------- deletes
+
+-- Deletes the notes and files at these vault paths that the key's family keeps. A batch of
+-- more than 25, or of more than 2% of what is kept (when that is more than one item), is
+-- refused whole and recorded on the run. The next run lets exactly that list through when it
+-- was opened with confirm.
+create function public.sync_delete(p_run uuid, p_paths text[]) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  k public.sync_keys := public._sync_live();
+  r public.sync_runs := public._sync_run(p_run);
+  v_paths text[];
+  v_n integer;
+  v_total integer;
+  f record;
+begin
+  if p_paths is null or cardinality(p_paths) > 20000
+     or exists (select 1 from unnest(p_paths) p where not public._sync_path_ok(p)) then
+    raise exception 'a path is not usable' using errcode = '22023';
+  end if;
+  select coalesce(array_agg(distinct p order by p), '{}') into v_paths
+    from unnest(p_paths) p
+   where exists (select 1 from public.notes n
+                  where n.workspace_id = k.workspace_id and n.path = p and not n.sync_generated
+                    and n.synced_by in (select public._sync_family(k.id)))
+      or exists (select 1 from public.files x
+                  where x.workspace_id = k.workspace_id and x.vault_path = p
+                    and x.synced_by in (select public._sync_family(k.id)));
+  v_n := cardinality(v_paths);
+  if v_n = 0 then
+    return jsonb_build_object('deleted', 0, 'refused', 0);
+  end if;
+  select (select count(*) from public.notes n
+           where n.workspace_id = k.workspace_id and not n.sync_generated
+             and n.synced_by in (select public._sync_family(k.id)))
+       + (select count(*) from public.files x
+           where x.workspace_id = k.workspace_id
+             and x.synced_by in (select public._sync_family(k.id)))
+    into v_total;
+  if (v_n > 25 or (v_n > 1 and v_n * 50 > v_total))
+     and not (r.confirmable @> p_paths) then
+    update public.sync_runs set refused_deletes = p_paths where id = r.id;
+    return jsonb_build_object('deleted', 0, 'refused', cardinality(p_paths));
+  end if;
+
+  for f in
+    delete from public.files x
+     where x.workspace_id = k.workspace_id and x.vault_path = any(v_paths)
+       and x.synced_by in (select public._sync_family(k.id))
+    returning x.storage_path, x.hive_id
+  loop
+    perform public._sync_orphan(f.storage_path, f.hive_id);
+  end loop;
+  delete from public.notes n
+   where n.workspace_id = k.workspace_id and n.path = any(v_paths) and not n.sync_generated
+     and n.synced_by in (select public._sync_family(k.id));
+  return jsonb_build_object('deleted', v_n, 'refused', 0);
+end
+$$;
+
+-- ----------------------------------------------------------------- finish
+
+-- A count the job sent: a whole number from 0 to 1,000,000, else 0.
+create function public._sync_count(v jsonb) returns integer
+language sql immutable set search_path = '' as $$
+  select case when jsonb_typeof(v) = 'number'
+              then case when (v #>> '{}')::numeric between 0 and 1000000
+                        then floor((v #>> '{}')::numeric)::integer else 0 end
+              else 0 end
+$$;
+
+create function public.sync_finish(p_run uuid, p_counts jsonb, p_too_big text[], p_error text)
+returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  k public.sync_keys := public._sync_live();
+  r public.sync_runs := public._sync_run(p_run);
+  c jsonb := case when jsonb_typeof(p_counts) = 'object' then p_counts else '{}' end;
+begin
+  update public.sync_runs set
+    finished_at = now(),
+    added = public._sync_count(c -> 'added'),
+    changed = public._sync_count(c -> 'changed'),
+    moved = public._sync_count(c -> 'moved'),
+    deleted = public._sync_count(c -> 'deleted'),
+    skipped = public._sync_count(c -> 'skipped'),
+    too_big = public._sync_count(c -> 'too_big'),
+    too_big_paths = coalesce((select array_agg(left(p, 4000))
+                                from (select unnest(p_too_big) p limit 200) x), '{}'),
+    error = left(p_error, 500)
+   where id = r.id;
+  -- This run's manifest, and any an interrupted run of the family left behind.
+  delete from public.sync_manifest m
+   where m.run_id in (select x.id from public.sync_runs x
+                       where x.key_id in (select public._sync_family(k.id)));
+  -- A generated "Vault files" note no file lives in any more.
+  delete from public.notes n
+   where n.workspace_id = k.workspace_id and n.sync_generated
+     and n.synced_by in (select public._sync_family(k.id))
+     and not exists (select 1 from public.files f where f.note_id = n.id);
+  delete from public.sync_runs x
+   where x.key_id = k.id
+     and x.id not in (select y.id from public.sync_runs y where y.key_id = k.id
+                       order by y.started_at desc, y.id limit 200);
+end
+$$;
+
+-- --------------------------------------------------------- the home note
+
+create or replace function public.file_set_home(p_file uuid, p_note uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  f public.files;
+begin
+  if public.jwt_oauth_client() is not null then
+    raise exception 'an app pass cannot do this';
+  end if;
+  if public.jwt_agent_id() is not null
+     or public.jwt_is_self_hosted() or (select auth.uid()) is null then
+    raise exception 'only a person changes where a file lives';
+  end if;
+  select * into f from public.files
+   where id = p_file and member_id in (select public.my_member_ids());
+  if not found then raise exception 'no such file'; end if;
+  -- sync: the vault decides where a file it keeps lives.
+  if f.synced_by is not null then
+    raise exception 'your vault sets where this file lives';
+  end if;
+  if p_note is not null and not exists (
+       select 1 from public.notes n where n.id = p_note and n.member_id = f.member_id) then
+    raise exception 'a file can only live in your own note';
+  end if;
+  if f.note_id is not distinct from p_note then return; end if;
+  update public.files set note_id = p_note where id = f.id;
+  insert into public.audit_log (hive_id, member_id, action, detail)
+  values (f.hive_id, f.member_id, 'file.home_changed',
+          jsonb_build_object('file_id', f.id, 'from', f.note_id, 'to', p_note));
+end
+$$;
+
+revoke all on function public._sync_orphan(text, uuid) from public, anon, authenticated;
+revoke all on function public._sync_home(public.sync_keys, text) from public, anon, authenticated;
+revoke all on function public._sync_count(jsonb) from public, anon;
+revoke all on function public.sync_put_files(uuid, jsonb) from public, anon;
+revoke all on function public.sync_delete(uuid, text[]) from public, anon;
+revoke all on function public.sync_finish(uuid, jsonb, text[], text) from public, anon;
+grant execute on function public.sync_put_files(uuid, jsonb) to authenticated;
+grant execute on function public.sync_delete(uuid, text[]) to authenticated;
+grant execute on function public.sync_finish(uuid, jsonb, text[], text) to authenticated;
