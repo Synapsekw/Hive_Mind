@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  symlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { walk } from "../src/walk.ts";
@@ -26,7 +32,10 @@ test("walk lists files by relative path, sorted, skipping and not following link
 
 test("paths are NFC, whatever form the disk gives", () => {
   const root = mkdtempSync(join(tmpdir(), "hive-sync-"));
-  writeFileSync(join(root, "Café.md"), "x");
+  // The name is written decomposed: the letter e, then U+0301.
+  writeFileSync(join(root, "Café.md"), "x");
   const { entries } = walk(root, parseIgnore(""));
   assert.equal(entries[0].path, "Café.md");
+  assert.equal(entries[0].path, entries[0].path.normalize("NFC"));
+  assert.equal(readFileSync(entries[0].abs, "utf8"), "x");
 });

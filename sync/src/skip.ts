@@ -29,9 +29,20 @@ function toRegex(glob: string): RegExp {
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i]!;
     if (c === "*" && glob[i + 1] === "*") {
-      re += ".*";
-      i++;
-      if (glob[i + 1] === "/") i++;
+      const atStart = i === 0 || glob[i - 1] === "/";
+      if (atStart && glob[i + 2] === "/") {
+        // "**/" at the start or after a "/": any number of leading folders, or none.
+        re += "(?:.*/)?";
+        i += 2;
+      } else if (atStart && i + 2 === glob.length && i > 0) {
+        // Trailing "/**": everything inside (the "/" is already in `re`).
+        re += ".*";
+        i++;
+      } else {
+        // Any other "**" acts like "*".
+        re += "[^/]*";
+        i++;
+      }
     } else if (c === "*") re += "[^/]*";
     else if (c === "?") re += "[^/]";
     else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");

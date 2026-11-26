@@ -15,6 +15,21 @@ test("dot parts and videos are skipped; HTML and everything else is kept", () =>
   assert.equal(isSkipped("img/a.svg", none), false);
 });
 
+test("** follows gitignore: any depth, never inside a name", () => {
+  const a = parseIgnore("**/drafts");
+  assert.equal(isSkipped("drafts/a.md", a), true);
+  assert.equal(isSkipped("x/y/drafts/a.md", a), true);
+  assert.equal(isSkipped("my-drafts/a.md", a), false);
+  assert.equal(isSkipped("a/mydrafts", a), false);
+  const b = parseIgnore("a/**/b");
+  assert.equal(isSkipped("a/b", b), true);
+  assert.equal(isSkipped("a/x/y/b", b), true);
+  assert.equal(isSkipped("a/xb", b), false);
+  const c = parseIgnore("logs/**");
+  assert.equal(isSkipped("logs/x/y.md", c), true);
+  assert.equal(isSkipped("other/x.md", c), false);
+});
+
 test(".hivesyncignore: names, folders, globs, anchors and comments", () => {
   const ig = parseIgnore(
     "# comment\n\nscratch/\n*.tmp\n/outputs/drafts\nlogs/**/*.log\n!keep.md\n",
