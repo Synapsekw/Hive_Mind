@@ -121,9 +121,14 @@ export function restStore(
       }
       // Storage reports its own status in the body, often inside a 400.
       let inner = "";
+      let error = "";
       try {
-        const body = (await res.json()) as { statusCode?: unknown };
+        const body = (await res.json()) as {
+          statusCode?: unknown;
+          error?: unknown;
+        };
         inner = String(body.statusCode ?? "");
+        error = String(body.error ?? "");
       } catch {
         // Not JSON.
       }
@@ -133,12 +138,18 @@ export function restStore(
         res.status === 401 ||
         res.status === 403 ||
         inner === "401" ||
-        inner === "403"
+        inner === "403" ||
+        error === "InvalidJWT"
       )
         throw new KeyRefused("an upload was refused");
       // This one file is bad (an invalid key or name, too big): the run goes on without it.
-      // Anything else is the hive's trouble, and the run stops to try again later.
-      if (res.status === 400 || res.status === 413)
+      // Storage wraps faults that hit every file (a missing bucket, a bad token) in a 400 too, so
+      // a 400 counts as this file's only when its own body says 400 or 413. Anything else is the
+      // hive's trouble, and the run stops to try again later.
+      if (
+        res.status === 413 ||
+        (res.status === 400 && (inner === "400" || inner === "413"))
+      )
         throw new Error(`an upload answered ${res.status}`);
       throw new Unreachable(`an upload answered ${res.status}`);
     },

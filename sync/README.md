@@ -21,6 +21,10 @@ node sync/src/cli.ts uninstall
   macOS `security`, never on a command line, and lives only in the Keychain (service `hive-sync`,
   account `default`). Setup checks the key by signing in, saves the config and installs a launchd
   agent that runs `now --scheduled` at login and every 15 minutes.
+  Run `setup` from the main Hive Mind checkout, not a task worktree (the agent bakes in the paths
+  of `node` and `cli.ts`, and a worktree is deleted when its task finishes). Run it again after a
+  Node upgrade. A new key waits in the Keychain under account `pending` until the hive accepts it,
+  so a failed `setup` leaves a working key in place.
 - `now` runs one sync. A second run while one is going is skipped.
 - `--confirm-deletes` (alone or with `now`) lets through deletions the guard held back. Without it
   a run that would remove too much removes nothing and says so in a notification.

@@ -105,6 +105,41 @@ test("a bad name or a too-big object fails that file only; server trouble stops 
   }
 });
 
+test("faults that hit every file, wrapped in a 400, are not per-file failures", async () => {
+  await assert.rejects(
+    upload(400, { statusCode: "400", error: "InvalidJWT" }),
+    KeyRefused,
+  );
+  await assert.rejects(
+    upload(400, { statusCode: "404", error: "Bucket not found" }),
+    Unreachable,
+  );
+  await assert.rejects(
+    upload(400, { statusCode: "503", error: "Unavailable" }),
+    Unreachable,
+  );
+  await assert.rejects(
+    upload(400, { statusCode: "400", error: "InvalidKey" }),
+    (e: Error) => !(e instanceof Unreachable) && !(e instanceof KeyRefused),
+  );
+  await assert.rejects(
+    upload(413, {}),
+    (e: Error) => !(e instanceof Unreachable) && !(e instanceof KeyRefused),
+  );
+});
+
+test("a 400 whose body cannot be read is Unreachable", async () => {
+  const store = restStore(
+    cfg,
+    session,
+    async () => new Response("<html>", { status: 400 }),
+  );
+  await assert.rejects(
+    store.upload("p", new Uint8Array([1]), "text/plain"),
+    Unreachable,
+  );
+});
+
 test("a dropped connection during an upload is Unreachable", async () => {
   const store = restStore(cfg, session, async () => {
     throw new TypeError("fetch failed");

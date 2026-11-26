@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { acquireLock, plist } from "../src/mac.ts";
+import { acquireLock, copyCommand, plist } from "../src/mac.ts";
 
 test("the launchd agent runs every 15 minutes and at login", () => {
   const text = plist({
@@ -27,6 +27,17 @@ test("paths are escaped in the plist", () => {
   const text = plist({ node: "/a&b/node", cli: "/c<d>/cli.ts", log: "/l" });
   assert.match(text, /\/a&amp;b\/node/);
   assert.match(text, /\/c&lt;d&gt;\/cli\.ts/);
+});
+
+test("the key goes to security on stdin, one well-formed line", () => {
+  const key = "hsync_" + "c".repeat(64);
+  assert.equal(
+    copyCommand(key, "default"),
+    `add-generic-password -U -s hive-sync -a default -w ${key}\n`,
+  );
+  assert.throws(() => copyCommand(key + "\nexit", "default"));
+  assert.throws(() => copyCommand("hsync_x", "default"));
+  assert.throws(() => copyCommand(key, "default -w x"));
 });
 
 test("a second run waits for the lock; a stale lock is taken over", () => {

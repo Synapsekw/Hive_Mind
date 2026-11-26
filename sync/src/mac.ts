@@ -16,6 +16,8 @@ import { paths } from "./config.ts";
 export const LABEL = "ai.hive-mind.sync";
 const SERVICE = "hive-sync";
 const ACCOUNT = "default";
+/** Where a pasted key waits until it has been checked. */
+export const PENDING = "pending";
 
 const xml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -71,11 +73,11 @@ export function removeAgent(): void {
   }
 }
 
-export function keychainRead(): string | null {
+export function keychainRead(account: string = ACCOUNT): string | null {
   try {
     const key = execFileSync(
       "security",
-      ["find-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-w"],
+      ["find-generic-password", "-s", SERVICE, "-a", account, "-w"],
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
@@ -88,10 +90,10 @@ export function keychainRead(): string | null {
 }
 
 /** Asks for the key on the terminal (security's own prompt) and stores it. */
-export function keychainStore(): boolean {
+export function keychainStore(account: string = ACCOUNT): boolean {
   const r = spawnSync(
     "security",
-    ["add-generic-password", "-U", "-s", SERVICE, "-a", ACCOUNT, "-w"],
+    ["add-generic-password", "-U", "-s", SERVICE, "-a", account, "-w"],
     {
       stdio: "inherit",
     },
@@ -99,10 +101,30 @@ export function keychainStore(): boolean {
   return r.status === 0;
 }
 
-export function keychainDelete(): void {
+/**
+ * The one line `security -i` reads on stdin to store a key under an account. It goes through
+ * stdin because anything on argv shows in the process list. The key is checked to be hex first,
+ * so it cannot carry a quote or a second command.
+ */
+export function copyCommand(key: string, account: string): string {
+  if (!/^hsync_[0-9a-f]{64}$/.test(key)) throw new Error("not a sync key");
+  if (!/^[a-z]+$/.test(account)) throw new Error("not an account name");
+  return `add-generic-password -U -s ${SERVICE} -a ${account} -w ${key}\n`;
+}
+
+/** Stores a key already in hand under an account, over stdin. */
+export function keychainWrite(key: string, account: string): boolean {
+  const r = spawnSync("security", ["-i"], {
+    input: copyCommand(key, account),
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  return r.status === 0 && keychainRead(account) === key;
+}
+
+export function keychainDelete(account: string = ACCOUNT): void {
   spawnSync(
     "security",
-    ["delete-generic-password", "-s", SERVICE, "-a", ACCOUNT],
+    ["delete-generic-password", "-s", SERVICE, "-a", account],
     { stdio: "ignore" },
   );
 }

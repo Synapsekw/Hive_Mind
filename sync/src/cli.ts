@@ -14,6 +14,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -24,12 +25,14 @@ import {
   paths,
   saveConfig,
   saveState,
-  type State,
+  type Config,
 } from "./config.ts";
 import {
   acquireLock,
   installAgent,
   keychainDelete,
+  keychainWrite,
+  PENDING,
   keychainRead,
   keychainStore,
   notify,
@@ -37,7 +40,7 @@ import {
   removeAgent,
 } from "./mac.ts";
 import { restStore } from "./rest-store.ts";
-import { runOnce } from "./run.ts";
+import { runOnce, type Report } from "./run.ts";
 import { syncSession } from "./session.ts";
 import { FolderMissing, KeyRefused, Unreachable } from "./store.ts";
 
@@ -82,47 +85,84 @@ const log = (line: string) => {
   appendFileSync(paths.log, `${new Date().toISOString()} ${line}\n`);
 };
 
-const once = (state: State, phrase: Parameters<typeof notify>[0]) => {
-  if (state.notified.includes(phrase)) return;
-  notify(phrase);
-  state.notified.push(phrase);
+/** What `now` touches outside itself; the tests swap these for in-memory ones. */
+export type NowDeps = {
+  loadConfig: typeof loadConfig;
+  loadState: typeof loadState;
+  saveState: typeof saveState;
+  keychainRead: () => string | null;
+  acquireLock: () => (() => void) | null;
+  run: (o: {
+    config: Config;
+    key: string;
+    confirmDeletes: boolean;
+  }) => Promise<Report>;
+  notify: typeof notify;
+  log: (line: string) => void;
 };
 
-async function now(confirmDeletes: boolean): Promise<number> {
-  const config = loadConfig();
-  const key = keychainRead();
-  if (!config || !key) {
-    log("not set up: run hive-sync setup");
-    return 2;
-  }
-  const release = acquireLock(paths.lock);
-  if (!release) {
-    log("another run is still going; this one is skipped");
-    return 0;
-  }
-  const state = loadState();
-  try {
-    const store = restStore(config, syncSession({ ...config, key }));
-    const r = await runOnce({
+const realNowDeps: NowDeps = {
+  loadConfig,
+  loadState,
+  saveState,
+  keychainRead: () => keychainRead(),
+  acquireLock: () => acquireLock(paths.lock),
+  run: ({ config, key, confirmDeletes }) =>
+    runOnce({
       root: config.folder,
       cachePath: paths.cache,
-      store,
+      store: restStore(config, syncSession({ ...config, key })),
       confirmDeletes,
-    });
+    }),
+  notify,
+  log,
+};
+
+export async function now(
+  confirmDeletes: boolean,
+  d: NowDeps = realNowDeps,
+): Promise<number> {
+  const config = d.loadConfig();
+  const key = d.keychainRead();
+  if (!config || !key) {
+    d.log("not set up: run hive-sync setup");
+    return 2;
+  }
+  const release = d.acquireLock();
+  if (!release) {
+    d.log("another run is still going; this one is skipped");
+    return 0;
+  }
+  const state = d.loadState();
+  const once = (phrase: Parameters<typeof notify>[0]) => {
+    if (state.notified.includes(phrase)) return;
+    d.notify(phrase);
+    state.notified.push(phrase);
+  };
+  try {
+    const r = await d.run({ config, key, confirmDeletes });
     const c = r.counts;
-    log(
-      `ok added ${c.added} changed ${c.changed} moved ${c.moved} deleted ${c.deleted} skipped ${c.skipped} too-big ${c.too_big} held-back ${r.refusedDeletes} failed ${r.failed.length} deferred ${r.deferred}`,
+    // Every file tried and every one failed is a fault of the hive's, not a good run.
+    const allFailed = r.failed.length > 0 && c.added + c.changed === 0;
+    d.log(
+      `${allFailed ? "failed" : "ok"} added ${c.added} changed ${c.changed} moved ${c.moved} deleted ${c.deleted} skipped ${c.skipped} too-big ${c.too_big} held-back ${r.refusedDeletes} failed ${r.failed.length} deferred ${r.deferred}`,
     );
-    state.failuresInRow = 0;
-    state.notified = [];
+    if (allFailed) {
+      state.failuresInRow++;
+      if (state.failuresInRow === 3)
+        d.notify("Hive sync has failed 3 times in a row. See the log.");
+    } else {
+      state.failuresInRow = 0;
+      state.notified = [];
+    }
     if (r.refusedDeletes > 0) {
-      notify(
-        `Hive sync held back ${r.refusedDeletes} deletions. Run hive-sync --confirm-deletes to let them through.`,
+      d.notify(
+        `Hive sync held back ${Math.trunc(Number(r.refusedDeletes))} deletions. Run hive-sync --confirm-deletes to let them through.`,
       );
     }
     state.last = {
       at: new Date().toISOString(),
-      ok: true,
+      ok: !allFailed,
       added: c.added,
       changed: c.changed,
       moved: c.moved,
@@ -130,28 +170,71 @@ async function now(confirmDeletes: boolean): Promise<number> {
       tooBig: c.too_big,
       refused: r.refusedDeletes,
     };
-    return 0;
+    return allFailed ? 1 : 0;
   } catch (e) {
     if (e instanceof KeyRefused) {
-      log("stopped: the sync key was refused");
-      once(state, "Your sync key was refused. Run hive-sync setup.");
+      d.log("stopped: the sync key was refused");
+      once("Your sync key was refused. Run hive-sync setup.");
     } else if (e instanceof FolderMissing) {
-      log("stopped: the vault folder is missing or unreadable");
-      once(state, "Your vault folder is missing. Nothing was synced.");
+      d.log("stopped: the vault folder is missing or unreadable");
+      once("Your vault folder is missing. Nothing was synced.");
     } else {
       state.failuresInRow++;
       // Only the hive's own errors have words fit for the log; a file-system error names a path.
-      log(`stopped: ${e instanceof Unreachable ? e.message : "an error"}`);
+      d.log(`stopped: ${e instanceof Unreachable ? e.message : "an error"}`);
       if (state.failuresInRow === 3)
-        notify("Hive sync has failed 3 times in a row. See the log.");
+        d.notify("Hive sync has failed 3 times in a row. See the log.");
     }
     if (state.last) state.last.ok = false;
     return 1;
   } finally {
-    saveState(state);
+    d.saveState(state);
     release();
   }
 }
+
+/** The Keychain and the sign-in that `replaceKey` leans on; the tests swap them. */
+export type KeyDeps = {
+  prompt: (account: string) => boolean;
+  read: (account: string) => string | null;
+  write: (key: string, account: string) => boolean;
+  remove: (account: string) => void;
+  signIn: (key: string) => Promise<void>;
+};
+
+export type KeyResult =
+  "ok" | "not-stored" | "bad-format" | "refused" | "unreachable";
+
+/**
+ * Takes a pasted key into account `default` only after it has been read back, found well formed
+ * and accepted by the hive. Until then it waits under `pending`, so a working key is never
+ * overwritten by one that does not work. On any failure `pending` is removed and `default` is
+ * as it was.
+ */
+export async function replaceKey(d: KeyDeps): Promise<KeyResult> {
+  d.remove(PENDING);
+  try {
+    if (!d.prompt(PENDING)) return "not-stored";
+    const key = d.read(PENDING);
+    if (!key) return "bad-format";
+    try {
+      await d.signIn(key);
+    } catch (e) {
+      return e instanceof KeyRefused ? "refused" : "unreachable";
+    }
+    return d.write(key, "default") ? "ok" : "not-stored";
+  } finally {
+    d.remove(PENDING);
+  }
+}
+
+const isDirectory = (p: string) => {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
 
 async function setup(c: Extract<Command, { cmd: "setup" }>): Promise<number> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -169,26 +252,34 @@ async function setup(c: Extract<Command, { cmd: "setup" }>): Promise<number> {
   const anonKey = await ask("Publishable key", c.anonKey, was?.anonKey);
   const folder = resolve(await ask("Vault folder", c.folder, was?.folder));
   rl.close();
-  if (!existsSync(folder)) {
-    console.error("That folder does not exist.");
+  if (!isDirectory(folder)) {
+    console.error("That is not a folder that exists.");
     return 2;
   }
   console.log(
     "Paste the sync key from Settings → Sync when asked (it is not shown).",
   );
-  if (!keychainStore()) {
-    console.error("The key was not stored in the Keychain.");
-    return 2;
-  }
-  const key = keychainRead();
-  if (!key) {
-    console.error("That is not a sync key (hsync_ followed by 64 characters).");
-    return 2;
-  }
-  try {
-    await syncSession({ url, anonKey, key }).token();
-  } catch {
-    console.error("The hive refused that key, or could not be reached.");
+  const result = await replaceKey({
+    prompt: (account) => keychainStore(account),
+    read: (account) => keychainRead(account),
+    write: keychainWrite,
+    remove: (account) => keychainDelete(account),
+    signIn: async (key) => {
+      await syncSession({ url, anonKey, key }).token();
+    },
+  });
+  if (result !== "ok") {
+    const was = keychainRead() ? " Your earlier key is still in place." : "";
+    console.error(
+      {
+        "not-stored": "The key was not stored in the Keychain.",
+        "bad-format":
+          "That is not a sync key (hsync_ followed by 64 characters).",
+        refused: "The hive refused that key.",
+        unreachable:
+          "The hive could not be reached, so the key was not checked.",
+      }[result] + was,
+    );
     return 2;
   }
   saveConfig({ url, anonKey, folder });
