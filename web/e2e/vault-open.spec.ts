@@ -159,7 +159,19 @@ test("a note a vault keeps says where it is from and offers no edit of its words
   const note = page.getByRole("region", { name: "Note" });
   await expect(title(page)).toHaveText(kept.title);
   await expect(note).toContainText(FROM_VAULT);
-  await expect(note).toContainText("From your vault on your Mac");
+  await expect(note).toContainText("from your vault on your Mac");
+  await note
+    .getByRole("button", { name: "More actions for this note" })
+    .click();
+  const theirs = fixtureVault(0, { tab: "shared" }).notes.find(
+    (n) => n.fromVault && n.member_id !== DATA.me,
+  )!;
+  await page.goto(`/dev/vault?note=${theirs.id}&tab=shared`, {
+    waitUntil: "networkidle",
+  });
+  await expect(title(page)).toHaveText(theirs.title);
+  await expect(note).not.toContainText("from your vault");
+  await page.goto(`/dev/vault?note=${kept.id}`, { waitUntil: "networkidle" });
   await note
     .getByRole("button", { name: "More actions for this note" })
     .click();

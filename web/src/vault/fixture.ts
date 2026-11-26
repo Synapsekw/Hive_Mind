@@ -446,7 +446,7 @@ function allNotes(now: number): VaultNote[] {
       title,
       updated_at: stamp(i),
       by_agent: false,
-      fromVault: false,
+      fromVault: k === 0, // a colleague's synced note: the screen must not mark it
       visibility: v,
       shared_with: w,
       quarantined: false,

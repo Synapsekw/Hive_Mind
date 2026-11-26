@@ -293,7 +293,7 @@ export function FilePanel({
         now={now}
         who={changed}
         home={
-          file.fromVault ? (
+          file.mine && file.fromVault ? (
             <p className={s.factQuiet}>{HOME_FROM_VAULT}</p>
           ) : (
             file.mine &&

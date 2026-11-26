@@ -190,6 +190,16 @@ describe("groupBySession with a vault", () => {
   });
 });
 
+describe("groupBySession with a colleague's synced file", () => {
+  it("leaves it under No session", () => {
+    const g = groupBySession(
+      [f({ name: "t", mine: false, fromVault: true })],
+      sessions,
+    );
+    expect(g.map((x) => x.session)).toEqual([null]);
+  });
+});
+
 describe("needsServer", () => {
   it("never when everything is loaded; only for server-side filters otherwise", () => {
     expect(needsServer(with_({ kinds: ["pdf"] }), true)).toBe(false);

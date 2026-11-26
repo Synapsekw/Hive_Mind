@@ -115,7 +115,7 @@ export const folderSharing = (text: string) => `${FOLDER_SHARING}: ${text}`;
 // The open note: who it is from, on its meta line.
 export const WRITTEN_BY_YOU = "written by you";
 export const WRITTEN_BY_AGENT = "written by your agent";
-export const FROM_VAULT = "From your vault on your Mac · edit it in your vault";
+export const FROM_VAULT = "from your vault on your Mac · edit it in your vault";
 export const sharedBy = (owner: string) => `shared by ${owner}`;
 export const OPENED_BY_LINK = "opened by a link";
 

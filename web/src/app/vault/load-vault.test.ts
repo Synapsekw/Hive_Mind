@@ -587,6 +587,12 @@ describe("toNote", () => {
     expect(kept.fromVault).toBe(true);
     expect(JSON.stringify(kept)).not.toContain(key);
     expect(toNote(row(MINE, { synced_by: null }), ME).fromVault).toBe(false);
+    // A colleague's synced note is a plain note to the caller.
+    const theirs = toNote(
+      row(THEIRS, { member_id: AHMED, synced_by: key }),
+      ME,
+    );
+    expect(theirs.fromVault).toBe(false);
     expect(toNote(row(MINE), ME).fromVault).toBe(false);
   });
 

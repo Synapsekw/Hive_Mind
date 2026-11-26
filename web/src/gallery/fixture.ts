@@ -249,6 +249,15 @@ const FIRST: Row[] = [
     fromVault: true,
   },
   {
+    name: "Colleague deck.html",
+    note: "pricing",
+    mime: "text/html",
+    size: 70 * KB,
+    hoursAgo: 305,
+    owner: "ahmed",
+    fromVault: true,
+  },
+  {
     name: "Client update deck.html",
     mime: "text/html",
     size: 84 * KB,

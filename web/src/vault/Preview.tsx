@@ -374,15 +374,16 @@ function Head({
   const rule = n.rule_folder
     ? (data.folders.find((f) => f.path === n.rule_folder) ?? null)
     : null;
-  const who = n.fromVault
-    ? FROM_VAULT
-    : mine
-      ? n.by_agent
-        ? WRITTEN_BY_AGENT
-        : WRITTEN_BY_YOU
-      : n.access === "link"
-        ? OPENED_BY_LINK
-        : sharedBy(owner);
+  const who =
+    mine && n.fromVault
+      ? FROM_VAULT
+      : mine
+        ? n.by_agent
+          ? WRITTEN_BY_AGENT
+          : WRITTEN_BY_YOU
+        : n.access === "link"
+          ? OPENED_BY_LINK
+          : sharedBy(owner);
 
   return (
     <header className={s.head}>

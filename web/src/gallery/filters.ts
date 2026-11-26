@@ -185,7 +185,7 @@ export function groupBySession(
     const key =
       x.session_id && sessions.has(x.session_id)
         ? x.session_id
-        : x.fromVault
+        : x.mine && x.fromVault
           ? "vault"
           : null;
     (groups.get(key) ?? groups.set(key, []).get(key)!).push(x);

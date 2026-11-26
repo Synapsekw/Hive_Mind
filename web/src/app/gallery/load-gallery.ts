@@ -139,7 +139,8 @@ export function toFile(r: Row, ctx: Context): GalleryFile {
     sharing: !mine ? "shared-with-me" : shared ? "through-note" : "private",
     thumb: (hasThumb(r) && ctx.thumbs.get(text(r.storage_path))) || null,
     session_id: text(r.session_id) || null,
-    fromVault: typeof r.vault_path === "string",
+    // Only the caller's own files say so; a colleague's are sent as plain files.
+    fromVault: mine && typeof r.vault_path === "string",
     refs: ctx.refs?.get(id) ?? [],
     folders: ctx.folders?.get(id) ?? [],
   };

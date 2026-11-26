@@ -498,7 +498,8 @@ test("a file the vault keeps says so in place of Change home note", async ({
   page,
 }) => {
   await open(page);
-  const kept = DATA.files.filter((f) => f.fromVault);
+  const kept = DATA.files.filter((f) => f.fromVault && f.mine);
+  const theirs = DATA.files.find((f) => f.fromVault && !f.mine)!;
   expect(kept.length).toBe(2);
   expect(kept.some((f) => f.name.endsWith(".html"))).toBe(true);
   const group = main(page).getByRole("region", { name: "From your vault" });
@@ -510,6 +511,10 @@ test("a file the vault keeps says so in place of Change home note", async ({
     0,
   );
   await expect(p.getByRole("button", { name: "Delete" })).toBeVisible();
+  // A colleague's file is no vault's: no marker, and not in the group.
+  await expect(group.locator("[data-file]")).toHaveCount(2);
+  await card(page, theirs).click();
+  await expect(p).not.toContainText("Home note set by your vault");
 });
 
 test("Enter or a double-click on a selected card opens the viewer", async ({

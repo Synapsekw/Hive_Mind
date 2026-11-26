@@ -29,9 +29,9 @@ describe("fixtureGallery", () => {
     expect(fixtureGallery(NOW)).toEqual(fixtureGallery(NOW));
   });
 
-  it("has 19 files with unique ids, newest first", () => {
-    expect(files).toHaveLength(19);
-    expect(new Set(files.map((f) => f.id)).size).toBe(19);
+  it("has 20 files with unique ids, newest first", () => {
+    expect(files).toHaveLength(20);
+    expect(new Set(files.map((f) => f.id)).size).toBe(20);
     for (const f of files) expect(f.id).toMatch(UUID);
     for (let i = 1; i < files.length; i++) {
       expect(time(files[i]!)).toBeLessThan(time(files[i - 1]!));
@@ -146,7 +146,7 @@ describe("fixtureMore", () => {
       expect(time(more.files[i]!)).toBeLessThan(time(more.files[i - 1]!));
     }
     const ids = new Set([...first, ...more.files].map((f) => f.id));
-    expect(ids.size).toBe(23);
+    expect(ids.size).toBe(24);
     for (const f of more.files) {
       if (f.thumb !== null) {
         expect(f.thumb.startsWith("data:image/png;base64,")).toBe(true);

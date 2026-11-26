@@ -421,11 +421,18 @@ describe("loadGallery: a file", () => {
             file(1, { vault_path: "decks/secret-plan/deck.html" }),
             file(2, { vault_path: null }),
             file(3),
+            file(4, { member_id: AHMED, vault_path: "theirs/deck.html" }),
           ],
         }),
       ),
     );
-    expect(data.files.map((f) => f.fromVault)).toEqual([true, false, false]);
+    // A colleague's synced file is not marked.
+    expect(data.files.map((f) => f.fromVault)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
     const json = JSON.stringify(data);
     expect(json).not.toContain("vault_path");
     expect(json).not.toContain("secret-plan");
