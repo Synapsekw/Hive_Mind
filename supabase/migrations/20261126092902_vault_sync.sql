@@ -953,11 +953,14 @@ begin
         update public.files set
           note_id = v_home, vault_path = v_path, synced_by = k.id,
           storage_path = coalesce(v_store, f.storage_path),
-          name = case when v_store is null then f.name else e ->> 'name' end,
+          -- A move (from sent) carries the file's new name even without a new object.
+          name = case when v_store is null and v_from is null then f.name
+                      else e ->> 'name' end,
           mime = case when v_store is null then f.mime else v_mime end,
           -- files_set_kind fires on insert only, so a change sets the kind itself.
-          kind = case when v_store is null then f.kind
-                      else public.file_kind(e ->> 'name', v_mime) end,
+          kind = case when v_store is null and v_from is null then f.kind
+                      else public.file_kind(e ->> 'name', case when v_store is null
+                                                               then f.mime else v_mime end) end,
           size_bytes = case when v_store is null then f.size_bytes
                             else (e ->> 'size')::bigint end,
           sync_sha256 = case when v_store is null then f.sync_sha256 else e ->> 'sha256' end
@@ -1076,10 +1079,14 @@ begin
                                 from (select unnest(p_too_big) p limit 200) x), '{}'),
     error = left(p_error, 500)
    where id = r.id;
-  -- This run's manifest, and any an interrupted run of the family left behind.
+  -- This run's manifest, and that of any run of the family that is finished or was left behind
+  -- more than a day ago. A run of the family still open (a second machine) keeps its pages.
   delete from public.sync_manifest m
-   where m.run_id in (select x.id from public.sync_runs x
-                       where x.key_id in (select public._sync_family(k.id)));
+   where m.run_id = r.id
+      or m.run_id in (select x.id from public.sync_runs x
+                       where x.key_id in (select public._sync_family(k.id))
+                         and (x.finished_at is not null
+                              or x.started_at < now() - interval '1 day'));
   -- A generated "Vault files" note no file lives in any more.
   delete from public.notes n
    where n.workspace_id = k.workspace_id and n.sync_generated

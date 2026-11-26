@@ -860,9 +860,9 @@ test("a move or rehome without a new object keeps the stored file", async () => 
   r = await openRun(t, s);
   const out = await putFiles(t, s, r.run_id, [
     {
-      path: "docs/a.pdf",
+      path: "docs/b.pdf",
       from: "a.pdf",
-      name: "a.pdf",
+      name: "b.pdf",
       size: 1,
       sha256: sha("1"),
       mime: "application/pdf",
@@ -871,13 +871,15 @@ test("a move or rehome without a new object keeps the stored file", async () => 
   ]);
   assert.equal(out.written.length, 1);
   const f = await t.db.query(
-    `select f.vault_path, f.storage_path, n.path as home from public.files f
+    `select f.vault_path, f.storage_path, f.name, f.kind, n.path as home from public.files f
        join public.notes n on n.id = f.note_id`,
   );
   assert.deepEqual(f.rows, [
     {
-      vault_path: "docs/a.pdf",
+      vault_path: "docs/b.pdf",
       storage_path: one,
+      name: "b.pdf",
+      kind: "pdf",
       home: "docs/Vault files.md",
     },
   ]);
@@ -1149,5 +1151,106 @@ test("purging a hive removes its sync keys, runs, orphans, notes and files", asy
       `select count(*)::int as n from public.${table}`,
     );
     assert.equal(n.rows[0].n, 0, table);
+  }
+});
+
+const countNotes = async (t, s, n) => {
+  const r = await openRun(t, s);
+  await putNotes(
+    t,
+    s,
+    r.run_id,
+    Array.from({ length: n }, (_, i) => note(`g/${i}.md`, "5")),
+  );
+  return openRun(t, s);
+};
+
+test("the 2% arm: with 30 kept, deleting 2 is refused", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await countNotes(t, s, 30);
+  assert.deepEqual(await del(t, s, r.run_id, ["g/0.md", "g/1.md"]), {
+    deleted: 0,
+    refused: 2,
+  });
+  const n = await t.db.query(`select count(*)::int as n from public.notes`);
+  assert.equal(n.rows[0].n, 30);
+});
+
+test("the 2% arm: with 30 kept, deleting 1 is allowed", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await countNotes(t, s, 30);
+  assert.deepEqual(await del(t, s, r.run_id, ["g/0.md"]), {
+    deleted: 1,
+    refused: 0,
+  });
+});
+
+test("the 2% arm: with 120 kept, deleting 2 is allowed", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  for (let i = 0; i < 120; i += 40) {
+    await putNotes(
+      t,
+      s,
+      r.run_id,
+      Array.from({ length: 40 }, (_, j) => note(`g/${i + j}.md`, "5")),
+    );
+  }
+  const r2 = await openRun(t, s);
+  assert.deepEqual(await del(t, s, r2.run_id, ["g/0.md", "g/1.md"]), {
+    deleted: 2,
+    refused: 0,
+  });
+});
+
+test("finishing a run keeps the manifest pages of another open run", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const first = await putNotes(t, s, (await openRun(t, s)).run_id, [
+    note("A.md", "1"),
+    note("B.md", "2"),
+  ]);
+  assert.equal(first.written.length, 2);
+  const a = (await openRun(t, s)).run_id;
+  const b = (await openRun(t, s)).run_id;
+  await t.as(s.claims, `select public.sync_plan($1, $2, false)`, [
+    b,
+    JSON.stringify([
+      { path: "A.md", sha256: sha("1"), size: 1 },
+      { path: "B.md", sha256: sha("2"), size: 1 },
+    ]),
+  ]);
+  await t.as(s.claims, `select public.sync_finish($1, '{}', '{}', null)`, [a]);
+  const p = await plan(t, s, b, [{ path: "C.md", sha256: sha("3"), size: 1 }]);
+  assert.deepEqual(p.gone, []);
+  assert.deepEqual(p.new, ["C.md"]);
+});
+
+test("a storage path under another member's or workspace's prefix is refused whole", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const r = await openRun(t, s);
+  const file = (storage_path) => ({
+    path: "z.pdf",
+    name: "z.pdf",
+    size: 1,
+    sha256: sha("e"),
+    mime: "application/pdf",
+    home: "Vault files.md",
+    storage_path,
+  });
+  const tail = `${"e".repeat(32)}/z.pdf`;
+  for (const prefix of [
+    `${t.members.ahmed}/${t.ws.ahmed}/vault/`,
+    `${t.members.dani}/${t.ws.ahmed}/vault/`,
+    `${t.members.ahmed}/${t.ws.dani}/vault/`,
+  ]) {
+    await assert.rejects(
+      putFiles(t, s, r.run_id, [file(prefix + tail)]),
+      /a file is not usable/,
+    );
   }
 });
