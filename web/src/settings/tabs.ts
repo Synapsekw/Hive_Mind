@@ -2,11 +2,13 @@
 // each name. Client state only: choosing a tab asks the server for nothing.
 import type { SettingsData } from "./types";
 
-export type Tab = "agents" | "workspaces" | "topics" | "people" | "hive";
+export type Tab =
+  "agents" | "workspaces" | "sync" | "topics" | "people" | "hive";
 
 export const TAB_NAMES: Record<Tab, string> = {
   agents: "Agents",
   workspaces: "Workspaces",
+  sync: "Sync",
   topics: "Topics",
   people: "People",
   hive: "Hive",
@@ -15,8 +17,8 @@ export const TAB_NAMES: Record<Tab, string> = {
 /** The tabs a person sees: a member has no Topics and no Hive. */
 export function tabsFor(isOwner: boolean): Tab[] {
   return isOwner
-    ? ["agents", "workspaces", "topics", "people", "hive"]
-    : ["agents", "workspaces", "people"];
+    ? ["agents", "workspaces", "sync", "topics", "people", "hive"]
+    : ["agents", "workspaces", "sync", "people"];
 }
 
 /** The tab a `?tab=` value opens; anything not shown to this person opens Agents. */
@@ -40,6 +42,8 @@ export function tabCount(
       return d.agents.filter((a) => a.status === "active").length;
     case "workspaces":
       return d.workspaces.length;
+    case "sync":
+      return d.syncKeys.filter((k) => k.status === "active").length;
     case "topics":
       return d.topics.length;
     case "people":

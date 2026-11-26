@@ -250,3 +250,80 @@ export function deleteFailure(
 ): string {
   return DELETE_FAILURES[r] ?? DELETE_FAILURES.failed;
 }
+
+// ---- Sync ----
+
+export const SYNC_TITLE: string = "Sync";
+export const SYNC_INTRO: string =
+  "Keep one workspace equal to a vault folder on your Mac. The folder is the source: notes from it are read-only here.";
+export const SYNC_MAKE: string = "Make a sync key";
+export const SYNC_REVOKE: string = "Revoke sync key";
+export const SYNC_NONE: string = "No sync key";
+export const SYNC_LAST_USED: string = "Last used";
+export const SYNC_NEVER: string = "Not used yet";
+export const SYNC_RUNS: string = "Recent runs";
+export const SYNC_TOO_BIG: string =
+  "Too big to sync (over 50 MB, or a note over 1 MB)";
+export const SYNC_NEW_KEY_REVOKES: string =
+  "Making a key revokes this workspace's current one. The Mac then needs the new key.";
+export const SYNC_KEY_TITLE: string = "Your sync key";
+export const SYNC_KEY_STEP: string =
+  "Run this in the Hive Mind folder on your Mac, then paste the key when asked:";
+export const SYNC_KEY_WARNING: string =
+  "This key is shown once. Copy it now; it cannot be shown again.";
+export const SYNC_NO_RUNS: string = "No runs yet.";
+export const SYNC_KEY_BY_HAND: string = "Select the key and copy it by hand.";
+export const SYNC_URL_PLACEHOLDER: string = "<project address>";
+export const SYNC_PUBLISHABLE_PLACEHOLDER: string = "<publishable key>";
+export const SYNC_MAKE_CONFIRM: string = "Make key";
+export const SYNC_KEEP: string = "Keep";
+export const SYNC_REVOKE_CONFIRM: string = "Revoke";
+export const SYNC_REVOKE_ASIDE: string = "The Mac then needs a new key.";
+
+/** The command that sets the Mac up. The key itself is typed at its prompt, never here. */
+export function setupCommand(url: string, publishableKey: string): string {
+  return `node sync/src/cli.ts setup --url ${url} --publishable-key ${publishableKey} --folder "<your vault folder>"`;
+}
+
+/** What one run did, in counts only. */
+export function runSummary(r: {
+  added: number;
+  changed: number;
+  moved: number;
+  deleted: number;
+  tooBig: number;
+  heldBack: number;
+  error: string | null;
+}): string {
+  const parts = [
+    r.added && `${r.added} added`,
+    r.changed && `${r.changed} changed`,
+    r.moved && `${r.moved} moved`,
+    r.deleted && `${r.deleted} deleted`,
+    r.tooBig && `${r.tooBig} too big`,
+  ].filter(Boolean) as string[];
+  const head = parts.length ? parts.join(" · ") : "No changes";
+  const held = r.heldBack ? ` · ${r.heldBack} deletions held back` : "";
+  const err = r.error ? ` · stopped: ${r.error}` : "";
+  return `${head}${held}${err}`;
+}
+
+/** "23 Nov, 11:00" in UTC, as every date on this screen. */
+export function runWhen(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${shortDate(iso, Date.UTC(d.getUTCFullYear(), 0, 1))}, ${hh}:${mm}`;
+}
+
+/** How long a run took: "5 s", "2 min 5 s"; null while unfinished or unreadable. */
+export function runLength(start: string, end: string | null): string | null {
+  if (end === null) return null;
+  const ms = Date.parse(end) - Date.parse(start);
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const sec = Math.round(ms / 1000);
+  return sec < 60
+    ? `${sec} s`
+    : `${Math.floor(sec / 60)} min ${String(sec % 60)} s`;
+}

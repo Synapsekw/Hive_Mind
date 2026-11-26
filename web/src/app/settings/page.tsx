@@ -6,12 +6,14 @@ import { cancelHiveDeletion, requestHiveDeletion } from "../hives/actions";
 import { loadInboxCount } from "../inbox/load-inbox";
 import {
   createAgent,
+  createSyncKey,
   deleteTopic,
   deleteWorkspace,
   inviteMember,
   resendInvitation,
   revokeAgent,
   revokeInvitation,
+  revokeSyncKey,
   saveTopics,
   scanTopics,
 } from "./actions";
@@ -59,6 +61,8 @@ export default async function SettingsPage({
       actions={{
         createAgent,
         revokeAgent,
+        createSyncKey,
+        revokeSyncKey,
         inviteMember: inviteMember.bind(null, result.hiveId),
         revokeInvitation,
         resendInvitation,

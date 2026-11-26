@@ -1,14 +1,14 @@
 "use client";
 
-// The settings screen: the hive's name, then tabs (Agents, Workspaces, Topics, People, Hive; a
-// member has no Topics and no Hive), each panel in its own file. The screen decides nothing
+// The settings screen: the hive's name, then tabs (Agents, Workspaces, Sync, Topics, People,
+// Hive; a member has no Topics and no Hive), each panel in its own file. The screen decides nothing
 // about who may create, revoke or invite: it calls `actions` and the database answers. What is
 // listed always comes from `data`, so a refresh from the server is what changes it. The chosen
 // tab, the forms, the revoke question, the invitation notice and the token dialog are client
 // state only; one form or question is open at a time. Every panel stays mounted while another
 // is shown, and the tab is kept in the address (`?tab=`) by replacing it in place.
-// A new agent's token is held in this component's state from the moment `createAgent`
-// answers until Done, is drawn only by `TokenDialog`, and is written nowhere else. Because it
+// A new agent's token, or a new sync key, is held in this component's state from the moment
+// `createAgent` (or `createSyncKey`) answers until Done, is drawn only by `TokenDialog`, and is written nowhere else. Because it
 // cannot be fetched again, the page is inert from Create until Done, leaving asks first, and
 // Back stays here while the dialog is open.
 import { useRouter } from "next/navigation";
@@ -23,6 +23,7 @@ import { Shell } from "../shell/Shell";
 import { AgentsTab } from "./AgentsTab";
 import { HiveTab } from "./HiveTab";
 import { PeopleTab } from "./PeopleTab";
+import { SyncTab } from "./SyncTab";
 import { TokenDialog } from "./TokenDialog";
 import { Topics } from "./Topics";
 import { WorkspacesTab } from "./WorkspacesTab";
@@ -44,6 +45,7 @@ import type {
   Sent,
   SettingsActions,
   SettingsData,
+  SyncKey,
 } from "./types";
 import s from "./settings.module.css";
 
@@ -115,8 +117,14 @@ export function Settings({
   const [unsent, setUnsent] = useState<ReadonlyMap<string, string>>(new Map());
   const [notice, setNotice] = useState<Notice | null>(null);
   // The new agent's token, from the answer until Done. Only the dialog draws it.
-  const [fresh, setFresh] = useState<{ token: string; name: string } | null>(
-    null,
+  const [fresh, setFresh] = useState<{
+    token: string;
+    name: string;
+    variant: "agent" | "sync";
+  } | null>(null);
+  // Sync keys answered `ok` to a revoke before the refresh brings them.
+  const [syncRevoked, setSyncRevoked] = useState<ReadonlySet<string>>(
+    new Set(),
   );
   const [said, setSaid] = useState("");
   // The same as `busy`, readable at once by a second press that arrives before the render.
@@ -128,7 +136,8 @@ export function Settings({
   const askedAt = useRef(0);
   // True while the history holds the extra entry that keeps Back on this page.
   const held = useRef(false);
-  const creating = busy === "connect";
+  // Creating an agent, or making a sync key (its busy value starts with `make:`).
+  const creating = busy === "connect" || (busy?.startsWith("make:") ?? false);
   const shown = fresh !== null;
   // The dialogs the Topics and Hive tabs keep themselves: whether each is open.
   const [topicsModal, setTopicsModal] = useState(false);
@@ -177,6 +186,11 @@ export function Settings({
         ? { ...a, status: "revoked" as const }
         : a,
     ),
+  );
+  const syncKeys = data.syncKeys.map((k) =>
+    k.status === "active" && syncRevoked.has(k.id)
+      ? { ...k, status: "revoked" as const }
+      : k,
   );
   const workspaceName = (id: string) =>
     data.workspaces.find((w) => w.id === id)?.name ?? null;
@@ -257,15 +271,71 @@ export function Settings({
       return false;
     }
     setOpen(null);
-    setFresh({ token: answer.token, name: input.name });
+    setFresh({ token: answer.token, name: input.name, variant: "agent" });
     return true;
+  }
+
+  /** Makes a sync key for a workspace; the dialog then holds the key until Done. */
+  async function makeSyncKey(workspaceId: string) {
+    if (running.current) return;
+    running.current = true;
+    // Prefixed so `creating` holds the page inert, as for a new agent's token.
+    setBusy(`make:${workspaceId}`);
+    setFailed((set) => without(set, workspaceId));
+    setSaid("");
+    let answer: Created = { ok: false };
+    try {
+      answer = await actions.createSyncKey(workspaceId);
+    } catch {
+      answer = { ok: false };
+    }
+    running.current = false;
+    setBusy(null);
+    if (
+      answer.ok !== true ||
+      typeof answer.token !== "string" ||
+      answer.token === ""
+    ) {
+      target.current = null;
+      setFailed((set) => withId(set, workspaceId));
+      setSaid(FAILED);
+      return;
+    }
+    setFresh({ token: answer.token, name: "", variant: "sync" });
+  }
+
+  async function revokeSyncKey(key: SyncKey) {
+    if (running.current) return;
+    running.current = true;
+    setBusy(key.id);
+    setFailed((set) => without(set, key.id));
+    setSaid("");
+    let ok = false;
+    try {
+      ok = (await actions.revokeSyncKey(key.id)).ok === true;
+    } catch {
+      ok = false;
+    }
+    running.current = false;
+    setBusy(null);
+    if (!ok) {
+      setFailed((set) => withId(set, key.id));
+      setSaid(FAILED);
+      // It may be refused because it is already revoked elsewhere: read the list again.
+      router.refresh();
+      return;
+    }
+    setSyncRevoked((set) => withId(set, key.id));
+    setSaid("Sync key revoked.");
+    router.refresh();
   }
 
   /** Done in the dialog: the token leaves the state, and the list is read again. */
   function done() {
+    const sync = fresh?.variant === "sync";
     setFresh(null);
-    target.current = { button: "connect" };
-    setSaid("Agent connected.");
+    target.current = sync ? null : { button: "connect" };
+    setSaid(sync ? "Sync key made." : "Agent connected.");
     if (!held.current) {
       router.refresh();
       return;
@@ -466,7 +536,7 @@ export function Settings({
     choose(shownTabs[to]!, true);
   }
 
-  const counted = { ...data, agents };
+  const counted = { ...data, agents, syncKeys };
   const panelOf = (t: Tab) => ({
     role: "tabpanel",
     id: `panel-${t}`,
@@ -553,6 +623,17 @@ export function Settings({
                 onDeleted={() => router.refresh()}
               />
             </section>
+            <section {...panelOf("sync")}>
+              <SyncTab
+                workspaces={data.workspaces}
+                keys={syncKeys}
+                runs={data.syncRuns}
+                busy={busy?.startsWith("make:") ? busy.slice(5) : busy}
+                failed={failed}
+                onMake={(id) => void makeSyncKey(id)}
+                onRevoke={(k) => void revokeSyncKey(k)}
+              />
+            </section>
             {data.isOwner && (
               <section {...panelOf("topics")}>
                 <Topics
@@ -605,7 +686,12 @@ export function Settings({
         </main>
       </div>
       {fresh && (
-        <TokenDialog token={fresh.token} agentName={fresh.name} onDone={done} />
+        <TokenDialog
+          token={fresh.token}
+          agentName={fresh.name}
+          variant={fresh.variant}
+          onDone={done}
+        />
       )}
     </div>
   );

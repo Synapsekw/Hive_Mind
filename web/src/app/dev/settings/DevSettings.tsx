@@ -63,6 +63,7 @@ const WAIT = 150;
 const SLOW_WAIT = 1200;
 /** Not a real token: the database has never seen it. */
 const DEV_TOKEN = "hive_devtoken0000000000000000000000000000";
+const DEV_SYNC_KEY = `hsync_${"0".repeat(64)}`;
 
 const wait = (ms = WAIT) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -150,6 +151,42 @@ export function DevSettings({
         ...d,
         agents: d.agents.map((a) =>
           a.id === id ? { ...a, status: "revoked" } : a,
+        ),
+      }));
+      return { ok: true };
+    },
+    createSyncKey: async (workspaceId) => {
+      record("createSyncKey", [workspaceId]);
+      await wait(slow ? SLOW_WAIT : WAIT);
+      if (fail) return { ok: false };
+      // As the database does: the workspace's live key is revoked as the new one is made.
+      setData((d) => ({
+        ...d,
+        syncKeys: [
+          {
+            id: idOf("d", 50 + d.syncKeys.length),
+            workspaceId,
+            createdAt: new Date(now).toISOString(),
+            lastUsedAt: null,
+            status: "active",
+          },
+          ...d.syncKeys.map((k) =>
+            k.workspaceId === workspaceId && k.status === "active"
+              ? { ...k, status: "revoked" as const }
+              : k,
+          ),
+        ],
+      }));
+      return { ok: true, token: DEV_SYNC_KEY };
+    },
+    revokeSyncKey: async (id) => {
+      record("revokeSyncKey", [id]);
+      await wait();
+      if (fail) return { ok: false };
+      setData((d) => ({
+        ...d,
+        syncKeys: d.syncKeys.map((k) =>
+          k.id === id ? { ...k, status: "revoked" } : k,
         ),
       }));
       return { ok: true };

@@ -22,11 +22,13 @@ import type { Proposal, ScanResult, TopicsSaved } from "../../topics/types";
 import { deleteTopicIn, saveTopicsIn, scanTopicsIn } from "./topics";
 import {
   createIn,
+  createSyncKeyIn,
   deleteWorkspaceIn,
   inviteIn,
   resendIn,
   revokeIn,
   revokeInvitationIn,
+  revokeSyncKeyIn,
 } from "./write";
 
 async function withSession<T>(
@@ -47,6 +49,19 @@ export async function createAgent(input: NewAgent): Promise<Created> {
 
 export async function revokeAgent(id: string): Promise<Result> {
   return withSession<Result>((db) => revokeIn(db, id), { ok: false });
+}
+
+/** A sync key passes through here once, like a token: answered to the caller, never logged. */
+export async function createSyncKey(workspaceId: string): Promise<Created> {
+  return withSession<Created>((db) => createSyncKeyIn(db, workspaceId), {
+    ok: false,
+  });
+}
+
+export async function revokeSyncKey(keyId: string): Promise<Result> {
+  return withSession<Result>((db) => revokeSyncKeyIn(db, keyId), {
+    ok: false,
+  });
 }
 
 /**

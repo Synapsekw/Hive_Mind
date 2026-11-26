@@ -92,6 +92,44 @@ export async function createIn(db: Db, raw: unknown): Promise<Created> {
   return { ok: true, token };
 }
 
+/** The key of the first row of `create_sync_key`'s answer, or null when it is not there. */
+function syncKeyOf(data: unknown): string | null {
+  const first: unknown = Array.isArray(data) ? data[0] : undefined;
+  if (typeof first !== "object" || first === null) return null;
+  const { key } = first as Record<string, unknown>;
+  return typeof key === "string" && key.length > 0 ? key : null;
+}
+
+/**
+ * Makes a sync key for one of the person's workspaces; the database refuses another's. The key
+ * leaves here only in the returned value, like an agent's token, and is never logged.
+ */
+export async function createSyncKeyIn(
+  db: Db,
+  workspaceId: unknown,
+): Promise<Created> {
+  if (!isUuid(workspaceId)) return NOT_CREATED;
+  if (!(await signedIn(db))) return NOT_CREATED;
+  const res = (await db.rpc("create_sync_key", {
+    p_workspace: workspaceId,
+  })) as Res;
+  if (failed("create_sync_key", res)) return NOT_CREATED;
+  const token = syncKeyOf(res.data);
+  if (token === null) {
+    // Said without the answer: a malformed answer may still hold the key somewhere.
+    console.error("create_sync_key answer has an unexpected shape");
+    return NOT_CREATED;
+  }
+  return { ok: true, token };
+}
+
+export async function revokeSyncKeyIn(db: Db, id: unknown): Promise<Result> {
+  if (!isUuid(id)) return NO;
+  if (!(await signedIn(db))) return NO;
+  const res = (await db.rpc("revoke_sync_key", { p_key: id })) as Res;
+  return failed("revoke_sync_key", res) ? NO : YES;
+}
+
 export async function revokeIn(db: Db, id: unknown): Promise<Result> {
   if (!isUuid(id)) return NO;
   if (!(await signedIn(db))) return NO;

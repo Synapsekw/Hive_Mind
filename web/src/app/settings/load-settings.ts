@@ -19,6 +19,8 @@ import type {
   Invitation,
   Member,
   SettingsData,
+  SyncKey,
+  SyncRun,
   Workspace,
 } from "../../settings/types";
 
@@ -45,6 +47,16 @@ const AGENT_COLUMNS =
 const MAX_AGENTS = 200;
 const MAX_INVITATIONS = 100;
 const MAX_TOPICS = 2000;
+/** A person has few sync keys; the screen shows the newest runs of them. */
+const MAX_SYNC_KEYS = 20;
+const MAX_SYNC_RUNS = 20;
+/** The too-big list is capped, as the database caps it, so the answer stays small. */
+const MAX_TOO_BIG_PATHS = 200;
+/** `key_hash` is not granted: naming it fails the query. */
+const SYNC_KEY_COLUMNS =
+  "id, workspace_id, created_at, last_used_at, revoked_at";
+const SYNC_RUN_COLUMNS =
+  "id, key_id, started_at, finished_at, added, changed, moved, deleted, skipped, too_big, too_big_paths, refused_deletes, error";
 
 /** Only the error's code and message, never a payload. */
 function failed(what: string, res: Res): boolean {
@@ -160,6 +172,62 @@ const toAgent =
     };
   };
 
+/** A sync key; null for a row that is not what was promised, so it is dropped. */
+export function toSyncKey(v: unknown): SyncKey | null {
+  if (!row(v)) return null;
+  const { id, workspace_id, created_at, last_used_at, revoked_at } = v;
+  if (!str(id) || !str(workspace_id)) return null;
+  if (!str(created_at) || time(created_at) === null) return null;
+  if (!dateOrNull(last_used_at) || !dateOrNull(revoked_at)) return null;
+  return {
+    id,
+    workspaceId: workspace_id,
+    createdAt: created_at,
+    lastUsedAt: last_used_at,
+    status: revoked_at === null ? "active" : "revoked",
+  };
+}
+
+/**
+ * A sync run, counts only. `heldBack` is how many deletions the guard refused; the paths of
+ * those are not carried. A row that is not what was promised is dropped.
+ */
+export function toSyncRun(v: unknown): SyncRun | null {
+  if (!row(v)) return null;
+  const { id, key_id, started_at, finished_at, error } = v;
+  const { added, changed, moved, deleted, skipped, too_big } = v;
+  const { too_big_paths, refused_deletes } = v;
+  if (!str(id) || !str(key_id)) return null;
+  if (!str(started_at) || time(started_at) === null) return null;
+  if (!dateOrNull(finished_at)) return null;
+  if (!count(added) || !count(changed) || !count(moved)) return null;
+  if (!count(deleted) || !count(skipped) || !count(too_big)) return null;
+  if (!Array.isArray(too_big_paths) || !too_big_paths.every(str)) return null;
+  if (!Array.isArray(refused_deletes)) return null;
+  if (error !== null && !str(error)) return null;
+  return {
+    id,
+    keyId: key_id,
+    startedAt: started_at,
+    finishedAt: finished_at,
+    added,
+    changed,
+    moved,
+    deleted,
+    skipped,
+    tooBig: too_big,
+    tooBigPaths: too_big_paths.slice(0, MAX_TOO_BIG_PATHS),
+    heldBack: refused_deletes.length,
+    error,
+  };
+}
+
+/** The items that are what was promised; the rest are left out. */
+function some<T>(list: unknown, one: (v: unknown) => T | null): T[] | null {
+  if (!Array.isArray(list)) return null;
+  return list.map(one).filter((x): x is T => x !== null);
+}
+
 /** Every item of the list, or null when one of them is not what was promised. */
 function all<T>(list: unknown, one: (v: unknown) => T | null): T[] | null {
   if (!Array.isArray(list)) return null;
@@ -230,6 +298,7 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
     invitationsRes,
     topicsRes,
     deletion,
+    syncKeysRes,
   ] = (await Promise.all([
     db
       .from("members")
@@ -246,6 +315,8 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
     db
       .from("agents")
       .select(AGENT_COLUMNS)
+      // The agent a sync key makes is the sync's, not one to connect or revoke here.
+      .neq("provider", "hive-sync")
       // Agents still in use first, so the cap can only ever cut off old revoked ones.
       .order("revoked_at", { ascending: true, nullsFirst: true })
       .order("created_at", { ascending: false })
@@ -272,7 +343,12 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
           .limit(MAX_TOPICS)
       : { data: [], error: null },
     hive.role === "owner" ? preview(db, hive.id) : null,
-  ])) as [Res, Res, Res, Res, Res, Deletion | null];
+    db
+      .from("sync_keys")
+      .select(SYNC_KEY_COLUMNS)
+      .order("created_at", { ascending: false })
+      .limit(MAX_SYNC_KEYS),
+  ])) as [Res, Res, Res, Res, Res, Deletion | null, Res];
   // Each is checked, so every failure is logged, not only the first.
   const bad = [
     failed("members query", membersRes),
@@ -280,6 +356,7 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
     failed("agents query", agentsRes),
     failed("invitations query", invitationsRes),
     failed("topics query", topicsRes),
+    failed("sync_keys query", syncKeysRes),
   ];
   if (bad.some(Boolean)) return ERROR;
 
@@ -288,13 +365,23 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
   const everyAgent = all(agentsRes.data, toAgent(now));
   const invitations = all(invitationsRes.data, toInvitation);
   const topics = all(topicsRes.data, toTopic);
-  if (!rows || !workspaces || !everyAgent || !invitations || !topics) {
+  const everyKey = some(syncKeysRes.data, toSyncKey);
+  if (
+    !rows ||
+    !workspaces ||
+    !everyAgent ||
+    !invitations ||
+    !topics ||
+    !everyKey
+  ) {
     console.error("settings answer has an unexpected shape");
     return ERROR;
   }
   // Only this hive's: an agent of the person's in another hive belongs to that hive's settings.
   const here = new Set(workspaces.map((w) => w.id));
   const agents = everyAgent.filter((a) => here.has(a.workspaceId));
+  const syncKeys = everyKey.filter((k) => here.has(k.workspaceId));
+  const syncRuns = await runsOf(db, syncKeys);
 
   const members: Member[] = rows.map((m) => ({
     id: m.id,
@@ -316,6 +403,32 @@ export async function loadSettings(db: Db, now: number): Promise<SettingsLoad> {
       members,
       invitations,
       topics,
+      syncKeys,
+      syncRuns,
     },
   };
+}
+
+/**
+ * The newest runs of these keys, in one read, and only when there are keys. A failure leaves
+ * the runs out and never fails the page: the keys are what the tab needs first.
+ */
+async function runsOf(db: Db, keys: SyncKey[]): Promise<SyncRun[]> {
+  if (keys.length === 0) return [];
+  try {
+    const res = (await db
+      .from("sync_runs")
+      .select(SYNC_RUN_COLUMNS)
+      .in(
+        "key_id",
+        keys.map((k) => k.id),
+      )
+      .order("started_at", { ascending: false })
+      .limit(MAX_SYNC_RUNS)) as Res;
+    if (failed("sync runs query", res)) return [];
+    return some(res.data, toSyncRun) ?? [];
+  } catch (e) {
+    console.error("sync runs query failed", e instanceof Error ? e.name : "");
+    return [];
+  }
 }

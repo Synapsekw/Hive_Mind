@@ -1205,6 +1205,31 @@
   color: var(--muted);
 }
 
+/* ---- The Sync tab: the runs and the too-big files under the workspace rows ---- */
+
+.syncBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 22px;
+}
+
+.paths {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.path {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--fg2);
+  overflow-wrap: anywhere;
+}
+
 /* ---- The token dialog: a solid sheet over the dimmed window ----
    Solid, so the token and the commands are read against one flat colour. */
 
