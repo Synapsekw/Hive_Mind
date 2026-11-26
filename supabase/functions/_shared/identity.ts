@@ -150,10 +150,13 @@ export async function signIdentity(
   identity: Identity,
   base: string,
   nowMs: number,
+  extra: Record<string, string> = {},
 ): Promise<{ accessToken: string; exp: number }> {
   const iat = Math.floor(nowMs / 1000);
   const exp = iat + LIFETIME_SECONDS;
   const accessToken = await sign(signing, {
+    // Extra claims first: none of them can replace a claim below.
+    ...extra,
     role: "authenticated",
     aud: "authenticated",
     sub: identity.user_id,

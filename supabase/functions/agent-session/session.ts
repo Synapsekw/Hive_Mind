@@ -8,6 +8,7 @@
 // Web platform only (Request, Response, fetch, crypto.subtle), so the same
 // file runs in the Edge runtime and under `node --test`.
 
+import { readBody } from "../_shared/body.ts";
 import { identityFrom, loadKey, signIdentity } from "../_shared/identity.ts";
 
 export type Env = {
@@ -57,35 +58,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// The body as text, or the status to refuse it with. The cap is on the bytes
-// actually read; Content-Length is only a way to refuse sooner.
-async function readBody(req: Request): Promise<string | 400 | 413> {
-  const declared = req.headers.get("content-length");
-  if (declared !== null && Number(declared) > MAX_BODY_BYTES) return 413;
-  if (req.body === null) return 400;
-
-  const reader = req.body.getReader();
-  const bytes = new Uint8Array(MAX_BODY_BYTES);
-  let length = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (length + value.byteLength > MAX_BODY_BYTES) {
-        await reader.cancel().catch(() => {});
-        return 413;
-      }
-      bytes.set(value, length);
-      length += value.byteLength;
-    }
-    return new TextDecoder("utf-8", { fatal: true }).decode(
-      bytes.subarray(0, length),
-    );
-  } catch {
-    return 400;
-  }
-}
-
 // Exactly `{ "token": "<20 to 200 characters>" }`. Any other key is refused,
 // so a request has nowhere to put a claim.
 function tokenFrom(text: string): string | null {
@@ -117,7 +89,7 @@ export async function handle(
     return fail(405, "use POST", "not a POST", { Allow: "POST" });
   }
 
-  const body = await readBody(req);
+  const body = await readBody(req, MAX_BODY_BYTES);
   if (body === 413) return fail(413, "request too large", "body too large");
   if (body === 400) return fail(400, BAD_REQUEST, "unreadable body");
   const token = tokenFrom(body);

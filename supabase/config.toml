@@ -4,6 +4,10 @@ project_id = "hive-mind"
 [functions.agent-session]
 verify_jwt = false
 
+# The caller has no JWT yet: the sync key in the body is the credential.
+[functions.sync-session]
+verify_jwt = false
+
 # The caller's pass is an app's, issued by the OAuth server below, not a session
 # the gateway can check: the function hands it to connector_login and the
 # database verifies it.
