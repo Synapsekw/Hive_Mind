@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { cleanCursor, isUuid } from "./validate";
+import {
+  cleanCursor,
+  cleanName,
+  cleanQuery,
+  cleanServerFilter,
+  cleanUploadRequest,
+  isUuid,
+} from "./validate";
 
 const ID = "00000000-0000-4000-8000-000000030001";
 
@@ -63,5 +70,142 @@ describe("cleanCursor", () => {
       `2026-11-20T10:00:00.${"0".repeat(40)}Z`,
     ])
       expect(cleanCursor({ created_at, id: ID })).toBeNull();
+  });
+});
+
+describe("cleanServerFilter", () => {
+  const S = "00000000-0000-4000-8000-0000000000a5";
+  const base = {
+    kinds: [],
+    session: null,
+    owner: null,
+    agent: null,
+    folder: null,
+    from: null,
+    to: null,
+  };
+
+  it("accepts the empty filter and returns a fresh object with only the known keys", () => {
+    const out = cleanServerFilter({ ...base, extra: "x" });
+    expect(out).toEqual(base);
+    expect(Object.keys(out!).sort()).toEqual(Object.keys(base).sort());
+  });
+
+  it("keeps every filter, de-duplicating kinds and writing instants in ISO form", () => {
+    expect(
+      cleanServerFilter({
+        kinds: ["pdf", "slides", "pdf"],
+        session: S,
+        owner: ID,
+        agent: "Mac Claude",
+        folder: S,
+        from: "2026-11-01T00:00:00Z",
+        to: "2026-11-02T00:00:00.000Z",
+      }),
+    ).toEqual({
+      kinds: ["pdf", "slides"],
+      session: S,
+      owner: ID,
+      agent: "Mac Claude",
+      folder: S,
+      from: "2026-11-01T00:00:00.000Z",
+      to: "2026-11-02T00:00:00.000Z",
+    });
+  });
+
+  it("keeps an agent name of 1 to 80 characters as given, commas and brackets included", () => {
+    expect(
+      cleanServerFilter({ ...base, agent: "Claude (work), v2" })?.agent,
+    ).toBe("Claude (work), v2");
+    expect(cleanServerFilter({ ...base, agent: "a".repeat(80) })?.agent).toBe(
+      "a".repeat(80),
+    );
+  });
+
+  it("drops a key it does not know, such as the old id list", () => {
+    expect(cleanServerFilter({ ...base, ids: [ID] })).toEqual(base);
+  });
+
+  it("refuses anything malformed", () => {
+    for (const bad of [
+      null,
+      "x",
+      [],
+      { ...base, kinds: ["pdf", "exe"] },
+      { ...base, kinds: "pdf" },
+      { ...base, session: "s1" },
+      { ...base, owner: 7 },
+      { ...base, from: "yesterday" },
+      { ...base, from: "2026-11-01T00:00:00Z,id.gt.0" },
+      { ...base, to: `2026-11-01T00:00:00.${"0".repeat(40)}Z` },
+      {
+        ...base,
+        from: "2026-11-02T00:00:00Z",
+        to: "2026-11-01T00:00:00Z",
+      },
+      { ...base, agent: "" },
+      { ...base, agent: "   " },
+      { ...base, agent: "a".repeat(81) },
+      { ...base, agent: 7 },
+      { ...base, agent: ["Claude"] },
+      { ...base, folder: "f1" },
+      { ...base, folder: 1 },
+      { kinds: [], session: null, owner: null, from: null, to: null },
+    ])
+      expect(cleanServerFilter(bad)).toBeNull();
+  });
+});
+
+describe("cleanName", () => {
+  it("trims and keeps 1 to 60 characters", () => {
+    expect(cleanName("  Acme ")).toBe("Acme");
+    expect(cleanName("x".repeat(60))).toBe("x".repeat(60));
+    for (const bad of ["", "   ", "x".repeat(61), 7, null, ["Acme"]])
+      expect(cleanName(bad)).toBeNull();
+  });
+});
+
+describe("cleanQuery", () => {
+  it("trims and keeps at most 100 characters", () => {
+    expect(cleanQuery(" acme ")).toBe("acme");
+    expect(cleanQuery("")).toBe("");
+    for (const bad of ["x".repeat(101), 7, null, { q: "a" }])
+      expect(cleanQuery(bad)).toBeNull();
+  });
+});
+
+describe("cleanUploadRequest", () => {
+  const good = {
+    files: [{ name: "Deck v2.pptx", size: 10 }],
+    noteId: null,
+    folderId: null,
+  };
+
+  it("returns a fresh copy of a good request", () => {
+    const raw = { ...good, extra: 1, files: [{ ...good.files[0], type: "x" }] };
+    expect(cleanUploadRequest(raw)).toEqual(good);
+    expect(cleanUploadRequest({ ...good, noteId: ID, folderId: ID })).toEqual({
+      ...good,
+      noteId: ID,
+      folderId: ID,
+    });
+  });
+
+  it("refuses too many or too big files, bad names and bad ids", () => {
+    for (const bad of [
+      null,
+      { ...good, files: [] },
+      { ...good, files: Array(21).fill(good.files[0]) },
+      { ...good, files: [{ name: "a.pdf", size: 50 * 1024 * 1024 + 1 }] },
+      { ...good, files: [{ name: "a.pdf", size: -1 }] },
+      { ...good, files: [{ name: "a.pdf", size: 1.5 }] },
+      { ...good, files: [{ name: "  ", size: 1 }] },
+      { ...good, files: [{ name: "x".repeat(256), size: 1 }] },
+      { ...good, files: [{ name: 7, size: 1 }] },
+      { ...good, noteId: "nope" },
+      { ...good, folderId: 7 },
+      { files: good.files },
+    ])
+      expect(cleanUploadRequest(bad)).toBeNull();
   });
 });

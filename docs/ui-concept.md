@@ -263,11 +263,50 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
 
 ## 4. Other pages
 
-- **Inbox** — overlap suggestions, share proposals from agents, contradiction flags, quarantine
-  releases. Each item: what, who, why, two actions. Built so far: proposed links waiting for
-  your own answer (accept or decline) and your held notes (release or open in the vault), with
-  the number waiting on the rail. Decline asks first: "Decline this link? It cannot be proposed
-  again." A declined pair of notes stays declined.
+- **Inbox** — what waits for the person's own answer, in two columns: a list on the left and the
+  one selected item with its decision on the right. Built so far: proposed links to answer
+  (accept or decline) and held notes (release, or open in the vault), with the number waiting
+  on the rail and beside the title. Nobody else can answer these: the line under the title says
+  "Only you can answer these."
+
+  The list is one listbox in two groups, **Links to decide** and **Held notes**, each with its
+  count; when more than 100 wait, a line says "Showing the newest 100 of N." A row only says
+  what it is. A link row reads "Link <your note> with <colleague>'s “<title>”", or "with a note
+  of <colleague>'s you can't see yet", over one small line: who proposed it, why (Same client or
+  project; One note refers to the other; Shared topic; Similar text) and the date, plus a mark
+  "<name> accepted" when the colleague has already said yes. A held row shows the title or
+  path, the agent, the date and the path. No row carries a button. ↑/↓ move the selection
+  across both groups, Home and End go to the ends, Enter or a click opens a row.
+
+  The detail shows the selected item and the one decision. For a link it shows two boxes side
+  by side, **Your note** (title, path, its opening lines, **Open in vault**) and "<name>'s
+  note". Of the colleague's note only the owner's name, the topic and, when the person may
+  already read it, the title are shown; otherwise the box reads "Not shared with you" and "You
+  will see it once you both accept." Its text, path and id never reach the page. Under the
+  boxes one line says what accepting does ("Accepting lets <name> read this note and lets you
+  read theirs. ..."), then the one decision: **Accept link** (the only yellow button) and
+  **Decline**. Decline asks in place: "Decline this link? It cannot be proposed again." with
+  **Decline** and **Keep**; the second Decline counts only half a second after the question
+  appears, and Escape keeps. A held note shows its title, path, "Held from <agent> · <date>",
+  its opening lines, "A held note is visible only to you until you release it.", **Release**
+  (yellow) and **Open in vault**. After an answer the status line says "Link accepted.", "Link
+  declined." or "Note released.", the row collapses, and the next item in its group (else the
+  other group) is selected; a refused answer keeps the item and says "That didn't work. Try
+  again." With nothing left the detail says "All done."; with nothing at all the page shows
+  "Nothing needs you." and **Open the vault**.
+
+  **Opening lines** are the person's own note's first lines (front matter and headings
+  dropped, at most 280 characters), plain text, shown only for the person's own note or a held
+  note, never for the colleague's. Selecting an item asks for them once, with one `noteOpening`
+  call per note id; they are cached, so selecting it again, moving back with ↑/↓ and folding
+  cost nothing. While they load the box keeps its height; if they cannot be read it shows
+  nothing. Selection, ↑/↓, the decline question and the fold are client state with no request;
+  only an answer writes and then refreshes the page.
+
+  When the card is under 1,000 px wide it folds: the list alone, or the detail alone once a row
+  is opened, with **← Inbox** at the top of the detail. Escape (when no decline question is
+  open) goes back, and the row that was open takes the focus again.
+
 - **Entities** — synthesis at the top with every fact citing its source on hover; contradictions
   pinned; linked notes and files below.
 - **Vault** — folder tree, note list, note preview. One bar runs along the top of the card:
@@ -364,45 +403,85 @@ the plain force graph ([[2026-11-20-decision-07-brain-dashboard-is-the-map]]).
   counts: attached, already attached, notes with no topic. A folder import runs it by itself as
   its last stage. In a hive with no topics it says where topics come from.
 
-- **Gallery** — previews of generated documents; mine, shared with me, whole hive; a full-screen
-  viewer for PDF, PPTX, XLSX and images. Built so far: a card grid with image thumbnails, the
-  viewer for images and PDFs, download for every file and delete for your own; PPTX and XLSX
-  download only.
+- **Gallery** — the files you may read, grouped by agent session (default) or as a flat grid;
+  folders of your own on the left, a panel with the file's facts on the right, and filter chips
+  for type, date, session, agent and owner. A full-window viewer opens images, PDFs (pdf.js, in
+  the browser), text, Markdown and CSV; PPTX and XLSX download only. Files are uploaded from the
+  browser, moved between folders by drag, and re-homed to another note from the panel. Sharing
+  always follows the home note.
 - **Chat** — conversations on the left, the thread in the centre panel with source chips under
   each answer, agent activity and artifacts on the right. The line under the composer always says
   which workspace is written to and whose subscription is paying.
-- **Settings** — workspaces and tokens, connected agents and setup instructions, sharing defaults,
-  members and roles, audit log. Built so far: your own agents (connect, token shown once,
-  revoke) and the member list. Under Members the owner has an **Invite a member** form (email
-  and display name). Nobody is added at once: the server emails the address an invitation, and
-  the person joins on the `/join` page by pressing **Join**. Every invited address is listed
-  under **Invitations** with name, email, invited and expiry dates, **Send again** and
-  **Revoke**. A notice says the invitation was sent, or that it was saved but the email could
-  not be sent. A member who is not the owner sees neither the form nor the invitations.
-  Between Agents and Members, **Workspaces** lists the person's own workspaces with the number
-  of notes in each and **Delete**, which asks once ("Delete DRA and its 25 notes?", **Delete** /
-  **Keep**) and then erases the workspace with its folders, notes and links for good; nothing
-  on the person's computer is touched. The database refuses the person's only workspace, one
-  with an agent still in use and one that still holds files, and the row says what to do first.
-  The only workspace shows no Delete, and neither does any workspace while the hive is being
-  deleted.
+- **Settings** — the hive's name with "· Settings", then tabs: **Agents**, **Workspaces**,
+  **Topics**, **People** and **Hive**, each with a count beside its name (active agents,
+  workspaces, topics, members plus open invitations; Hive has none). One panel shows at a time.
+  The owner sees all five. A member has no **Topics** and no **Hive** tab (no topic list, no
+  Find topics, no hive deletion), and no **Invite someone** or invitations; `?tab=topics` or
+  `?tab=hive` opens **Agents** for a member, as does any unknown value. The tab is kept in the
+  address as `?tab=` by replacing the address in place, never by navigating, so Back keeps
+  its meaning. Choosing a tab sends no request: every panel is rendered at first paint and
+  stays mounted, hidden, while another shows, so a running Find topics or a half-typed form
+  survives a switch. The tabs follow the tabs pattern: ←/→ wrap round, Home and End go to the
+  ends. Each tab has at most one yellow button. Settings sends nothing when a tab, a search, a
+  chip or a menu is opened; only a write does, followed by a refresh.
 
-  The owner also has **Topics**: the hive's customers, partners, projects, vendors, products,
-  solutions, people and subjects, in eight kinds, each kind's list under its own heading with
-  the number of notes under each topic and **Delete** (asked once; the notes stay). **Find
-  topics in my notes** reads the owner's own notes, never their text, and lists the topics they
-  name that the hive does not have yet, under a heading for each kind, ticked except subjects,
-  which start unticked; **Save topics** adds the ticked ones.
+  A dialog (a panel over the dimmed page, as in the Vault: focus stays in it, Escape closes it
+  unless something is running, and focus returns to the button that opened it) is used for
+  **Connect an agent**, **Find topics in my notes**, **Invite someone** and **Delete this
+  hive**. The content behind an open dialog is inert, so it takes no focus and no press. A
+  row's **⋯** menu (named "Actions for <name>") holds what can be done to that row; choosing an
+  item closes the menu, then opens the question or dialog, so nothing is done in one press that
+  cannot be undone. There is no danger colour: the danger items and the Hive's box are marked
+  by emphasis in the ordinary text colour, not red.
 
-  Owners also have a **Delete this hive** section. It shows how many members, notes and files
-  the hive holds and a field for the hive's name; **Delete hive** is enabled only when the
-  typed name matches exactly. Nothing is erased at once: the hive is marked, the page reloads,
-  and for 7 days everyone can read and nobody can save. While the hive is marked, the section
-  shows the date it will be erased and **Cancel deletion** in place of the form. A member who
-  is not an owner does not see the section. In a hive that is being deleted **Revoke** on an
-  agent still works, so a leaked token can be cut off; everything else in Settings that saves
-  is refused. Revoke on an agent that is already revoked shows the usual failure line there (a
-  known gap).
+  **Agents.** The heading row has **Connect an agent**. Each active agent is a row with its name,
+  one grey line (provider, trust tier, workspace, last used) and a ⋯ menu with **Revoke…**,
+  which asks in place ("Revoke <name>?", **Revoke** / **Keep**; the second Revoke counts only
+  half a second after the question appears). Agents that were revoked or have expired are
+  folded away under "N revoked or expired agents", closed by default. The connect dialog
+  asks for a name and a workspace; the token comes back once, shown in its own dialog
+  with the `.env` line and the MCP command. From Create until Done the whole page is inert,
+  leaving asks first, Back stays on the page, and the token lives in the screen's state only
+  and is written nowhere. Revoke still works while the hive is being deleted, so a leaked
+  token can be cut off. Revoke on an agent that is already revoked shows the usual failure
+  line (a known gap).
+
+  **Workspaces** lists the person's own workspaces, each with its notes and a ⋯ menu with
+  **Delete workspace…**, which asks in place ("Delete DRA and its 25 notes?", **Delete** /
+  **Keep**, "This cannot be undone.") and then erases the workspace with its folders, notes and
+  links for good; nothing on the person's computer is touched. The database refuses the
+  person's only workspace, one with an agent still in use and one that still holds files, and
+  the row says what to do first. The only workspace shows "Your only workspace" instead of a
+  menu, and no workspace has a menu while the hive is being deleted.
+
+  **Topics** (owner only) holds the hive's customers, partners, projects, vendors, products,
+  solutions, people and subjects, in eight kinds. A search field, "Find a topic", and one
+  chip per kind that has topics (with **All**), each with its count, filter a grid of topics;
+  both are client state over the topics already loaded. A cell shows the topic's name, its
+  kind when no kind chip is chosen, and how many notes sit under it. Its ⋯ menu holds **Delete
+  topic…**, asked in place (**Delete** / **Keep**; the notes stay). **Find topics in my
+  notes** opens a dialog: it reads the owner's own notes, never their text, and lists the
+  topics they name that the hive does not have yet, under a heading for each kind, ticked
+  except subjects, which start unticked; **Save topics** adds the ticked ones. With no topics
+  the tab says so and says where they come from. While the hive is being deleted there is no
+  Find topics and no topic ⋯.
+
+  **People** is one list: every member with a **You** mark where it is the person and the role
+  (Owner or Member), then each open invitation with its name, an **Invited** mark, one grey
+  line (email, invited and expiry dates) and a ⋯ menu with **Send again** and **Revoke
+  invitation**, each one step. The owner's **Invite someone** button opens a dialog with
+  **Email**, then **Display name**. Nobody is added at once: the server emails the address an
+  invitation, and the person joins on the `/join` page by pressing **Join**. A notice says the
+  invitation was sent, or that it was saved but the email could not be sent. A member sees the
+  members only.
+
+  **Hive** (owner only) is **Delete this hive**: how many members, notes and files the hive
+  holds, and one button, **Delete hive…**, which opens a dialog with a field for the hive's
+  name; the dialog's **Delete hive** is enabled only when the typed name matches exactly.
+  Nothing is erased at once: the hive is marked, the page reloads, and for 7 days everyone can
+  read and nobody can save. While the hive is marked, the tab shows the date it will be erased
+  and **Cancel deletion** in place of the button. In a hive that is being deleted everything
+  else in Settings that saves is refused, except Revoke on an agent.
 
 ## 5. Overlays and states
 

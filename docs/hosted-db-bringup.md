@@ -65,6 +65,12 @@ deleted is in [Hive deletion](#hive-deletion).
   for an agent or a connected app they are the real moment) and `map_graph` (every item carries
   `created_at`). It also adds the trigger `files_keep_date`: nobody sets a file's date through
   the API.
+- Gallery v2's migrations `20261124181505_sessions`, `20261124184944_file_links` and
+  `20261124190145_gallery_folders` are applied (2026-11-25) with `supabase db push --include-all`
+  (the project was already past `20261124185153_topics_view`) and recorded under those versions.
+  They add agent sessions and session notes, `files.kind`, file references, `file_set_home` and
+  personal gallery folders. `scripts/setup-session-sweep.sh` has been run: job
+  `close-idle-sessions` every 15 minutes (pg_cron was already on).
 - The Edge Function `mcp` (the remote connector) is deployed, with JWT verification off. It uses
   the same two secrets as `agent-session` and needs no other. The deployed `agent-session` is
   still the build from before its signing code moved to `_shared/`; behaviour is the same.
@@ -103,6 +109,22 @@ deleted is in [Hive deletion](#hive-deletion).
 
      This is the one place the history table is touched by hand, and only to make it say what is
      true. Never do it to hide a difference between the files and the database.
+
+   After the migrations, run `scripts/setup-session-sweep.sh`. It enables `pg_cron` if needed
+   and schedules the job `close-idle-sessions` every 15 minutes, which closes agent sessions
+   idle for two hours (an idle session is also closed by its agent's next write, sweep or no
+   sweep). It runs through the Supabase CLI login (`supabase login`), stores no project secret
+   anywhere, and is safe to run again.
+
+   **Gallery v2 on the dev project.** The dev project is already past
+   `20261124185153_topics_view`, and the three gallery migrations carry earlier stamps
+   (`20261124181505_sessions`, `20261124184944_file_links`, `20261124190145_gallery_folders`).
+   A plain `supabase db push` refuses migrations older than the last one applied, so push them
+   with `supabase db push --include-all` (list first with `supabase migration list` and check
+   that exactly these three are pending). Never re-stamp them to a later version to get round
+   this: the files keep the versions they were minted with. Then run
+   `scripts/setup-session-sweep.sh` and record the result under
+   [Current state](#current-state-of-the-dev-project).
 
 3. **Create the hive as the owner.** `create_hive` refuses a caller with no identity. In SQL, set
    the owner's identity for the transaction first:

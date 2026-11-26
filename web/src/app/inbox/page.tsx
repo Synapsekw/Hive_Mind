@@ -1,7 +1,7 @@
 import { Inbox } from "../../inbox/Inbox";
 import { createServerSupabase } from "../../lib/supabase/server";
 import { Notice } from "../../shell/Notice";
-import { releaseNote, respondToLink } from "./actions";
+import { noteOpening, releaseNote, respondToLink } from "./actions";
 import { loadInbox } from "./load-inbox";
 
 // Reads the session cookie, so never prerendered.
@@ -28,7 +28,7 @@ export default async function InboxPage() {
     <Inbox
       data={result.data}
       now={Date.now()}
-      actions={{ respondToLink, releaseNote }}
+      actions={{ respondToLink, releaseNote, noteOpening }}
     />
   );
 }

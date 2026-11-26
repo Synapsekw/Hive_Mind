@@ -1,9 +1,11 @@
 // The sentences and labels of the settings screen, and the order of its agents. Plain functions,
 // so the screen and the tests read the same words.
+import { shortDate } from "../vault/format";
 import type {
   Agent,
   AgentStatus,
   Deletion,
+  Invitation,
   InviteReason,
   Requested,
   Sent,
@@ -43,6 +45,9 @@ const SEND_FAILURES: Record<(Sent & { ok: false })["reason"], string> = {
     "This address has had as many invitation emails as allowed. Try again tomorrow.",
   failed: "That didn't work. Try again.",
 };
+
+/** What a refused or failed action says when there is nothing more particular to say. */
+export const FAILED: string = "That didn't work. Try again.";
 
 export function tierText(t: TrustTier): string {
   return TIERS[t];
@@ -88,11 +93,61 @@ export const INVITE_HELP: string =
 export const INVITATIONS_NOTE: string =
   "Not members yet. Each has an email with a link and joins by pressing Join.";
 
+// ---- People ----
+
+/** The invite dialog's heading and name, and the button that opens it. */
+export const INVITE_TITLE: string = "Invite someone";
+/** The mark beside an invitation's name in the People list. */
+export const INVITED: string = "Invited";
+/** The items of an invitation's ⋯ menu. */
+export const SEND_AGAIN: string = "Send again";
+export const REVOKE_INVITATION: string = "Revoke invitation";
+
+/** An invitation's one grey line, in parts: the email, when it was sent, when it expires. */
+export function invitationLine(i: Invitation, now: number): string[] {
+  return [
+    i.email,
+    `Invited ${shortDate(i.createdAt, now)}`,
+    `Expires ${shortDate(i.expiresAt, now)}`,
+  ];
+}
+
 /** Active agents first, then the rest; the newest first inside each group. A new array. */
 export function sortAgents(agents: Agent[]): Agent[] {
   const group = (a: Agent) => (a.status === "active" ? 0 : 1);
   const time = (a: Agent) => new Date(a.createdAt).getTime();
   return [...agents].sort((a, b) => group(a) - group(b) || time(b) - time(a));
+}
+
+// ---- Agents ----
+
+/** The connect dialog's heading and name. */
+export const CONNECT_TITLE: string = "Connect an agent";
+/** The item in an active agent's ⋯ menu that opens the revoke question. */
+export const REVOKE_ITEM: string = "Revoke…";
+/** The longest name an agent or an invitation may carry. */
+export const NAME_MAX = 60;
+
+/** The fold that holds the agents that no longer work. */
+export function foldedAgents(n: number): string {
+  return `${n} revoked or expired agent${n === 1 ? "" : "s"}`;
+}
+
+/** An agent's one grey line, in parts: provider, tier, workspace (when known), last used. */
+export function agentLine(
+  a: Agent,
+  workspace: string | null,
+  now: number,
+): string[] {
+  const used = a.lastUsedAt
+    ? `Last used ${shortDate(a.lastUsedAt, now)}`
+    : "Never used";
+  return [
+    a.provider,
+    tierText(a.trustTier),
+    ...(workspace ? [workspace] : []),
+    used,
+  ];
 }
 
 /** The line that goes into the `.env` file the agent's server reads. */
@@ -109,6 +164,7 @@ export const WORKSPACES_TITLE: string = "Workspaces";
 export const WORKSPACES_NOTE: string =
   "Where your notes live. Deleting a workspace erases its notes here for good; files on your computer are not touched.";
 export const DELETE_WORKSPACE: string = "Delete";
+export const DELETE_WORKSPACE_ITEM: string = "Delete workspace…";
 export const KEEP_WORKSPACE: string = "Keep";
 export const WORKSPACE_ASIDE: string = "This cannot be undone.";
 /** Under the only workspace a person has, in place of Delete. */
@@ -164,6 +220,10 @@ export const DELETED_ON: string = "This hive will be deleted on";
 export const CLOSING_HELP: string =
   "Until then it can only be read. Cancelling brings it back as it was.";
 export const CANCEL_DELETION: string = "Cancel deletion";
+/** The button in the Hive tab's danger box that opens the delete dialog. */
+export const DELETE_HIVE_ITEM: string = "Delete hive…";
+/** The delete dialog's way out. */
+export const KEEP_HIVE: string = "Keep the hive";
 
 function many(n: number, one: string): string {
   return `${n} ${n === 1 ? one : `${one}s`}`;

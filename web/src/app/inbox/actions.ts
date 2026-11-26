@@ -5,10 +5,10 @@
 // lets the database decide. No session, no Supabase configuration or an unexpected failure
 // answers `{ ok: false }`.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Result } from "../../inbox/types";
+import type { Opening, Result } from "../../inbox/types";
 import { createServerSupabase } from "../../lib/supabase/server";
 import { releaseIn } from "../vault/write";
-import { respondIn } from "./write";
+import { openingIn, respondIn } from "./write";
 
 async function withSession(
   run: (db: SupabaseClient) => Promise<Result>,
@@ -30,4 +30,13 @@ export async function respondToLink(
 
 export async function releaseNote(id: string): Promise<Result> {
   return withSession((db) => releaseIn(db, id));
+}
+
+export async function noteOpening(id: string): Promise<Opening> {
+  try {
+    return await openingIn(await createServerSupabase(), id);
+  } catch (e) {
+    console.error("inbox action failed", e instanceof Error ? e.name : "");
+    return { ok: false };
+  }
 }

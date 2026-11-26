@@ -62,10 +62,14 @@ export async function openDb() {
     await db.exec(readFileSync(new URL(f, dir), "utf8"));
 
   // Run SQL as a signed-in person or agent (claims), or as nobody (null).
-  async function as(claims, sql, params = []) {
+  // `headers` stands in for the request headers PostgREST passes on.
+  async function as(claims, sql, params = [], { headers } = {}) {
     await db.exec("reset role");
     await db.query(`select set_config('request.jwt.claims', $1, false)`, [
       JSON.stringify(claims ?? {}),
+    ]);
+    await db.query(`select set_config('request.headers', $1, false)`, [
+      JSON.stringify(headers ?? {}),
     ]);
     await db.exec(`set role ${claims ? "authenticated" : "anon"}`);
     try {

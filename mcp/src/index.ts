@@ -15,6 +15,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { SESSION_HEADER, sessionKey } from "./session-key.js";
 import { signIn, type Session } from "./sign-in.js";
 import { done, fail, registerTools } from "./tools.js";
 
@@ -55,7 +56,10 @@ function db(): Promise<{ db: SupabaseClient; me: Session }> {
         {
           auth: { persistSession: false, autoRefreshToken: false },
           global: {
-            headers: { Authorization: `Bearer ${accessToken}` },
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              [SESSION_HEADER]: sessionKey(),
+            },
             // A 401 means the identity is no longer accepted (expired early,
             // signing key rotated). That call fails; the next one signs in
             // again instead of failing until a restart.
@@ -131,8 +135,13 @@ server.tool(
       .string()
       .optional()
       .describe("A note in your workspace to attach the file to"),
+    references: z
+      .array(z.string().min(1))
+      .max(20)
+      .optional()
+      .describe("Other notes in your workspace that mention this file"),
   },
-  async ({ local_path, type, customer, name, note_path }) => {
+  async ({ local_path, type, customer, name, note_path, references }) => {
     let root: string, file: string;
     try {
       root = await realpath(FILES_ROOT);
@@ -185,22 +194,47 @@ server.tool(
           : `Upload failed: ${up.error.message}`,
       );
 
-    const row = await s.from("files").insert({
-      hive_id: me.hive_id,
-      member_id: me.member_id,
-      workspace_id: me.workspace_id,
-      note_id: noteId,
-      storage_path: storagePath,
-      name: parts[2],
-      mime,
-      size_bytes: info.size,
-    });
+    const row = await s
+      .from("files")
+      .insert({
+        hive_id: me.hive_id,
+        member_id: me.member_id,
+        workspace_id: me.workspace_id,
+        note_id: noteId,
+        storage_path: storagePath,
+        name: parts[2],
+        mime,
+        size_bytes: info.size,
+      })
+      .select("id, session_id, sessions(title)")
+      .single();
     if (row.error)
       return fail(
         `The file was uploaded to ${hivePath} but could not be recorded: ${row.error.message}`,
       );
+    const saved = row.data as { id: string };
+    let refNote = "";
+    for (const p of references ?? []) {
+      const n = await s
+        .from("notes")
+        .select("id")
+        .eq("workspace_id", me.workspace_id)
+        .eq("path", p)
+        .maybeSingle();
+      if (n.error || !n.data) {
+        refNote += ` No note at ${p}, so no reference from it.`;
+        continue;
+      }
+      const r = await s
+        .from("file_references")
+        .insert({ file_id: saved.id, note_id: n.data.id });
+      if (r.error) refNote += ` Could not reference it from ${p}.`;
+    }
     return done(
-      `Saved ${hivePath}` + (note_path ? `, attached to ${note_path}.` : "."),
+      `Saved ${hivePath}` +
+        (note_path ? `, attached to ${note_path}.` : ".") +
+        " It belongs to your current session; close the session with hive_end_session when the work is done." +
+        refNote,
     );
   },
 );

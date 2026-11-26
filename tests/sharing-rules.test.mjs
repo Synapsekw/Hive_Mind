@@ -5466,6 +5466,7 @@ test("every function refuses an app pass except connector_login", async () => {
     "jwt_is_self_hosted", // the caller's own trust_tier claim
     "jwt_oauth_client", // the caller's own client_id and aud claims
     "note_topic", // cuts a path given as the argument
+    "file_kind", // a name and a type given as arguments
   ];
   // Signs in by the token in its argument, for anyone, as it does for anon:
   // the caller's identity plays no part, so a pass gains nothing from it.
@@ -5485,6 +5486,14 @@ test("every function refuses an app pass except connector_login", async () => {
   await as(kai, `select public.request_hive_deletion($1, 'CA closing')`, [
     closingHive,
   ]);
+  // Two upload sessions of kai's: one to retitle, one to end.
+  const uploadSessions = [];
+  for (let i = 0; i < 2; i++)
+    uploadSessions.push(
+      (
+        await as(kai, `select public.upload_session_open($1) as id`, [ws.kai])
+      )[0].id,
+    );
   const calls = {
     my_member_ids: [`select id from public.my_member_ids() as id`],
     my_hive_ids: [`select id from public.my_hive_ids() as id`],
@@ -5555,6 +5564,21 @@ test("every function refuses an app pass except connector_login", async () => {
       [ca.hive],
       true,
     ],
+    upload_session_open: [
+      `select public.upload_session_open($1)`,
+      [ws.kai],
+      true,
+    ],
+    upload_session_end: [
+      `select public.upload_session_end($1, $2)`,
+      [uploadSessions[0], ca.ownNote],
+      true,
+    ],
+    session_retitle: [
+      `select public.session_retitle($1, 'Retitled')`,
+      [uploadSessions[1]],
+      true,
+    ],
     // Cancelling needs a hive that is being deleted: one of kai's own, made
     // for this and taken away again at the end of the test.
     cancel_hive_deletion: [
@@ -5564,7 +5588,20 @@ test("every function refuses an app pass except connector_login", async () => {
     ],
   };
 
-  const known = [...pure, ...byToken, ...forApps, ...Object.keys(calls)];
+  // Made for an agent: a person is refused for another reason, so the proof
+  // for an app pass is its own check below.
+  const forAgents = ["session_end"];
+  // Made for a person: an app pass is refused before any file is looked up.
+  const forPeople = ["file_set_home"];
+
+  const known = [
+    ...pure,
+    ...byToken,
+    ...forApps,
+    ...forAgents,
+    ...forPeople,
+    ...Object.keys(calls),
+  ];
   // A function added later must be put in one of the groups above, and the
   // only group that asks for no proof is `pure`, which is checked to touch
   // no table.
@@ -5622,6 +5659,19 @@ test("every function refuses an app pass except connector_login", async () => {
       `${name} answered an app pass`,
     );
   }
+
+  const homed = await trial(
+    pass,
+    `select public.file_set_home(gen_random_uuid(), null)`,
+  );
+  assert.match(homed.error?.message ?? "(no error)", APP_REFUSED);
+
+  const ended = await trial(pass, `select public.session_end('t', 's')`);
+  assert.match(
+    ended.error?.message ?? "(no error)",
+    APP_REFUSED,
+    "session_end",
+  );
 
   // agent_login: a pass that holds no token gets what anyone gets.
   const guess = await trial(pass, `select * from public.agent_login('hive_x')`);
@@ -6881,7 +6931,16 @@ const HD_TABLES = {
 };
 // The tables that hold hive data and stay writable while a hive is closing,
 // and the record that lives outside every hive.
-const HD_OPEN = ["audit_log", "deleted_hives", "hives", "notifications"];
+const HD_OPEN = [
+  "audit_log",
+  "deleted_hives",
+  "file_references", // rows go with their file or note; the insert trigger refuses a closing hive
+  "gallery_folder_files", // rows go with their folder or file; the insert trigger refuses a closing hive
+  "gallery_folders", // rows go with their member; the insert trigger refuses a closing hive
+  "hives",
+  "notifications",
+  "sessions", // written only by the session functions, none of which writes a note into a closing hive
+];
 const hdSnapshot = async (hiveId) => {
   await db.exec("reset role");
   const out = {};
@@ -11440,4 +11499,56 @@ test("vault_index answers nobody but the workspace's owner, as a person", async 
   );
   // The public cannot call it at all.
   await assert.rejects(vaultIndex(null, f.workspace), /permission denied/);
+});
+
+test("erasing a hive takes its gallery folders and their memberships with it", async () => {
+  const h = await hdHive();
+  const file = (
+    await db.query(`select id from public.files where hive_id = $1 limit 1`, [
+      h.id,
+    ])
+  ).rows[0].id;
+  for (const who of ["owner", "member"]) {
+    const top = (
+      await as(
+        h[who],
+        `insert into public.gallery_folders (member_id, name) values ($1, 'Gone') returning id`,
+        [h[`${who}Member`]],
+      )
+    )[0].id;
+    const sub = (
+      await as(
+        h[who],
+        `insert into public.gallery_folders (member_id, parent_id, name) values ($1, $2, 'Gone too') returning id`,
+        [h[`${who}Member`], top],
+      )
+    )[0].id;
+    if (who === "owner")
+      await as(
+        h[who],
+        `insert into public.gallery_folder_files (folder_id, file_id) values ($1, $2)`,
+        [sub, file],
+      );
+  }
+  const left = async () =>
+    (
+      await db.query(
+        `select (select count(*) from public.gallery_folders g
+                  where g.member_id in (select id from public.members where hive_id = $1))::int as folders,
+                (select count(*) from public.gallery_folder_files)::int as memberships`,
+        [h.id],
+      )
+    ).rows[0];
+  await db.exec("reset role");
+  assert.deepEqual(await left(), { folders: 4, memberships: 1 });
+  await requestDeletion(h.owner, h.id, h.name);
+  await hdMakeDue(h.id);
+  await hdBegin(h.id);
+  await hdRemoveObjects(h.id);
+  let done = false;
+  for (let i = 0; i < 50 && !done; i++) done = await hdStep(h.id);
+  assert.equal(done, true);
+  await db.exec("reset role");
+  assert.deepEqual(await left(), { folders: 0, memberships: 0 });
+  assert.notEqual((await hdRecord(h.id)).purged_at, null);
 });

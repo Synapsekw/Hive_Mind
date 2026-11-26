@@ -5,10 +5,10 @@
 // dims, a new invitation appears and a revoked invitation goes. Inviting never adds a member:
 // the person joins by pressing Join. Each call is recorded on `window.__settingsCalls` (for the
 // browser tests) with what was asked and never with the token that was answered. With `fail`,
-// every action is refused; with `slow`, creating an agent takes over a second; `reason` is why
-// inviting is refused; with `unsent`, an invitation is saved but its email is not sent; with
-// `wait`, Send again answers that one was sent a moment ago; with `limit`, that the invitation
-// has been emailed as often as it may be.
+// every action is refused; with `slow`, creating an agent, Send again and each page of Find
+// topics take over a second; `reason` is why inviting is refused; with `unsent`, an invitation
+// is saved but its email is not sent; with `wait`, Send again answers that one was sent a
+// moment ago; with `limit`, that the invitation has been emailed as often as it may be.
 //
 // Deleting the hive and cancelling that end in a full reload, so those two calls are recorded
 // in `sessionStorage.__hiveDeletionCalls` and the state they leave is remembered there too: the
@@ -23,6 +23,7 @@ import {
   fixtureHeads,
 } from "../../../settings/fixture";
 import { Settings } from "../../../settings/Settings";
+import type { Tab } from "../../../settings/tabs";
 import { AccountProvider } from "../../../shell/AccountContext";
 import { ClosingBanner } from "../../../shell/ClosingBanner";
 import { HiveActionsProvider } from "../../../shell/HiveActions";
@@ -57,7 +58,8 @@ function recordDeletion(name: string, args: unknown[]) {
 }
 
 const WAIT = 150;
-/** How long `createAgent` takes with `slow`: long enough to press something meanwhile. */
+/** How long `createAgent`, `resendInvitation` and `scanTopics` take with `slow`: long enough to press
+ * something meanwhile. */
 const SLOW_WAIT = 1200;
 /** Not a real token: the database has never seen it. */
 const DEV_TOKEN = "hive_devtoken0000000000000000000000000000";
@@ -81,6 +83,7 @@ export function DevSettings({
   limit,
   closing: closingAtFirst,
   notName,
+  tab,
 }: {
   initial: SettingsData;
   now: number;
@@ -94,6 +97,8 @@ export function DevSettings({
   limit: boolean;
   closing: boolean;
   notName: boolean;
+  /** The tab open at first. */
+  tab?: Tab;
 }) {
   const [data, setData] = useState(initial);
   // Whether the hive is being deleted: the flag, until this tab's own Delete hive or Cancel
@@ -174,7 +179,7 @@ export function DevSettings({
     },
     resendInvitation: async (id) => {
       record("resendInvitation", [id]);
-      await wait();
+      await wait(slow ? SLOW_WAIT : WAIT);
       if (fail) return { ok: false, reason: "failed" };
       if (tooSoon) return { ok: false, reason: "wait" };
       if (limit) return { ok: false, reason: "limit" };
@@ -218,7 +223,7 @@ export function DevSettings({
     },
     scanTopics: async (workspaceId, after) => {
       record("scanTopics", [workspaceId, after]);
-      await wait();
+      await wait(slow ? SLOW_WAIT : WAIT);
       if (fail) return { ok: false };
       // Everything on the first workspace's first page; the others hold nothing.
       const first = data.workspaces[0]?.id === workspaceId && after === null;
@@ -258,6 +263,7 @@ export function DevSettings({
       inbox={0}
       deletion={data.isOwner ? fixtureDeletion() : null}
       closing={closing ? FIXTURE_DELETE_AFTER : null}
+      tab={tab}
     />
   );
   if (!closing) return settings;

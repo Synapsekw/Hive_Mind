@@ -7,7 +7,13 @@ import { DevGallery } from "./DevGallery";
 //   ?fail=1      every action is refused
 //   ?mislabel=1  a PDF's link answers with a web page instead
 //   ?empty=1     a hive with no files
+//   ?every=1     every file opens in the viewer (the v2 viewer's tests)
 //   ?stale=1     every thumbnail link is dead, as on a page left open past ten minutes
+//   ?more=1      older files wait behind "Load more", so server-side filters ask the server
+//   ?slowstart=1 starting an upload takes 1.5 s
+//   ?failfinish=1 the first file an upload records is refused once (its bytes are stored)
+//   ?many=1      with ?more=1: the server also holds 250 older PDFs, so filtered answers page
+//   ?slowpage=1  the server's filtered pages arrive after 1.5 s
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -20,7 +26,18 @@ export default async function DevGalleryPage({
   if (process.env.NODE_ENV === "production") notFound();
   const q = await searchParams;
   let data =
-    one(q.empty) === "1" ? { files: [], next: null } : fixtureGallery(NOW);
+    one(q.empty) === "1"
+      ? {
+          files: [],
+          sessions: [],
+          folders: [],
+          members: [],
+          memberships: [],
+          next: null,
+        }
+      : fixtureGallery(NOW);
+  // Without ?more the first page is the whole gallery: every filter is answered in the page.
+  if (one(q.more) !== "1") data = { ...data, next: null };
   if (one(q.stale) === "1")
     data = {
       ...data,
@@ -34,6 +51,11 @@ export default async function DevGalleryPage({
       now={NOW}
       fail={one(q.fail) === "1"}
       mislabel={one(q.mislabel) === "1"}
+      everyFile={one(q.every) === "1"}
+      slowStart={one(q.slowstart) === "1"}
+      failFinish={one(q.failfinish) === "1"}
+      many={one(q.many) === "1"}
+      slowPage={one(q.slowpage) === "1"}
     />
   );
 }

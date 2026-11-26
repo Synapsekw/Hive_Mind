@@ -1,10 +1,15 @@
 // Every sentence of the owner's Topics section in Settings.
-import type { Kind } from "../topics/types";
+import type { Kind, TopicRow } from "../topics/types";
 
 export const TITLE = "Topics";
 export const NOTE =
   "Customers, vendors, subjects: what notes are about. Every member's notes are attached to these by their folder, tags, title and text.";
 export const FIND = "Find topics in my notes";
+/** The heading row's outlined button that opens the candidates. */
+export const FIND_LONG = FIND;
+export const SEARCH = "Find a topic";
+export const NO_MATCH = "No topic matches.";
+export const DELETE_TOPIC_ITEM = "Delete topic…";
 export const FINDING = "Reading your notes";
 export const FOUND = "Topics found in your notes";
 export const FOUND_NOTE =
@@ -13,6 +18,8 @@ export const NOTHING_NEW =
   "Nothing new found. Every topic your notes name is already here.";
 export const SCAN_FAILED = "Your notes could not be read. Try again.";
 export const SAVE = "Save topics";
+/** The save button in the candidates dialog: how many it will save. */
+export const saveN = (n: number) => `Save ${n} topic${n === 1 ? "" : "s"}`;
 export const CANCEL = "Cancel";
 export const ALL = "All";
 export const NONE = "None";
@@ -78,3 +85,25 @@ export const pickLabel = (
   const also = alsoKnown(aliases);
   return `${kindName}: ${name}${also ? `, ${also}` : ""}${under ? `, ${under}` : ""}`;
 };
+
+/** The saved topics a kind chip and the search keep: `kind` null is every kind; the text is
+ * matched anywhere in the name, ignoring case and the spaces around it. Client state only. */
+export function filterTopics(
+  topics: TopicRow[],
+  kind: string | null,
+  q: string,
+): TopicRow[] {
+  const want = q.trim().toLowerCase();
+  return topics.filter(
+    (x) =>
+      (kind === null || x.kind === kind) &&
+      (want === "" || x.name.toLowerCase().includes(want)),
+  );
+}
+
+/** How many saved topics each kind has; a kind with none is left out. */
+export function kindCounts(topics: TopicRow[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const x of topics) counts[x.kind] = (counts[x.kind] ?? 0) + 1;
+  return counts;
+}

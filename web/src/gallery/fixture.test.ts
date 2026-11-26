@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { fixtureGallery, fixtureMore } from "./fixture";
+import {
+  ARCHIVE_SIZE,
+  fixtureArchive,
+  fixtureGallery,
+  fixtureMore,
+} from "./fixture";
 import { fileKind, PDF_VIEW_MAX, THUMB_MAX } from "./kind";
 import type { GalleryFile, Kind } from "./types";
 
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/;
-const KINDS: Kind[] = ["image", "pdf", "slides", "sheet", "doc", "other"];
+const KINDS: Kind[] = [
+  "image",
+  "pdf",
+  "slides",
+  "sheet",
+  "doc",
+  "text",
+  "csv",
+  "other",
+];
 const time = (f: GalleryFile) => new Date(f.created_at).getTime();
 
 describe("fixtureGallery", () => {
@@ -15,9 +29,9 @@ describe("fixtureGallery", () => {
     expect(fixtureGallery(NOW)).toEqual(fixtureGallery(NOW));
   });
 
-  it("has 14 files with unique ids, newest first", () => {
-    expect(files).toHaveLength(14);
-    expect(new Set(files.map((f) => f.id)).size).toBe(14);
+  it("has 17 files with unique ids, newest first", () => {
+    expect(files).toHaveLength(17);
+    expect(new Set(files.map((f) => f.id)).size).toBe(17);
     for (const f of files) expect(f.id).toMatch(UUID);
     for (let i = 1; i < files.length; i++) {
       expect(time(files[i]!)).toBeLessThan(time(files[i - 1]!));
@@ -82,9 +96,36 @@ describe("fixtureGallery", () => {
 
   it("names its files so that the kind follows from the name", () => {
     for (const f of files) {
-      if (f.kind === "image" || f.kind === "pdf") continue; // these need the declared type too
+      if (["image", "pdf", "text", "csv"].includes(f.kind)) continue; // these need the declared type too
       expect(fileKind(f.name, null)).toBe(f.kind);
     }
+  });
+
+  it("has sessions, folders, references and every kind", () => {
+    const d = fixtureGallery(NOW);
+    expect(d.sessions.length).toBeGreaterThanOrEqual(3);
+    expect(d.sessions.some((s) => s.agent === "Browser upload")).toBe(true);
+    expect(d.folders.some((f) => f.parent_id !== null)).toBe(true);
+    expect(d.files.some((f) => f.refs.length > 0)).toBe(true);
+    expect(d.files.some((f) => f.session_id === null)).toBe(true);
+    const kinds = new Set(d.files.map((f) => f.kind));
+    for (const k of [
+      "image",
+      "pdf",
+      "slides",
+      "sheet",
+      "doc",
+      "text",
+      "csv",
+      "other",
+    ])
+      expect(kinds.has(k as never)).toBe(true);
+    for (const f of d.files)
+      for (const id of f.folders)
+        expect(d.folders.some((x) => x.id === id)).toBe(true);
+    for (const f of d.files)
+      if (f.session_id)
+        expect(d.sessions.some((s) => s.id === f.session_id)).toBe(true);
   });
 
   it("says more exist, from its last file on", () => {
@@ -105,12 +146,34 @@ describe("fixtureMore", () => {
       expect(time(more.files[i]!)).toBeLessThan(time(more.files[i - 1]!));
     }
     const ids = new Set([...first, ...more.files].map((f) => f.id));
-    expect(ids.size).toBe(18);
+    expect(ids.size).toBe(21);
     for (const f of more.files) {
       if (f.thumb !== null) {
         expect(f.thumb.startsWith("data:image/png;base64,")).toBe(true);
         expect(f.kind).toBe("image");
       }
     }
+  });
+});
+
+describe("fixtureArchive", () => {
+  const archive = fixtureArchive(NOW);
+  const rest = [...fixtureGallery(NOW).files, ...fixtureMore(NOW).files];
+
+  it("holds more than a page of PDFs, older than every other file, with unique uuids", () => {
+    expect(archive).toHaveLength(ARCHIVE_SIZE);
+    expect(ARCHIVE_SIZE).toBeGreaterThan(200);
+    expect(new Set(archive.map((f) => f.id)).size).toBe(ARCHIVE_SIZE);
+    for (const f of archive) {
+      expect(f.id).toMatch(UUID);
+      expect(f.kind).toBe(fileKind(f.name, "application/pdf"));
+    }
+    const oldest = Math.min(...rest.map(time));
+    for (let i = 0; i < archive.length; i++) {
+      expect(time(archive[i]!)).toBeLessThan(oldest);
+      if (i) expect(time(archive[i]!)).toBeLessThan(time(archive[i - 1]!));
+    }
+    const ids = new Set(rest.map((f) => f.id));
+    expect(archive.some((f) => ids.has(f.id))).toBe(false);
   });
 });

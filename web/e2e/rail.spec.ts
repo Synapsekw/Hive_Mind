@@ -667,3 +667,22 @@ test("with the banner, a page that is one window tall still is: nothing scrolls 
   await expect(question(page)).toBeVisible();
   await expect.poll(fits).toBe(true);
 });
+
+// Every page draws its own rail, so a new one appears on each move between pages. It is the
+// same on every page and must not play the page's entry animation (a 10 px rise and a fade),
+// or it jumps on every click in the rail.
+test("the rail does not animate in when moving between pages", async ({
+  page,
+}) => {
+  await page.goto("/dev/inbox", { waitUntil: "networkidle" });
+  const rail = page.getByRole("complementary", { name: "Navigation" });
+  await expect(rail).toHaveCSS("animation-name", "none");
+  await page.evaluate(() =>
+    (
+      window as unknown as { next: { router: { push(href: string): void } } }
+    ).next.router.push("/dev/map"),
+  );
+  await expect(page.getByRole("main", { name: "Hive map" })).toBeVisible();
+  await expect(rail).toHaveCSS("animation-name", "none");
+  await expect(rail).toHaveCSS("opacity", "1");
+});

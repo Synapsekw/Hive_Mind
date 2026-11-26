@@ -2,15 +2,15 @@
 // argument before any query and answers only a link, `{ ok }` or nothing. The database decides
 // which rows can be read and deleted: a file the caller cannot read and one that does not exist
 // both come back as no row, and are answered the same way. A file's place in storage is used to
-// sign or remove it and is never returned. Only an error's code and message are logged.
+// sign or remove it and is never returned. Only an error's code and message are logged. Moving a
+// file's home note is the database's `file_set_home`, which decides whose file and note it is.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { fileKind } from "../../gallery/kind";
-import type { Kind, Result } from "../../gallery/types";
+import type { Kind, NoteChoice, Result } from "../../gallery/types";
 import { ownHive } from "../own-hive";
-import { BUCKET, LINK_SECONDS } from "./load-gallery";
-import { isUuid } from "./validate";
+import { BUCKET, kindOf, LINK_SECONDS } from "./load-gallery";
+import { cleanQuery, isUuid } from "./validate";
 
-type Db = Pick<SupabaseClient, "from" | "auth" | "storage">;
+type Db = Pick<SupabaseClient, "from" | "auth" | "storage" | "rpc">;
 type Row = Record<string, unknown>;
 type Res = { data: unknown; error: { code?: string; message: string } | null };
 
@@ -39,7 +39,7 @@ type FileRow = { member_id: string; path: string; name: string; kind: Kind };
 async function readable(db: Db, id: string): Promise<FileRow | null> {
   const res = (await db
     .from("files")
-    .select("id,member_id,storage_path,name,mime")
+    .select("id,member_id,storage_path,name,kind")
     .eq("id", id)
     .limit(1)) as Res;
   if (failed("file query", res)) return null;
@@ -52,9 +52,13 @@ async function readable(db: Db, id: string): Promise<FileRow | null> {
     member_id: text(r.member_id),
     path,
     name,
-    kind: fileKind(name, typeof r.mime === "string" ? r.mime : null),
+    // Stored on insert from the name and the declared type (public.file_kind).
+    kind: kindOf(r),
   };
 }
+
+const INLINE = new Set<Kind>(["image", "pdf", "text", "csv"]);
+const NOTE_CHOICES = 20;
 
 /** A ten-minute link to the object. */
 async function sign(db: Db, path: string): Promise<string | null> {
@@ -75,7 +79,9 @@ export async function openIn(
   if (!file) return null;
   // Only what the viewer shows gets a link without the download disposition: anything else
   // (a page, a drawing, a mislabelled file) could be rendered by the browser if opened inline.
-  if (file.kind !== "image" && file.kind !== "pdf") return null;
+  // Text and CSV are kinds only when declared as text/plain, text/markdown or text/csv, which a
+  // browser shows as text; the viewer fetches them and never renders them as HTML.
+  if (!INLINE.has(file.kind)) return null;
   const url = await sign(db, file.path);
   return url ? { url, kind: file.kind } : null;
 }
@@ -98,7 +104,9 @@ export async function downloadIn(
 }
 
 /** The caller's member id in their own hive, read now; null when it cannot be told. */
-async function myMember(db: Db): Promise<string | null> {
+export async function myMember(
+  db: Pick<SupabaseClient, "from" | "auth">,
+): Promise<string | null> {
   const { data } = await db.auth.getUser();
   const uid = data.user?.id;
   if (!uid) return null;
@@ -130,4 +138,52 @@ export async function deleteIn(db: Db, id: unknown): Promise<Result> {
     .select("id")) as Res;
   if (failed("deleteFile", res)) return NO;
   return Array.isArray(res.data) && res.data.length > 0 ? YES : NO;
+}
+
+/**
+ * Moves the caller's file to another of their own notes, or to none (`noteId` null): who may
+ * read a file follows its home note. The database checks both are the caller's and logs it.
+ */
+export async function setHomeIn(
+  db: Db,
+  fileId: unknown,
+  noteId: unknown,
+): Promise<Result> {
+  if (!isUuid(fileId)) return NO;
+  if (noteId !== null && !isUuid(noteId)) return NO;
+  const res = (await db.rpc("file_set_home", {
+    p_file: fileId,
+    p_note: noteId,
+  })) as Res;
+  if (failed("setHome", res)) return NO;
+  return YES;
+}
+
+/** The query as a case-blind "contains" pattern; `*` is PostgREST's own wildcard, so it goes. */
+const pattern = (q: string) =>
+  `%${q.replace(/\*/g, "").replace(/[\\%_]/g, "\\$&")}%`;
+
+/**
+ * Up to 20 of the caller's own notes in their hive whose title contains `query`, newest first:
+ * the choices for a file's home note and an upload's. An empty query lists the newest.
+ */
+export async function findNotesIn(
+  db: Db,
+  query: unknown,
+): Promise<NoteChoice[]> {
+  const q = cleanQuery(query);
+  if (q === null) return [];
+  const mine = await myMember(db);
+  if (!mine) return [];
+  let search = db.from("notes").select("id,title,path").in("member_id", [mine]);
+  if (q) search = search.ilike("title", pattern(q));
+  const res = (await search
+    .order("updated_at", { ascending: false })
+    .limit(NOTE_CHOICES)) as Res;
+  if (failed("note search", res)) return [];
+  return (Array.isArray(res.data) ? (res.data as Row[]) : []).map((n) => ({
+    id: text(n.id),
+    title: text(n.title),
+    path: text(n.path),
+  }));
 }

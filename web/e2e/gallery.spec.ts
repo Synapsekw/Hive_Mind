@@ -1,29 +1,65 @@
+import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type Request } from "@playwright/test";
-import { fixtureGallery, fixtureMore } from "../src/gallery/fixture";
-import { tabCounts, viewable, visibleFiles } from "../src/gallery/select";
-import { metaLine, sharingText } from "../src/gallery/text";
-import type { GalleryFile } from "../src/gallery/types";
+import {
+  fixtureArchive,
+  fixtureGallery,
+  fixtureMore,
+} from "../src/gallery/fixture";
+import {
+  applyFilters,
+  DEFAULT_FILTERS,
+  groupBySession,
+  scopeCounts,
+  toServerFilter,
+} from "../src/gallery/filters";
+import {
+  metaLine,
+  sharingText,
+  spanText,
+  uploadTitle,
+} from "../src/gallery/text";
+import type {
+  Filters,
+  GalleryFile,
+  GallerySession,
+} from "../src/gallery/types";
 import { setLook } from "./look";
 
-// The clock of /dev/gallery, so the dates in the expected text are the ones drawn.
+// The clock of /dev/gallery, so the dates in the expected text are the ones drawn. Without ?more
+// the dev page's first page is the whole gallery, so no filter needs the server.
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 const DATA = fixtureGallery(NOW);
 const MORE = fixtureMore(NOW);
-const COUNTS = tabCounts(DATA.files);
+const COUNTS = scopeCounts(DATA.files);
+const SESSIONS = new Map<string, GallerySession>(
+  DATA.sessions.map((s) => [s.id, s]),
+);
+const FOLDER = (name: string) => DATA.folders.find((f) => f.name === name)!;
+const HARBOUR = FOLDER("Harbour");
+const PROPOSALS = FOLDER("Proposals");
+const INSPIRATION = FOLDER("Inspiration");
+const inFolder = (id: string) =>
+  new Set(DATA.files.filter((f) => f.folders.includes(id)).map((f) => f.id));
+const shownBy = (over: Partial<Filters>) =>
+  applyFilters(
+    DATA.files,
+    { ...DEFAULT_FILTERS, ...over },
+    SESSIONS,
+    inFolder,
+    NOW,
+  );
 
 const file = (name: string): GalleryFile =>
   DATA.files.find((f) => f.name === name)!;
-const PHOTO = file("site-photo-north-elevation.png"); // mine, image, through a note
-const PROPOSAL = file("Proposal - Harbour Logistics v3.pdf"); // mine, pdf
-const DECK = file("Kickoff deck - Harbour Logistics.pptx"); // mine, no note
-const SOW = file("Statement of work - Northwind.docx"); // mine, private note
-const SCAN = file("Site survey - full scan.pdf"); // mine, too large for the viewer
-const TEAM = file("team-photo-offsite.jpeg"); // mine, image, no note
+const PHOTO = file("site-photo-north-elevation.png"); // mine, image, session 1, Inspiration
+const PROPOSAL = file("Proposal - Harbour Logistics v3.pdf"); // mine, pdf, Proposals, a ref
+const DECK = file("Kickoff deck - Harbour Logistics.pptx"); // mine, no note, no viewer
+const SOW = file("Statement of work - Northwind.docx"); // mine, private note, no session
 const SHEET = file("Pricing sheet 2026.xlsx"); // Ahmed's
 const BAY = file("site-photo-loading-bay.jpg"); // Sara's, image
-const DIAGRAM = file("process-diagram.svg"); // Ahmed's, never shown inline
 
 const QUESTION = "Delete this file? This cannot be undone.";
+const FOLDER_QUESTION = "Delete this folder? Files stay in the gallery.";
 
 async function open(page: Page, query = "") {
   // Nothing on this screen may use a browser dialog (confirm, alert).
@@ -35,40 +71,57 @@ async function open(page: Page, query = "") {
 }
 
 type Call = { name: string; args: unknown[] };
-const calls = (page: Page, name: string) =>
+const allCalls = (page: Page) =>
   page.evaluate(
-    (wanted) =>
-      (
-        (window as unknown as { __galleryCalls?: Call[] }).__galleryCalls ?? []
-      ).filter((c) => c.name === wanted),
-    name,
+    () =>
+      (window as unknown as { __galleryCalls?: Call[] }).__galleryCalls ?? [],
   );
+const calls = async (page: Page, name: string) =>
+  (await allCalls(page)).filter((c) => c.name === name);
 
+/** Every request the page makes that is not a static asset, a script chunk or HMR. */
 function watch(page: Page) {
   const seen: Request[] = [];
   page.on("request", (r) => seen.push(r));
   return () =>
     seen
-      .filter((r) => ["document", "fetch", "xhr"].includes(r.resourceType()))
-      .map((r) => `${r.resourceType()} ${r.url()}`);
+      .filter(
+        (r) =>
+          ["document", "fetch", "xhr"].includes(r.resourceType()) &&
+          !/\/_next\/|__nextjs|webpack-hmr|\/dev\/sample\./.test(r.url()),
+      )
+      .map((r) => `${r.method()} ${r.resourceType()} ${r.url()}`);
 }
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const grid = (page: Page) => page.getByRole("list", { name: "Files" });
-const cards = (page: Page) => grid(page).getByRole("listitem");
+const main = (page: Page) => page.getByRole("main", { name: "Gallery" });
+const cards = (page: Page) => main(page).locator("[data-file]");
 const card = (page: Page, f: GalleryFile) =>
-  grid(page).getByRole("button", { name: new RegExp(`^${escaped(f.name)}`) });
-const tab = (page: Page, name: string) =>
+  main(page).getByRole("button", { name: new RegExp(`^${escaped(f.name)}`) });
+const scope = (page: Page, name: string) =>
   page
-    .getByRole("group", { name: "Show" })
+    .getByRole("group", { name: "Scope" })
     .getByRole("button", { name: new RegExp(`^${name}\\b`) });
-const filter = (page: Page) =>
-  page.getByRole("searchbox", { name: "Filter files" });
-const details = (page: Page, f: GalleryFile) =>
-  page.getByRole("group", { name: `Details for ${f.name}` });
+const folders = (page: Page) => page.getByRole("group", { name: "My folders" });
+const folder = (page: Page, name: string) =>
+  folders(page).getByRole("button", { name: new RegExp(`^${name} \\d+$`) });
+const view = (page: Page, name: string) =>
+  page.getByRole("group", { name: "View" }).getByRole("button", { name });
+const filterBox = (page: Page) =>
+  page.getByRole("searchbox", { name: "Filter by name" });
+const chip = (page: Page, name: string) =>
+  page
+    .getByRole("group", { name: "Filters" })
+    .getByRole("button", { name: new RegExp(`^${name}\\b`) });
+const panel = (page: Page) =>
+  page.getByRole("complementary", { name: "File details" });
 const viewer = (page: Page) => page.getByRole("dialog");
-const actionsIn = (page: Page, within: ReturnType<typeof viewer>) =>
-  within.getByRole("group", { name: "File actions" });
+const uploader = (page: Page) =>
+  page.getByRole("dialog", { name: "Upload files" });
+const shownIds = (page: Page) =>
+  cards(page).evaluateAll((all) =>
+    all.map((el) => (el as HTMLElement).dataset.file),
+  );
 
 // The default look, and the light theme, which differs the most from it.
 const LOOKS = [undefined, "paper"] as const;
@@ -81,280 +134,416 @@ test("the rail marks Gallery as the current page", async ({ page }) => {
       .getByRole("navigation", { name: "Main" })
       .getByRole("link", { name: "Gallery" }),
   ).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("main", { name: "Gallery" })).toBeVisible();
 });
 
-test("tabs and the filter change the cards without a request", async ({
+test("by session: one group per session, newest first, No session last", async ({
   page,
 }) => {
   await open(page);
-  await expect(tab(page, "Mine")).toHaveAttribute("aria-pressed", "true");
-  await expect(tab(page, "Mine")).toContainText(String(COUNTS.mine));
-  await expect(tab(page, "Shared with me")).toContainText(
-    String(COUNTS.shared),
-  );
-  await expect(tab(page, "All")).toContainText(String(COUNTS.all));
-  await expect(cards(page)).toHaveCount(COUNTS.mine);
-  const requests = watch(page);
-
-  await tab(page, "Shared with me").click();
-  await expect(tab(page, "Shared with me")).toHaveAttribute(
+  await expect(view(page, "By session")).toHaveAttribute(
     "aria-pressed",
     "true",
   );
+  const groups = groupBySession(DATA.files, SESSIONS);
+  const sections = main(page).getByRole("region");
+  await expect(sections).toHaveCount(groups.length);
+  for (const [i, g] of groups.entries()) {
+    const section = sections.nth(i);
+    const title = g.session?.title ?? "No session";
+    await expect(section.getByRole("heading", { level: 3 })).toHaveText(title);
+    await expect(
+      section
+        .getByRole("list", { name: `Files from ${title}` })
+        .locator("[data-file]"),
+    ).toHaveCount(g.files.length);
+    await expect(section).toContainText(
+      `${g.files.length} ${g.files.length === 1 ? "file" : "files"}`,
+    );
+    if (!g.session) continue;
+    await expect(section).toContainText(g.session.agent);
+    await expect(section).toContainText(spanText(g.session, NOW));
+    const link = section.getByRole("link", { name: "Session note" });
+    if (g.session.note)
+      await expect(link).toHaveAttribute(
+        "href",
+        `/vault?note=${g.session.note.id}`,
+      );
+    else await expect(link).toHaveCount(0);
+    if (!g.session.ended_at) await expect(section).toContainText("open");
+  }
+  expect(groups.at(-1)!.session).toBeNull();
+});
+
+test("scopes, folders, the view switch and the name filter make no request", async ({
+  page,
+}) => {
+  await open(page);
+  const requests = watch(page);
+  await expect(scope(page, "All files")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(scope(page, "All files")).toContainText(String(COUNTS.all));
+  await expect(scope(page, "Mine")).toContainText(String(COUNTS.mine));
+  await expect(scope(page, "Shared with me")).toContainText(
+    String(COUNTS.shared),
+  );
+  await expect(cards(page)).toHaveCount(COUNTS.all);
+
+  await scope(page, "Shared with me").click();
   await expect(cards(page)).toHaveCount(COUNTS.shared);
   await expect(card(page, SHEET)).toBeVisible();
   await expect(card(page, DECK)).toHaveCount(0);
+  await scope(page, "Mine").click();
+  await expect(cards(page)).toHaveCount(COUNTS.mine);
 
-  await tab(page, "All").click();
+  // Folders count the loaded files in each.
+  await expect(folder(page, "Harbour")).toHaveText(/0$/);
+  await expect(folder(page, "Proposals")).toHaveText(/1$/);
+  await expect(folder(page, "Inspiration")).toHaveText(/2$/);
+  await folder(page, "Inspiration").click();
+  await expect(folder(page, "Inspiration")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(scope(page, "Mine")).toHaveAttribute("aria-pressed", "false");
+  await expect(cards(page)).toHaveCount(2);
+  await scope(page, "All files").click();
   await expect(cards(page)).toHaveCount(COUNTS.all);
 
-  await filter(page).fill("  PROPOSAL ");
-  await expect(cards(page)).toHaveCount(
-    visibleFiles(DATA.files, "all", "proposal").length,
-  );
-  // The counts are of what is loaded, whatever the filter.
-  await expect(tab(page, "All")).toContainText(String(COUNTS.all));
+  await view(page, "Grid").click();
+  await expect(view(page, "Grid")).toHaveAttribute("aria-pressed", "true");
+  const grid = main(page).getByRole("list", { name: "Files" });
+  await expect(grid.locator("[data-file]")).toHaveCount(COUNTS.all);
+  const newest = [...DATA.files]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map((f) => f.id);
+  expect(await shownIds(page)).toEqual(newest);
 
-  await filter(page).fill("no such file");
-  await expect(cards(page)).toHaveCount(0);
-  await expect(page.getByRole("main")).toContainText("No files match.");
-
-  // Selecting a card that the viewer cannot show is client state too.
-  await filter(page).fill("");
-  await card(page, SHEET).click();
-  await expect(details(page, SHEET)).toBeVisible();
+  await filterBox(page).fill("  PROPOSAL ");
+  await expect(cards(page)).toHaveCount(shownBy({ q: "proposal" }).length);
+  await card(page, PROPOSAL).click();
+  await expect(panel(page)).toBeVisible();
 
   await page.waitForTimeout(400);
   expect(requests()).toEqual([]);
+  expect(await allCalls(page)).toEqual([]);
 });
 
-test("a card shows the name, the meta line and the sharing line", async ({
+test("filter chips: Type, Date, Session, Agent and Owner, with × and Clear all", async ({
+  page,
+}) => {
+  await open(page);
+  const requests = watch(page);
+
+  await chip(page, "Type").click();
+  const types = page.getByRole("group", { name: "Type" });
+  await types.getByRole("checkbox", { name: "PDF" }).check();
+  await types.getByRole("checkbox", { name: "Images" }).check();
+  await page.keyboard.press("Escape");
+  await expect(types).toHaveCount(0);
+  await expect(chip(page, "Type: PDF, Images")).toBeVisible();
+  await expect(cards(page)).toHaveCount(
+    shownBy({ kinds: ["pdf", "image"] }).length,
+  );
+  await page
+    .getByRole("group", { name: "Filters" })
+    .getByRole("button", { name: "Clear Type" })
+    .click();
+  await expect(cards(page)).toHaveCount(COUNTS.all);
+
+  await chip(page, "Date").click();
+  await page
+    .getByRole("group", { name: "Date" })
+    .getByRole("radio", { name: "Today" })
+    .check();
+  await page.keyboard.press("Escape");
+  await expect(chip(page, "Date: Today")).toBeVisible();
+  await expect(cards(page)).toHaveCount(shownBy({ date: "today" }).length);
+
+  await chip(page, "Session").click();
+  const sessionList = page.getByRole("group", { name: "Session" });
+  // Loaded sessions, newest first.
+  const newestFirst = [...DATA.sessions]
+    .sort((a, b) => b.started_at.localeCompare(a.started_at))
+    .map((s) => s.title);
+  await expect(sessionList.getByRole("button")).toHaveText(newestFirst);
+  await sessionList
+    .getByRole("button", { name: "Harbour Logistics proposal" })
+    .click();
+  await expect(chip(page, "Session: Harbour Logistics proposal")).toBeVisible();
+  await expect(cards(page)).toHaveCount(
+    shownBy({ date: "today", session: DATA.sessions[0]!.id }).length,
+  );
+
+  await page.getByRole("button", { name: "Clear all" }).click();
+  await expect(cards(page)).toHaveCount(COUNTS.all);
+  await expect(page.getByRole("button", { name: "Clear all" })).toHaveCount(0);
+
+  await chip(page, "Agent").click();
+  await page
+    .getByRole("group", { name: "Agent" })
+    .getByRole("button", { name: "Ahmed's ChatGPT" })
+    .click();
+  await expect(cards(page)).toHaveCount(
+    shownBy({ agent: "Ahmed's ChatGPT" }).length,
+  );
+  await page.getByRole("button", { name: "Clear Agent" }).click();
+
+  await chip(page, "Owner").click();
+  await page
+    .getByRole("group", { name: "Owner" })
+    .getByRole("button", { name: "Sara" })
+    .click();
+  await expect(chip(page, "Owner: Sara")).toBeVisible();
+  await expect(cards(page)).toHaveCount(shownBy({ owner: "m-sara" }).length);
+  await expect(card(page, BAY)).toBeVisible();
+
+  // Filters that match nothing say so, with a way back.
+  await filterBox(page).fill("no such file");
+  await expect(main(page)).toContainText("No files match these filters.");
+  await main(page)
+    .getByRole("status")
+    .getByRole("button", { name: "Clear all" })
+    .click();
+  await expect(cards(page)).toHaveCount(COUNTS.all);
+  await expect(filterBox(page)).toHaveValue("");
+
+  await page.waitForTimeout(400);
+  expect(requests()).toEqual([]);
+  expect(await allCalls(page)).toEqual([]);
+});
+
+test("a date range filters by two days", async ({ page }) => {
+  await open(page);
+  await chip(page, "Date").click();
+  const date = page.getByRole("group", { name: "Date" });
+  await date.getByRole("radio", { name: "Range" }).check();
+  await date.getByLabel("From", { exact: true }).fill("2026-11-20");
+  await date.getByLabel("To", { exact: true }).fill("2026-11-21");
+  await page.keyboard.press("Escape");
+  await expect(chip(page, "Date: 2026-11-20 – 2026-11-21")).toBeVisible();
+  await expect(cards(page)).toHaveCount(
+    shownBy({ date: "range", from: "2026-11-20", to: "2026-11-21" }).length,
+  );
+});
+
+test("the address carries the filters and a reload restores them", async ({
+  page,
+}) => {
+  await open(page);
+  await view(page, "Grid").click();
+  await chip(page, "Type").click();
+  await page
+    .getByRole("group", { name: "Type" })
+    .getByRole("checkbox", { name: "PDF" })
+    .check();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/dev\/gallery\?view=grid&kinds=pdf$/);
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(view(page, "Grid")).toHaveAttribute("aria-pressed", "true");
+  await expect(chip(page, "Type: PDF")).toBeVisible();
+  await expect(cards(page)).toHaveCount(shownBy({ kinds: ["pdf"] }).length);
+
+  await filterBox(page).fill("proposal");
+  await expect(page).toHaveURL(/kinds=pdf&q=proposal$/);
+  await folder(page, "Proposals").click();
+  await expect(page).toHaveURL(new RegExp(`folder=${PROPOSALS.id}`));
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(folder(page, "Proposals")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(filterBox(page)).toHaveValue("proposal");
+  await expect(cards(page)).toHaveCount(1);
+});
+
+test("with more files on the server, a chip asks the server once after a pause", async ({
+  page,
+}) => {
+  await open(page, "?more=1");
+  await chip(page, "Type").click();
+  const types = page.getByRole("group", { name: "Type" });
+  await types.getByRole("checkbox", { name: "PDF" }).check();
+  await page.keyboard.press("Escape");
+  // The older PDF only the server knows about arrives.
+  await expect(
+    main(page).getByRole("button", { name: /^Quarterly report Q3\.pdf/ }),
+  ).toBeVisible();
+  await page.waitForTimeout(400);
+  const asked = await calls(page, "loadPage");
+  expect(asked).toEqual([
+    {
+      name: "loadPage",
+      args: [toServerFilter({ ...DEFAULT_FILTERS, kinds: ["pdf"] }, NOW), null],
+    },
+  ]);
+  // The name filter is applied in the page: no new call.
+  await filterBox(page).fill("quarterly");
+  await expect(cards(page)).toHaveCount(1);
+  await page.waitForTimeout(400);
+  expect(await calls(page, "loadPage")).toHaveLength(1);
+  // The server's answer was complete: no Load more for it.
+  await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+});
+
+test("Load more appends the older files and then goes away", async ({
+  page,
+}) => {
+  await open(page, "?more=1");
+  await view(page, "Grid").click();
+  const more = page.getByRole("button", { name: "Load more" });
+  await more.click();
+  await expect(cards(page)).toHaveCount(COUNTS.all + MORE.files.length);
+  await expect(more).toHaveCount(0);
+  await expect(scope(page, "All files")).toContainText(
+    String(COUNTS.all + MORE.files.length),
+  );
+  expect(await calls(page, "loadPage")).toEqual([
+    {
+      name: "loadPage",
+      args: [toServerFilter(DEFAULT_FILTERS, NOW), DATA.next],
+    },
+  ]);
+});
+
+test("a card shows its thumbnail or tile, name, size and sharing word", async ({
   page,
 }) => {
   await open(page);
   const own = card(page, PROPOSAL);
   await expect(own).toContainText(PROPOSAL.name);
-  await expect(own).toContainText(metaLine(PROPOSAL, NOW));
+  await expect(own).toContainText("1.2 MB");
   await expect(own).toContainText(sharingText(PROPOSAL));
-  await expect(own.getByTitle(PROPOSAL.name)).toBeVisible();
-  // My own card does not repeat my name.
-  await expect(own.getByText(PROPOSAL.owner, { exact: true })).toHaveCount(0);
-  await expect(card(page, DECK)).toContainText("Private");
-  // An image small enough has its thumbnail; a larger one has the type tile.
+  await expect(own).toHaveAttribute("draggable", "true");
   await expect(card(page, PHOTO).locator("img")).toHaveAttribute(
     "src",
     PHOTO.thumb!,
   );
+  await expect(card(page, DECK)).toContainText("PPTX");
+});
+
+test("a card with a picture shows a small type badge and no sheet; one without keeps the sheet", async ({
+  page,
+}) => {
+  await open(page);
+  const withPicture = card(page, PHOTO);
+  await expect(withPicture.locator("img")).toHaveCount(1);
+  await expect(withPicture.locator('span[class*="badge"]')).toHaveCount(1);
   await expect(
-    card(page, file("floor-plan-level-2.webp")).locator("img"),
+    withPicture.locator('span[class*="sheet"]:not([class*="sheetLabel"])'),
   ).toHaveCount(0);
-
-  await tab(page, "Shared with me").click();
-  const theirs = card(page, SHEET);
-  await expect(theirs).toContainText(metaLine(SHEET, NOW));
-  await expect(theirs.getByText(SHEET.owner, { exact: true })).toBeVisible();
-  await expect(theirs).toContainText(sharingText(SHEET));
+  const without = card(page, DECK);
+  await expect(
+    without.locator('span[class*="sheet"]:not([class*="sheetLabel"])'),
+  ).toHaveCount(1);
+  await expect(without.locator('span[class*="badge"]')).toHaveCount(0);
 });
 
-test("the sharing line carries a mark as well as words", async ({ page }) => {
+test("selecting a card opens the panel with what is known about the file", async ({
+  page,
+}) => {
   await open(page);
-  const mark = (f: GalleryFile) =>
-    card(page, f).locator("[data-sharing]").getAttribute("data-sharing");
-  expect(await mark(PROPOSAL)).toBe("through-note");
-  expect(await mark(DECK)).toBe("private");
-  await tab(page, "Shared with me").click();
-  expect(await mark(SHEET)).toBe("shared-with-me");
-  // Three different shapes, none of them resting on a colour.
-  const shape = (f: GalleryFile) =>
-    card(page, f)
-      .locator("[data-sharing]")
-      .evaluate((el) => {
-        const cs = getComputedStyle(el);
-        return `${cs.backgroundImage}|${cs.backgroundColor === "rgba(0, 0, 0, 0)"}|${cs.borderTopWidth}`;
-      });
-  const half = await shape(SHEET);
-  await tab(page, "Mine").click();
-  const shapes = new Set([half, await shape(PROPOSAL), await shape(DECK)]);
-  expect(shapes.size).toBe(3);
+  await expect(panel(page)).toHaveCount(0);
+  const requests = watch(page);
+  await card(page, PROPOSAL).click();
+  const p = panel(page);
+  await expect(p).toBeVisible();
+  await expect(card(page, PROPOSAL)).toHaveAttribute("aria-pressed", "true");
+  await expect(p.getByRole("heading", { name: PROPOSAL.name })).toBeVisible();
+  await expect(p).toContainText(metaLine(PROPOSAL, NOW));
+  for (const name of ["Open", "Download", "Add to folder", "Delete"])
+    await expect(p.getByRole("button", { name, exact: true })).toBeVisible();
+  await expect(p).toContainText(
+    "Whoever can read “Harbour Logistics proposal”.",
+  );
+  await expect(
+    p.getByRole("link", { name: "Northwind renewal" }),
+  ).toHaveAttribute("href", `/vault?note=${PROPOSAL.refs[0]!.id}`);
+  const session = SESSIONS.get(PROPOSAL.session_id!)!;
+  await expect(p).toContainText(session.agent);
+  await expect(p).toContainText(spanText(session, NOW));
+  await expect(p).toContainText("Harbour / Proposals");
+  // Nothing is selected: the panel folds away.
+  await p.getByRole("button", { name: "Close details" }).click();
+  await expect(panel(page)).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(requests()).toEqual([]);
+  expect(await allCalls(page)).toEqual([]);
 });
 
-test("an image opens in the viewer; Escape returns to its card", async ({
+test("a colleague's file offers neither Delete nor Change home note", async ({
+  page,
+}) => {
+  await open(page);
+  await card(page, SHEET).click();
+  const p = panel(page);
+  await expect(p).toContainText(`Shared with you by ${SHEET.owner}.`);
+  await expect(p.getByRole("button", { name: "Download" })).toBeVisible();
+  await expect(p.getByRole("button", { name: "Delete" })).toHaveCount(0);
+  await expect(p.getByRole("button", { name: "Change home note" })).toHaveCount(
+    0,
+  );
+  await card(page, SOW).click();
+  await expect(p.getByRole("button", { name: "Delete" })).toBeVisible();
+  await expect(
+    p.getByRole("button", { name: "Change home note" }),
+  ).toBeVisible();
+});
+
+test("Enter or a double-click on a selected card opens the viewer", async ({
   page,
 }) => {
   await open(page);
   await card(page, PHOTO).click();
+  await expect(viewer(page)).toHaveCount(0);
+  await card(page, PHOTO).press("Enter");
   const dialog = page.getByRole("dialog", { name: PHOTO.name });
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toHaveAttribute("aria-modal", "true");
   await expect(dialog.getByRole("img", { name: PHOTO.name })).toBeVisible();
-  await expect(dialog.locator("iframe")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
-  expect(await calls(page, "openFile")).toContainEqual({
-    name: "openFile",
-    args: [PHOTO.id],
-  });
-
+  // The screen adds Add to folder to the viewer's bar, and the file's facts beside it.
+  await expect(
+    dialog.getByRole("button", { name: "Add to folder" }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Download" })).toHaveCount(1);
+  await expect(dialog).toContainText("Who can read it");
   await page.keyboard.press("Escape");
   await expect(viewer(page)).toHaveCount(0);
   await expect(card(page, PHOTO)).toBeFocused();
 
-  // The close button does the same.
-  await card(page, PHOTO).click();
-  await viewer(page).getByRole("button", { name: "Close" }).click();
-  await expect(viewer(page)).toHaveCount(0);
-  await expect(card(page, PHOTO)).toBeFocused();
-});
-
-test("the arrows move through the files the viewer can show", async ({
-  page,
-}) => {
-  await open(page);
-  const shown = visibleFiles(DATA.files, "mine", "").filter(viewable);
-  expect(shown[0]!.id).toBe(PHOTO.id);
-  expect(shown.map((f) => f.id)).not.toContain(SCAN.id);
-  await card(page, PHOTO).click();
-  await expect(page.getByRole("dialog", { name: PHOTO.name })).toBeVisible();
-
-  await page.keyboard.press("ArrowRight");
-  await expect(
-    page.getByRole("dialog", { name: shown[1]!.name }),
-  ).toBeVisible();
-  await page.keyboard.press("ArrowLeft");
-  await expect(page.getByRole("dialog", { name: PHOTO.name })).toBeVisible();
-  // The first file has nothing before it.
-  await page.keyboard.press("ArrowLeft");
-  await expect(page.getByRole("dialog", { name: PHOTO.name })).toBeVisible();
-  await expect(
-    viewer(page).getByRole("button", { name: "Previous file" }),
-  ).toBeDisabled();
-
-  await viewer(page).getByRole("button", { name: "Next file" }).click();
-  await viewer(page).getByRole("button", { name: "Next file" }).click();
-  await expect(
-    page.getByRole("dialog", { name: shown[2]!.name }),
-  ).toBeVisible();
-  // Closing returns to the card of the file that was on screen.
+  await card(page, PROPOSAL).dblclick();
+  await expect(page.getByRole("dialog", { name: PROPOSAL.name })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(card(page, shown[2]!)).toBeFocused();
-});
 
-test("a PDF is shown from an object URL in a frame", async ({ page }) => {
-  await open(page);
-  await card(page, PROPOSAL).click();
-  const dialog = page.getByRole("dialog", { name: PROPOSAL.name });
-  const frame = dialog.locator("iframe");
-  await expect(frame).toHaveCount(1);
-  await expect(frame).toHaveAttribute("title", PROPOSAL.name);
-  await expect(frame).toHaveAttribute("src", /^blob:/);
-  await expect(dialog.locator("img")).toHaveCount(0);
-});
-
-test("a file that claims to be a PDF but is a page is not rendered", async ({
-  page,
-}) => {
-  await open(page, "?mislabel=1");
-  await card(page, PROPOSAL).click();
-  const dialog = page.getByRole("dialog", { name: PROPOSAL.name });
-  await expect(dialog).toContainText("This file can't be shown here.");
-  await expect(dialog.locator("iframe")).toHaveCount(0);
-  await expect(dialog.locator("img")).toHaveCount(0);
-  await expect(
-    actionsIn(page, dialog).getByRole("button", { name: "Download" }),
-  ).toBeVisible();
-  // Nothing of the page ran or was drawn.
-  await expect(page.getByText("mislabelled page")).toHaveCount(0);
-  expect(await page.evaluate(() => document.title)).not.toBe("pwned");
-});
-
-test("a PDF too large for the viewer opens the details instead", async ({
-  page,
-}) => {
-  await open(page);
-  await card(page, SCAN).click();
-  await expect(details(page, SCAN)).toBeVisible();
-  await expect(
-    details(page, SCAN).getByRole("button", { name: "Download" }),
-  ).toBeVisible();
-  await expect(viewer(page)).toHaveCount(0);
-  await expect(page.locator("iframe")).toHaveCount(0);
-  expect(await calls(page, "openFile")).toEqual([]);
-});
-
-test("a deck opens the details: Download, and no viewer", async ({ page }) => {
-  await open(page);
+  // A deck has no viewer: Enter keeps the panel, and there is no Open.
   await card(page, DECK).click();
-  const box = details(page, DECK);
-  await expect(box).toBeVisible();
-  await expect(card(page, DECK)).toHaveAttribute("aria-expanded", "true");
-  await expect(box).toContainText(DECK.name);
-  await expect(box).toContainText(sharingText(DECK));
-  await expect(box.getByRole("button", { name: "Download" })).toBeFocused();
+  await card(page, DECK).press("Enter");
   await expect(viewer(page)).toHaveCount(0);
-
-  await page.keyboard.press("Escape");
-  await expect(box).toHaveCount(0);
-  await expect(card(page, DECK)).toBeFocused();
-
-  // An SVG is never an image here: details, not the viewer.
-  await tab(page, "All").click();
-  await card(page, DIAGRAM).click();
-  await expect(details(page, DIAGRAM)).toBeVisible();
-  await expect(viewer(page)).toHaveCount(0);
-  expect(await calls(page, "openFile")).toEqual([]);
+  await expect(panel(page).getByRole("button", { name: "Open" })).toHaveCount(
+    0,
+  );
+  await expect(panel(page)).toContainText(DECK.name);
 });
 
-test("Download asks the server for that file's link", async ({ page }) => {
+test("Open in the panel opens the viewer on that file", async ({ page }) => {
   await open(page);
-  await card(page, DECK).click();
-  await details(page, DECK).getByRole("button", { name: "Download" }).click();
-  await expect
-    .poll(() => calls(page, "downloadFile"))
-    .toEqual([{ name: "downloadFile", args: [DECK.id] }]);
-
-  // The viewer's Download is the same action.
-  await page.keyboard.press("Escape");
   await card(page, PHOTO).click();
-  await actionsIn(page, viewer(page))
-    .getByRole("button", { name: "Download" })
-    .click();
-  await expect
-    .poll(() => calls(page, "downloadFile"))
-    .toEqual([
-      { name: "downloadFile", args: [DECK.id] },
-      { name: "downloadFile", args: [PHOTO.id] },
-    ]);
+  await panel(page).getByRole("button", { name: "Open" }).click();
+  await expect(page.getByRole("dialog", { name: PHOTO.name })).toBeVisible();
 });
 
-test("a download that fails says so", async ({ page }) => {
+test("Download asks the server for that file's link; a failure says so", async ({
+  page,
+}) => {
   await open(page, "?fail=1");
   await card(page, DECK).click();
-  await details(page, DECK).getByRole("button", { name: "Download" }).click();
-  await expect(details(page, DECK)).toContainText(
+  await panel(page).getByRole("button", { name: "Download" }).click();
+  await expect(panel(page).getByRole("alert")).toHaveText(
     "Couldn't download the file.",
   );
-});
-
-test("Delete is not offered on a colleague's file", async ({ page }) => {
-  await open(page);
-  await tab(page, "Shared with me").click();
-  await card(page, SHEET).click();
-  await expect(
-    details(page, SHEET).getByRole("button", { name: "Download" }),
-  ).toBeVisible();
-  await expect(
-    details(page, SHEET).getByRole("button", { name: "Delete" }),
-  ).toHaveCount(0);
-  await page.keyboard.press("Escape");
-
-  await card(page, BAY).click();
-  await expect(page.getByRole("dialog", { name: BAY.name })).toBeVisible();
-  await expect(
-    viewer(page).getByRole("button", { name: "Download" }),
-  ).toBeVisible();
-  await expect(
-    viewer(page).getByRole("button", { name: "Delete" }),
-  ).toHaveCount(0);
+  expect(await calls(page, "downloadFile")).toEqual([
+    { name: "downloadFile", args: [DECK.id] },
+  ]);
 });
 
 test("Delete asks first, in place; confirming removes the card", async ({
@@ -362,159 +551,592 @@ test("Delete asks first, in place; confirming removes the card", async ({
 }) => {
   await open(page);
   await card(page, DECK).click();
-  const box = details(page, DECK);
-  await box.getByRole("button", { name: "Delete" }).click();
-  await expect(box).toContainText(QUESTION);
-  // The safe answer has the focus.
-  await expect(box.getByRole("button", { name: "Cancel" })).toBeFocused();
+  const p = panel(page);
+  await p.getByRole("button", { name: "Delete" }).click();
+  await expect(p).toContainText(QUESTION);
+  await p.getByRole("button", { name: "Cancel" }).click();
+  await expect(p).not.toContainText(QUESTION);
   expect(await calls(page, "deleteFile")).toEqual([]);
 
-  await box.getByRole("button", { name: "Cancel" }).click();
-  await expect(box).not.toContainText(QUESTION);
-  await expect(box.getByRole("button", { name: "Delete" })).toBeFocused();
-  await expect(card(page, DECK)).toBeVisible();
-  await expect(cards(page)).toHaveCount(COUNTS.mine);
-  expect(await calls(page, "deleteFile")).toEqual([]);
-
-  await box.getByRole("button", { name: "Delete" }).click();
-  await expect(box).toContainText(QUESTION);
-  await box.getByRole("button", { name: "Delete" }).click();
+  await p.getByRole("button", { name: "Delete" }).click();
+  await p.getByRole("button", { name: "Delete" }).click();
   await expect(card(page, DECK)).toHaveCount(0);
-  await expect(box).toHaveCount(0);
-  await expect(cards(page)).toHaveCount(COUNTS.mine - 1);
-  await expect(tab(page, "Mine")).toContainText(String(COUNTS.mine - 1));
-  await expect(tab(page, "All")).toContainText(String(COUNTS.all - 1));
+  await expect(panel(page)).toHaveCount(0);
+  await expect(cards(page)).toHaveCount(COUNTS.all - 1);
+  await expect(scope(page, "Mine")).toContainText(String(COUNTS.mine - 1));
   expect(await calls(page, "deleteFile")).toEqual([
     { name: "deleteFile", args: [DECK.id] },
-  ]);
-  // The keyboard is not left nowhere: focus lands on a card.
-  await expect(grid(page).locator("button:focus")).toHaveCount(1);
-});
-
-test("a second press where Delete was lands on Cancel", async ({ page }) => {
-  await open(page);
-  // With and without a note link in the popover, and in the viewer's row.
-  const rows = [
-    async () => {
-      await card(page, DECK).click();
-      return details(page, DECK);
-    },
-    async () => {
-      await card(page, SOW).click();
-      return details(page, SOW);
-    },
-    async () => {
-      await card(page, PHOTO).click();
-      return actionsIn(page, page.getByRole("dialog", { name: PHOTO.name }));
-    },
-  ];
-  for (const show of rows) {
-    const row = await show();
-    const box = (await row
-      .getByRole("button", { name: "Delete" })
-      .boundingBox())!;
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
-    await page.mouse.click(x, y);
-    await expect(row).toContainText(QUESTION);
-    await page.mouse.click(x, y);
-    await expect(row).not.toContainText(QUESTION);
-    await page.keyboard.press("Escape");
-  }
-  expect(await calls(page, "deleteFile")).toEqual([]);
-  await expect(cards(page)).toHaveCount(COUNTS.mine);
-});
-
-test("deleting from the viewer closes it and removes the card", async ({
-  page,
-}) => {
-  await open(page);
-  await card(page, TEAM).click();
-  const row = actionsIn(page, page.getByRole("dialog", { name: TEAM.name }));
-  await row.getByRole("button", { name: "Delete" }).click();
-  await expect(row).toContainText(QUESTION);
-  await row.getByRole("button", { name: "Delete" }).click();
-  await expect(viewer(page)).toHaveCount(0);
-  await expect(card(page, TEAM)).toHaveCount(0);
-  await expect(cards(page)).toHaveCount(COUNTS.mine - 1);
-  expect(await calls(page, "deleteFile")).toEqual([
-    { name: "deleteFile", args: [TEAM.id] },
   ]);
 });
 
 test("a refused delete keeps the card and says so", async ({ page }) => {
   await open(page, "?fail=1");
   await card(page, DECK).click();
-  const box = details(page, DECK);
-  await box.getByRole("button", { name: "Delete" }).click();
-  await box.getByRole("button", { name: "Delete" }).click();
-  await expect(box).toContainText("Couldn't delete the file.");
+  const p = panel(page);
+  await p.getByRole("button", { name: "Delete" }).click();
+  await p.getByRole("button", { name: "Delete" }).click();
+  await expect(p.getByRole("alert")).toHaveText("Couldn't delete the file.");
   await expect(card(page, DECK)).toBeVisible();
-  await expect(cards(page)).toHaveCount(COUNTS.mine);
-  await expect(tab(page, "Mine")).toContainText(String(COUNTS.mine));
 });
 
-test("an image that cannot be opened says so and shows nothing", async ({
+test("Add to folder toggles the file in and out of a folder", async ({
   page,
 }) => {
-  await open(page, "?fail=1");
-  await card(page, PHOTO).click();
-  const dialog = page.getByRole("dialog", { name: PHOTO.name });
-  await expect(dialog).toContainText("Couldn't open the file.");
-  await expect(dialog.locator("img")).toHaveCount(0);
-  await expect(dialog.locator("iframe")).toHaveCount(0);
+  await open(page);
+  await card(page, PROPOSAL).click();
+  const p = panel(page);
+  await p.getByRole("button", { name: "Add to folder" }).click();
+  const choices = p.getByRole("group", { name: "Folders" });
+  await expect(
+    choices.getByRole("checkbox", { name: "Harbour / Proposals" }),
+  ).toBeChecked();
+  await choices.getByRole("checkbox", { name: "Inspiration" }).check();
+  await expect(folder(page, "Inspiration")).toHaveText(/3$/);
+  await choices
+    .getByRole("checkbox", { name: "Harbour / Proposals" })
+    .uncheck();
+  await expect(folder(page, "Proposals")).toHaveText(/0$/);
   await page.keyboard.press("Escape");
-  await expect(card(page, PHOTO)).toBeFocused();
+  const mine = p.getByRole("region", { name: "In my folders" });
+  await expect(mine).toContainText("Inspiration");
+  await expect(mine).not.toContainText("Proposals");
+  expect((await allCalls(page)).filter((c) => /Folder$/.test(c.name))).toEqual([
+    { name: "addToFolder", args: [INSPIRATION.id, [PROPOSAL.id]] },
+    { name: "removeFromFolder", args: [PROPOSALS.id, PROPOSAL.id] },
+  ]);
 });
 
-test("a file attached to a readable note links to it in the vault", async ({
-  page,
-}) => {
+test("dragging a card onto a folder adds it there", async ({ page }) => {
+  await open(page);
+  await expect(folder(page, "Inspiration")).toHaveText(/2$/);
+  await card(page, PROPOSAL).dragTo(folder(page, "Inspiration"));
+  await expect(folder(page, "Inspiration")).toHaveText(/3$/);
+  expect(await calls(page, "addToFolder")).toEqual([
+    { name: "addToFolder", args: [INSPIRATION.id, [PROPOSAL.id]] },
+  ]);
+  await folder(page, "Inspiration").click();
+  await expect(card(page, PROPOSAL)).toBeVisible();
+});
+
+test("Change home note picks one of my notes, or none", async ({ page }) => {
   await open(page);
   await card(page, SOW).click();
-  await expect(
-    details(page, SOW).getByRole("link", { name: "Open note in vault" }),
-  ).toHaveAttribute("href", `/vault?note=${SOW.note!.id}`);
-  await page.keyboard.press("Escape");
+  const p = panel(page);
+  await p.getByRole("button", { name: "Change home note" }).click();
+  const find = p.getByRole("combobox", { name: "Find a note" });
+  await find.pressSequentially("site", { delay: 30 });
+  const option = p.getByRole("option", { name: /^Site visit, 18 November/ });
+  await expect(option).toBeVisible();
+  // Typed quickly, the search is asked once, for what was typed last.
+  expect(await calls(page, "findMyNotes")).toEqual([
+    { name: "findMyNotes", args: ["site"] },
+  ]);
+  await find.press("ArrowDown");
+  await find.press("Enter");
+  await expect(p).toContainText(
+    "Changed. Sharing now follows “Site visit, 18 November”.",
+  );
+  expect(await calls(page, "setHome")).toEqual([
+    { name: "setHome", args: [SOW.id, "00000000-0000-4000-8000-000000000d02"] },
+  ]);
 
-  await card(page, DECK).click();
-  await expect(details(page, DECK)).toBeVisible();
-  await expect(
-    details(page, DECK).getByRole("link", { name: "Open note in vault" }),
-  ).toHaveCount(0);
-  await page.keyboard.press("Escape");
-
-  // The viewer offers the same link.
-  await card(page, PHOTO).click();
-  await expect(
-    viewer(page).getByRole("link", { name: "Open note in vault" }),
-  ).toHaveAttribute("href", `/vault?note=${PHOTO.note!.id}`);
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("dialog", { name: TEAM.name })).toBeVisible();
-  await expect(
-    viewer(page).getByRole("link", { name: "Open note in vault" }),
-  ).toHaveCount(0);
+  await p.getByRole("button", { name: "Change home note" }).click();
+  await p.getByRole("option", { name: "No home note (only you)" }).click();
+  expect((await calls(page, "setHome")).at(-1)).toEqual({
+    name: "setHome",
+    args: [SOW.id, null],
+  });
+  await expect(p).toContainText("Changed. It has no home note now.");
 });
 
-test("Load more appends the older files and then goes away", async ({
+test("a single letter does not search", async ({ page }) => {
+  await open(page);
+  await card(page, SOW).click();
+  await panel(page).getByRole("button", { name: "Change home note" }).click();
+  await panel(page).getByRole("combobox", { name: "Find a note" }).fill("s");
+  await page.waitForTimeout(500);
+  expect(await calls(page, "findMyNotes")).toEqual([]);
+});
+
+test("folders: create, sub-folder, rename and delete, all in the page", async ({
   page,
 }) => {
   await open(page);
-  await tab(page, "All").click();
-  await expect(cards(page)).toHaveCount(COUNTS.all);
-  const more = page.getByRole("button", { name: "Load more" });
-  await more.click();
-  await expect(cards(page)).toHaveCount(COUNTS.all + MORE.files.length);
-  await expect(more).toHaveCount(0);
-  await expect(tab(page, "All")).toContainText(
-    String(COUNTS.all + MORE.files.length),
+  const side = folders(page);
+  // Escape cancels a new folder without asking anything.
+  await page.getByRole("button", { name: "New folder" }).click();
+  await page.getByRole("textbox", { name: "Folder name" }).fill("Nope");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("textbox", { name: "Folder name" })).toHaveCount(
+    0,
   );
-  await expect(cards(page).last()).toContainText(MORE.files.at(-1)!.name);
-  expect(await calls(page, "loadMore")).toEqual([
-    { name: "loadMore", args: [DATA.next] },
+  expect(await calls(page, "createFolder")).toEqual([]);
+
+  await page.getByRole("button", { name: "New folder" }).click();
+  await page.getByRole("textbox", { name: "Folder name" }).fill("Clients");
+  await page.keyboard.press("Enter");
+  await expect(folder(page, "Clients")).toHaveText(/0$/);
+
+  // Only a top-level folder can hold sub-folders.
+  await side.getByRole("button", { name: "More for Proposals" }).click();
+  await expect(
+    page.getByRole("button", { name: "New sub-folder" }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await side.getByRole("button", { name: "More for Harbour" }).click();
+  await page.getByRole("button", { name: "New sub-folder" }).click();
+  await page.getByRole("textbox", { name: "Folder name" }).fill("Invoices");
+  await page.keyboard.press("Enter");
+  await expect(folder(page, "Invoices")).toBeVisible();
+
+  await side.getByRole("button", { name: "More for Inspiration" }).click();
+  await page.getByRole("button", { name: "Rename" }).click();
+  const rename = page.getByRole("textbox", { name: "Folder name" });
+  await expect(rename).toHaveValue("Inspiration");
+  await rename.fill("Moodboard");
+  await page.keyboard.press("Enter");
+  await expect(folder(page, "Moodboard")).toHaveText(/2$/);
+
+  await folder(page, "Moodboard").click();
+  await side.getByRole("button", { name: "More for Moodboard" }).click();
+  await page.getByRole("button", { name: "Delete" }).click();
+  await expect(side).toContainText(FOLDER_QUESTION);
+  await side.getByRole("button", { name: "Delete" }).click();
+  await expect(folder(page, "Moodboard")).toHaveCount(0);
+  // The files stay, and the view goes back to all files.
+  await expect(scope(page, "All files")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(cards(page)).toHaveCount(COUNTS.all);
+
+  const writes = (await allCalls(page)).filter((c) => /Folder$/.test(c.name));
+  expect(writes.map((c) => c.name)).toEqual([
+    "createFolder",
+    "createFolder",
+    "renameFolder",
+    "deleteFolder",
   ]);
+  expect(writes[0]!.args).toEqual(["Clients", null]);
+  expect(writes[1]!.args).toEqual(["Invoices", HARBOUR.id]);
+  expect(writes[2]!.args).toEqual([INSPIRATION.id, "Moodboard"]);
+  expect(writes[3]!.args).toEqual([INSPIRATION.id]);
+});
+
+test("uploading two files shows their progress and adds them under an upload group", async ({
+  page,
+}) => {
+  await open(page);
+  const puts: { url: string; type: string | undefined }[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "PUT" && r.url().includes("/dev/upload-sink"))
+      puts.push({ url: r.url(), type: r.headers()["content-type"] });
+  });
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await expect(dialog).toBeVisible();
+  // The browser's own type is not what is sent: the PUT declares mimeFor(stored name). Two
+  // files of one name are stored under distinct names, and those are what finishUpload gets.
+  await dialog.getByLabel("Choose files").setInputFiles([
+    {
+      name: "report.pdf",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.alloc(2048),
+    },
+    {
+      name: "report.pdf",
+      mimeType: "text/plain",
+      buffer: Buffer.from("# Hi"),
+    },
+  ]);
+  const rows = dialog
+    .getByRole("list", { name: "Files to upload" })
+    .getByRole("listitem");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("report.pdf");
+  await expect(rows.nth(0)).toContainText("2 KB");
+  await expect(dialog).toContainText("Uploads (private)");
+  await dialog.getByRole("button", { name: "Upload 2 files" }).click();
+  await expect(rows.nth(0)).toContainText("Uploaded");
+  await expect(rows.nth(1)).toContainText("Uploaded");
+  await expect(rows.nth(1)).toContainText("report (2).pdf");
+  await expect
+    .poll(async () => (await calls(page, "endUpload")).length)
+    .toBe(1);
+
+  const start = await calls(page, "startUpload");
+  expect(start).toEqual([
+    {
+      name: "startUpload",
+      args: [
+        {
+          files: [
+            { name: "report.pdf", size: 2048 },
+            { name: "report.pdf", size: 4 },
+          ],
+          noteId: null,
+          folderId: null,
+        },
+      ],
+    },
+  ]);
+  expect(puts.map((p) => p.type)).toEqual([
+    "application/pdf",
+    "application/pdf",
+  ]);
+  expect(
+    puts.map((p) => new URL(p.url).searchParams.get("name")).sort(),
+  ).toEqual(["report (2).pdf", "report.pdf"]);
+  expect(
+    (await calls(page, "finishUpload")).map((c) => c.args[1]).sort(),
+  ).toEqual(["report (2).pdf", "report.pdf"]);
+
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(uploader(page)).toHaveCount(0);
+  const group = main(page).getByRole("region", {
+    name: uploadTitle(new Date(NOW).toISOString()),
+  });
+  await expect(group.locator("[data-file]")).toHaveCount(2);
+  await expect(group).toContainText("Browser upload");
+  await expect(cards(page)).toHaveCount(COUNTS.all + 2);
+});
+
+test("an upload can go to a chosen note and folder", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog
+    .getByLabel("Choose files")
+    .setInputFiles([
+      { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("a") },
+    ]);
+  await dialog.getByRole("button", { name: "Change home note" }).click();
+  await dialog.getByRole("combobox", { name: "Find a note" }).fill("harbour");
+  await dialog
+    .getByRole("option", { name: /^Harbour Logistics proposal/ })
+    .click();
+  await expect(dialog).toContainText("Harbour Logistics proposal");
+  await dialog.getByLabel("Folder").selectOption({ label: "Inspiration" });
+  await dialog.getByRole("button", { name: "Upload 1 file" }).click();
+  await expect(dialog.getByRole("listitem")).toContainText("Uploaded");
+  const [start] = await calls(page, "startUpload");
+  expect(start!.args[0]).toMatchObject({
+    noteId: "00000000-0000-4000-8000-000000000d01",
+    folderId: INSPIRATION.id,
+  });
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(folder(page, "Inspiration")).toHaveText(/3$/);
+});
+
+test("a file over 50 MB is refused in the dialog without a call", async ({
+  page,
+}, testInfo) => {
+  await open(page);
+  // Playwright passes buffers up to 50 MB only; a larger file goes by path.
+  const huge = testInfo.outputPath("huge.zip");
+  writeFileSync(huge, Buffer.alloc(51 * 1024 * 1024));
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog.getByLabel("Choose files").setInputFiles(huge);
+  await expect(dialog).toContainText("Too large: 50 MB at most.");
+  const upload = dialog.getByRole("button", { name: /^Upload/ });
+  await expect(upload).toHaveAttribute("aria-disabled", "true");
+  await upload.click({ force: true });
+  await page.waitForTimeout(300);
+  expect(await allCalls(page)).toEqual([]);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(uploader(page)).toHaveCount(0);
+});
+
+test("a failed upload can be retried", async ({ page }) => {
+  await open(page);
+  let refuse = true;
+  await page.route("**/dev/upload-sink**", (route) =>
+    refuse ? route.fulfill({ status: 500 }) : route.continue(),
+  );
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog
+    .getByLabel("Choose files")
+    .setInputFiles([
+      { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("a") },
+    ]);
+  await dialog.getByRole("button", { name: "Upload 1 file" }).click();
+  const row = dialog.getByRole("listitem");
+  await expect(row).toContainText("Failed");
+  expect(await calls(page, "endUpload")).toEqual([]);
+  refuse = false;
+  await row.getByRole("button", { name: "Retry" }).click();
+  await expect(row).toContainText("Uploaded");
+  await expect
+    .poll(async () => (await calls(page, "endUpload")).length)
+    .toBe(1);
+});
+
+test("while the upload is starting, the dialog can be neither finished nor closed", async ({
+  page,
+}) => {
+  await open(page, "?slowstart=1");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog
+    .getByLabel("Choose files")
+    .setInputFiles([
+      { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("a") },
+    ]);
+  await dialog.getByRole("button", { name: "Upload 1 file" }).click();
+  await expect
+    .poll(async () => (await calls(page, "startUpload")).length)
+    .toBe(1);
+  // The start takes 1.5 s: no Done meanwhile, and Escape and Cancel do not close.
+  await expect(dialog.getByRole("button", { name: "Done" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "Cancel" }).click({ force: true });
+  await page.waitForTimeout(300);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Done" })).toHaveCount(0);
+  await expect(dialog.getByRole("listitem")).toContainText("Uploaded");
+  await expect
+    .poll(async () => (await calls(page, "endUpload")).length)
+    .toBe(1);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(uploader(page)).toHaveCount(0);
+  expect(await calls(page, "finishUpload")).toHaveLength(1);
+});
+
+test("a file stored but not recorded is recorded again on Retry, without a second PUT", async ({
+  page,
+}) => {
+  await open(page, "?failfinish=1");
+  let puts = 0;
+  page.on("request", (r) => {
+    if (r.method() === "PUT" && r.url().includes("/dev/upload-sink")) puts++;
+  });
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog
+    .getByLabel("Choose files")
+    .setInputFiles([
+      { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("a") },
+    ]);
+  await dialog.getByRole("button", { name: "Upload 1 file" }).click();
+  const row = dialog.getByRole("listitem");
+  await expect(row).toContainText("Failed");
+  expect(puts).toBe(1);
+  expect(await calls(page, "endUpload")).toEqual([]);
+  await row.getByRole("button", { name: "Retry" }).click();
+  await expect(row).toContainText("Uploaded");
+  await expect
+    .poll(async () => (await calls(page, "endUpload")).length)
+    .toBe(1);
+  expect(puts).toBe(1);
+  expect(await calls(page, "finishUpload")).toHaveLength(2);
+});
+
+test("with older files on the server, a folder asks the server for that folder", async ({
+  page,
+}) => {
+  await open(page, "?more=1");
+  const older = MORE.files.find((f) => f.name === "Quarterly report Q3.pdf")!;
+  expect(older.folders).toEqual([HARBOUR.id]);
+  await folder(page, "Harbour").click();
+  await expect(
+    main(page).getByRole("button", { name: /^Quarterly report Q3\.pdf/ }),
+  ).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(await calls(page, "loadPage")).toEqual([
+    {
+      name: "loadPage",
+      args: [
+        toServerFilter({ ...DEFAULT_FILTERS, folder: HARBOUR.id }, NOW),
+        null,
+      ],
+    },
+  ]);
+});
+
+// ?many=1: the server also holds 250 older PDFs of Ahmed's ChatGPT, in Inspiration.
+const ARCHIVE = fixtureArchive(NOW);
+const SERVER = [...DATA.files, ...MORE.files, ...ARCHIVE];
+const pdfs = SERVER.filter((f) => f.kind === "pdf")
+  .map((f) => f.id)
+  .sort()
+  .reverse();
+const after200 = (ids: GalleryFile[]) => {
+  const sorted = [...ids].sort(
+    (a, b) =>
+      b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
+  );
+  const last = sorted[199]!;
+  return { created_at: last.created_at, id: last.id };
+};
+
+test("a filtered answer of more than 200 files pages with Load more", async ({
+  page,
+}) => {
+  await open(page, "?more=1&many=1");
+  await view(page, "Grid").click();
+  await chip(page, "Type").click();
+  await page
+    .getByRole("group", { name: "Type" })
+    .getByRole("checkbox", { name: "PDF" })
+    .check();
+  await page.keyboard.press("Escape");
+  const filter = toServerFilter({ ...DEFAULT_FILTERS, kinds: ["pdf"] }, NOW);
+  await expect(cards(page)).toHaveCount(200);
+  const more = page.getByRole("button", { name: "Load more" });
+  await expect(more).toBeVisible();
+  await more.click();
+  await expect(cards(page)).toHaveCount(pdfs.length);
+  await expect(more).toHaveCount(0);
+  expect((await shownIds(page)).slice().sort().reverse()).toEqual(pdfs);
+  const all = SERVER.filter((f) => f.kind === "pdf");
+  expect(await calls(page, "loadPage")).toEqual([
+    { name: "loadPage", args: [filter, null] },
+    { name: "loadPage", args: [filter, after200(all)] },
+  ]);
+  // Clearing the chip goes back to the loaded list and its own Load more.
+  await page
+    .getByRole("group", { name: "Filters" })
+    .getByRole("button", { name: "Clear Type" })
+    .click();
+  await expect(cards(page)).toHaveCount(COUNTS.all);
+  await expect(more).toBeVisible();
+});
+
+test("the Agent chip and a large folder ask the server, and both page", async ({
+  page,
+}) => {
+  await open(page, "?more=1&many=1");
+  await view(page, "Grid").click();
+  await folder(page, "Inspiration").click();
+  const inspiration = SERVER.filter((f) => f.folders.includes(INSPIRATION.id));
+  await expect(cards(page)).toHaveCount(200);
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(cards(page)).toHaveCount(inspiration.length);
+  await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+  const byFolder = toServerFilter(
+    { ...DEFAULT_FILTERS, folder: INSPIRATION.id },
+    NOW,
+  );
+  expect(await calls(page, "loadPage")).toEqual([
+    { name: "loadPage", args: [byFolder, null] },
+    { name: "loadPage", args: [byFolder, after200(inspiration)] },
+  ]);
+});
+
+test("an agent filter carries the agent to the server", async ({ page }) => {
+  await open(page, "?more=1&many=1&agent=Ahmed%27s%20ChatGPT&view=grid");
+  const mine = SERVER.filter((f) => f.session_id === ARCHIVE[0]!.session_id);
+  await expect(cards(page)).toHaveCount(200);
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(cards(page)).toHaveCount(mine.length);
+  const asked = await calls(page, "loadPage");
+  expect(asked[0]).toEqual({
+    name: "loadPage",
+    args: [
+      toServerFilter({ ...DEFAULT_FILTERS, agent: "Ahmed's ChatGPT" }, NOW),
+      null,
+    ],
+  });
+});
+
+test("a file uploaded under a server filter shows when it matches", async ({
+  page,
+}) => {
+  await open(page, "?more=1&kinds=pdf&view=grid");
+  await expect(
+    main(page).getByRole("button", { name: /^Quarterly report Q3\.pdf/ }),
+  ).toBeVisible();
+  const before = await cards(page).count();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const dialog = uploader(page);
+  await dialog.getByLabel("Choose files").setInputFiles([
+    { name: "fresh.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(8) },
+    { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hi") },
+  ]);
+  await dialog.getByRole("button", { name: "Upload 2 files" }).click();
+  await expect
+    .poll(async () => (await calls(page, "endUpload")).length)
+    .toBe(1);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  // The PDF matches the Type filter; the text file does not.
+  await expect(cards(page)).toHaveCount(before + 1);
+  await expect(
+    main(page).getByRole("button", { name: /^fresh\.pdf/ }),
+  ).toBeVisible();
+});
+
+test("clearing a server filter drops its answer and its error", async ({
+  page,
+}) => {
+  const banner = page.getByText("Couldn't search the older files");
+  const clearType = page
+    .getByRole("group", { name: "Filters" })
+    .getByRole("button", { name: "Clear Type" });
+  // A refused answer says so; clearing the filter clears the message.
+  await open(page, "?more=1&fail=1&kinds=pdf");
+  await expect(banner).toBeVisible();
+  await clearType.click();
+  await expect(banner).toHaveCount(0);
+  // An answer still on its way when the filter is cleared is not applied.
+  await open(page, "?more=1&fail=1&slowpage=1&kinds=pdf");
+  await expect.poll(async () => (await calls(page, "loadPage")).length).toBe(1);
+  await clearType.click();
+  await page.waitForTimeout(1800);
+  await expect(banner).toHaveCount(0);
+  await expect(cards(page)).toHaveCount(COUNTS.all);
+});
+
+test("files dropped from the computer open the upload dialog with them", async ({
+  page,
+}) => {
+  await open(page);
+  await main(page).evaluate((el) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(["x"], "dropped.csv", { type: "text/csv" }));
+    el.dispatchEvent(
+      new DragEvent("dragover", {
+        dataTransfer: dt,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    el.dispatchEvent(
+      new DragEvent("drop", {
+        dataTransfer: dt,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect(uploader(page)).toBeVisible();
+  await expect(uploader(page).getByRole("listitem")).toContainText(
+    "dropped.csv",
+  );
+});
+
+test("with no files the screen says where they come from", async ({ page }) => {
+  await open(page, "?empty=1");
+  await expect(main(page)).toContainText(
+    "No files yet. Files your agents save, and files you upload, appear here.",
+  );
+  await expect(cards(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+});
+
+test("a thumbnail whose link no longer works falls back to the type tile", async ({
+  page,
+}) => {
+  await open(page, "?stale=1&view=grid");
+  const list = main(page).getByRole("list", { name: "Files" });
+  const items = list.locator("li");
+  for (let i = 0; i < (await items.count()); i++) {
+    await items.nth(i).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(100);
+  }
+  await expect(list.locator("img")).toHaveCount(0);
+  await expect(card(page, PHOTO)).toContainText("PNG");
 });
 
 for (const look of LOOKS)
@@ -523,152 +1145,76 @@ for (const look of LOOKS)
     // The smallest window the screen has to fit.
     { width: 1100, height: 560 },
   ])
-    test(`at ${size.width} x ${size.height} the page does not scroll and the grid does${named(look)}`, async ({
+    test(`at ${size.width} x ${size.height} the page does not scroll and the files do${named(look)}`, async ({
       page,
       context,
     }) => {
       if (look) await setLook(context, look);
       await page.setViewportSize(size);
       await open(page);
-      await tab(page, "All").click();
-      await expect(cards(page)).toHaveCount(COUNTS.all);
-
-      const fit = () =>
-        page.evaluate(() => {
-          const main = document.querySelector("main")!.getBoundingClientRect();
-          const root = document.documentElement;
-          const list = document.querySelector('ul[aria-label="Files"]')!;
-          let box: Element | null = list;
-          while (box && !/auto|scroll/.test(getComputedStyle(box).overflowY))
-            box = box.parentElement;
-          return {
-            pageScrolls:
-              root.scrollHeight > window.innerHeight ||
-              root.scrollWidth > window.innerWidth,
-            panelBottom: main.bottom,
-            panelRight: main.right,
-            gridScrolls:
-              !!box && box !== root && box.scrollHeight > box.clientHeight,
-            gridInside: !!box && document.querySelector("main")!.contains(box),
-            sideways: !!box && box.scrollWidth > box.clientWidth,
-          };
-        });
-      const before = await fit();
-      expect(before.pageScrolls).toBe(false);
-      expect(before.panelBottom).toBeLessThanOrEqual(size.height);
-      expect(before.panelRight).toBeLessThanOrEqual(size.width);
-      expect(before.gridScrolls).toBe(true);
-      expect(before.gridInside).toBe(true);
-      expect(before.sideways).toBe(false);
-
-      // The details of a card in the last row are reachable, and still nothing moves the page.
-      await card(page, DIAGRAM).click();
-      const download = details(page, DIAGRAM).getByRole("button", {
-        name: "Download",
-      });
-      await expect(download).toBeVisible();
-      const reachable = await download.evaluate((el) => {
-        const r = el.getBoundingClientRect();
-        const hit = document.elementFromPoint(
-          r.left + r.width / 2,
-          r.top + r.height / 2,
-        );
-        return !!hit && (hit === el || el.contains(hit));
-      });
-      expect(reachable).toBe(true);
-      const after = await fit();
-      expect(after.pageScrolls).toBe(false);
-      expect(after.sideways).toBe(false);
-
-      // The viewer covers the window exactly.
-      await page.keyboard.press("Escape");
-      await tab(page, "Mine").click();
-      await card(page, PHOTO).click();
-      const dialog = page.getByRole("dialog", { name: PHOTO.name });
-      await expect(dialog.getByRole("img", { name: PHOTO.name })).toBeVisible();
-      // The viewer opens with a short fade and scale; measure it at rest.
-      await dialog.evaluate((el) =>
-        Promise.all(el.getAnimations().map((a) => a.finished)),
-      );
-      const cover = await dialog.evaluate((el) => {
-        const r = el.getBoundingClientRect();
-        const img = el.querySelector("img")!.getBoundingClientRect();
-        const close = [...el.querySelectorAll("button")]
-          .find((b) => b.getAttribute("aria-label") === "Close")!
+      await card(page, PROPOSAL).click();
+      await expect(panel(page)).toBeVisible();
+      const fit = await page.evaluate(() => {
+        const root = document.documentElement;
+        const main = document.querySelector("main")!.getBoundingClientRect();
+        const first = document.querySelector("[data-file]")!;
+        let box: Element | null = first;
+        while (box && !/auto|scroll/.test(getComputedStyle(box).overflowY))
+          box = box.parentElement;
+        const side = document
+          .querySelector('[aria-label="Gallery sidebar"]')!
+          .getBoundingClientRect();
+        const aside = document
+          .querySelector('[aria-label="File details"]')!
           .getBoundingClientRect();
         return {
-          box: [r.left, r.top, r.width, r.height],
-          imageInside:
-            img.left >= 0 &&
-            img.top >= 0 &&
-            img.right <= window.innerWidth &&
-            img.bottom <= window.innerHeight,
-          closeInside: close.right <= window.innerWidth && close.top >= 0,
           pageScrolls:
-            document.documentElement.scrollHeight > window.innerHeight ||
-            document.documentElement.scrollWidth > window.innerWidth,
+            root.scrollHeight > window.innerHeight ||
+            root.scrollWidth > window.innerWidth,
+          mainBottom: main.bottom,
+          mainRight: main.right,
+          scrolls: !!box && box !== root && box.scrollHeight > box.clientHeight,
+          inside: !!box && document.querySelector("main")!.contains(box),
+          sideways: !!box && box.scrollWidth > box.clientWidth,
+          side: Math.round(side.width),
+          panel: Math.round(aside.width),
+          panelInside: aside.right <= main.right && aside.bottom <= main.bottom,
         };
       });
-      expect(cover.box).toEqual([0, 0, size.width, size.height]);
-      expect(cover.imageInside).toBe(true);
-      expect(cover.closeInside).toBe(true);
-      expect(cover.pageScrolls).toBe(false);
+      expect(fit.pageScrolls).toBe(false);
+      expect(fit.mainBottom).toBeLessThanOrEqual(size.height);
+      expect(fit.mainRight).toBeLessThanOrEqual(size.width);
+      expect(fit.scrolls).toBe(true);
+      expect(fit.inside).toBe(true);
+      expect(fit.sideways).toBe(false);
+      expect(fit.side).toBe(200);
+      expect(fit.panel).toBe(260);
+      expect(fit.panelInside).toBe(true);
     });
 
-test("the gallery is a solid card with no blur and no control is a pill", async ({
-  page,
-}) => {
-  await open(page);
-  const flat = await page
-    .getByRole("main", { name: "Gallery" })
-    .evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return {
-        blur:
-          cs.backdropFilter || cs.getPropertyValue("-webkit-backdrop-filter"),
-        background: cs.backgroundColor,
-      };
-    });
-  expect(flat.blur === "" || flat.blur === "none").toBe(true);
-  expect(flat.background).not.toBe("rgba(0, 0, 0, 0)");
-  await card(page, DECK).click();
-  await expect(details(page, DECK)).toBeVisible();
-  const pills = await page.evaluate(() =>
-    [...document.querySelectorAll("main *")]
-      .filter((e) =>
-        getComputedStyle(e).borderRadius.split(" ").includes("999px"),
-      )
-      .map((e) => e.outerHTML.slice(0, 100)),
-  );
-  expect(pills).toEqual([]);
-});
-
-test("in light mode the details have dark text on a surface of their own", async ({
+test("the panel has its own surface and dark text in light mode", async ({
   page,
   context,
 }) => {
   await setLook(context, "paper");
   await open(page);
   await card(page, DECK).click();
-  const look = await details(page, DECK).evaluate((el) => {
+  const look = await panel(page).evaluate((el) => {
     const cs = getComputedStyle(el);
-    return { color: cs.color, background: cs.backgroundColor };
+    return { color: cs.color };
   });
   expect(look.color).not.toBe("rgb(255, 255, 255)");
-  expect(look.background).not.toBe("rgba(0, 0, 0, 0)");
-  expect(look.background).not.toBe("transparent");
 });
 
-test("the keyboard reaches every control, each with a visible outline", async ({
+test("the keyboard reaches every control in order, each with a visible outline", async ({
   page,
 }) => {
-  await open(page);
+  await open(page, "?view=grid");
   const focused = () =>
     page.evaluate(() => {
       const el = document.activeElement as HTMLElement;
       const cs = getComputedStyle(el);
       return {
-        // A card is named by its file name (the type tile before it is decoration).
         name: (
           el.getAttribute("aria-label") ??
           el.querySelector("[title]")?.textContent ??
@@ -677,22 +1223,33 @@ test("the keyboard reaches every control, each with a visible outline", async ({
         ).trim(),
         outlined:
           cs.outlineStyle !== "none" && Number.parseFloat(cs.outlineWidth) >= 2,
-        inDialog: !!el.closest('[role="dialog"]'),
       };
     });
-
-  // Tabs, then the filter, then every card in order, then Load more.
-  await tab(page, "Mine").focus();
-  await page.keyboard.press("Shift+Tab");
-  await page.keyboard.press("Tab");
-  const mine = visibleFiles(DATA.files, "mine", "");
+  await scope(page, "All files").focus();
+  const newest = [...DATA.files].sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
   const expected = [
+    /^All files/,
     /^Mine/,
     /^Shared with me/,
-    /^All/,
-    /^Filter files$/,
-    ...mine.map((f) => new RegExp(`^${escaped(f.name)}`)),
-    /^Load more$/,
+    /^Harbour/,
+    /^More for Harbour$/,
+    /^Proposals/,
+    /^More for Proposals$/,
+    /^Inspiration/,
+    /^More for Inspiration$/,
+    /New folder$/,
+    /^By session$/,
+    /^Grid$/,
+    /^Filter by name$/,
+    /^Upload$/,
+    /^Type/,
+    /^Date/,
+    /^Session/,
+    /^Agent/,
+    /^Owner/,
+    ...newest.map((f) => new RegExp(`^${escaped(f.name)}`)),
   ];
   for (const [i, want] of expected.entries()) {
     const at = await focused();
@@ -701,78 +1258,22 @@ test("the keyboard reaches every control, each with a visible outline", async ({
     await page.keyboard.press("Tab");
   }
 
-  // Enter on an image card opens the viewer with the focus on Close.
-  await card(page, PHOTO).focus();
-  await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", { name: PHOTO.name });
-  await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
-  await expect(dialog.getByRole("img", { name: PHOTO.name })).toBeVisible();
-  const seen = new Set<string>();
-  for (let i = 0; i < 12; i++) {
-    const at = await focused();
-    expect(at.inDialog, `focus left the dialog at ${at.name}`).toBe(true);
-    expect(at.outlined, `outline on ${at.name}`).toBe(true);
-    seen.add(at.name);
-    await page.keyboard.press(i < 8 ? "Tab" : "Shift+Tab");
-  }
-  for (const name of ["Close", "Download", "Delete", "Next file"])
-    expect([...seen]).toContain(name);
-
-  // The page behind the viewer cannot be reached at all.
-  expect(
-    await page.evaluate(() => {
-      const main = document.querySelector("main")!;
-      return main.inert || !!main.closest("[inert]");
-    }),
-  ).toBe(true);
-
-  // Enter on a deck opens its details with the focus inside; Tab walks its controls.
-  await page.keyboard.press("Escape");
+  // The panel comes after the files.
   await card(page, DECK).focus();
   await page.keyboard.press("Enter");
-  await expect(
-    details(page, DECK).getByRole("button", { name: "Download" }),
-  ).toBeFocused();
-  expect((await focused()).outlined).toBe(true);
-  await page.keyboard.press("Tab");
-  expect(await focused()).toMatchObject({ name: "Delete", outlined: true });
-});
-
-test("a thumbnail whose link no longer works falls back to the type tile", async ({
-  page,
-}) => {
-  await open(page, "?stale=1");
-  await tab(page, "All").click();
-  const list = page.getByRole("list", { name: "Files" });
-  // A thumbnail fails when it is asked for, and lazy ones are asked for when they come into
-  // view: the first card has turned already, the rest turn as the grid is scrolled to them.
-  await expect(
-    list.locator("li", { hasText: "site-photo-north-elevation.png" }),
-  ).not.toContainText("Loading");
-  await expect(
-    list
-      .locator("li", { hasText: "site-photo-north-elevation.png" })
-      .locator("img"),
-  ).toHaveCount(0);
-  // The cards are scrolled to, not the images: an image leaves the page the moment it fails, and
-  // scrolling to one that has just left fails the step.
-  const items = list.locator("li");
-  for (let i = 0; i < (await items.count()); i++) {
-    await items.nth(i).scrollIntoViewIfNeeded();
-    await page.waitForTimeout(100);
+  await expect(panel(page)).toBeVisible();
+  await panel(page).getByRole("button", { name: "Close details" }).focus();
+  const inPanel: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press("Tab");
+    const at = await focused();
+    expect(at.outlined, `outline on ${at.name}`).toBe(true);
+    inPanel.push(at.name);
   }
-  await expect(list.locator("img")).toHaveCount(0);
-  await expect(
-    list.locator("li", { hasText: "site-photo-north-elevation.png" }),
-  ).toContainText("PNG");
-});
-
-test("with no files the screen says where they come from", async ({ page }) => {
-  await open(page, "?empty=1");
-  await expect(page.getByRole("main")).toContainText(
-    "No files yet. Files your agents save appear here.",
-  );
-  await expect(tab(page, "All")).toHaveAttribute("aria-pressed", "true");
-  await expect(cards(page)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+  expect(inPanel).toEqual([
+    "Download",
+    "Add to folder",
+    "Delete",
+    "Change home note",
+  ]);
 });
