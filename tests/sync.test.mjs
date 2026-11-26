@@ -92,7 +92,10 @@ test("the sync identity cannot touch a table directly", async () => {
 test("the sync identity is refused every person-only function", async () => {
   const t = await setupHive();
   const s = await syncFor(t, "dani");
-  await assert.rejects(t.as(s.claims, `select public.create_hive('x', 'x')`));
+  await assert.rejects(
+    t.as(s.claims, `select public.create_hive('x', 'x')`),
+    /sign in as a person to create a hive/,
+  );
   await assert.rejects(
     t.as(s.claims, `select * from public.create_agent($1, 'a', 'other')`, [
       t.ws.dani,
@@ -115,6 +118,7 @@ test("the sync identity may upload only under its own workspace", async () => {
       `insert into storage.objects (bucket_id, name) values ('files', $1)`,
       [`${t.members.ahmed}/${t.ws.ahmed}/vault/aa/x.pdf`],
     ),
+    /row-level security/,
   );
 });
 
@@ -186,4 +190,159 @@ test("an app pass cannot make a sync key", async () => {
     ),
     /only a person makes a sync key/,
   );
+});
+
+// Stand-ins for the security-definer sync_* functions of a later task: they run one
+// statement as the definer, so the triggers see the sync identity as they will there.
+async function standIn(t, name, args, sql) {
+  await t.db.exec("reset role");
+  await t.db.query(
+    `create function public.${name}(${args}) returns void
+       language sql security definer set search_path = '' as $$ ${sql} $$`,
+  );
+  await t.db.query(
+    `grant execute on function public.${name}(${args}) to authenticated`,
+  );
+}
+
+const KEEPS = /the sync only changes the notes it keeps/;
+const KEEPS_FILES = /the sync only changes the files it keeps/;
+const OWN_WS = /the sync writes only in its own workspace/;
+
+test("the sync adopts only an unsynced note of its own workspace", async () => {
+  const t = await setupHive();
+  const theirs = await t.addNote("ahmed", "Theirs");
+  const mine = await t.addNote("dani", "Mine");
+  const s = await syncFor(t, "dani");
+  await standIn(
+    t,
+    "zz_adopt",
+    "p uuid, k uuid",
+    `update public.notes set synced_by = k where id = p`,
+  );
+  await assert.rejects(
+    t.as(s.claims, `select public.zz_adopt($1, $2)`, [theirs.id, s.keyId]),
+    KEEPS,
+  );
+  await t.as(s.claims, `select public.zz_adopt($1, $2)`, [mine.id, s.keyId]);
+  const row = (
+    await t.db.query(`select synced_by from public.notes where id = $1`, [
+      mine.id,
+    ])
+  ).rows[0];
+  assert.equal(row.synced_by, s.keyId);
+});
+
+test("the sync cannot edit a note another member's key keeps, or clear its mark", async () => {
+  const t = await setupHive();
+  const theirs = await t.addNote("ahmed", "Theirs");
+  const mine = await t.addNote("dani", "Mine");
+  const other = await syncFor(t, "ahmed");
+  const s = await syncFor(t, "dani");
+  await markSynced(t, "notes", theirs.id, other.keyId);
+  await markSynced(t, "notes", mine.id, s.keyId);
+  await standIn(
+    t,
+    "zz_edit",
+    "p uuid",
+    `update public.notes set body = 'changed' where id = p`,
+  );
+  await standIn(
+    t,
+    "zz_clear",
+    "p uuid",
+    `update public.notes set synced_by = null where id = p`,
+  );
+  await assert.rejects(
+    t.as(s.claims, `select public.zz_edit($1)`, [theirs.id]),
+    KEEPS,
+  );
+  await assert.rejects(
+    t.as(s.claims, `select public.zz_clear($1)`, [mine.id]),
+    KEEPS,
+  );
+  await t.as(s.claims, `select public.zz_edit($1)`, [mine.id]);
+});
+
+test("the sync inserts notes and files only in its own workspace", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  await standIn(
+    t,
+    "zz_note",
+    "m uuid, w uuid",
+    `insert into public.notes (hive_id, member_id, workspace_id, path, title)
+     values ('00000000-0000-0000-0000-000000000000', m, w, 'x.md', 'x')`,
+  );
+  await assert.rejects(
+    t.as(s.claims, `select public.zz_note($1, $2)`, [
+      t.members.ahmed,
+      t.ws.ahmed,
+    ]),
+    OWN_WS,
+  );
+  await t.as(s.claims, `select public.zz_note($1, $2)`, [
+    t.members.dani,
+    t.ws.dani,
+  ]);
+  await standIn(
+    t,
+    "zz_file",
+    "m uuid, w uuid, sp text",
+    `insert into public.files (hive_id, member_id, workspace_id, storage_path, name, size_bytes)
+     select h.hive_id, m, w, m || '/' || w || '/' || sp, 'a.pdf', 1 from public.members h where h.id = m`,
+  );
+  await assert.rejects(
+    t.as(s.claims, `select public.zz_file($1, $2, 'p1')`, [
+      t.members.ahmed,
+      t.ws.ahmed,
+    ]),
+    OWN_WS,
+  );
+  await t.as(s.claims, `select public.zz_file($1, $2, 'p2')`, [
+    t.members.dani,
+    t.ws.dani,
+  ]);
+  const row = (
+    await t.db.query(
+      `select synced_by from public.files where storage_path like '%/p2'`,
+    )
+  ).rows[0];
+  assert.equal(row.synced_by, s.keyId);
+});
+
+test("the sync changes only the files its key keeps", async () => {
+  const t = await setupHive();
+  const theirs = await t.saveFile(t.person("ahmed"), "ahmed", "t.pdf");
+  const mine = await t.saveFile(t.person("dani"), "dani", "m.pdf");
+  const unkept = await t.saveFile(t.person("dani"), "dani", "u.pdf");
+  const other = await syncFor(t, "ahmed");
+  const s = await syncFor(t, "dani");
+  await markSynced(t, "files", theirs.id, other.keyId);
+  await markSynced(t, "files", mine.id, s.keyId);
+  await standIn(
+    t,
+    "zz_vpath",
+    "p uuid, v text",
+    `update public.files set vault_path = v where id = p`,
+  );
+  await standIn(
+    t,
+    "zz_fclear",
+    "p uuid",
+    `update public.files set synced_by = null where id = p`,
+  );
+  await assert.rejects(
+    t.as(s.claims, `select public.zz_vpath($1, 'a')`, [theirs.id]),
+    KEEPS_FILES,
+  );
+  await assert.rejects(
+    t.as(s.claims, `select public.zz_vpath($1, 'a')`, [unkept.id]),
+    KEEPS_FILES,
+  );
+  await assert.rejects(
+    t.as(s.claims, `select public.zz_fclear($1)`, [mine.id]),
+    KEEPS_FILES,
+  );
+  await t.as(s.claims, `select public.zz_vpath($1, 'a')`, [mine.id]);
 });

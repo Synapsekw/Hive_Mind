@@ -236,12 +236,13 @@ declare
   k public.sync_keys;
   -- An agent or an app: its dates are the real moment. sync: the sync is not limited; it
   -- sends the file's dates, as an import does.
-  limited boolean := (public.jwt_agent_id() is not null and public.jwt_sync_key() is null)
+  limited boolean := (public.jwt_agent_id() is not null and sync_key is null)
                   or public.jwt_oauth_client() is not null
                   or public.jwt_is_self_hosted();
   person boolean;
   earliest constant timestamptz := timestamptz '1990-01-01 00:00:00+00';
 begin
+  -- A signed-in person: may set the two dates, within the rules below.
   person := not limited and (select auth.uid()) is not null;
   if sync_key is not null then
     select * into k from public.sync_keys where id = sync_key;
@@ -272,6 +273,9 @@ begin
       end if;
       new.quarantined := public.jwt_is_self_hosted();
     end if;
+    -- created_at and updated_at: an agent, an app or a self-hosted claim gets now. A person's
+    -- are held between 1990-01-01 and now, updated_at never before created_at. The server with
+    -- no caller is not checked.
     if limited then
       new.created_at := now();
       new.updated_at := now();
@@ -291,11 +295,14 @@ begin
   -- sync: the sync changes only the notes its key's family keeps, or adopts a note of its own
   -- member and workspace that nobody keeps yet.
   if sync_key is not null then
-    if not (old.synced_by in (select public._sync_family(sync_key))
-            or (old.synced_by is null and new.synced_by = sync_key
-                and old.member_id = k.member_id and old.workspace_id = k.workspace_id))
-       or new.synced_by is null
-       or new.synced_by not in (select public._sync_family(sync_key)) then
+    -- Every arm is a real boolean (a null IN is null, and an IF on null does not raise).
+    if not coalesce(
+         ((old.synced_by is not null
+           and old.synced_by in (select public._sync_family(sync_key)))
+          or (old.synced_by is null and new.synced_by is not distinct from sync_key))
+         and old.member_id = k.member_id and old.workspace_id = k.workspace_id
+         and new.synced_by is not null
+         and new.synced_by in (select public._sync_family(sync_key)), false) then
       raise exception 'the sync only changes the notes it keeps';
     end if;
   elsif (select auth.uid()) is not null then
@@ -322,6 +329,8 @@ begin
     or (sync_key is null and new.folder_id is distinct from old.folder_id)) then
     raise exception 'agents cannot change sharing';
   end if;
+  -- Null keeps the old created_at; a value that was sent is held between the floor and now
+  -- (greatest and least skip a null, so null is handled first).
   if limited then
     new.created_at := old.created_at;
   elsif person and new.created_at is distinct from old.created_at then
@@ -331,6 +340,8 @@ begin
       new.created_at := greatest(least(new.created_at, now()), earliest);
     end if;
   end if;
+  -- A change of content stamps updated_at as now, except that a person (an import) may send
+  -- the date of the change with it; the version goes up and written_by_agent is set either way.
   if new.title <> old.title or new.body <> old.body or new.frontmatter <> old.frontmatter then
     new.version := old.version + 1;
     if person and new.updated_at is distinct from old.updated_at then
@@ -365,10 +376,23 @@ create function public.files_sync_columns() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare
   sync_key uuid := public.jwt_sync_key();
+  k public.sync_keys;
 begin
   if sync_key is not null then
+    select * into k from public.sync_keys where id = sync_key;
     if tg_op = 'INSERT' then
+      if new.member_id <> k.member_id or new.workspace_id <> k.workspace_id then
+        raise exception 'the sync writes only in its own workspace';
+      end if;
       new.synced_by := sync_key;
+    elsif not coalesce(
+         old.synced_by is not null
+         and old.synced_by in (select public._sync_family(sync_key))
+         and old.member_id = k.member_id and old.workspace_id = k.workspace_id
+         and new.member_id = old.member_id and new.workspace_id = old.workspace_id
+         and new.synced_by is not null
+         and new.synced_by in (select public._sync_family(sync_key)), false) then
+      raise exception 'the sync only changes the files it keeps';
     end if;
     return new;
   end if;
