@@ -5481,6 +5481,10 @@ test("every function refuses an app pass except connector_login", async () => {
   const byToken = ["agent_login", "sync_login"];
   // Answers only for the sync's own claims: null for a person and for a pass.
   const bySyncClaim = ["jwt_sync_key"];
+  // A restrictive Storage gate that narrows only the sync's own claims: for a
+  // person and a pass it lets through what the other policies decide (true,
+  // proved below), so a pass gains nothing from it.
+  const syncNarrows = ["sync_object_ok"];
   // Refused to a pass in their own words: only a person makes or revokes a key.
   const forSyncKeys = ["create_sync_key", "revoke_sync_key"];
   // Refused to anyone but the sync's own identity: a person and a pass both get
@@ -5624,6 +5628,7 @@ test("every function refuses an app pass except connector_login", async () => {
     ...pure,
     ...byToken,
     ...bySyncClaim,
+    ...syncNarrows,
     ...forSyncKeys,
     ...forSync,
     ...forApps,
@@ -5672,6 +5677,13 @@ test("every function refuses an app pass except connector_login", async () => {
   }
 
   const first = (r) => (r.rows.length ? Object.values(r.rows[0])[0] : null);
+  for (const who of [kai, pass]) {
+    const r = await trial(who, `select public.sync_object_ok($1)`, [
+      ca.filePath,
+    ]);
+    assert.equal(r.error, undefined, r.error?.message);
+    assert.equal(first(r), true, "sync_object_ok narrows only the sync");
+  }
   for (const [name, [sql, params = [], raises = false]] of Object.entries(
     calls,
   )) {

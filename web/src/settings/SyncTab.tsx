@@ -1,13 +1,14 @@
 "use client";
 
 // The Sync tab: one row per workspace with the state of its sync key, a ⋯ menu to make or revoke
-// it, then the recent runs and the files the latest run left out as too big. What a press does
+// it, then the recent runs and the files the latest finished run left out as too big. What a press does
 // lives in `Settings`, which also holds the new key until Done and draws it in `TokenDialog`;
 // this file never sees a key. Making a key while one is live asks first, because it ends the
 // live one. Everything shown comes from `SettingsData`: opening the tab asks the server for
 // nothing.
 import { useEffect, useRef, useState } from "react";
 import { RowMenu } from "./RowMenu";
+import { newestFinished } from "./runs";
 import {
   FAILED,
   SYNC_INTRO,
@@ -69,7 +70,8 @@ export function SyncTab({
   // Where the focus goes after the next render: a row's button.
   const target = useRef<{ id: string; pick: "keep" | "menu" } | null>(null);
   const live = keys.filter((k) => k.status === "active");
-  const latest = runs[0] ?? null;
+  // The too-big list is a finished run's: a run still going has not listed its files yet.
+  const latest = newestFinished(runs);
   const active = live.length;
   // The workspace a run was for, by its key (a key outlives its revoking, so it is still here).
   const nameOf = (r: SyncRun) =>

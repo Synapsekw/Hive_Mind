@@ -33,7 +33,9 @@ import { walk, type Entry } from "./walk.ts";
 
 export const PAGE = 2000;
 export const BATCH_NOTES = 50;
-export const BATCH_BYTES = 1_000_000;
+/** Under the database's 1 MB a batch, with room to spare. */
+export const BATCH_BYTES = 990_000;
+/** A note's size on disk, and its text as the database counts it (`noteBytes`). */
 export const MAX_NOTE_BYTES = 1_000_000;
 export const MAX_FILE_BYTES = 52_428_800;
 export const BATCH_FILES = 200;
@@ -107,11 +109,12 @@ function readNote(e: Entry, sha256: string, now: number): NoteUp {
   const dates = noteDates(parsed.frontmatter, e.path, e.mtimeMs, now);
   return {
     path: e.path,
-    title: (
-      parsed.title ||
-      nameOf(e.path).replace(/\.md$/i, "") ||
-      "Untitled"
-    ).slice(0, 1000),
+    // Cut by characters, as the database counts them: a cut inside one is not valid text.
+    title: Array.from(
+      parsed.title || nameOf(e.path).replace(/\.md$/i, "") || "Untitled",
+    )
+      .slice(0, 1000)
+      .join(""),
     body: parsed.body,
     frontmatter: parsed.frontmatter,
     sha256,
@@ -120,10 +123,34 @@ function readNote(e: Entry, sha256: string, now: number): NoteUp {
   };
 }
 
-const noteBytes = (n: NoteUp): number =>
-  utf8(n.title) + utf8(n.body) + utf8(JSON.stringify(n.frontmatter));
+/**
+ * The bytes of a JSON value as the database's jsonb prints it, or more: jsonb puts a space after
+ * every ":" and ",", and prints a number in full (1e300 as 301 digits), so a plain
+ * `JSON.stringify` counts too few.
+ */
+export function jsonbBytes(v: unknown): number {
+  const list = (n: number) => 2 + Math.max(0, n - 1) * 2; // brackets, ", " between
+  if (Array.isArray(v))
+    return v.reduce<number>((a, x) => a + jsonbBytes(x), list(v.length));
+  if (v !== null && typeof v === "object") {
+    const fields = Object.entries(v).filter(([, x]) => x !== undefined);
+    return fields.reduce<number>(
+      (a, [k, x]) => a + utf8(JSON.stringify(k)) + 2 + jsonbBytes(x),
+      list(fields.length),
+    );
+  }
+  const s = JSON.stringify(v) ?? "null";
+  if (typeof v !== "number") return utf8(s);
+  // "1e+300" or "1.5e-7": at most the exponent's digits more, and "0." in front.
+  const e = s.indexOf("e");
+  return s.length + (e === -1 ? 0 : Math.abs(Number(s.slice(e + 1))) + 2);
+}
 
-/** Batches of at most 50 notes and 1 MB of text; a note that alone is over goes by itself. */
+/** A note's text as `sync_put_notes` counts it, or more. */
+export const noteBytes = (n: NoteUp): number =>
+  utf8(n.title) + utf8(n.body) + jsonbBytes(n.frontmatter);
+
+/** Batches of at most 50 notes and 990 kB of text; a note that alone is over goes by itself. */
 export function noteBatches(notes: NoteUp[]): NoteUp[][] {
   const out: NoteUp[][] = [];
   let cur: NoteUp[] = [];
@@ -236,18 +263,25 @@ export async function runOnce(o: RunOptions): Promise<Report> {
 
     // Notes first, so a file's home note exists when the file is recorded.
     const noteUps: NoteUp[] = [];
+    // A note under 1 MB on disk can still be over it as the database counts its text (a long
+    // name for a title, frontmatter printed with spaces): listed as too big like one on disk,
+    // never sent (the batch would be refused every run), never deleted.
+    const take = (n: NoteUp) => {
+      if (noteBytes(n) > MAX_NOTE_BYTES) {
+        tooBig.push(n.path);
+        unreadable.add(n.path);
+      } else noteUps.push(n);
+    };
     for (const path of [...newPaths, ...plan.changed].filter(isNote)) {
       try {
-        noteUps.push(
-          readNote(byPath.get(path)!, prints.get(path)!.sha256, now()),
-        );
+        take(readNote(byPath.get(path)!, prints.get(path)!.sha256, now()));
       } catch {
         unreadable.add(path);
       }
     }
     for (const m of moves.filter((x) => isNote(x.to))) {
       try {
-        noteUps.push({
+        take({
           ...readNote(byPath.get(m.to)!, prints.get(m.to)!.sha256, now()),
           from: m.from,
         });
@@ -255,6 +289,7 @@ export async function runOnce(o: RunOptions): Promise<Report> {
         unreadable.add(m.to);
       }
     }
+    counts.too_big = tooBig.length;
     for (const batch of noteBatches(noteUps)) {
       const r = await o.store.putNotes(runId, batch);
       const sent = new Map(batch.map((n) => [n.path, n]));

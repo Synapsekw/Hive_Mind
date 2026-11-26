@@ -38,6 +38,7 @@ import {
   notify,
   plist,
   removeAgent,
+  type Phrase,
 } from "./mac.ts";
 import { restStore } from "./rest-store.ts";
 import { runOnce, type Report } from "./run.ts";
@@ -148,11 +149,18 @@ export async function now(
       `ok added ${c.added} changed ${c.changed} moved ${c.moved} deleted ${c.deleted} skipped ${c.skipped} too-big ${c.too_big} held-back ${r.refusedDeletes} failed ${r.failed.length} deferred ${r.deferred}`,
     );
     state.failuresInRow = 0;
+    // A good run clears what was told, so a fault that comes back is told again; held-back
+    // deletes are the exception: the same count is told once, a new count again, and a run
+    // with none clears it.
+    const held: Phrase | null =
+      r.refusedDeletes > 0
+        ? `Hive sync held back ${Math.trunc(Number(r.refusedDeletes))} deletions. Run hive-sync --confirm-deletes to let them through.`
+        : null;
+    const told = held !== null && state.notified.includes(held);
     state.notified = [];
-    if (r.refusedDeletes > 0) {
-      d.notify(
-        `Hive sync held back ${Math.trunc(Number(r.refusedDeletes))} deletions. Run hive-sync --confirm-deletes to let them through.`,
-      );
+    if (held !== null) {
+      if (!told) d.notify(held);
+      state.notified.push(held);
     }
     state.last = {
       at: new Date().toISOString(),
@@ -287,6 +295,17 @@ async function setup(c: Extract<Command, { cmd: "setup" }>): Promise<number> {
   return 0;
 }
 
+/** launchd's StartInterval in the agent's plist. */
+const EVERY_MS = 900_000;
+
+/** The status line for the next run: the last run's time plus 15 minutes, when one is known. */
+export function nextRun(lastAt: string | undefined): string {
+  const t = lastAt ? Date.parse(lastAt) : NaN;
+  return Number.isFinite(t)
+    ? `Next run: ${new Date(t + EVERY_MS).toISOString()}`
+    : "Next run: at the next login or within 15 minutes";
+}
+
 function status(): number {
   const config = loadConfig();
   const state = loadState();
@@ -302,6 +321,7 @@ function status(): number {
     if (l.failed) console.log(`${l.failed} items failed on the last run`);
   }
   console.log("Runs every 15 minutes and at login.");
+  console.log(nextRun(state.last?.at));
   if (existsSync(paths.log)) {
     const lines = readFileSync(paths.log, "utf8")
       .trimEnd()

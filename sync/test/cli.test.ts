@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  nextRun,
   now,
   parseArgs,
   replaceKey,
@@ -119,6 +120,61 @@ test("a refused key is told once", async () => {
   assert.deepEqual(t.notes, [
     "Your sync key was refused. Run hive-sync setup.",
   ]);
+});
+
+test("held-back deletes are told once per count, and again after a run without", async () => {
+  let held = 30;
+  const t = nowDeps(async () => report({ refusedDeletes: held }));
+  const phrase = (n: number) =>
+    `Hive sync held back ${n} deletions. Run hive-sync --confirm-deletes to let them through.`;
+  await now(false, t.deps);
+  await now(false, t.deps);
+  assert.deepEqual(t.notes, [phrase(30)]);
+  held = 40;
+  await now(false, t.deps);
+  assert.deepEqual(t.notes, [phrase(30), phrase(40)]);
+  // An outage in between does not repeat it.
+  const real = t.deps.run;
+  t.deps.run = () => Promise.reject(new Unreachable("x"));
+  await now(false, t.deps);
+  t.deps.run = real;
+  await now(false, t.deps);
+  assert.deepEqual(t.notes, [phrase(30), phrase(40)]);
+  // A run with nothing held back clears it: the same count later is told again.
+  held = 0;
+  await now(false, t.deps);
+  assert.deepEqual(t.state.notified, []);
+  held = 40;
+  await now(false, t.deps);
+  assert.deepEqual(t.notes, [phrase(30), phrase(40), phrase(40)]);
+});
+
+test("a refused key told before is told again after a good run", async () => {
+  let refuse = true;
+  const t = nowDeps(() =>
+    refuse ? Promise.reject(new KeyRefused("x")) : Promise.resolve(report({})),
+  );
+  await now(false, t.deps);
+  refuse = false;
+  await now(false, t.deps);
+  refuse = true;
+  await now(false, t.deps);
+  assert.equal(t.notes.length, 2);
+});
+
+test("status tells when the next run is due", () => {
+  assert.equal(
+    nextRun("2026-11-26T10:00:00.000Z"),
+    "Next run: 2026-11-26T10:15:00.000Z",
+  );
+  assert.equal(
+    nextRun(undefined),
+    "Next run: at the next login or within 15 minutes",
+  );
+  assert.equal(
+    nextRun("not a time"),
+    "Next run: at the next login or within 15 minutes",
+  );
 });
 
 function keyDeps(opts: { signIn?: () => Promise<void>; format?: boolean }) {

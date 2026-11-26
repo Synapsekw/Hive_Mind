@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fixtureSettings } from "./fixture";
+import { newestFinished } from "./runs";
 import { runSummary, setupCommand } from "./text";
 
 describe("sync text", () => {
@@ -51,5 +52,18 @@ describe("sync text", () => {
     expect(d.syncRuns).toHaveLength(3);
     expect(d.syncRuns[0]!.tooBigPaths).toEqual(["talks/keynote.key"]);
     expect(d.syncRuns[0]!.heldBack).toBe(40);
+  });
+  it("the too-big list is the newest finished run's, not one still going", () => {
+    const d = fixtureSettings();
+    const going = {
+      ...d.syncRuns[0]!,
+      id: "going",
+      startedAt: "2026-11-26T12:00:00.000Z",
+      finishedAt: null,
+      tooBigPaths: [],
+    };
+    expect(newestFinished([going, ...d.syncRuns])).toBe(d.syncRuns[0]);
+    expect(newestFinished([going])).toBeNull();
+    expect(newestFinished([])).toBeNull();
   });
 });

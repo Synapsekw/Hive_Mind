@@ -3,7 +3,8 @@
 -- an agent meets holds for it too, and it carries a sync_key_id claim. Its extra powers (moving
 -- and deleting the notes and files it keeps, adopting imported notes, written dates) exist only
 -- inside the sync_* functions below, which check the key is live. Restrictive policies keep it
--- off every table; only storage uploads under its own workspace go through directly.
+-- off every table; in Storage it uploads and reads directly, and only under its live key's own
+-- <member>/<workspace>/vault/ folder (objects_sync_own_vault).
 -- Spec: docs/superpowers/specs/2026-11-26-vault-sync-design.md.
 
 -- ------------------------------------------------------------------ tables
@@ -492,6 +493,21 @@ begin
 end
 $$;
 
+-- Storage: the sync identity reads and stores objects only under its live key's own
+-- <member>/<workspace>/vault/ folder, never another workspace of its member, never the rest of
+-- its own workspace. Every other caller passes (the claim is absent). A revoked key matches
+-- no folder. Definer functions (sync_put_files' check that an object is stored) are not held.
+create function public.sync_object_ok(p_name text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select not public.jwt_has_sync_claim()
+      or coalesce((
+           select left(p_name, length(x.prefix)) = x.prefix
+             from (select k.member_id::text || '/' || k.workspace_id::text || '/vault/' as prefix
+                     from public.sync_keys k where k.id = public.jwt_sync_key()) x), false)
+$$;
+create policy objects_sync_own_vault on storage.objects as restrictive for all to authenticated
+  using (public.sync_object_ok(name)) with check (public.sync_object_ok(name));
+
 -- An app pass sees no sync rows either.
 create policy sync_keys_no_app on public.sync_keys as restrictive for all to authenticated
   using (public.jwt_oauth_client() is null) with check (public.jwt_oauth_client() is null);
@@ -508,6 +524,8 @@ revoke all on function public.revoke_sync_key(uuid) from public, anon;
 revoke all on function public.sync_login(text) from public;
 grant execute on function public.jwt_has_sync_claim() to authenticated;
 grant execute on function public.jwt_sync_key() to authenticated;
+revoke all on function public.sync_object_ok(text) from public, anon;
+grant execute on function public.sync_object_ok(text) to authenticated;
 grant execute on function public.create_sync_key(uuid) to authenticated;
 grant execute on function public.revoke_sync_key(uuid) to authenticated;
 grant execute on function public.sync_login(text) to anon, authenticated;
@@ -753,10 +771,12 @@ begin
                          public._sync_date(e ->> 'created_at')))
         returning id into v_id;
       else
+        -- A note the vault has is never generated, even at a path a "Vault files" note was
+        -- made for: else the plan would not count it as kept, and a finish could remove it.
         update public.notes set
           path = v_path, folder_id = v_folder,
           title = e ->> 'title', body = e ->> 'body', frontmatter = e -> 'frontmatter',
-          synced_by = k.id, sync_sha256 = e ->> 'sha256',
+          synced_by = k.id, sync_sha256 = e ->> 'sha256', sync_generated = false,
           created_at = coalesce(public._sync_date(e ->> 'created_at'), n.created_at),
           updated_at = coalesce(public._sync_date(e ->> 'updated_at'), n.updated_at)
          where id = n.id

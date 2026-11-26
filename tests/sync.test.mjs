@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setupHive } from "./helpers/hive.mjs";
 import { syncFor, markSynced } from "./helpers/sync.mjs";
+import { noteBatches, noteBytes } from "../sync/src/run.ts";
 
 test("a person makes a sync key for an own workspace; it is shown once", async () => {
   const t = await setupHive();
@@ -120,6 +121,61 @@ test("the sync identity may upload only under its own workspace", async () => {
     ),
     /row-level security/,
   );
+});
+
+test("the sync identity reads and writes Storage only under its own vault folder", async () => {
+  const t = await setupHive();
+  const second = (
+    await t.db.query(
+      `insert into public.workspaces (hive_id, member_id, name) values ($1, $2, 'Second') returning id`,
+      [t.hive, t.members.dani],
+    )
+  ).rows[0].id;
+  const dani = `${t.members.dani}/${t.ws.dani}`;
+  const objects = {
+    vault: `${dani}/vault/aa/x.pdf`,
+    outputs: `${dani}/outputs/y.pdf`,
+    otherWs: `${t.members.dani}/${second}/vault/aa/z.pdf`,
+    otherMember: `${t.members.ahmed}/${t.ws.ahmed}/vault/aa/w.pdf`,
+  };
+  for (const name of Object.values(objects).slice(1))
+    await t.db.query(
+      `insert into storage.objects (bucket_id, name) values ('files', $1)`,
+      [name],
+    );
+  const s = await syncFor(t, "dani");
+  await t.as(
+    s.claims,
+    `insert into storage.objects (bucket_id, name) values ('files', $1)`,
+    [objects.vault],
+  );
+  const read = async (who) =>
+    (
+      await t.as(
+        who,
+        `select name from storage.objects where bucket_id = 'files' order by name`,
+      )
+    ).map((r) => r.name);
+  assert.deepEqual(await read(s.claims), [objects.vault]);
+  for (const name of [objects.outputs, objects.otherWs])
+    await assert.rejects(
+      t.as(
+        s.claims,
+        `insert into storage.objects (bucket_id, name) values ('files', $1)`,
+        [name.replace(/\.pdf$/, "2.pdf")],
+      ),
+      /row-level security/,
+    );
+  // A revoked key reads nothing, its own folder included.
+  await t.as(t.person("dani"), `select public.revoke_sync_key($1)`, [s.keyId]);
+  assert.deepEqual(await read(s.claims), []);
+  // A person and an agent read what they read before.
+  assert.deepEqual(
+    await read(t.person("dani")),
+    [objects.outputs, objects.vault, objects.otherWs].sort(),
+  );
+  const agent = await t.agentFor("dani");
+  assert.ok((await read(agent)).includes(objects.outputs));
 });
 
 test("a synced note is read-only to the person and their agents", async () => {
@@ -541,6 +597,54 @@ test("a batch over 50 notes or 1 MB of text is refused whole", async () => {
     putNotes(t, s, run, [big]),
     /a batch holds at most 1 MB/,
   );
+});
+
+test("the batches the job makes are measured as the database measures them, and accepted", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  const run = (await openRun(t, s)).run_id;
+  // Frontmatter jsonb prints longer than its JSON: a space after each ":" and ",", numbers in full.
+  const fm = {
+    ...Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`k${i}`, i])),
+    big: 1e300,
+    small: 1.5e-7,
+    words: ["é", "ü", { deep: [1, 2] }],
+  };
+  const a = note("a.md", "a", { frontmatter: fm });
+  const old = (n) =>
+    Buffer.byteLength(n.title) +
+    Buffer.byteLength(n.body) +
+    Buffer.byteLength(JSON.stringify(n.frontmatter));
+  const b = note("b.md", "b", {
+    frontmatter: fm,
+    body: "x".repeat(
+      999_990 - old(a) - old(note("b.md", "b", { frontmatter: fm })),
+    ),
+  });
+  // By its JSON the pair fits in one batch; the database refuses it whole.
+  assert.ok(old(a) + old(b) < 1_000_000);
+  await assert.rejects(
+    putNotes(t, s, run, [a, b]),
+    /a batch holds at most 1 MB/,
+  );
+  // The job's measure is never under the database's.
+  for (const n of [a, b]) {
+    const db = (
+      await t.db.query(
+        `select octet_length($1::jsonb ->> 'title') + octet_length($1::jsonb ->> 'body')
+                + octet_length(($1::jsonb -> 'frontmatter')::text) as n`,
+        [JSON.stringify(n)],
+      )
+    ).rows[0].n;
+    assert.ok(noteBytes(n) >= db, `${n.path}: ${noteBytes(n)} < ${db}`);
+  }
+  const batches = noteBatches([a, b]);
+  assert.equal(batches.length, 2);
+  for (const batch of batches) {
+    const r = await putNotes(t, s, run, batch);
+    assert.equal(r.written.length, batch.length);
+    assert.deepEqual(r.failed, []);
+  }
 });
 
 test("wiki links between synced notes are made and accepted at once", async () => {
@@ -1071,6 +1175,51 @@ test("finishing a run removes a generated note no file lives in", async () => {
     r.run_id,
   ]);
   assert.equal(await count(), 0);
+});
+
+test("a real Vault files note written over a generated one is kept as a real note", async () => {
+  const t = await setupHive();
+  const s = await syncFor(t, "dani");
+  let r = await openRun(t, s);
+  const p = await store(t, s, r.storage_prefix, "9".repeat(32), "h.pdf");
+  await putFiles(t, s, r.run_id, [
+    {
+      path: "h.pdf",
+      name: "h.pdf",
+      size: 1,
+      sha256: sha("9"),
+      mime: "application/pdf",
+      home: "Vault files.md",
+      storage_path: p,
+    },
+  ]);
+  // The vault has its own "Vault files.md": the job sends it as a new note.
+  const w = await putNotes(t, s, r.run_id, [note("Vault files.md", "5")]);
+  assert.equal(w.written.length, 1);
+  await t.as(s.claims, `select public.sync_finish($1, '{}', '{}', null)`, [
+    r.run_id,
+  ]);
+  // Next run: same content, so it is neither new nor changed.
+  r = await openRun(t, s);
+  const next = await plan(t, s, r.run_id, [
+    { path: "Vault files.md", sha256: sha("5"), size: 1 },
+  ]);
+  assert.deepEqual(next.new, []);
+  assert.deepEqual(next.changed, []);
+  // The file is gone from the vault: its row goes, the real note stays.
+  assert.deepEqual(next.gone, ["h.pdf"]);
+  await del(t, s, r.run_id, ["h.pdf"]);
+  await t.as(s.claims, `select public.sync_finish($1, '{}', '{}', null)`, [
+    r.run_id,
+  ]);
+  const rows = (
+    await t.db.query(
+      `select path, body, sync_generated from public.notes where path = 'Vault files.md'`,
+    )
+  ).rows;
+  assert.deepEqual(rows, [
+    { path: "Vault files.md", body: "body 5", sync_generated: false },
+  ]);
 });
 
 test("purging a hive removes its sync keys, runs, orphans, notes and files", async () => {

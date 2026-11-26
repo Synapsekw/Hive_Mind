@@ -11,7 +11,14 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { pathOk, runOnce } from "../src/run.ts";
+import {
+  jsonbBytes,
+  noteBatches,
+  noteBytes,
+  pathOk,
+  runOnce,
+} from "../src/run.ts";
+import type { NoteUp } from "../src/store.ts";
 import { FolderMissing, Unreachable } from "../src/store.ts";
 import { FakeStore } from "./fake-store.ts";
 
@@ -415,4 +422,86 @@ test("finish is called once even when it throws", async () => {
     Unreachable,
   );
   assert.equal(n, 1);
+});
+
+test("a note whose text is over 1 MB once read is listed as too big; the run completes", async () => {
+  const v = vault();
+  // Under 1 MB on disk, over it with the title its long name gives.
+  const name = `${"n".repeat(200)}.md`;
+  v.write(name, "x".repeat(999_900));
+  v.write("ok.md", "ok");
+  const store = new FakeStore();
+  const r = await runOnce({
+    root: v.root,
+    cachePath: v.cachePath,
+    store,
+    confirmDeletes: false,
+  });
+  assert.deepEqual(r.tooBig, [name]);
+  assert.equal(r.counts.too_big, 1);
+  assert.equal(store.notes.has(name), false);
+  assert.equal(store.notes.has("ok.md"), true);
+  assert.equal(store.runs[0]!.finished?.error, null);
+  assert.equal(store.runs[0]!.finished?.counts.too_big, 1);
+});
+
+test("a note is measured as the database prints its frontmatter, or more", () => {
+  // jsonb puts a space after every ":" and ",", and prints a number in full.
+  assert.equal(jsonbBytes({}), 2);
+  assert.equal(
+    jsonbBytes({ a: 1, b: [1, "x", null, true] }),
+    '{"a": 1, "b": [1, "x", null, true]}'.length,
+  );
+  assert.equal(jsonbBytes({ é: "ü" }), Buffer.byteLength('{"é": "ü"}'));
+  assert.ok(jsonbBytes({ n: 1e300 }) >= '{"n": }'.length + 301);
+  assert.ok(jsonbBytes({ n: 1.5e-7 }) >= '{"n": 0.00000015}'.length);
+});
+
+const up = (path: string, over: Partial<NoteUp>): NoteUp => ({
+  path,
+  title: "t",
+  body: "",
+  frontmatter: {},
+  sha256: "0".repeat(64),
+  ...over,
+});
+
+test("two notes under 1 MB by their JSON but over it as the database counts go apart", () => {
+  const fm = Object.fromEntries(
+    Array.from({ length: 2000 }, (_, i) => [`k${i}`, i]),
+  );
+  const old = (n: NoteUp) =>
+    Buffer.byteLength(n.title) +
+    Buffer.byteLength(n.body) +
+    Buffer.byteLength(JSON.stringify(n.frontmatter));
+  const a = up("a.md", { frontmatter: fm });
+  const b = up("b.md", {
+    frontmatter: fm,
+    body: "x".repeat(999_990 - 2 * old(a)),
+  });
+  assert.ok(old(a) + old(b) < 1_000_000);
+  assert.ok(noteBytes(a) + noteBytes(b) > 1_000_000);
+  assert.deepEqual(
+    noteBatches([a, b]).map((x) => x.map((n) => n.path)),
+    [["a.md"], ["b.md"]],
+  );
+});
+
+test("a title is cut by characters, never inside one", async () => {
+  const v = vault();
+  const title = "a".repeat(999) + "\u{1F600}" + "bbb";
+  v.write("T.md", `---\ntitle: ${title}\n---\nbody`);
+  const store = new FakeStore();
+  await runOnce({
+    root: v.root,
+    cachePath: v.cachePath,
+    store,
+    confirmDeletes: false,
+  });
+  const got = store.notes.get("T.md")!.title;
+  // No lone half of a character: the text survives UTF-8 unchanged.
+  assert.equal(/\p{Surrogate}/u.test(got), false);
+  assert.equal(Buffer.from(got, "utf8").toString("utf8"), got);
+  assert.equal(Array.from(got).length, 1000);
+  assert.equal(got, "a".repeat(999) + "\u{1F600}");
 });
