@@ -20,6 +20,8 @@ import { notePairs } from "./links.ts";
 import { loadIgnore } from "./skip.ts";
 import {
   FolderMissing,
+  KeyRefused,
+  Unreachable,
   type Counts,
   type FileUp,
   type ManifestEntry,
@@ -76,6 +78,20 @@ export function storageName(name: string): string {
 /** An object's folder, fixed by the file's path and content. */
 export function objectKey(path: string, sha256: string): string {
   return sha256Hex(`${path}\n${sha256}`).slice(0, 32);
+}
+
+/** The database's `_sync_path_ok`, on the client: a path it refuses would fail every run. */
+export function pathOk(path: string): boolean {
+  const n = [...path].length;
+  return (
+    n >= 1 &&
+    n <= 4000 &&
+    !/(^|\/)\.{1,2}(\/|$)/.test(path) &&
+    !path.includes("//") &&
+    !path.startsWith("/") &&
+    !path.endsWith("/") &&
+    !path.includes("\\")
+  );
 }
 
 function isReadableDir(root: string): boolean {
@@ -139,10 +155,26 @@ export async function runOnce(o: RunOptions): Promise<Report> {
   const byPath = new Map<string, Entry>();
   const prints = new Map<string, Cached>();
   const tooBig: string[] = [];
+  // Paths still in the vault that this run does not record: an unreadable folder or file,
+  // one too big, one the database would refuse, one that failed to upload. An entry also
+  // covers everything below it. None of them is ever deleted.
   const unreadable = new Set(walked.unreadable);
+  const isKept = (p: string): boolean => {
+    if (unreadable.has(p)) return true;
+    for (let i = p.indexOf("/"); i !== -1; i = p.indexOf("/", i + 1))
+      if (unreadable.has(p.slice(0, i))) return true;
+    return false;
+  };
+  let refused = 0;
   for (const e of walked.entries) {
+    if (!pathOk(e.path)) {
+      refused++;
+      unreadable.add(e.path);
+      continue;
+    }
     if (e.size > (isNote(e.path) ? MAX_NOTE_BYTES : MAX_FILE_BYTES)) {
       tooBig.push(e.path);
+      unreadable.add(e.path);
       continue;
     }
     try {
@@ -173,7 +205,7 @@ export async function runOnce(o: RunOptions): Promise<Report> {
     changed: 0,
     moved: 0,
     deleted: 0,
-    skipped: walked.skipped,
+    skipped: walked.skipped + refused,
     too_big: tooBig.length,
   };
   const failed: string[] = [];
@@ -181,6 +213,7 @@ export async function runOnce(o: RunOptions): Promise<Report> {
   let deferred = 0;
 
   const { runId, storagePrefix } = await o.store.openRun(o.confirmDeletes);
+  let finishing = false; // finish is called once, whichever way the run ends
   try {
     let plan: PlanResult | null = null;
     const pages = manifest.length ? chunks(manifest, PAGE) : [[]];
@@ -188,7 +221,12 @@ export async function runOnce(o: RunOptions): Promise<Report> {
       plan = await o.store.plan(runId, pages[i]!, i === pages.length - 1);
     }
     if (!plan) throw new Error("no plan");
-    const added = new Set(plan.new);
+    // A move whose source is still on disk (too big, unreadable, refused) is no move: the
+    // destination goes up as a new item and the source's row stays.
+    const moves = plan.moved.filter((m) => !isKept(m.from));
+    const asNew = plan.moved.filter((m) => isKept(m.from)).map((m) => m.to);
+    const newPaths = [...plan.new, ...asNew];
+    const added = new Set(newPaths);
     const changed = new Set(plan.changed);
     const tally = (path: string, from?: string) => {
       if (from) counts.moved++;
@@ -198,7 +236,7 @@ export async function runOnce(o: RunOptions): Promise<Report> {
 
     // Notes first, so a file's home note exists when the file is recorded.
     const noteUps: NoteUp[] = [];
-    for (const path of [...plan.new, ...plan.changed].filter(isNote)) {
+    for (const path of [...newPaths, ...plan.changed].filter(isNote)) {
       try {
         noteUps.push(
           readNote(byPath.get(path)!, prints.get(path)!.sha256, now()),
@@ -207,7 +245,7 @@ export async function runOnce(o: RunOptions): Promise<Report> {
         unreadable.add(path);
       }
     }
-    for (const m of plan.moved.filter((x) => isNote(x.to))) {
+    for (const m of moves.filter((x) => isNote(x.to))) {
       try {
         noteUps.push({
           ...readNote(byPath.get(m.to)!, prints.get(m.to)!.sha256, now()),
@@ -237,7 +275,7 @@ export async function runOnce(o: RunOptions): Promise<Report> {
     // Then files: upload, then record, at most the run's budget of bytes.
     const fileUps: FileUp[] = [];
     let spent = 0;
-    for (const path of [...plan.new, ...plan.changed].filter(
+    for (const path of [...newPaths, ...plan.changed].filter(
       (p) => !isNote(p),
     )) {
       const e = byPath.get(path)!;
@@ -259,7 +297,15 @@ export async function runOnce(o: RunOptions): Promise<Report> {
       }
       const name = nameOf(path);
       const storage_path = `${storagePrefix}${objectKey(path, sha)}/${storageName(name)}`;
-      await o.store.upload(storage_path, bytes, mimeFor(name));
+      try {
+        await o.store.upload(storage_path, bytes, mimeFor(name));
+      } catch (err) {
+        if (err instanceof KeyRefused || err instanceof Unreachable) throw err;
+        // This file alone failed: leave it for the next run, and go on with the rest.
+        failed.push(path);
+        unreadable.add(path);
+        continue;
+      }
       spent += e.size;
       fileUps.push({
         path,
@@ -271,7 +317,7 @@ export async function runOnce(o: RunOptions): Promise<Report> {
         storage_path,
       });
     }
-    for (const m of plan.moved.filter((x) => !isNote(x.to))) {
+    for (const m of moves.filter((x) => !isNote(x.to))) {
       const name = nameOf(m.to);
       fileUps.push({
         path: m.to,
@@ -304,14 +350,13 @@ export async function runOnce(o: RunOptions): Promise<Report> {
     }
 
     // Deletes last. A too-big or unreadable path is still in the vault: never deleted.
-    const gone = plan.gone.filter(
-      (p) => !unreadable.has(p) && !tooBig.includes(p),
-    );
+    const gone = plan.gone.filter((p) => !isKept(p));
     if (gone.length) {
       const d = await o.store.deletePaths(runId, gone);
       counts.deleted = d.deleted;
       refusedDeletes = d.refused;
     }
+    finishing = true;
     await o.store.finish(
       runId,
       counts,
@@ -319,10 +364,12 @@ export async function runOnce(o: RunOptions): Promise<Report> {
       failed.length ? `${failed.length} items failed` : null,
     );
   } catch (e) {
-    const what = e instanceof Error ? e.constructor.name : "unknown";
-    await o.store
-      .finish(runId, counts, tooBig, `the run stopped: ${what}`)
-      .catch(() => {});
+    if (!finishing) {
+      const what = e instanceof Error ? e.constructor.name : "unknown";
+      await o.store
+        .finish(runId, counts, tooBig, `the run stopped: ${what}`)
+        .catch(() => {});
+    }
     throw e;
   }
   return { counts, tooBig, refusedDeletes, failed, deferred };

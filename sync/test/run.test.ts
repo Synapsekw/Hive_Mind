@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
@@ -10,8 +11,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runOnce } from "../src/run.ts";
-import { FolderMissing } from "../src/store.ts";
+import { pathOk, runOnce } from "../src/run.ts";
+import { FolderMissing, Unreachable } from "../src/store.ts";
 import { FakeStore } from "./fake-store.ts";
 
 const vault = () => {
@@ -195,7 +196,7 @@ test("an interrupted run is finished by the next, with nothing duplicated", asyn
   store.upload = async (p, bytes, type) => {
     if (!failedOnce && p.endsWith("/b.pdf")) {
       failedOnce = true;
-      throw new Error("network");
+      throw new Unreachable("network");
     }
     return real(p, bytes, type);
   };
@@ -207,7 +208,7 @@ test("an interrupted run is finished by the next, with nothing duplicated", asyn
       confirmDeletes: false,
     }),
   );
-  assert.equal(store.runs[0]!.finished!.error, "the run stopped: Error");
+  assert.equal(store.runs[0]!.finished!.error, "the run stopped: Unreachable");
   await runOnce({
     root: v.root,
     cachePath: v.cachePath,
@@ -241,4 +242,177 @@ test("uploads stop at the run's budget; the rest goes up next run", async () => 
   });
   assert.equal(again.deferred, 0);
   assert.equal(store.objects.size, 2);
+});
+
+const rootCanReadAnyway = process.getuid?.() === 0;
+
+test("files in an unreadable subfolder are not deleted", async (t) => {
+  if (rootCanReadAnyway) return t.skip("root reads everything");
+  const v = vault();
+  v.write("sub/Keep.md", "keep");
+  v.write("top.md", "top");
+  const store = new FakeStore();
+  const opts = {
+    root: v.root,
+    cachePath: v.cachePath,
+    store,
+    confirmDeletes: false,
+  };
+  await runOnce(opts);
+  chmodSync(join(v.root, "sub"), 0o000);
+  try {
+    const r = await runOnce(opts);
+    assert.equal(r.counts.deleted, 0);
+    assert.equal(store.kept.has("sub/Keep.md"), true);
+  } finally {
+    chmodSync(join(v.root, "sub"), 0o755);
+  }
+});
+
+test("a file whose fingerprint fails is not deleted", async (t) => {
+  if (rootCanReadAnyway) return t.skip("root reads everything");
+  const v = vault();
+  v.write("a.pdf", "1");
+  v.write("b.pdf", "2");
+  v.write("c.pdf", "3");
+  const store = new FakeStore();
+  const opts = {
+    root: v.root,
+    cachePath: v.cachePath,
+    store,
+    confirmDeletes: false,
+  };
+  await runOnce(opts);
+  // A changed time forces a fresh read, which then fails.
+  writeFileSync(join(v.root, "b.pdf"), "22");
+  chmodSync(join(v.root, "b.pdf"), 0o000);
+  try {
+    const r = await runOnce(opts);
+    assert.equal(r.counts.deleted, 0);
+    assert.equal(store.kept.has("b.pdf"), true);
+  } finally {
+    chmodSync(join(v.root, "b.pdf"), 0o644);
+  }
+});
+
+test("pathOk mirrors the database's _sync_path_ok", () => {
+  assert.equal(pathOk("a/b.md"), true);
+  assert.equal(pathOk("a/.b.md"), true);
+  assert.equal(pathOk("a..b/c"), true);
+  assert.equal(pathOk("x".repeat(4000)), true);
+  assert.equal(pathOk("x".repeat(4001)), false);
+  assert.equal(pathOk(""), false);
+  assert.equal(pathOk("a\\b.pdf"), false);
+  assert.equal(pathOk("a//b"), false);
+  assert.equal(pathOk("/a"), false);
+  assert.equal(pathOk("a/"), false);
+  assert.equal(pathOk("."), false);
+  assert.equal(pathOk("a/./b"), false);
+  assert.equal(pathOk("../b"), false);
+  assert.equal(pathOk("a/.."), false);
+});
+
+test("a path the database refuses is skipped, never sent, never deleted", async () => {
+  const v = vault();
+  v.write("ok.pdf", "1");
+  v.write("a\\b.pdf", "2");
+  const store = new FakeStore();
+  const sent: string[] = [];
+  const plan = store.plan.bind(store);
+  store.plan = async (run, page, last) => {
+    sent.push(...page.map((e) => e.path));
+    return plan(run, page, last);
+  };
+  const opts = {
+    root: v.root,
+    cachePath: v.cachePath,
+    store,
+    confirmDeletes: false,
+  };
+  const r = await runOnce(opts);
+  assert.deepEqual(sent, ["ok.pdf"]);
+  assert.equal(r.counts.skipped, 1);
+  assert.equal(r.counts.added, 1);
+  const again = await runOnce(opts);
+  assert.equal(again.counts.deleted, 0);
+});
+
+test("one file that always fails to upload does not block the others or the run", async () => {
+  const v = vault();
+  v.write("bad.pdf", "1");
+  v.write("good.pdf", "2");
+  v.write("gone.md", "x");
+  const store = new FakeStore();
+  const opts = {
+    root: v.root,
+    cachePath: v.cachePath,
+    store,
+    confirmDeletes: false,
+  };
+  await runOnce({ ...opts, store });
+  unlinkSync(join(v.root, "gone.md"));
+  v.write("bad2.pdf", "3");
+  v.write("good2.pdf", "4");
+  store.failUploadAlways.add("bad2.pdf");
+  const r = await runOnce(opts);
+  assert.deepEqual(r.failed, ["bad2.pdf"]);
+  assert.equal(store.kept.has("good2.pdf"), true);
+  assert.equal(store.kept.has("bad2.pdf"), false);
+  assert.equal(r.counts.deleted, 1);
+  assert.equal(
+    store.runs[store.runs.length - 1]!.finished!.error,
+    "1 items failed",
+  );
+  const again = await runOnce(opts);
+  assert.deepEqual(again.failed, ["bad2.pdf"]);
+  assert.equal(store.kept.has("good2.pdf"), true);
+});
+
+test("a move whose source is still on disk goes up as a new item", async (t) => {
+  if (rootCanReadAnyway) return t.skip("root reads everything");
+  const v = vault();
+  v.write("sub/A.md", "same text");
+  v.write("other.md", "o");
+  const store = new FakeStore();
+  const opts = {
+    root: v.root,
+    cachePath: v.cachePath,
+    store,
+    confirmDeletes: false,
+  };
+  await runOnce(opts);
+  chmodSync(join(v.root, "sub"), 0o000);
+  try {
+    v.write("B.md", "same text");
+    const r = await runOnce(opts);
+    assert.equal(r.counts.moved, 0);
+    assert.equal(r.counts.added, 1);
+    assert.equal(store.notes.get("B.md")!.from, undefined);
+    assert.equal(store.kept.has("sub/A.md"), true);
+  } finally {
+    chmodSync(join(v.root, "sub"), 0o755);
+  }
+});
+
+test("finish is called once even when it throws", async () => {
+  const v = vault();
+  v.write("A.md", "a");
+  const store = new FakeStore();
+  const real = store.finish.bind(store);
+  let n = 0;
+  store.finish = async (...a) => {
+    n++;
+    await real(...a);
+    throw new Unreachable("down");
+  };
+  await assert.rejects(
+    runOnce({
+      root: v.root,
+      cachePath: v.cachePath,
+      store,
+      confirmDeletes: false,
+    }),
+    Unreachable,
+  );
+  assert.equal(n, 1);
 });

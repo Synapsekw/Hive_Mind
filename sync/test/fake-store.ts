@@ -22,7 +22,8 @@ export class FakeStore implements Store {
     finished?: { counts: Counts; error: string | null };
   }[] = [];
   private manifest: ManifestEntry[] = [];
-  failUploadOnce = new Set<string>();
+  /** File names whose upload always throws a plain Error. */
+  failUploadAlways = new Set<string>();
 
   async openRun(confirm: boolean) {
     const prev = this.runs[this.runs.length - 1];
@@ -108,7 +109,8 @@ export class FakeStore implements Store {
 
   async upload(path: string, bytes: Uint8Array, _contentType?: string) {
     this.calls.push("upload");
-    if (this.failUploadOnce.delete(path)) throw new Error("network");
+    if ([...this.failUploadAlways].some((n) => path.endsWith(`/${n}`)))
+      throw new Error("network");
     this.objects.set(path, bytes);
   }
 
