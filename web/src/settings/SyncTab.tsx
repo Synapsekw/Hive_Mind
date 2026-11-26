@@ -12,6 +12,7 @@ import {
   FAILED,
   SYNC_INTRO,
   SYNC_KEEP,
+  SYNC_KEYS_LIST,
   SYNC_LAST_USED,
   SYNC_MAKE,
   SYNC_MAKE_CONFIRM,
@@ -28,6 +29,9 @@ import {
   runLength,
   runSummary,
   runWhen,
+  syncActionsLabel,
+  syncAskLabel,
+  syncRevokeQuestion,
 } from "./text";
 import type { SyncKey, SyncRun, Workspace } from "./types";
 import s from "./settings.module.css";
@@ -120,7 +124,7 @@ export function SyncTab({
         ref={list}
         role="list"
         tabIndex={-1}
-        aria-label="Sync keys"
+        aria-label={SYNC_KEYS_LIST}
         className={s.rows}
       >
         {workspaces.map((w) => {
@@ -159,13 +163,13 @@ export function SyncTab({
                   <>
                     <div
                       role="group"
-                      aria-label={`${isAsking.kind === "make" ? SYNC_MAKE : SYNC_REVOKE} for ${w.name}`}
+                      aria-label={syncAskLabel(isAsking.kind, w.name)}
                       className={s.actions}
                     >
                       <p className={s.ask}>
                         {isAsking.kind === "make"
                           ? SYNC_NEW_KEY_REVOKES
-                          : `${SYNC_REVOKE} for ${w.name}?`}
+                          : syncRevokeQuestion(w.name)}
                       </p>
                       <button
                         type="button"
@@ -200,7 +204,7 @@ export function SyncTab({
                   </>
                 ) : (
                   <RowMenu
-                    label={`Actions for ${w.name}`}
+                    label={syncActionsLabel(w.name)}
                     disabled={off}
                     items={
                       key === null
@@ -259,7 +263,12 @@ export function SyncTab({
       </div>
       {latest !== null && latest.tooBigPaths.length > 0 && (
         <div className={s.syncBlock}>
-          <h3 className={s.label}>{SYNC_TOO_BIG}</h3>
+          <h3 className={s.label}>
+            {SYNC_TOO_BIG}
+            {nameOf(latest) && (
+              <span className={s.count}>{nameOf(latest)}</span>
+            )}
+          </h3>
           <ul role="list" aria-label={SYNC_TOO_BIG} className={s.paths}>
             {latest.tooBigPaths.map((p) => (
               <li key={p} className={s.path}>

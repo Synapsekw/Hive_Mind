@@ -13,6 +13,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   MCP_COMMAND,
   SYNC_KEY_BY_HAND,
+  SYNC_KEY_COPIED,
+  SYNC_KEY_LABEL,
   SYNC_KEY_STEP,
   SYNC_KEY_TITLE,
   SYNC_KEY_WARNING,
@@ -117,7 +119,7 @@ export function TokenDialog({
         </p>
         <div className={s.tokenRow}>
           <label htmlFor={fieldId} className={s.srOnly}>
-            {sync ? "Key" : "Token"}
+            {sync ? SYNC_KEY_LABEL : "Token"}
           </label>
           <input
             id={fieldId}
@@ -151,7 +153,7 @@ export function TokenDialog({
               : BY_HAND
             : copied
               ? sync
-                ? "Key copied."
+                ? SYNC_KEY_COPIED
                 : "Token copied."
               : ""}
         </p>

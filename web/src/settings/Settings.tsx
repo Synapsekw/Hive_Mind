@@ -30,6 +30,8 @@ import { WorkspacesTab } from "./WorkspacesTab";
 import { TAB_NAMES, tabCount, tabsFor, type Tab } from "./tabs";
 import {
   FAILED,
+  SYNC_MADE_SAID,
+  SYNC_REVOKED_SAID,
   inviteFailure,
   sendFailure,
   sentAgain,
@@ -121,6 +123,8 @@ export function Settings({
     token: string;
     name: string;
     variant: "agent" | "sync";
+    /** The workspace a sync key was made for, where the focus returns. */
+    workspaceId?: string;
   } | null>(null);
   // Sync keys answered `ok` to a revoke before the refresh brings them.
   const [syncRevoked, setSyncRevoked] = useState<ReadonlySet<string>>(
@@ -192,6 +196,9 @@ export function Settings({
       ? { ...k, status: "revoked" as const }
       : k,
   );
+  const liveSyncWorkspaces: ReadonlySet<string> = new Set(
+    syncKeys.filter((k) => k.status === "active").map((k) => k.workspaceId),
+  );
   const workspaceName = (id: string) =>
     data.workspaces.find((w) => w.id === id)?.name ?? null;
   const invitations = data.isOwner
@@ -212,9 +219,12 @@ export function Settings({
     else if ("form" in want)
       to = root.querySelector<HTMLElement>(`[data-form="${want.form}"] input`);
     else {
-      const row = [...root.querySelectorAll<HTMLElement>("[data-row]")].find(
-        (el) => el.dataset.row === want.row,
-      );
+      // Only the tab shown: the Workspaces and Sync rows share their workspace's id.
+      const row = [
+        ...root.querySelectorAll<HTMLElement>(
+          '[role="tabpanel"]:not([hidden]) [data-row]',
+        ),
+      ].find((el) => el.dataset.row === want.row);
       // Once the question has closed, "revoke" means the row's ⋯ button, which opens it.
       to = want.pick
         ? (row?.querySelector<HTMLElement>(`[data-pick="${want.pick}"]`) ??
@@ -296,12 +306,12 @@ export function Settings({
       typeof answer.token !== "string" ||
       answer.token === ""
     ) {
-      target.current = null;
+      target.current = { row: workspaceId, pick: "revoke" };
       setFailed((set) => withId(set, workspaceId));
       setSaid(FAILED);
       return;
     }
-    setFresh({ token: answer.token, name: "", variant: "sync" });
+    setFresh({ token: answer.token, name: "", variant: "sync", workspaceId });
   }
 
   async function revokeSyncKey(key: SyncKey) {
@@ -325,8 +335,9 @@ export function Settings({
       router.refresh();
       return;
     }
+    target.current = { row: key.workspaceId, pick: "revoke" };
     setSyncRevoked((set) => withId(set, key.id));
-    setSaid("Sync key revoked.");
+    setSaid(SYNC_REVOKED_SAID);
     router.refresh();
   }
 
@@ -334,8 +345,11 @@ export function Settings({
   function done() {
     const sync = fresh?.variant === "sync";
     setFresh(null);
-    target.current = sync ? null : { button: "connect" };
-    setSaid(sync ? "Sync key made." : "Agent connected.");
+    target.current =
+      sync && fresh?.workspaceId
+        ? { row: fresh.workspaceId, pick: "revoke" }
+        : { button: "connect" };
+    setSaid(sync ? SYNC_MADE_SAID : "Agent connected.");
     if (!held.current) {
       router.refresh();
       return;
@@ -617,6 +631,7 @@ export function Settings({
             <section {...panelOf("workspaces")}>
               <WorkspacesTab
                 workspaces={data.workspaces}
+                liveSyncKeys={liveSyncWorkspaces}
                 closing={closing !== null}
                 deleteWorkspace={actions.deleteWorkspace}
                 onSay={setSaid}

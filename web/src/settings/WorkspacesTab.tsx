@@ -28,12 +28,15 @@ import s from "./settings.module.css";
  */
 export function WorkspacesTab({
   workspaces,
+  liveSyncKeys,
   closing,
   deleteWorkspace,
   onSay,
   onDeleted,
 }: {
   workspaces: Workspace[];
+  /** Ids of the workspaces that have a live sync key (its agent is not listed on Agents). */
+  liveSyncKeys: ReadonlySet<string>;
   closing: boolean;
   deleteWorkspace: SettingsActions["deleteWorkspace"];
   onSay: (text: string) => void;
@@ -106,7 +109,7 @@ export function WorkspacesTab({
       onDeleted();
       return;
     }
-    const text = workspaceFailure(answer.reason);
+    const text = workspaceFailure(answer.reason, liveSyncKeys.has(w.id));
     target.current = { id: w.id, pick: "delete" };
     setRefused({ id: w.id, text });
     onSay(text);

@@ -2655,6 +2655,8 @@ test("Make a sync key shows the key once with the setup command; Done closes it"
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(dialog).toHaveCount(0);
+  // The focus goes back to the row's menu button, not to the page.
+  await expect(moreButton(syncRow(page, DRA.name))).toBeFocused();
   await expect(page.getByText("hsync_")).toHaveCount(0);
   expect(await calls(page)).toEqual(
     [["createSyncKey", [DRA.id]]].map(([name, args]) => ({ name, args })),
@@ -2687,6 +2689,7 @@ test("Revoke sync key asks, then revokes", async ({ page }) => {
   await page.waitForTimeout(600);
   await row.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(row).toContainText(SYNC_NONE);
+  await expect(moreButton(row)).toBeFocused();
   await expect(tabOf(page, "Sync")).toHaveText("Sync 0");
   expect((await calls(page)).map((c) => c.name)).toEqual(["revokeSyncKey"]);
 });
@@ -2696,4 +2699,28 @@ test("a refused sync key says so", async ({ page }) => {
   await pick(syncRow(page, DRA.name), SYNC_MAKE);
   await expect(syncRow(page, DRA.name)).toContainText(FAILED);
   await expect(syncDialog(page)).toHaveCount(0);
+  await expect(moreButton(syncRow(page, DRA.name))).toBeFocused();
+});
+
+test("deleting a workspace with a live sync key is refused in the sync key's words", async ({
+  page,
+}) => {
+  await open(page);
+  await openTab(page, "Workspaces");
+  const main = rows(page, "Workspaces").filter({ hasText: MAIN.name });
+  await askDelete(main);
+  await main.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(main).toContainText(
+    "Revoke this workspace's sync key first (Settings → Sync).",
+  );
+  await expect(main).not.toContainText("agents first");
+});
+
+test("the too-big list names the workspace of the latest run", async ({
+  page,
+}) => {
+  await open(page, "?tab=sync");
+  await expect(
+    main(page).getByRole("heading", { name: SYNC_TOO_BIG }),
+  ).toContainText(MAIN.name);
 });

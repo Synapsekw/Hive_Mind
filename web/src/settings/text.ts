@@ -197,10 +197,16 @@ const WORKSPACE_FAILURES: Record<
   failed: "That didn't work. Try again.",
 };
 
-/** Why the workspace was not deleted. */
+/** A workspace with a live sync key cannot go: its sync agent is hidden from the Agents tab. */
+export const WORKSPACE_SYNC_KEY: string =
+  "Revoke this workspace's sync key first (Settings → Sync).";
+
+/** Why the workspace was not deleted; `syncKey`: it has a live sync key, which is what blocks. */
 export function workspaceFailure(
   r: (WorkspaceDeleted & { ok: false })["reason"],
+  syncKey = false,
 ): string {
+  if (r === "agents" && syncKey) return WORKSPACE_SYNC_KEY;
   return WORKSPACE_FAILURES[r] ?? WORKSPACE_FAILURES.failed;
 }
 
@@ -272,6 +278,26 @@ export const SYNC_KEY_STEP: string =
 export const SYNC_KEY_WARNING: string =
   "This key is shown once. Copy it now; it cannot be shown again.";
 export const SYNC_NO_RUNS: string = "No runs yet.";
+export const SYNC_MADE_SAID: string = "Sync key made.";
+export const SYNC_REVOKED_SAID: string = "Sync key revoked.";
+export const SYNC_KEY_LABEL: string = "Key";
+export const SYNC_KEY_COPIED: string = "Key copied.";
+export const SYNC_KEYS_LIST: string = "Sync keys";
+
+/** A sync row's ⋯ button. */
+export function syncActionsLabel(workspace: string): string {
+  return `Actions for ${workspace}`;
+}
+
+/** The name of a sync row's question group, e.g. "Make a sync key for Main". */
+export function syncAskLabel(kind: "make" | "revoke", workspace: string) {
+  return `${kind === "make" ? SYNC_MAKE : SYNC_REVOKE} for ${workspace}`;
+}
+
+/** The question before a live key is revoked. */
+export function syncRevokeQuestion(workspace: string): string {
+  return `${SYNC_REVOKE} for ${workspace}?`;
+}
 export const SYNC_KEY_BY_HAND: string = "Select the key and copy it by hand.";
 export const SYNC_URL_PLACEHOLDER: string = "<project address>";
 export const SYNC_PUBLISHABLE_PLACEHOLDER: string = "<publishable key>";

@@ -248,7 +248,10 @@ export function DevSettings({
       if (fail) return { ok: false, reason: "failed" };
       // As the database answers: a workspace with an agent still in use stays.
       if (
-        data.agents.some((a) => a.workspaceId === id && a.status === "active")
+        data.agents.some(
+          (a) => a.workspaceId === id && a.status === "active",
+        ) ||
+        data.syncKeys.some((k) => k.workspaceId === id && k.status === "active")
       )
         return { ok: false, reason: "agents" };
       setData((d) => ({
