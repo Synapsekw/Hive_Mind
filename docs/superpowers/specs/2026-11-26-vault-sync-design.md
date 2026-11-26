@@ -203,3 +203,37 @@ Critical path: 1 → 4 (wiring) → the live run.
 Two-way sync; syncing from Windows or from the GitHub repo; video; files over 50 MB (raising the
 bucket limit is its own decision); viewing HTML in the app (next spec); topics set by the sync;
 several folders per key (one key, one folder, one workspace).
+
+## Refinements (from the plan)
+
+1. **The sync identity is an agent plus a claim.** `create_sync_key` makes an `agents` row (name
+   `Hive sync`, provider `hive-sync`, tier `vendor`). Its `token_hash` is the hash of a random
+   value that is never given out, so `agent_login` can never match it. The key's own hash lives
+   in `sync_keys`.
+2. **No storage dedupe by fingerprint.** `files.storage_path` is unique, so two vault paths with
+   the same content are two objects. An object's place is
+   `<member>/<workspace>/vault/<first 32 hex of sha256(vault_path + "\n" + content sha)>/<name>`.
+   That place is fixed by path and content, so a retried upload lands on the same object.
+3. **Old objects are removed later.** When a synced file changes or is deleted, its old object's
+   path goes into `sync_orphans`. `purge-hives`, already running daily with the secret key,
+   removes those objects (Task 5). The sync identity itself never deletes an object.
+4. **Audit:**
+   - Deletes are recorded by the existing delete-audit triggers. Their `agent_id` is the sync
+     key's agent, and `sync_keys.agent_id` is unique, so the key can be found from it.
+   - Moves write `note.moved` and `file.moved` entries, with `sync_key_id` in `detail`.
+5. **Synced writes carry no session.** The sync's notes and files have `session_id` null. In the
+   gallery's "By session" view, synced files form their own group, "From your vault", ahead of
+   "No session".
+6. **Generated notes.** A "Vault files" note (`<folder>/Vault files.md`) has
+   `sync_generated = true`. It is never treated as gone. `sync_finish` deletes it once no file
+   lives in it.
+7. **Keys rotate without re-upload.** "Synced" means kept by any key, live or revoked, of the
+   same member and workspace. A new key takes over the old key's notes and files.
+8. **Too-big and unreadable paths are never deleted.** The job leaves them out of the manifest
+   and also drops them from the gone list before calling `sync_delete`.
+9. **A single delete never needs a confirm.** The guard trips at more than 25 items, or at more
+   than 2% of synced items when that is more than one item. Without that, every single delete
+   in a small workspace would wait for a confirm.
+10. **The sync key's agent row stays out of the Agents tab** (filtered by provider `hive-sync`).
+    While a key is live, deleting its workspace is refused ("still has an agent in use"); revoke
+    the key first.
